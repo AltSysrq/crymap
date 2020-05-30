@@ -1,0 +1,261 @@
+Crymap -- A simple, secure IMAP server with encrypted data at rest
+
+* Motivation
+
+uw-imap (University of Washington IMAP) is no longer maintained, and UW has
+even removed it from their site.
+
+Other IMAP implementations are much more complex to set up and are still prone
+to security issues.
+
+Nothing really supports encryption at rest.
+
+* Goals
+
+No unsafe code other than OpenSSL itself.
+
+Minimal configuration: Logging, location of user database, port to listen on.
+Per user, password hash, encryption information, location of user data and
+optional UID to switch to.
+
+IMAPS only. No support for cleartext or STARTTLS.
+
+User data is stored in a way that makes it amenable to online backup (as with
+rsync or ensync); i.e., don't shove everything into a huge sqlite database or
+something.
+
+Encryption at rest. All user data is encrypted and can only be accessed by
+knowing the user's password (hence we can't use PAM authentication,
+unfortunately, since we'd lose the encryption key when the password changed).
+Encryption is done in a public-private key system so that mail can be delivered
+without needing the decryption key. Encryption at rest protects from
+compromising of disk contents but not shell access since shell access could
+probe process memory and recover the key that way, so this does not fully
+replace using pgpipe --- we'll just layer both together. This also precludes
+using nginx to do TLS termination since it wants to be able to handle auth
+itself.
+
+Make Thunderbird happy. Other mail frontends are nice-to-have but no point in
+using a time to test them.
+
+* Non-Goals
+
+Performance. It's nice to have, but simplicitly is more important for security.
+
+Resistance to DoS from logged in users.
+
+Supporting message mutations like deletion of attachments.
+
+* User data format
+
+Encryption at rest makes it impossible to be interoperable with any other
+mailbox format (mbox, maildir, ...), so we're going to be doing our own thing
+regardless.
+
+We need to support these attributes for IMAP:
+
+- UID. 32-bit integer uniquely identifying the message, strictly incrementing.
+  We need to be able to remember UIDs that were used in the past.
+
+- Sequence number. Volatile, per-session identifier. The ire of IMAP
+  implementors everywhere. Nothing to store here since it's volatile.
+
+- System flags: \Seen, \Answered, \Flagged, \Deleted, \Draft, \Recent. These
+  need to be queriable reasonably efficiently and must be mutable on a
+  per-message basis.
+
+- Keyword flags (represented by \* in PERMANENTFLAGS). Need to be easily
+  readable but not necessarily efficiently searchable. Need to be able to be
+  defined permanently by the client. Also need to be mutable on a per-message
+  basis.
+
+- Internal date. Just a timestamp we can embed somewhere.
+
+- Message size. The physical size of the RFC-2822 message. We need this for
+  framing regardless.
+
+- Envelope structure, body structure, message text. We can just parse stuff out
+  of the RFC-2822 message on-demand.
+
+Each mailbox will be a directory. Names need not be encrypted since delivery
+needs to be able to determine mailbox names without the decryption key anyway.
+
+Each directory contains 256 subdirectories, 00 through ff. Each message is a
+single file in one of those, where the directory name represents the low 8 bits
+of its UID, and the file name is the upper 24 bits of the UID in byte-wise
+little-endian order. Expunged messages are represented by an empty file.
+
+A message consists of the following:
+
+- An encryption block, giving any information needed to descrypt the message
+  (other than the key of course).
+
+- Immutable metadata, encrypted. Probably just the timestamp and size of the
+  message (both compressed and plaintext) but there might be other stuff to put
+  here.
+
+- The message data. Encrypted after compression, RFC-2822 format.
+
+Mutable attributes like flags are tracked separately. Each mailbox has a "meta"
+subdirectory. The meta subdirectory contains any number of mutation files
+representing changes to mutable attributes.
+
+Each mutation file is symmetrically encrypted (since there is no reason for
+unauthenticated processes to modify it). It starts with the timestamp of its
+creation, and then a sequence of encrypted blocks (framed so the file can be
+progressively appended to). Each block gives a timestamp and a mutation. By
+reading all mutations into memory and sorting by total order, every process can
+determine the mutable status of every message.
+
+Mutation files have a maximum lifetime. After that point, the owner must stop
+writing the file and make a new one. After more time still, extra files can be
+garbage-collected by any process, simply by writing a new mutation file without
+redundant information and deleting the old ones. This system also encodes
+metadata about the mailbox itself.
+
+A mailbox directory with no "meta" subdirectory is a \Noselect mailbox.
+Mailboxes with children are subsubdirectories under a "sub" subdirectory.
+
+A mailbox directory with neither "meta" nor "sub" is considered to not exist.
+This is needed to support subscribing to deleted mailboxes.
+
+Subscriptions are indicated by an empty "subscription" file inside the mailbox
+directory.
+
+* Overall data layout
+
+The root of system data is a directory.
+
+The system data directory contains a "users" subdirectory. This in turn has one
+symlink or subdirectory for each username that is allowed to log in. User
+directories do not need to be on the same filesystem as the system data
+directory. The system data directory also holds "crymap.toml" which defines the
+rest of the system configuration.
+
+The user directory contains the following:
+
+- "mailboxes", a subdirectory containing the user data (see previous section)
+- "config", a text file holding various user config, including password hash
+  and encryption information and the names of special mailboxes.
+- "keys", a directory containing encrypted private key blobs and cleartext
+  public key blobs
+- "tmp", a subdirectory used for temporary buffers and for staging files before
+  moving them into place
+
+* IMAP Extensions
+
+uw-imap advertises these:
+IMAP4rev1 IMAP4 AUTH=LOGIN AUTH=CRAM-MD5 IDLE CHILDREN UIDPLUS
+
+IDLE
+
+UTF8=ONLY, so we don't need to deal with the obsolete UTF-7 stuff
+
+ENABLE, for clients to acknowledge UTF8=ONLY
+
+MOVE, moving messages instead of COPY+delete+EXPUNGE
+
+UIDPLUS, base more things around UIDs instead of sequence numbers
+
+QRESYNC is attractive in goal, but brings along an oodle of baggage, so let's
+not.
+
+BINARY sounds since since it's another thing about ditching old limitations,
+but it allows the client to force the server to transcode MIME messages, so no.
+
+CHILDREN just adds mailbox attributes indicating whether or not each mailbox
+has children, so that's easy enough.
+
+COMPRESS would be nice, but it's welded to STARTTLS. We might be able to do the
+same thing in our TLS termination though.
+
+WITHIN adds a couple search filters based on relative timestamps. Pretty
+trivial.
+* Special mailboxes
+
+Inbox. Undeletable, unrenamable, flagged \Inbox. Name must be case-insensitive.
+Renaming has a weird special case in that we must support it, but do so by
+creating a new mailbox with the new name and moving all contents inside Inbox
+into it, while leaving any child mailboxes of Inbox unaffected. There doesn't
+seem to be a particularly strong reason to implement this.
+
+Sent. Undeletable, flagged \Sent.
+
+Junk. Undeletable, flagged \Junk.
+
+Trash. Undeletable, flagged \Trash.
+
+* Operational design
+
+One process per connection. This has a lot of advantages, such as being able to
+switch users once authenticated, isolating unrelated connections from eaech
+other, making it possible to see sources of load in `top`, and simplicity.
+
+Processes can be spawned by inetd or similar, making daemonisation unnecessary.
+
+If UNIX-specific features are enabled, the process can be configured to chroot
+into the system data directory after all resources needed are loaded but before
+anything on the socket is read, to insulate from OpenSSL vulnerabilities. After
+authentication, it can further optionally chroot into the user directory and
+switch to a particular UID. These features of course require spawning the
+process as root. Some installations may prefer to just run under a dedicated
+service user.
+
+* Encryption
+
+Symmetric encryption is done with AES-128-GCM, except for mutable metadata
+files, which use AES-128-CBC since it is more suitable for incremental updates
+and less sensitive in general.
+
+An encrypted blob starts with a 16-byte IV and is followed by the ciphertext
+with 0-padding. In GCM mode, this is followed by the 16-byte AEAD tag.
+
+Asymmetric encryption is done through RSA. This adds a prefix to the encrypted
+blob:
+
+- The public/private key pair name, terminated with LF
+- Two bytes (LE u16) indicating the length of the next component
+- The 16-byte encryption key of what follows, itself encrypted with RSA using
+  PKCS1-OAEP padding.
+
+A user can have any number of keys, each of which has a name. Keys may be
+"internal" if the public key is not stored in cleartext, or "external" if it
+is.
+
+Each private key is stored in the user's "keys" directory at "$name.priv". It
+is an encrypted blob containing the RSA key's DER format, encrypted with the
+user's master key. External public keys are stored in "$name.pub" in PEM PKCS#1
+format.
+
+The master key is a 16-byte value generated randomly generated when the user is
+created. At runtime, it is derived from the user's password indirectly.
+
+The user's password is passed through Scrypt, using parameters and salt stored
+in the user config to produce the password hash. The user config stores the
+SHA-3 of the password hash in order to verify the password. The master key is
+derived by taking the SHA-3 hash of the password hash with "master" appended
+and then XORing it with a "master key XOR" stored in the user config. The first
+16 bytes of the result are the master key. The master key XOR makes it possible
+to change the password without invalidating the data.
+
+* Internal Architecture
+
+`crypt`. Shared crytographic primitives.
+
+`mailbox`. Implementation of the basic mailbox storage mechanism, including
+mutable metadata and sequence numbers, but not including functionality
+involving parsing of MIME messages (e.g. partial FETCH, SEARCH elements),
+instead only providing a feature to stream cleartext messages out of the store.
+
+`mime`. Minimal parsing of MIME messages. We might pull this out of pgpipe.
+
+`imap`. Implementation of IMAP operations, but nothing to do with the wire
+protocol. Ties `mailbox` and `mime` together.
+
+`wire`. Definitions for working with the IMAP wire protocol, with full support
+for server-side parsing/serialisation and enough support for client-side to
+support the CLI.
+
+`server`. Actual IMAP server implementation. Ties `imap` and `wire` together.
+
+`cli`. Various CLI utilities.
