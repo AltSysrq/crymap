@@ -87,7 +87,7 @@ little-endian order. Expunged messages are represented by an empty file.
 
 A message consists of the following:
 
-- An encryption block, giving any information needed to descrypt the message
+- An encryption block, giving any information needed to decrypt the message
   (other than the key of course).
 
 - Immutable metadata, encrypted. Probably just the timestamp and size of the
@@ -230,7 +230,7 @@ format.
 The master key is a 16-byte value generated randomly generated when the user is
 created. At runtime, it is derived from the user's password indirectly.
 
-The user's password is passed through Scrypt, using parameters and salt stored
+The user's password is passed through Argon2, using parameters and salt stored
 in the user config to produce the password hash. The user config stores the
 SHA-3 of the password hash in order to verify the password. The master key is
 derived by taking the SHA-3 hash of the password hash with "master" appended
