@@ -1,0 +1,26 @@
+[package]
+name = "crymap"
+version = "0.1.0"
+authors = ["Jason Lingle <jason@lin.gl>"]
+license = "GPL-3.0"
+edition = "2018"
+
+[dependencies]
+chrono = "0.4"
+clap = "2.33"
+fern = "0.6"
+log = "0.4.8"
+notify = "4.0"
+openssl = "0.10.29"
+rand = "0.7"
+rpassword = "4.0"
+rust-argon2 = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+syslog = "5.0"
+tempfile = "3.1"
+tiny-keccak = { version = "2.0", features = ["sha3"] }
+toml = "0.5"
+
+[dev-dependencies]
+proptest = "0.10"
+tempdir = "0.3.7"
