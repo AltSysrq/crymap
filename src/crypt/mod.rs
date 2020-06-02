@@ -16,11 +16,7 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-#![allow(dead_code)]
+pub const AES_BLOCK: usize = 16;
 
-mod crypt;
-mod support;
-
-fn main() {
-    println!("Hello, world!");
-}
+mod item_stream;
+mod naked;

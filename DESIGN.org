@@ -135,8 +135,8 @@ rest of the system configuration.
 The user directory contains the following:
 
 - "mailboxes", a subdirectory containing the user data (see previous section)
-- "config", a text file holding various user config, including password hash
-  and encryption information and the names of special mailboxes.
+- "config.toml", a text file holding various user config, including password
+  hash and encryption information and the names of special mailboxes.
 - "keys", a directory containing encrypted private key blobs and cleartext
   public key blobs
 - "tmp", a subdirectory used for temporary buffers and for staging files before

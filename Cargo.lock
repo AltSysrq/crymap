@@ -10,6 +10,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85bb70cc08ec97ca5450e6eba421deeea5f172c0fc61f78b5357b2a8e8be195f"
+
+[[package]]
 name = "arrayref"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -147,6 +153,8 @@ checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
 name = "crymap"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "base64",
  "chrono",
  "clap",
  "fern",
@@ -158,9 +166,12 @@ dependencies = [
  "rpassword",
  "rust-argon2",
  "serde",
+ "serde_cbor",
+ "serde_repr",
  "syslog",
  "tempdir",
  "tempfile",
+ "thiserror",
  "tiny-keccak",
  "toml",
 ]
@@ -267,6 +278,12 @@ dependencies = [
  "libc",
  "wasi",
 ]
+
+[[package]]
+name = "half"
+version = "1.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d36fab90f82edc3c747f9d438e06cf0a491055896f2a279638bb5beed6c40177"
 
 [[package]]
 name = "hermit-abi"
@@ -678,10 +695,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_cbor"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e18acfa2f90e8b735b2836ab8d538de304cbb6729a7360729ea5a895d15a622"
+dependencies = [
+ "half",
+ "serde",
+]
+
+[[package]]
 name = "serde_derive"
 version = "1.0.111"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f2c3ac8e6ca1e9c80b8be1023940162bf81ae3cffbb1809474152f2ce1eb250"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "serde_repr"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd02c7587ec314570041b2754829f84d873ced14a96d1fd1823531e11db40573"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -754,6 +792,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d326610f408c7a4eb6f51c37c330e496b08506c9457c9d34287ecc38809fb060"
 dependencies = [
  "unicode-width",
+]
+
+[[package]]
+name = "thiserror"
+version = "1.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b13f926965ad00595dd129fa12823b04bbf866e9085ab0a5f2b05b850fbfc344"
+dependencies = [
+ "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "1.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "893582086c2f98cde18f906265a65b5030a074b1046c674ae898be6519a7f479"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
