@@ -34,8 +34,10 @@
 //! payload (opaque to the code in this file), and then zero padding to the end
 //! of the AES block.
 
+use std::convert::TryInto;
 use std::io::{self, Read, Write};
 
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use openssl;
 use rand::{rngs::OsRng, Rng};
 use serde::{Deserialize, Serialize};
@@ -84,14 +86,10 @@ impl<R: Read> Reader<R> {
     /// This will immediately read in the header information, and will return
     /// an EOF error if the header has not been fully written.
     pub fn new(mut reader: R, key: &[u8]) -> Result<Self, Error> {
-        let mut len_bytes = [0u8; 2];
-        reader.read_exact(&mut len_bytes)?;
+        let len = reader.read_u16::<LittleEndian>()?;
 
-        let len = len_bytes[0] as usize | ((len_bytes[1] as usize) << 8);
-
-        let mut buf = vec![0u8; len];
-        reader.read_exact(&mut buf)?;
-        let meta: Metadata = serde_cbor::from_reader(&buf[..])?;
+        let meta: Metadata =
+            serde_cbor::from_reader(reader.by_ref().take(len.into()))?;
 
         let mut iv = [0u8; AES_BLOCK];
         reader.read_exact(&mut iv)?;
@@ -166,10 +164,9 @@ impl<W: Write> Writer<W> {
             algorithm: Algorithm::Aes128Cbc,
         };
         let meta_bytes = serde_cbor::to_vec(&meta)?;
-        assert!(meta_bytes.len() < 65536);
-        let len_bytes = [meta_bytes.len() as u8, (meta_bytes.len() >> 8) as u8];
 
-        writer.write_all(&len_bytes)?;
+        writer
+            .write_u16::<LittleEndian>(meta_bytes.len().try_into().unwrap())?;
         writer.write_all(&meta_bytes)?;
         writer.write_all(&iv)?;
         Ok(Writer { writer, crypter })
