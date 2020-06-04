@@ -337,7 +337,7 @@ impl<W: Write> Write for Writer<W> {
 
     fn flush(&mut self) -> io::Result<()> {
         if self.cleartext_buffer.is_empty() {
-            return Ok(());
+            return self.writer.flush();
         }
 
         let iv: [u8; AES_BLOCK] = OsRng.gen();
@@ -372,7 +372,7 @@ impl<W: Write> Write for Writer<W> {
 
         self.cleartext_buffer.clear();
         self.slab_size = 65536.min(self.slab_size * 2);
-        Ok(())
+        self.writer.flush()
     }
 }
 
