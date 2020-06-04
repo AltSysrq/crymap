@@ -39,7 +39,7 @@
 
 use rand::{rngs::OsRng, Rng};
 use serde::{Deserialize, Serialize};
-use tiny_keccak::{Hasher, Sha3};
+use tiny_keccak::{Hasher, Kmac};
 
 use super::AES_BLOCK;
 use crate::support::user_config::b64;
@@ -50,14 +50,14 @@ pub enum Algorithm {
     /// Use the Argon2i 1.3 algorithm with a memory cost of 4MB, time cost of
     /// 10, 1 lane, and a hash length of 32, with no associated data or secret.
     ///
-    /// The final password hash is `SHA3(argon2_hash ++ "check")`. The derived
-    /// key is `SHA3(argon2_hash ++ "master")`.
-    Argon2i_V13_M4096_T10_L1,
+    /// The final password hash is `KMAC256(salt, argon2_hash, 32, "check")`.
+    /// The derived key is `KMAC256(salt, argon_hash, 32, "master")`
+    Argon2i_V13_M4096_T10_L1_Kmac256,
 }
 
 impl Default for Algorithm {
     fn default() -> Self {
-        Algorithm::Argon2i_V13_M4096_T10_L1
+        Algorithm::Argon2i_V13_M4096_T10_L1_Kmac256
     }
 }
 
@@ -154,7 +154,7 @@ fn hash_password(
     algorithm: Algorithm,
 ) -> Result<([u8; 32], [u8; 32]), argon2::Error> {
     let raw_hash = match algorithm {
-        Algorithm::Argon2i_V13_M4096_T10_L1 => argon2::hash_raw(
+        Algorithm::Argon2i_V13_M4096_T10_L1_Kmac256 => argon2::hash_raw(
             password,
             salt,
             &argon2::Config {
@@ -170,21 +170,18 @@ fn hash_password(
         )?,
     };
 
-    let mut sha3_prefix = Sha3::v256();
-    sha3_prefix.update(&raw_hash);
-
     let mut password_hash = [0u8; 32];
     {
-        let mut s = sha3_prefix.clone();
-        s.update(b"check");
-        s.finalize(&mut password_hash);
+        let mut k = Kmac::v256(salt, b"check");
+        k.update(&raw_hash);
+        k.finalize(&mut password_hash);
     }
 
     let mut derived_key = [0u8; 32];
     {
-        let mut s = sha3_prefix.clone();
-        s.update(b"master");
-        s.finalize(&mut derived_key);
+        let mut k = Kmac::v256(salt, b"master");
+        k.update(&raw_hash);
+        k.finalize(&mut derived_key);
     }
 
     Ok((password_hash, derived_key))
