@@ -18,7 +18,9 @@
 
 use serde::{Deserialize, Serialize};
 
-mod b64 {
+use crate::crypt::master_key::MasterKeyConfig;
+
+pub mod b64 {
     use base64;
     use serde::{Deserialize, Deserializer, Serializer};
 
@@ -39,12 +41,6 @@ mod b64 {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(non_camel_case_types)]
-pub enum PasswordType {
-    Argon2i_V13_M16384_T10_L1,
-}
-
 /// The user configuration.
 ///
 /// This is the root of the TOML file stored in "config.toml" at the root of
@@ -53,16 +49,5 @@ pub enum PasswordType {
 /// Everything inside here is assumed to be mutable by the user.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct UserConfig {
-    pub credentials: CredConfig,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct CredConfig {
-    #[serde(with = "b64")]
-    pub password_hash: Vec<u8>,
-    #[serde(with = "b64")]
-    pub password_salt: Vec<u8>,
-    pub password_type: PasswordType,
-    #[serde(with = "b64")]
-    pub master_key_xor: Vec<u8>,
+    pub master_key: MasterKeyConfig,
 }

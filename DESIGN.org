@@ -232,11 +232,12 @@ created. At runtime, it is derived from the user's password indirectly.
 
 The user's password is passed through Argon2, using parameters and salt stored
 in the user config to produce the password hash. The user config stores the
-SHA-3 of the password hash in order to verify the password. The master key is
-derived by taking the SHA-3 hash of the password hash with "master" appended
-and then XORing it with a "master key XOR" stored in the user config. The first
-16 bytes of the result are the master key. The master key XOR makes it possible
-to change the password without invalidating the data.
+SHA-3 of the password hash with "check" appended in order to verify the
+password. The master key is derived by taking the SHA-3 hash of the password
+hash with "master" appended and then XORing it with a "master key XOR" stored
+in the user config. The first 16 bytes of the result are the master key. The
+master key XOR makes it possible to change the password without invalidating
+the data.
 
 * Internal Architecture
 
