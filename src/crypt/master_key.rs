@@ -34,8 +34,13 @@
 //! also stored in the user config, to derive the master key. This makes it
 //! possible for arbitrary passwords to derive arbitrary master keys.
 //!
-//! The master key is used for things requiring symmetric encryption, such as
-//! private keys and item streams.
+//! Several secondary key families are derived from the master key:
+//!
+//! - AES key = `KMAC128(master_key, filename, 16, "aes")`, used for all
+//! symmetric AES encryption in files
+//!
+//! - PEM passphrase = `base64_encode(KMAC256(master_key, key_name, 32,
+//! "pem"))`, used as a passphrase in RSA PEM files containing private keys.
 
 use rand::{rngs::OsRng, Rng};
 use serde::{Deserialize, Serialize};
@@ -75,24 +80,47 @@ pub struct MasterKeyConfig {
     /// Sequence of bytes XORed with the key derived from the password to
     /// obtain the master key.
     ///
-    /// Currently, this is expected to always be exactly 16 bytes long.
+    /// Currently, this is expected to always be exactly 32 bytes long.
     #[serde(with = "b64")]
     master_key_xor: Vec<u8>,
 }
 
-/// A randomly generated, AES-128 key.
+/// A randomly generated master key and secondary keys derived from it.
 ///
 /// Each user has a single, unalterable master key. See the module
 /// documentation for more information.
 #[derive(Clone, Copy)]
 pub struct MasterKey {
-    pub(super) key: [u8; AES_BLOCK],
+    master_key: [u8; 32],
 }
 
 impl MasterKey {
     /// Generate a new master key.
     pub fn new() -> Self {
-        MasterKey { key: OsRng.gen() }
+        MasterKey { master_key: OsRng.gen() }
+    }
+
+    /// Return the symmetric AES encryption key to use for the given filename.
+    ///
+    /// The filename should be bare and OS-independent.
+    pub fn aes_key(&self, filename: &str) -> [u8; AES_BLOCK] {
+        let mut k = Kmac::v128(&self.master_key, b"aes");
+        k.update(filename.as_bytes());
+
+        let mut ret = [0u8; AES_BLOCK];
+        k.finalize(&mut ret);
+        ret
+    }
+
+    /// Return the PEM passphrase to use for an RSA private key of the given
+    /// name.
+    pub fn pem_passphrase(&self, key_name: &str) -> String {
+        let mut k = Kmac::v256(&self.master_key, b"pem");
+        k.update(key_name.as_bytes());
+
+        let mut hash = [0u8; 32];
+        k.finalize(&mut hash);
+        base64::encode(&hash)
     }
 
     /// Given this key and a password, generate a `MasterKeyConfig` which can
@@ -108,9 +136,9 @@ impl MasterKey {
         let (password_hash, derived_key) =
             hash_password(password, &salt, Algorithm::default())?;
 
-        let mut master_key_xor = vec![0u8; AES_BLOCK];
-        for i in 0..AES_BLOCK {
-            master_key_xor[i] = self.key[i] ^ derived_key[i];
+        let mut master_key_xor = vec![0u8; 32];
+        for i in 0..32 {
+            master_key_xor[i] = self.master_key[i] ^ derived_key[i];
         }
 
         Ok(MasterKeyConfig {
@@ -134,17 +162,17 @@ impl MasterKey {
 
         if password_hash.len() != conf.password_hash.len()
             || !openssl::memcmp::eq(&password_hash, &conf.password_hash)
-            || AES_BLOCK != conf.master_key_xor.len()
+            || 32 != conf.master_key_xor.len()
         {
             return None;
         }
 
-        let mut key = [0u8; AES_BLOCK];
-        for i in 0..AES_BLOCK {
+        let mut key = [0u8; 32];
+        for i in 0..32 {
             key[i] = derived_key[i] ^ conf.master_key_xor[i];
         }
 
-        Some(MasterKey { key })
+        Some(MasterKey { master_key: key })
     }
 }
 
@@ -196,7 +224,7 @@ mod test {
         let orig = MasterKey::new();
         let config = orig.make_config(b"hunter2").unwrap();
         let derived = MasterKey::from_config(&config, b"hunter2").unwrap();
-        assert_eq!(orig.key, derived.key);
+        assert_eq!(orig.master_key, derived.master_key);
     }
 
     #[test]
