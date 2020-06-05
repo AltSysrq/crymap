@@ -167,6 +167,7 @@ dependencies = [
  "rand 0.7.3",
  "rpassword",
  "rust-argon2",
+ "secstr",
  "serde",
  "serde_bytes",
  "serde_cbor",
@@ -686,6 +687,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "secstr"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cce2c726741c320e5b8f1edd9a21b3c2c292ae94514afd001d41d81ba143dafc"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

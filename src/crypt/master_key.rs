@@ -41,13 +41,21 @@
 //!
 //! - PEM passphrase = `base64_encode(KMAC256(master_key, key_name, 32,
 //! "pem"))`, used as a passphrase in RSA PEM files containing private keys.
+//!
+//! Besides the general benefits of using multiple keys, the secondary key
+//! derivation also means that the master key does not need to proliferate in
+//! process memory as much, instead being kept in a locked page and zeroed out
+//! on destruction.
 
 use rand::{rngs::OsRng, Rng};
+use secstr::SecBox;
 use serde::{Deserialize, Serialize};
 use tiny_keccak::{Hasher, Kmac};
 
 use super::AES_BLOCK;
 use crate::support::user_config::b64;
+
+const MASTER_SIZE: usize = 32;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
@@ -89,22 +97,30 @@ pub struct MasterKeyConfig {
 ///
 /// Each user has a single, unalterable master key. See the module
 /// documentation for more information.
-#[derive(Clone, Copy)]
+///
+/// This is a heavy-weight object, and its memory is locked from paging on
+/// systems where this is possible.
 pub struct MasterKey {
-    master_key: [u8; 32],
+    master_key: SecBox<[u8; MASTER_SIZE]>,
 }
 
 impl MasterKey {
     /// Generate a new master key.
     pub fn new() -> Self {
-        MasterKey { master_key: OsRng.gen() }
+        // Initialise to 0 and generate each byte individually so that the key
+        // does not come into existence outside of the locked area.
+        let mut key = SecBox::new(Box::new([0u8; MASTER_SIZE]));
+        for i in 0..MASTER_SIZE {
+            key.unsecure_mut()[i] = OsRng.gen();
+        }
+        MasterKey { master_key: key }
     }
 
     /// Return the symmetric AES encryption key to use for the given filename.
     ///
     /// The filename should be bare and OS-independent.
     pub fn aes_key(&self, filename: &str) -> [u8; AES_BLOCK] {
-        let mut k = Kmac::v128(&self.master_key, b"aes");
+        let mut k = Kmac::v128(self.master_key.unsecure(), b"aes");
         k.update(filename.as_bytes());
 
         let mut ret = [0u8; AES_BLOCK];
@@ -115,7 +131,7 @@ impl MasterKey {
     /// Return the PEM passphrase to use for an RSA private key of the given
     /// name.
     pub fn pem_passphrase(&self, key_name: &str) -> String {
-        let mut k = Kmac::v256(&self.master_key, b"pem");
+        let mut k = Kmac::v256(self.master_key.unsecure(), b"pem");
         k.update(key_name.as_bytes());
 
         let mut hash = [0u8; 32];
@@ -136,9 +152,9 @@ impl MasterKey {
         let (password_hash, derived_key) =
             hash_password(password, &salt, Algorithm::default())?;
 
-        let mut master_key_xor = vec![0u8; 32];
-        for i in 0..32 {
-            master_key_xor[i] = self.master_key[i] ^ derived_key[i];
+        let mut master_key_xor = vec![0u8; MASTER_SIZE];
+        for i in 0..MASTER_SIZE {
+            master_key_xor[i] = self.master_key.unsecure()[i] ^ derived_key[i];
         }
 
         Ok(MasterKeyConfig {
@@ -162,14 +178,14 @@ impl MasterKey {
 
         if password_hash.len() != conf.password_hash.len()
             || !openssl::memcmp::eq(&password_hash, &conf.password_hash)
-            || 32 != conf.master_key_xor.len()
+            || MASTER_SIZE != conf.master_key_xor.len()
         {
             return None;
         }
 
-        let mut key = [0u8; 32];
-        for i in 0..32 {
-            key[i] = derived_key[i] ^ conf.master_key_xor[i];
+        let mut key = SecBox::new(Box::new([0u8; MASTER_SIZE]));
+        for i in 0..MASTER_SIZE {
+            key.unsecure_mut()[i] = derived_key[i] ^ conf.master_key_xor[i];
         }
 
         Some(MasterKey { master_key: key })
