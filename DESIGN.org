@@ -96,6 +96,39 @@ A message consists of the following:
 
 - The message data. Encrypted after compression, RFC-2822 format.
 
+** Mutable metadata
+
+There's a number of ways this could be done.
+
+Important criteria:
+
+- Determining which flags are set on a message should require at most linear
+  system calls with respect to the number of flags that could be set.
+
+- Determining which messages are have or do not have a particular flag must
+  require sub-linear system calls with respect to the number of messages that
+  will be found.
+
+- The system needs to be amenable to naïve backup files. Tearing in directory
+  contents or within incrementally updated files must be safe.
+
+- Holding everything in memory is not ideal, and if this is done, it must have
+  a reasonably compact representation.
+
+There's also some mutable metadata for the mailbox itself which must be
+tracked, though this is not performance sensitive and does not need to solve
+the same race conditions:
+
+- Whether the mailbox has one of the special mailbox flags (i.e., \Sent and
+  friends).
+
+- Whether the mailbox is subscribed.
+
+Disposition: Item stream CRDT is complex and efficient, but the security of
+bitsets is so flimsy it doesn't feel like a good option.
+
+*** Item stream CRDT
+
 Mutable attributes like flags are tracked separately. Each mailbox has a "meta"
 subdirectory. The meta subdirectory contains any number of mutation files
 representing changes to mutable attributes.
@@ -113,6 +146,9 @@ garbage-collected by any process, simply by writing a new mutation file without
 redundant information and deleting the old ones. This system also encodes
 metadata about the mailbox itself.
 
+Flag queries are performed by loading all the metadata into memory in a
+collapsed form and then looking at the in-memory representation.
+
 A mailbox directory with no "meta" subdirectory is a \Noselect mailbox.
 Mailboxes with children are subsubdirectories under a "sub" subdirectory.
 
@@ -121,6 +157,32 @@ This is needed to support subscribing to deleted mailboxes.
 
 Subscriptions are indicated by an empty "subscription" file inside the mailbox
 directory.
+
+This is overall a fairly complex option, particularly since rollup must be done
+in multiple stages to avoid backup solutions seeing a torn view and losing the
+metadata.
+
+*** Message flags as bitsets
+
+Each flag is stored in a single file, which contains an encrypted bitmap keyed
+by UID. Determining whether a flag is on a message is simply a matter of
+seeking to the correct block, reading and decrypting it, and looking at the
+bit for that message. Finding the UIDs with a flag is simply a matter of
+scanning the file.
+
+The security of this system is moderate at best. Even with 128 messages
+represented per block, an adversary can get a good idea of when certain
+messages get certain flags, and can trivially see which message are not even
+covered by the bitset based on its length.
+
+Updates are trickier due to their read-modify-write nature. We'd need to use
+file locking to prevent processes from stepping on one another's toes.
+Alternatively, if we use a stream cipher (of sorts) and one byte per message,
+writes would be atomic and would not be RMW. This does make the system even
+more transparent though, since each byte takes on one of two values.
+
+Interaction with naïve backup systems is easy though, since writing a single
+block will be atomic and torn updates are otherwise safe.
 
 * Overall data layout
 
