@@ -43,6 +43,8 @@
 use std::convert::TryInto;
 use std::io::{self, BufRead, Cursor, Read, Write};
 
+use crate::support::compression::FinishWrite;
+
 #[derive(Debug, Clone)]
 pub struct Reader<R> {
     reader: R,
@@ -263,6 +265,13 @@ impl<W: Write> Write for Writer<W> {
         }
 
         self.writer.flush()
+    }
+}
+
+impl<W: FinishWrite> FinishWrite for Writer<W> {
+    fn finish(&mut self) -> io::Result<()> {
+        self.flush()?;
+        self.writer.finish()
     }
 }
 

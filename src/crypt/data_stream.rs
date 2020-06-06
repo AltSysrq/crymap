@@ -58,6 +58,7 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 use thiserror::Error;
 
 use super::AES_BLOCK;
+use crate::support::compression::Compression;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -87,14 +88,6 @@ enum Algorithm {
 #[repr(u8)]
 enum MetaAlgorithm {
     RsaPkcs1Oaep = 0,
-}
-
-#[derive(
-    Serialize_repr, Deserialize_repr, Clone, Copy, Debug, PartialEq, Eq,
-)]
-#[repr(u8)]
-pub enum Compression {
-    Zstd = 0,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -416,7 +409,7 @@ mod test {
                     &mut ciphertext,
                     |_| Some(RSA1024A.clone()),
                     "the key name".to_owned(),
-                    Compression::Zstd,
+                    Compression::Un64Zstd,
                 )
                 .unwrap();
                 writer.write_all(&cleartext).unwrap();
