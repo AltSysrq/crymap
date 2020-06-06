@@ -309,7 +309,7 @@ impl KeyStore {
     pub fn get_private_key(
         &mut self,
         name: &str,
-    ) -> Result<Option<&Rsa<Private>>, Error> {
+    ) -> Result<&Rsa<Private>, Error> {
         let master_key = self
             .master_key
             .as_ref()
@@ -321,9 +321,9 @@ impl KeyStore {
             &self.root,
             &mut self.private_keys,
         ) {
-            Ok(k) => Ok(Some(k)),
+            Ok(k) => Ok(k),
             Err(Error::Io(e)) if io::ErrorKind::NotFound == e.kind() => {
-                Ok(None)
+                Err(Error::NamedKeyNotFound)
             }
             Err(e) => Err(e),
         }
@@ -436,5 +436,14 @@ mod test {
         authed_store.get_private_key("external1").unwrap();
         authed_store.get_private_key("internal2").unwrap();
         authed_store.get_private_key("external2").unwrap();
+
+        assert!(matches!(
+            authed_store.get_private_key("nx"),
+            Err(Error::NamedKeyNotFound)
+        ));
+        assert!(matches!(
+            anon_store.get_private_key("internal1"),
+            Err(Error::MasterKeyUnavailable)
+        ));
     }
 }

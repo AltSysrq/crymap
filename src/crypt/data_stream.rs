@@ -131,13 +131,12 @@ impl<R: Read> Reader<R> {
     /// The header block is fully read in by this call.
     pub fn new<'a>(
         mut reader: R,
-        priv_key_lookup: impl Fn(&str) -> Option<&'a Rsa<Private>> + 'a,
+        priv_key_lookup: impl Fn(&str) -> Result<&'a Rsa<Private>, Error> + 'a,
     ) -> Result<Self, Error> {
         let meta_length = reader.read_u16::<LittleEndian>()?;
         let meta: Metadata =
             serde_cbor::from_reader(reader.by_ref().take(meta_length.into()))?;
-        let priv_key = priv_key_lookup(&meta.meta_key_id)
-            .ok_or(Error::NamedKeyNotFound)?;
+        let priv_key = priv_key_lookup(&meta.meta_key_id)?;
 
         let key = match meta.meta_algorithm {
             MetaAlgorithm::RsaPkcs1Oaep => {
@@ -400,7 +399,7 @@ mod test {
 
             let decrypted = {
                 let mut reader =
-                    Reader::new(Cursor::new(ciphertext), |_| Some(&RSA1024A))
+                    Reader::new(Cursor::new(ciphertext), |_| Ok(&RSA1024A))
                         .unwrap();
                 let mut d = Vec::new();
                 reader.read_to_end(&mut d).unwrap();
