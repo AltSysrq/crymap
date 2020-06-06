@@ -35,26 +35,16 @@
 //! of the AES block.
 
 use std::convert::TryInto;
-use std::io::{self, Read, Write};
+use std::io::{Read, Write};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use openssl;
 use rand::{rngs::OsRng, Rng};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use thiserror::Error;
 
 use super::AES_BLOCK;
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error(transparent)]
-    Io(#[from] io::Error),
-    #[error(transparent)]
-    Ssl(#[from] openssl::error::ErrorStack),
-    #[error(transparent)]
-    Cbor(#[from] serde_cbor::error::Error),
-}
+use crate::support::error::Error;
 
 #[derive(
     Serialize_repr, Deserialize_repr, Clone, Copy, Debug, PartialEq, Eq,

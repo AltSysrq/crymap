@@ -16,9 +16,24 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-pub(crate) mod compression;
-pub(crate) mod error;
-pub(crate) mod file_ops;
-pub(crate) mod safe_name;
-pub(crate) mod un64;
-pub(crate) mod user_config;
+use std::io;
+
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Unsafe key or mailbox name")]
+    UnsafeName,
+    #[error("Master key unavailable")]
+    MasterKeyUnavailable,
+    #[error("Named key not found")]
+    NamedKeyNotFound,
+    #[error("Encrypted key malformed")]
+    BadEncryptedKey,
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error(transparent)]
+    Ssl(#[from] openssl::error::ErrorStack),
+    #[error(transparent)]
+    Cbor(#[from] serde_cbor::error::Error),
+}

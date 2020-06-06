@@ -47,26 +47,14 @@ use openssl::{
     rsa::Rsa,
 };
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 use crate::crypt::master_key::MasterKey;
+use crate::support::error::Error;
 use crate::support::file_ops;
 use crate::support::safe_name::is_safe_name;
 
 const RSA_BITS: u32 = 4096;
 const MAX_KEY_FILE_SIZE: u64 = 256 * 1024;
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Unsafe key name")]
-    UnsafeName,
-    #[error("Master key unavailable")]
-    MasterKeyUnavailable,
-    #[error(transparent)]
-    Io(#[from] io::Error),
-    #[error(transparent)]
-    Ssl(#[from] openssl::error::ErrorStack),
-}
 
 /// Section in the user configuration which controls key assignment and
 /// rotation.
