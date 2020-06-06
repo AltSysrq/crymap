@@ -52,6 +52,10 @@ use std::convert::TryInto;
 use std::io::{self, BufRead, Cursor, Read, Write};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use openssl::{
+    pkey::{HasPublic, Private},
+    rsa::Rsa,
+};
 use rand::{rngs::OsRng, Rng};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
@@ -139,13 +143,9 @@ impl<R: Read> Reader<R> {
     /// session key.
     ///
     /// The header block is fully read in by this call.
-    pub fn new(
+    pub fn new<'a>(
         mut reader: R,
-        priv_key_lookup: impl Fn(
-            &str,
-        ) -> Option<
-            openssl::rsa::Rsa<openssl::pkey::Private>,
-        >,
+        priv_key_lookup: impl Fn(&str) -> Option<&'a Rsa<Private>> + 'a,
     ) -> Result<Self, Error> {
         let meta_length = reader.read_u16::<LittleEndian>()?;
         let meta: Metadata =
@@ -271,17 +271,13 @@ pub struct Writer<W> {
 impl<W: Write> Writer<W> {
     /// Create a new writer.
     ///
-    /// `pub_key_lookup` is invoked to get the public key to use for
-    /// encryption of the session key. It is always passed the value of
-    /// `pub_key_name`, but is present here as a callback for consistency.
-    pub fn new<P: openssl::pkey::HasPublic>(
+    /// `pub_key_name` must correspond to the name of `pub_key`.
+    pub fn new(
         mut writer: W,
-        pub_key_lookup: impl Fn(&str) -> Option<openssl::rsa::Rsa<P>>,
+        pub_key: &Rsa<impl HasPublic>,
         pub_key_name: String,
         compression: Compression,
     ) -> Result<Self, Error> {
-        let pub_key =
-            pub_key_lookup(&pub_key_name).ok_or(Error::NamedKeyNotFound)?;
         let key: [u8; AES_BLOCK] = OsRng.gen();
         let mut encrypted_key = vec![0u8; pub_key.size().try_into().unwrap()];
         let encrypted_key_length = pub_key.public_encrypt(
@@ -407,7 +403,7 @@ mod test {
             {
                 let mut writer = Writer::new(
                     &mut ciphertext,
-                    |_| Some(RSA1024A.clone()),
+                    &RSA1024A,
                     "the key name".to_owned(),
                     Compression::Un64Zstd,
                 )
@@ -417,10 +413,9 @@ mod test {
             }
 
             let decrypted = {
-                let mut reader = Reader::new(Cursor::new(ciphertext), |_| {
-                    Some(RSA1024A.clone())
-                })
-                .unwrap();
+                let mut reader =
+                    Reader::new(Cursor::new(ciphertext), |_| Some(&RSA1024A))
+                        .unwrap();
                 let mut d = Vec::new();
                 reader.read_to_end(&mut d).unwrap();
                 d

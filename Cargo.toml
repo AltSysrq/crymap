@@ -33,4 +33,3 @@ zstd = "0.5"
 
 [dev-dependencies]
 proptest = "0.10"
-tempdir = "0.3.7"
