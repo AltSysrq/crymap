@@ -17,5 +17,6 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 pub(crate) mod compression;
+pub(crate) mod safe_name;
 pub(crate) mod un64;
 pub(crate) mod user_config;
