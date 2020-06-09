@@ -24,5 +24,6 @@
 //! singular _mailbox_) and "post office" (which suggests holding mailboxes of
 //! different people, i.e., the top-level store).
 
+pub(crate) mod flag_store;
 pub(crate) mod key_store;
 pub(crate) mod message_store;

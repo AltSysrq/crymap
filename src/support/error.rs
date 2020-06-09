@@ -38,6 +38,10 @@ pub enum Error {
     ExpungedMessage,
     #[error("Non-existent message")]
     NxMessage,
+    #[error("Unsupported/unknown flag")]
+    NxFlag,
+    #[error("Corrupted flag bitmap")]
+    CorruptFlag,
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]

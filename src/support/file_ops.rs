@@ -19,7 +19,7 @@
 //! Miscellaneous functions for working with files.
 
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -50,4 +50,31 @@ pub fn spit(
 
 pub fn chmod(path: impl AsRef<Path>, mode: u32) -> io::Result<()> {
     fs::set_permissions(path, fs::Permissions::from_mode(mode))
+}
+
+pub trait ReadUninterruptibly: Read {
+    fn read_uninteruptibly(&mut self, dst: &mut [u8]) -> io::Result<usize>;
+}
+
+impl<R: Read> ReadUninterruptibly for R {
+    /// Read bytes into `dst` until `dst` is full or EOF is reached.
+    ///
+    /// `Interrupted` errors are ignored and retried. Other errors are
+    /// propagated.
+    fn read_uninteruptibly(&mut self, mut dst: &mut [u8]) -> io::Result<usize> {
+        let mut total = 0;
+        while 0 != dst.len() {
+            match self.read(dst) {
+                Ok(0) => break,
+                Ok(n) => {
+                    total += n;
+                    dst = &mut dst[n..];
+                }
+                Err(e) if io::ErrorKind::Interrupted == e.kind() => continue,
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(total)
+    }
 }
