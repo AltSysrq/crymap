@@ -209,30 +209,43 @@ The user directory contains the following:
 uw-imap advertises these:
 IMAP4rev1 IMAP4 AUTH=LOGIN AUTH=CRAM-MD5 IDLE CHILDREN UIDPLUS
 
-IDLE
+ID [RFC2971], to exchange implementation info with the server
 
-UTF8=ONLY, so we don't need to deal with the obsolete UTF-7 stuff
+IDLE [RFC 2177]
 
-ENABLE, for clients to acknowledge UTF8=ONLY
+UTF8=ONLY [RFC6855], so we don't need to deal with the obsolete UTF-7 stuff.
+TODO: Does Thunderbird actually support this? Looks like it doesn't, oh well.
+We should try to implement UTF8=ACCEPT at least though.
+
+ENABLE [RFC5161], for clients to acknowledge UTF8=ONLY
 
 MOVE, moving messages instead of COPY+delete+EXPUNGE
+https://tools.ietf.org/html/draft-krecicki-imap-move-01
 
-UIDPLUS, base more things around UIDs instead of sequence numbers
+UIDPLUS [RFC 4315], base more things around UIDs instead of sequence numbers
 
-QRESYNC is attractive in goal, but brings along an oodle of baggage, so let's
-not.
+QRESYNC [RFC 5162] is attractive in goal, but brings along an oodle of baggage,
+so let's not.
 
-BINARY sounds since since it's another thing about ditching old limitations,
-but it allows the client to force the server to transcode MIME messages, so no.
+BINARY [RFC 3516] sounds since since it's another thing about ditching old
+limitations, but it allows the client to force the server to transcode MIME
+messages, so no.
 
-CHILDREN just adds mailbox attributes indicating whether or not each mailbox
-has children, so that's easy enough.
+CHILDREN [RFC 3348] just adds mailbox attributes indicating whether or not each
+mailbox has children, so that's easy enough.
 
-COMPRESS would be nice, but it's welded to STARTTLS. We might be able to do the
-same thing in our TLS termination though.
+COMPRESS [RFC 4978] would be nice, but it's welded to STARTTLS. We might be
+able to do the same thing in our TLS termination though.
 
-WITHIN adds a couple search filters based on relative timestamps. Pretty
-trivial.
+WITHIN [RFC 5032] adds a couple search filters based on relative timestamps.
+Pretty trivial.
+
+LITERAL- [RFC 7888], avoid client-server round-trip for binary literals <= 4096
+bytes with special syntax
+
+XLIST and related [RFC 6154], for the special mailbox markers.
+https://bugzilla.mozilla.org/show_bug.cgi?id=476260
+
 * Special mailboxes
 
 Inbox. Undeletable, unrenamable, flagged \Inbox. Name must be case-insensitive.
