@@ -30,8 +30,18 @@ pub enum Error {
     NamedKeyNotFound,
     #[error("Encrypted key malformed")]
     BadEncryptedKey,
+    #[error("Mailbox full")]
+    MailboxFull,
+    #[error("Mailbox read-only")]
+    MailboxReadOnly,
+    #[error("Message expunged")]
+    ExpungedMessage,
+    #[error("Non-existent message")]
+    NxMessage,
     #[error(transparent)]
     Io(#[from] io::Error),
+    #[error(transparent)]
+    Nix(#[from] nix::Error),
     #[error(transparent)]
     Ssl(#[from] openssl::error::ErrorStack),
     #[error(transparent)]

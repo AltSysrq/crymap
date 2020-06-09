@@ -131,7 +131,7 @@ impl<R: Read> Reader<R> {
     /// The header block is fully read in by this call.
     pub fn new<'a>(
         mut reader: R,
-        priv_key_lookup: impl Fn(&str) -> Result<&'a Rsa<Private>, Error> + 'a,
+        priv_key_lookup: impl FnOnce(&str) -> Result<&'a Rsa<Private>, Error> + 'a,
     ) -> Result<Self, Error> {
         let meta_length = reader.read_u16::<LittleEndian>()?;
         let meta: Metadata =

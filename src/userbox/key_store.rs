@@ -86,6 +86,15 @@ pub struct KeyStoreConfig {
     pub external_key_pattern: String,
 }
 
+impl Default for KeyStoreConfig {
+    fn default() -> Self {
+        KeyStoreConfig {
+            internal_key_pattern: "internal-%Y-%m".to_owned(),
+            external_key_pattern: "external-%Y-%m".to_owned(),
+        }
+    }
+}
+
 /// Maintains the key store.
 ///
 /// This can operated in "logged in" mode with a `MasterKey` or in "external"
@@ -102,6 +111,7 @@ pub struct KeyStore {
     private_keys: HashMap<String, Rsa<Private>>,
     public_key: Option<(String, Rsa<Public>)>,
     preferred_private_key: Option<String>,
+    rsa_bits: u32,
 }
 
 impl KeyStore {
@@ -119,7 +129,16 @@ impl KeyStore {
             private_keys: HashMap::new(),
             public_key: None,
             preferred_private_key: None,
+            rsa_bits: RSA_BITS,
         }
+    }
+
+    /// Used by tests to make things faster.
+    ///
+    /// In real code, the RSA bit count is effectively pegged to `RSA_BITS`.
+    #[cfg(test)]
+    pub fn set_rsa_bits(&mut self, bits: u32) {
+        self.rsa_bits = bits;
     }
 
     /// Initialise the key store.
@@ -205,9 +224,9 @@ impl KeyStore {
         // Doesn't exist, generate the new key
         info!(
             "{} Generating new {}-bit RSA key '{}'",
-            self.log_prefix, RSA_BITS, name
+            self.log_prefix, self.rsa_bits, name
         );
-        let generated_key = Rsa::generate(RSA_BITS)?;
+        let generated_key = Rsa::generate(self.rsa_bits)?;
         let generated_key_bytes = generated_key.private_key_to_pem_passphrase(
             // AEAD ciphers aren't supported here
             openssl::symm::Cipher::aes_128_cbc(),

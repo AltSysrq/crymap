@@ -38,7 +38,7 @@ pub fn spit(
 ) -> io::Result<()> {
     let mut tf = tempfile::NamedTempFile::new_in(tmp)?;
     tf.as_file_mut().write_all(data)?;
-    fs::set_permissions(tf.path(), fs::Permissions::from_mode(mode))?;
+    chmod(tf.path(), mode)?;
     tf.as_file_mut().sync_all()?;
     if overwrite {
         tf.persist(path)?;
@@ -46,4 +46,8 @@ pub fn spit(
         tf.persist_noclobber(path)?;
     }
     Ok(())
+}
+
+pub fn chmod(path: impl AsRef<Path>, mode: u32) -> io::Result<()> {
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
 }

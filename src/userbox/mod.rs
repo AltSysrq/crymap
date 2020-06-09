@@ -25,3 +25,4 @@
 //! different people, i.e., the top-level store).
 
 pub(crate) mod key_store;
+pub(crate) mod message_store;
