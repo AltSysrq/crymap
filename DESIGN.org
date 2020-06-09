@@ -124,8 +124,10 @@ the same race conditions:
 
 - Whether the mailbox is subscribed.
 
-Disposition: Item stream CRDT is complex and efficient, but the security of
-bitsets is so flimsy it doesn't feel like a good option.
+Disposition: Item stream CRDT is complex and inefficient. The security benifits
+it provides are tangible but small, since the more widely-used message
+classification system, mailboxes, is already fully transparent. We'll go with
+unencrypted bitmaps.
 
 *** Item stream CRDT
 
@@ -180,6 +182,10 @@ file locking to prevent processes from stepping on one another's toes.
 Alternatively, if we use a stream cipher (of sorts) and one byte per message,
 writes would be atomic and would not be RMW. This does make the system even
 more transparent though, since each byte takes on one of two values.
+
+A final alternative is to be completely transparent and not encrypt anything at
+all here. This isn't entirely weird since mailbox names are also transparent.
+This turns this option into the simplest thing we could possibly do.
 
 Interaction with naïve backup systems is easy though, since writing a single
 block will be atomic and torn updates are otherwise safe.
