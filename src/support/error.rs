@@ -34,6 +34,16 @@ pub enum Error {
     MailboxFull,
     #[error("Mailbox read-only")]
     MailboxReadOnly,
+    #[error("Mailbox already exists")]
+    MailboxExists,
+    #[error("Mailbox has inferiors")]
+    MailboxHasInferiors,
+    #[error("Mailbox is not selectable")]
+    MailboxUnselectable,
+    #[error("Operation not allowed for INBOX")]
+    BadOperationOnInbox,
+    #[error("No such mailbox")]
+    NxMailbox,
     #[error("Message expunged")]
     ExpungedMessage,
     #[error("Non-existent message")]
@@ -50,4 +60,6 @@ pub enum Error {
     Ssl(#[from] openssl::error::ErrorStack),
     #[error(transparent)]
     Cbor(#[from] serde_cbor::error::Error),
+    #[error(transparent)]
+    Toml(#[from] toml::de::Error),
 }

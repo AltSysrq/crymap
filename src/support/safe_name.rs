@@ -41,7 +41,10 @@ pub fn is_safe_name(name: &str) -> bool {
         // Names beginning with # have special meaning in IMAP
         name.chars().next() != Some('#') &&
         // Don't allow any ASCII control characters
-        name.find(|c| c < ' ' || c == '\x7F').is_none()
+        name.find(|c| c < ' ' || c == '\x7F').is_none() &&
+        // * and % are very special in *some* IMAP contexts, so forbid
+        // everywhere
+        name.find(|c| c == '*' || c == '%').is_none()
 }
 
 #[cfg(test)]
@@ -67,5 +70,7 @@ mod test {
         assert!(!is_safe_name("foo\0"));
         assert!(!is_safe_name("foo\r"));
         assert!(!is_safe_name("fo\x7Fo"));
+        assert!(!is_safe_name("foo*bar"));
+        assert!(!is_safe_name("foo%bar"));
     }
 }

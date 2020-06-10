@@ -50,7 +50,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::crypt::master_key::MasterKey;
 use crate::support::error::Error;
-use crate::support::file_ops;
+use crate::support::file_ops::{self, IgnoreKinds};
 use crate::support::safe_name::is_safe_name;
 
 const RSA_BITS: u32 = 4096;
@@ -150,13 +150,10 @@ impl KeyStore {
     /// updated.
     pub fn init(&mut self, config: &KeyStoreConfig) -> Result<(), Error> {
         // Create the key store root if it doesn't already exist
-        match fs::DirBuilder::new().mode(0o750).create(&self.root) {
-            Ok(_) => (),
-            Err(e) if io::ErrorKind::AlreadyExists == e.kind() => (),
-            Err(e) => {
-                return Err(e.into());
-            }
-        }
+        fs::DirBuilder::new()
+            .mode(0o750)
+            .create(&self.root)
+            .ignore_already_exists()?;
 
         // Determine the current preferred key names
         let now = chrono::Utc::now();

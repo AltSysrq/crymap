@@ -23,6 +23,11 @@ use std::io::{self, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
+use log::error;
+use rand::{rngs::OsRng, Rng};
+
+use crate::support::error::Error;
+
 /// Write `data` into the file at `path`, atomically.
 ///
 /// The file will first be staged within `tmp`.
@@ -45,6 +50,38 @@ pub fn spit(
     } else {
         tf.persist_noclobber(path)?;
     }
+    Ok(())
+}
+
+/// Delete `target` by moving it into the directory given by `garbage` (with a
+/// new random name) and recursively removing it in the background.
+///
+/// This is used to make removal of large directory trees both fast and atomic.
+pub fn delete_async(
+    target: impl AsRef<Path>,
+    garbage: impl AsRef<Path>,
+) -> io::Result<()> {
+    let target = target.as_ref();
+    let garbage = garbage.as_ref();
+
+    loop {
+        let name = format!("garbage.{}", OsRng.gen::<u64>());
+        let dst = garbage.join(name);
+
+        match fs::rename(target, &dst) {
+            Ok(()) => {
+                std::thread::spawn(move || {
+                    if let Err(e) = fs::remove_dir_all(&dst) {
+                        error!("Failed to remove {}: {}", dst.display(), e);
+                    }
+                });
+                break;
+            }
+            Err(e) if io::ErrorKind::AlreadyExists == e.kind() => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+
     Ok(())
 }
 
@@ -76,5 +113,64 @@ impl<R: Read> ReadUninterruptibly for R {
         }
 
         Ok(total)
+    }
+}
+
+pub trait IgnoreKinds {
+    fn ignore_already_exists(self) -> Self;
+    fn ignore_not_found(self) -> Self;
+}
+
+impl<R: Default> IgnoreKinds for Result<R, io::Error> {
+    fn ignore_already_exists(self) -> Self {
+        match self {
+            Ok(r) => Ok(r),
+            Err(e) if io::ErrorKind::AlreadyExists == e.kind() => {
+                Ok(R::default())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn ignore_not_found(self) -> Self {
+        match self {
+            Ok(r) => Ok(r),
+            Err(e) if io::ErrorKind::NotFound == e.kind() => Ok(R::default()),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+pub trait ErrorTransforms {
+    type Coerced;
+    fn on_exists(self, error: Error) -> Self::Coerced;
+    fn on_not_found(self, error: Error) -> Self::Coerced;
+}
+
+impl<R, E: Into<Error>> ErrorTransforms for Result<R, E> {
+    type Coerced = Result<R, Error>;
+
+    fn on_exists(self, error: Error) -> Result<R, Error> {
+        match self.map_err(|e| e.into()) {
+            Err(Error::Io(e)) if io::ErrorKind::AlreadyExists == e.kind() => {
+                Err(error)
+            }
+            Err(Error::Nix(nix::Error::Sys(nix::errno::Errno::EEXIST))) => {
+                Err(error)
+            }
+            s => s,
+        }
+    }
+
+    fn on_not_found(self, error: Error) -> Result<R, Error> {
+        match self.map_err(|e| e.into()) {
+            Err(Error::Io(e)) if io::ErrorKind::NotFound == e.kind() => {
+                Err(error)
+            }
+            Err(Error::Nix(nix::Error::Sys(nix::errno::Errno::ENOENT))) => {
+                Err(error)
+            }
+            s => s,
+        }
     }
 }

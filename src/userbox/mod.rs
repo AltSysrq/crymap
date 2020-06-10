@@ -26,4 +26,5 @@
 
 pub(crate) mod flag_store;
 pub(crate) mod key_store;
+pub(crate) mod mailbox;
 pub(crate) mod message_store;
