@@ -252,6 +252,8 @@ bytes with special syntax
 XLIST and related [RFC 6154], for the special mailbox markers.
 https://bugzilla.mozilla.org/show_bug.cgi?id=476260
 
+UNSELECT [RFC 3691], to close a mailbox without expunging it
+
 * Special mailboxes
 
 Inbox. Undeletable, unrenamable, flagged \Inbox. Name must be case-insensitive.
