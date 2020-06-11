@@ -891,7 +891,10 @@ impl MessageStore {
 
         let mut watcher = notify::immediate_watcher(
             move |evt: notify::Result<notify::Event>| match evt {
-                Ok(evt) => notifications.see_path_event(evt.paths.get(0)),
+                Ok(evt) if is_useful_event(&evt) => {
+                    notifications.see_path_event(evt.paths.get(0))
+                }
+                Ok(_) => (),
                 Err(e) => {
                     warn!("{} Watcher error: {}", log_prefix, e);
                     notifications.set_all();
@@ -899,7 +902,7 @@ impl MessageStore {
             },
         )?;
 
-        watcher.configure(notify::Config::PreciseEvents(false))?;
+        watcher.configure(notify::Config::PreciseEvents(true))?;
 
         // Do our best to ensure that expunge-log already exists
         if !self.read_only {
@@ -1338,6 +1341,14 @@ fn probe_for_first_uid(guess: Uid, exists: impl Fn(Uid) -> bool) -> Uid {
     // Suggest starting one beyond the maximum existing UID found to be more
     // conservative in the presence of concurrent modification
     Uid::of(maximum_used.saturating_add(1)).unwrap()
+}
+
+fn is_useful_event(evt: &notify::Event) -> bool {
+    match &evt.kind {
+        &notify::event::EventKind::Create(_)
+        | &notify::event::EventKind::Modify(_) => true,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
