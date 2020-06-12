@@ -240,8 +240,7 @@ messages, so no.
 CHILDREN [RFC 3348] just adds mailbox attributes indicating whether or not each
 mailbox has children, so that's easy enough.
 
-COMPRESS [RFC 4978] would be nice, but it's welded to STARTTLS. We might be
-able to do the same thing in our TLS termination though.
+COMPRESS [RFC 4978] might be nice.
 
 WITHIN [RFC 5032] adds a couple search filters based on relative timestamps.
 Pretty trivial.
@@ -253,6 +252,11 @@ XLIST and related [RFC 6154], for the special mailbox markers.
 https://bugzilla.mozilla.org/show_bug.cgi?id=476260
 
 UNSELECT [RFC 3691], to close a mailbox without expunging it
+
+REPLACE [RFC 8508], a simple APPEND + UID EXPUNGE command.
+
+APPENDLIMIT [RFC 7889], a completely passive way for the server to indicate the
+maximum allowable APPEND size.
 
 * Special mailboxes
 
