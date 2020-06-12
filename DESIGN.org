@@ -347,3 +347,51 @@ support the CLI.
 `server`. Actual IMAP server implementation. Ties `imap` and `wire` together.
 
 `cli`. Various CLI utilities.
+* On parsing MIME
+
+IMAP unfortunately requires the server to actually parse MIME content in
+certain cases, particularly for structured `FETCH` and many `SEARCH` queries.
+
+How /little/ can we get away with? A full MIME parser is complex and
+error-prone.
+
+Inventory: What can the client ask the server to extract?
+
+- FETCH: BODYSTRUCTURE. Also known as BODY, which confusingly is different from
+  BODY[section]. This is a tree representing the multipart structure (including
+  recursing into `message/rfc822` attachments for some reason). The exact
+  format of the body structure varies wildly with content type. It's mostly
+  stuff from the simple message headers, but also the size of certain types
+  (measured in bytes or *lines* depending on type), and in one case the MD5 of
+  the content (though that is extension data, which is apparently optional). So
+  while formatting this the way IMAP wants is going to be ridiculously complex,
+  getting the data itself should be fairly easy.
+
+- FETCH: BODY[]. Fetches a (possibly filtered) part of the message. The client
+  can optionally select a multipart section, and then can choose between all
+  headers, some specific headers, all but some specific headers, the content
+  only, or the whole section. Additionally, the client can request a
+  byte-slice, which can just be handled after the whole byte array is buffered.
+
+- FETCH: ENVELOPE. Grab a smorgasboard of headers and, for reasons unknown,
+  reencode them into IMAP's own syntax. This includes fields that can contain
+  non-ASCII characters in 8BITMIME, which is potentially problematic. These
+  also require a deeper understanding of MIME and.. SMTP? syntax. There's also
+  `Subject` which may require decoding.
+
+- SEARCH: BCC, CC, FROM, TO. Primary headers that only need rudimentary
+  parsing for the search match.
+
+- SEARCH: SENTBEFORE, SENTON, SENTSINCE. The `Date` header. There's some
+  ambiguity regarding timezone but is otherwise unproblematic.
+
+- SEARCH: SUBJECT. We need to decode the subject if it's in one of the wonky
+  non-ASCII encoding schemes.
+
+- SEARCH: TEXT. Search the entire content, headers and all. RFC 3501 does not
+  indicate whether the server is expected to know how to decode the body. We'll
+  assume no. Server-side text search will be slow and is undeniably the wrong
+  approach here so it's not that important to fully support.
+
+Overall, BODYSTRUCTURE and ENVELOPE are both apalling and will be, by a wide
+margin, the biggest difficulty here.
