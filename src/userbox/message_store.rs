@@ -386,7 +386,7 @@ impl MessageStore {
                 src_file,
                 None,
                 &uid_path,
-                nix::unistd::LinkatFlags::NoSymlinkFollow,
+                nix::unistd::LinkatFlags::SymlinkFollow,
             ) {
                 Ok(_) => {
                     info!(
@@ -418,6 +418,12 @@ impl MessageStore {
                         );
                         uid = Uid::of(uid.0.get() + 1).unwrap();
                     }
+                }
+                Err(nix::Error::Sys(nix::errno::Errno::ELOOP)) => {
+                    return Err(Error::ExpungedMessage);
+                }
+                Err(nix::Error::Sys(nix::errno::Errno::ENOENT)) => {
+                    return Err(Error::NxMessage);
                 }
                 Err(e) => {
                     error!(
@@ -629,6 +635,37 @@ impl MessageStore {
             .valid_size
     }
 
+    /// Return an iterator over the messages in this store, identified by
+    /// sequence number and UID.
+    pub fn messages<'a>(&'a self) -> impl Iterator<Item = (Seqnum, Uid)> + 'a {
+        let seqnum_index = self
+            .seqnum_index
+            .as_ref()
+            .expect("messages called on passive store");
+        seqnum_index.extant_uids[..seqnum_index.valid_size]
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(ix, uid)| {
+                (Seqnum::of(ix as u32 + 1).unwrap(), Uid::of(uid).unwrap())
+            })
+    }
+
+    /// If active and not read-only, save the current sequence number index.
+    pub fn save_seqnum_index(&self, tmp: &Path) -> Result<(), Error> {
+        if self.read_only {
+            return Ok(());
+        }
+
+        let seqnum_index = match self.seqnum_index.as_ref() {
+            None => return Ok(()),
+            Some(i) => i,
+        };
+
+        seqnum_index.save(tmp, &self.root.join("seqnum"))?;
+        Ok(())
+    }
+
     /// Update active mode state.
     ///
     /// If this store was passive, it immediately becomes active.
@@ -745,7 +782,7 @@ impl MessageStore {
 
         Ok(ActiveStatus {
             exist: if has_new {
-                Some(seqnum_index.extant_uids.len() as u32)
+                Some(seqnum_index.extant_uids.len())
             } else {
                 None
             },
@@ -916,7 +953,8 @@ impl MessageStore {
         Ok(watcher)
     }
 
-    fn path_for_uid(&self, uid: Uid) -> PathBuf {
+    /// Returns the path that does or would hold the given UID.
+    pub fn path_for_uid(&self, uid: Uid) -> PathBuf {
         self.root.join(path_for_uid(uid))
     }
 
@@ -1016,7 +1054,7 @@ impl Notifications {
 pub struct ActiveStatus {
     /// If present, new messages have been added since the last activity poll,
     /// and this value indicates how many exist now.
-    pub exist: Option<u32>,
+    pub exist: Option<usize>,
     /// The sequence numbers of any messages that have been expunged since the
     /// last activity poll, sorted descending and deduplicated.
     ///
@@ -1811,7 +1849,7 @@ mod test {
                 )
             );
             let status = setup.expect_notificaion_soon();
-            assert_eq!(Some(i + 1), status.exist);
+            assert_eq!(Some(i as usize + 1), status.exist);
             assert_eq!(0, status.expunged.len());
         }
 
@@ -1824,6 +1862,40 @@ mod test {
             assert_eq!(None, status.exist);
             assert_eq!(vec![Seqnum::u(1)], status.expunged);
         }
+    }
+
+    #[test]
+    fn insert_message_error_cases() {
+        let mut setup = set_up();
+
+        assert_eq!(
+            1,
+            deliver_simple(
+                &mut setup.passive_store,
+                &mut setup.authed_key_store
+            )
+        );
+        assert_eq!(
+            2,
+            deliver_simple(
+                &mut setup.passive_store,
+                &mut setup.authed_key_store
+            )
+        );
+        setup.passive_store.expunge(Uid::u(1), false).unwrap();
+
+        assert!(matches!(
+            setup
+                .passive_store
+                .insert_message(setup.passive_store.path_for_uid(Uid::u(1))),
+            Err(Error::ExpungedMessage)
+        ));
+        assert!(matches!(
+            setup
+                .passive_store
+                .insert_message(setup.passive_store.path_for_uid(Uid::u(3))),
+            Err(Error::NxMessage)
+        ));
     }
 
     fn deliver_simple(

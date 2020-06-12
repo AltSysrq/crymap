@@ -448,7 +448,6 @@ impl MailboxPath {
     }
 }
 
-
 /// Given a raw mailbox path, emit the parts that comprise the actual path.
 ///
 /// This accounts for the path delimiter, empty segments, and the required

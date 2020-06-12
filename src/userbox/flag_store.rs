@@ -151,6 +151,11 @@ impl FlagStore {
         Ok(())
     }
 
+    /// Returns an iterator to the flags currently known to the store.
+    pub fn iter_flags<'a>(&'a self) -> impl Iterator<Item = &'a Flag> + 'a {
+        self.flags.keys()
+    }
+
     /// Clear all flag caches.
     pub fn clear_cache(&mut self) {
         for tab in self.flags.values_mut() {
