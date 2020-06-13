@@ -190,6 +190,74 @@ This turns this option into the simplest thing we could possibly do.
 Interaction with naïve backup systems is easy though, since writing a single
 block will be atomic and torn updates are otherwise safe.
 
+** Alternate design for CONDSTORE and QRESYNC support
+
+CONDSTORE and QRESYNC are a nice-to-have, but were rejected in the original
+design because they require assigning a unique, strictly ascending 63-bit value
+to every operation in the mailbox.
+
+On further consideration, building the design around this may make things
+simpler in the long run. A key simplification is that we do not need to take
+any 63-bit sequence number and point to the change; we only need to know what
+messages have changed since that time, and to support conditional store.
+
+Thoughts:
+
+The message store can stay exactly as it is currently, except with
+`expunge-log` removed. The pre-built seqnum index is also removed. Expunge
+"events" are pushed up into the "change store".
+
+The "change store" is similar to the "message store", but stores encrypted
+changesets identified by 31-bit change-ids (CID). Changes are things such as
+additions and removals of tags and expungement of messages. We have a rollup
+system (TODO) which folds changes into single rollup files which also serve as
+a cache for the set of extant UIDs.
+
+A Modseq has the greatest UID in the upper 32 bits and the greatest CID in the
+lower 32 bits. The modseq is thus effectively a 2-element vector clock,
+allowing messages to be inserted asynchronously from other changes.
+
+The modseq at the instant a message is inserted is considered to have a CID
+of 0. However, we do not track UID-CID relations. The "current" modseq is
+always the greatest UID and greatest CID. Conditional stores are only strictly
+conditional on the CID, but this is fine since it is impossible for the client
+to observe the absolute ordering between their conditional change and the
+creation of the new message.
+
+A message is "changed since" a modseq if the UID part is less than the UID of
+the message or if any changes after the CID of the modseq affected that
+message.
+
+One quirk here is that each message is considered to have a "last changed
+modseq", but we only track the CID. (We can't associate a "canonical UID" with
+each change since that would be racy and could yield out-of-order events.) This
+leaves us between a rock and a hard place: we could synthesise the modseq by
+pasting the CID to the _latest_ UID, but then a client that sees the new modseq
+and does a `CHANGEDSINCE` query will not get the message.
+
+We can probably virtualise it: If the client FETCHes a modseq for a message, we
+store (in memory) the modseq that was returned, and act on that in future
+requests. This would still be observable to cross-session activity though.
+
+Actually, we *should* be able to store the canonical UID with each modseq: if
+the writer of a change loses the race for a CID, it must first read in any new
+modifications and in doing so will learn of any later UIDs.
+
+Rollups. Whenever an instance ingests a change whose id is an even multiple of
+256, it dumps the current state, including the last UID it knows about and the
+extant UID list, into a file which is a sibling to the directory containing the
+last 256 changes. The rollup excludes flags for expunged messages and all but
+the last of any explicit expunge events (because CONDSTORE/QRESYNC does not
+require remembering them). Old rollup files and the original events can be
+garbage collected 24 hours after a rollup including them has been generated.
+
+What this whole system makes easier implementation-wise is that there are now
+only two places to watch for realtime changes: the file corresponding to the
+next UID, and the file corresponding to the next CID. It also reduces the
+number of bespoke binary formats and gets us reasonably good encryption of
+message attributes. We do end up holding all information about flags in memory,
+but we probably would have ended up needing to do something like that anyway.
+
 * Overall data layout
 
 The root of system data is a directory.
@@ -235,7 +303,7 @@ so let's not.
 
 BINARY [RFC 3516] sounds since since it's another thing about ditching old
 limitations, but it allows the client to force the server to transcode MIME
-messages, so no.
+messages, so no. (On the other hand, IMAP4rev2 (draft) requires this...)
 
 CHILDREN [RFC 3348] just adds mailbox attributes indicating whether or not each
 mailbox has children, so that's easy enough.
@@ -246,7 +314,8 @@ WITHIN [RFC 5032] adds a couple search filters based on relative timestamps.
 Pretty trivial.
 
 LITERAL- [RFC 7888], avoid client-server round-trip for binary literals <= 4096
-bytes with special syntax
+bytes with special syntax. Though apparently it's not widely supported, and
+IMAP4rev2 (draft) requires LITERAL+, so I guess we'll do that.
 
 XLIST and related [RFC 6154], for the special mailbox markers.
 https://bugzilla.mozilla.org/show_bug.cgi?id=476260
@@ -257,6 +326,22 @@ REPLACE [RFC 8508], a simple APPEND + UID EXPUNGE command.
 
 APPENDLIMIT [RFC 7889], a completely passive way for the server to indicate the
 maximum allowable APPEND size.
+
+SASL-IR [RFC 4959], allows the client to send its auth immediately instead of
+going through a continuation round-trip. Pretty trivial.
+
+NAMESPACE [RFC 2342]. It's trivial for what we're doing.
+
+SEARCHRES [RFC 5182] might be worth doing just because IMAP4rev2 will probably
+require it.
+
+ESEARCH [RFC 4731] is also incorporated into IMAP4rev2.
+
+LIST-EXTENDED [RFC 5258] is also incorporated into IMAP4rev2.
+
+[RFC 5530] defines additional error codes.
+
+IMAP4rev2 draft: https://datatracker.ietf.org/doc/draft-ietf-extra-imap4rev2/?include_text=1
 
 * Special mailboxes
 
