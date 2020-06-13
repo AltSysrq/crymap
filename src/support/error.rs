@@ -46,6 +46,8 @@ pub enum Error {
     NxMailbox,
     #[error("Message expunged")]
     ExpungedMessage,
+    #[error("Message not addressable by sequence number")]
+    UnaddressableMessage,
     #[error("Non-existent message")]
     NxMessage,
     #[error("Unsupported/unknown flag")]
