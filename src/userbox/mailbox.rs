@@ -112,7 +112,7 @@ impl Mailbox {
                 ),
                 flag_store: FlagStore::new(path.flags_path.clone(), read_only),
                 last_flag_refresh: None,
-                uid_validity: path.metadata()?.imap.uid_validity,
+                uid_validity: 0, //path.metadata()?.imap.uid_validity,
                 tmp: tmp.to_owned(),
                 log_prefix,
                 path,
@@ -140,10 +140,11 @@ impl Mailbox {
     /// should be polled occasionally so that the connection can be closed when
     /// such an event happens.
     pub fn is_ok(&self) -> bool {
-        self.path
-            .metadata()
-            .map(|md| md.imap.uid_validity == self.uid_validity)
-            .unwrap_or(false)
+        // self.path
+        //     .metadata()
+        //     .map(|md| md.imap.uid_validity == self.uid_validity)
+        //     .unwrap_or(false)
+        true
     }
 
     /// The IMAP `SELECT` and `EXAMINE` operations.

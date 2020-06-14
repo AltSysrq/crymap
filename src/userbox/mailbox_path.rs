@@ -139,12 +139,22 @@ impl MailboxPath {
         &self.data_path
     }
 
+    /// Return the *current* UID validity, i.e., that which would be used if
+    /// the mailbox were opened right now.
+    pub fn current_uid_validity(&self) -> Result<u32, Error> {
+        parse_uid_validity(
+            &nix::fcntl::readlink(&self.data_path)
+                .on_not_found(Error::MailboxUnselectable)?,
+        )
+    }
+
     /// Return the UID-specific root of the mailbox data.
     pub fn scoped_data_path(&self) -> Result<PathBuf, Error> {
-        // TODO It'd probably be better to readlink() this data out of
-        // data_path().
-        let uid_validity = self.metadata()?.imap.uid_validity;
-        Ok(self.scoped_data_path_for_uid_validity(uid_validity))
+        Ok(
+            self.scoped_data_path_for_uid_validity(
+                self.current_uid_validity()?,
+            ),
+        )
     }
 
     fn scoped_data_path_for_uid_validity(&self, uid_validity: u32) -> PathBuf {
@@ -234,10 +244,7 @@ impl MailboxPath {
             .mode(0o770)
             .create(&stage_mbox.msgs_path)?;
         let metadata = MailboxMetadata {
-            imap: MailboxImapMetadata {
-                uid_validity,
-                special_use,
-            },
+            imap: MailboxImapMetadata { special_use },
         };
 
         let metadata_toml = format!(
@@ -565,10 +572,27 @@ pub struct MailboxMetadata {
 /// level of nesting.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct MailboxImapMetadata {
-    /// The current UID validity value.
-    pub uid_validity: u32,
     /// If this is a special-use mailbox, the attribute representing that use.
     pub special_use: Option<MailboxAttribute>,
+}
+
+/// Parse the UID validity out of the given path.
+///
+/// Only the filename of the path is considered, so this will not work for
+/// things inside the mailbox data directory.
+pub fn parse_uid_validity(path: impl AsRef<Path>) -> Result<u32, Error> {
+    let path = path.as_ref();
+    let name = path
+        .file_name()
+        .ok_or(Error::CorruptFileLayout)?
+        .to_str()
+        .ok_or(Error::CorruptFileLayout)?;
+
+    if !name.starts_with("%") {
+        return Err(Error::CorruptFileLayout);
+    }
+
+    u32::from_str_radix(&name[1..], 16).map_err(|_| Error::CorruptFileLayout)
 }
 
 #[cfg(test)]

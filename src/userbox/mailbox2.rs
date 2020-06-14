@@ -253,6 +253,36 @@ impl StatelessMailbox {
         })
     }
 
+    /// Return the underlying `MailboxPath`.
+    pub fn path(&self) -> &MailboxPath {
+        &self.path
+    }
+
+    /// Return the data directory root for this mailbox instance.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Return the UID validity of this mailbox instance.
+    ///
+    /// If the mailbox is deleted and recreated, this will continue to reflect
+    /// the validity this instance was opened with.
+    pub fn uid_validity(&self) -> Result<u32, Error> {
+        parse_uid_validity(&self.root)
+    }
+
+    /// Check whether this instance is still "OK".
+    ///
+    /// An instance is broken if the mailbox is deleted or the UID validity has
+    /// changed.
+    ///
+    /// This should be called in response to unexpected errors to see whether
+    /// it is desirable to hang up on the client instead of continuing to
+    /// futilely try to do operations on the mailbox.
+    pub fn is_ok(&self) -> bool {
+        self.root.is_dir()
+    }
+
     /// Open the identified message for reading.
     ///
     /// This doesn't correspond to any particular IMAP command (that would be
@@ -626,5 +656,37 @@ mod test {
         // If we were able to deserialise it at all, the read operation worked.
         // So just make sure we got something non-trivial back.
         assert!(!tx.is_empty());
+    }
+
+    #[test]
+    fn delete_open_mailbox() {
+        let setup = set_up();
+
+        assert!(setup.stateless.is_ok());
+        assert_eq!(
+            setup.stateless.uid_validity().unwrap(),
+            setup.stateless.path().current_uid_validity().unwrap()
+        );
+
+        setup.stateless.path().delete(setup.root.path()).unwrap();
+        assert!(!setup.stateless.is_ok());
+        assert!(matches!(
+            setup.stateless.path().current_uid_validity(),
+            Err(Error::MailboxUnselectable)
+        ));
+
+        // Ensure we get a distinct UID validity
+        std::thread::sleep(std::time::Duration::from_millis(2000));
+
+        setup
+            .stateless
+            .path()
+            .create(setup.root.path(), None)
+            .unwrap();
+        assert_ne!(
+            setup.stateless.uid_validity().unwrap(),
+            setup.stateless.path().current_uid_validity().unwrap()
+        );
+        assert!(!setup.stateless.is_ok());
     }
 }

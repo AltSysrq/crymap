@@ -56,6 +56,8 @@ pub enum Error {
     CorruptFlag,
     #[error("Gave up atomic insertion after too many retries")]
     GaveUpInsertion,
+    #[error("File/directory layout is corrupt")]
+    CorruptFileLayout,
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]
