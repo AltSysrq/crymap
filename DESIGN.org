@@ -480,3 +480,62 @@ Inventory: What can the client ask the server to extract?
 
 Overall, BODYSTRUCTURE and ENVELOPE are both apalling and will be, by a wide
 margin, the biggest difficulty here.
+* Notifications and IDLE
+
+In general, and particularly when using IDLE, we need some way for the process
+to learn about changes made by other processes.
+
+Goals:
+
+- Crymap itself shouldn't have different paths for different OSes.
+
+- Support FreeBSD well. Linux is also a must.
+
+- Minimise the time between message delivery and notification to an idling
+  client.
+
+- No "exotic" libraries, e.g., ZeroMQ, or anything that depends on another
+  process (e.g. DBus).
+
+** Polling
+
+There's polling, of course, and that's really the only option if we happen to
+be on NFS or similar. Polling is non-ideal not only because of its inherent
+wastefulness, but also delays notifications since we need to keep the poll rate
+to something reasonable.
+
+** `notify` crate
+
+The original plan was to use the `notify` crate. It's fairly usable despite its
+oddities.
+
+However, it doesn't support `kqueue`, relegating FreeBSD --- the main target
+platform --- to polling. The only reasonable OS it supports is Linux through
+inotify. It also brings in a huge number of dependencies, some for OSes we
+don't care about and some because it uses Tokio and friends despite not
+exposing a Tokio-friendly interface.
+
+** UNIX sockets
+
+The scheme would look something like this:
+
+- Each mailbox has a `socks` directory.
+
+- When a process goes into idle, it creates a datagram listener in that
+  directory, then makes one last poll to prevent race conditions, then waits
+  for a message on the socket. When it wakes up, it discards any message
+  received and unlinks the socket and uses the normal poll process to see
+  what's changed.
+
+- When a process makes a change worth notifying, it iterates through the
+  sockets in the `socks` directory and sends one packet to each (with `NOWAIT`)
+  before unlinking it.
+
+The sockets are "one shot"; the expectation is that an idling process will wake
+up in response to /any/ message and so there is no reason to allow it to
+receive more than one. Unlinking of sockets by the notifier and the idler
+ensure that socket files do not accumulate over time (e.g. from processes that
+got killed while idling).
+
+This system should work on pretty much everything but Windows, which isn't
+supported for other reasons anyway.
