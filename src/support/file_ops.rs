@@ -70,7 +70,7 @@ pub fn delete_async(
 
         match fs::rename(target, &dst) {
             Ok(()) => {
-                std::thread::spawn(move || {
+                rayon::spawn(move || {
                     if let Err(e) = fs::remove_dir_all(&dst) {
                         error!("Failed to remove {}: {}", dst.display(), e);
                     }

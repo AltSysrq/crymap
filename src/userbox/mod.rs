@@ -25,6 +25,7 @@
 //! different people, i.e., the top-level store).
 
 pub(crate) mod flag_store;
+mod hier_id_scheme;
 pub(crate) mod key_store;
 pub(crate) mod mailbox;
 pub(crate) mod mailbox_path;

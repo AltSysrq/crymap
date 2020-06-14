@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc e7a94dd9a051bfb52f825dc8e8dafbdee8a0fba569223da8d2c7ceadcbebc36d # shrinks to expunge_before = [1], expunge_after = [76, 2]

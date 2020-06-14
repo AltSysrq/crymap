@@ -99,6 +99,11 @@ pub struct MailboxState {
     /// date.
     recent_expungements: VecDeque<(Modseq, Uid)>,
 
+    /// The earliest transaction that might still exist in non-rolled-up form.
+    ///
+    /// This is maintained by the mailbox garbage collection process.
+    pub earliest_possible_unrolled_cid: Option<Cid>,
+
     /// The number of new elements in `extant_messages` that are not considered
     /// to have sequence numbers.
     ///
