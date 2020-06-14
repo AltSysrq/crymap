@@ -21,28 +21,36 @@
 //! A mailbox is a collection of messages and their related metadata events. It
 //! is functionally independent from any associated child mailboxes.
 //!
-//! The contents of a mailbox directory are:
+//! The contents of a mailbox directory are (where `UV` is the UID validity in
+//! lowercase hex):
 //!
-//! - `%/u*`. Directories containing messages in the _hierarchical identifier_
-//! scheme described below.
+//! - `%`. Symlink to `%UV`.
 //!
-//! - `%/c*`. Directories containing state transactions in the _hierarchical
-//! identifier_ scheme described below.
+//! - `%UV/u*`. Directories containing messages in the _hierarchical
+//!   identifier_ scheme described below.
 //!
-//! - `%/rollup/*`. Change rollup files.
+//! - `%UV/c*`. Directories containing state transactions in the _hierarchical
+//!   identifier_ scheme described below.
 //!
-//! - `%/mailbox.toml`. Immutable metadata about this mailbox. Managed by
-//! `MailboxPath`.
+//! - `%UV/rollup/*`. Change rollup files.
 //!
-//! - `%/unsubscribe`. Marker file; if present, the mailbox is not subscribed.
-//!   Managed by `MailboxPath`.
+//! - `%UV/mailbox.toml`. Immutable metadata about this mailbox. Managed by
+//!   `MailboxPath`.
+//!
+//! - `%UV/unsubscribe`. Marker file; if present, the mailbox is not
+//!   subscribed. Managed by `MailboxPath`.
 //!
 //! - Directories containing child mailboxes, each of which is in a
 //!   subdirectory corresponding to its name. Managed by `MailboxPath`.
 //!
+//! The distinction between `%` and `%UV` is to prevent confusion if a mailbox
+//! is deleted and recreated while open. Mailboxes are opened through their
+//! `%UV` path, so any change in UID validity permanently invalidates them. The
+//! symlink is used to be able to access metadata statelessly.
+//!
 //! There are some wonky special cases to support IMAP's wonky data model.
 //!
-//! If the `%` directory is missing, this is a `\Noselect` mailbox. Mailboxes
+//! If the `%UV` directory is missing, this is a `\Noselect` mailbox. Mailboxes
 //! are normally created as dual-use, but IMAP requires that a `DELETE`
 //! operation on a dual-use mailbox with child mailboxes must transmogrify it
 //! into a folder-like mailbox.
@@ -68,7 +76,7 @@
 //!   instantiated.
 //!
 //! - A mailbox is subscribed if it is selectable and does not have a
-//!   `%/unsubscribe` file.
+//!   `%UV/unsubscribe` file.
 //!
 //! ## Hierarchical Identifier scheme
 //!
@@ -170,7 +178,7 @@
 //! ## Message format
 //!
 //! Each message consists of a u32 LE `size_xor_a` immediately followed by a
-//! data stream. The data stream contains a u32 LE `size_xor_b`, a u64 LE
+//! data stream. The data stream contains a u32 LE `size_xor_b`, a i64 LE
 //! `internal_date`, followed by the raw message text.
 //!
 //! The two size fields together encode the size of the message before
@@ -179,3 +187,444 @@
 //! chosen for `size_xor_b`. Once the message is fully written, the actual
 //! length is XORed with `size_xor_b` and the result is written over
 //! `size_xor_a`.
+//!
+//! ## Change transaction format and rollup format
+//!
+//! Change transactions and rollups are stored as unframed `data_stream`s. The
+//! cleartext content is CBOR of either `StateTransaction` or `MailboxState`.
+
+use std::convert::TryInto;
+use std::fs;
+use std::io::{self, BufRead, Read, Seek, Write};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use chrono::prelude::*;
+use log::{info, warn};
+use rand::{rngs::OsRng, Rng};
+use serde::{de::DeserializeOwned, Serialize};
+use tempfile::NamedTempFile;
+
+use super::hier_id_scheme::*;
+use super::key_store::*;
+use super::mailbox_path::*;
+use super::mailbox_state::*;
+use super::model::*;
+use crate::crypt::data_stream;
+use crate::support::compression::{Compression, FinishWrite};
+use crate::support::error::Error;
+use crate::support::file_ops;
+
+/// A stateless view of a mailbox.
+///
+/// The stateless view is capable of inserting messages, performing
+/// unconditional flag modifications, and reading messages by UID, but cannot
+/// query flags or notice changes.
+#[derive(Clone)]
+pub struct StatelessMailbox {
+    log_prefix: String,
+    path: MailboxPath,
+    root: PathBuf,
+    read_only: bool,
+    key_store: Arc<Mutex<KeyStore>>,
+    common_paths: Arc<CommonPaths>,
+}
+
+impl StatelessMailbox {
+    pub fn new(
+        mut log_prefix: String,
+        path: MailboxPath,
+        read_only: bool,
+        key_store: Arc<Mutex<KeyStore>>,
+        common_paths: Arc<CommonPaths>,
+    ) -> Result<Self, Error> {
+        log_prefix.push(':');
+        log_prefix.push_str(path.name());
+        let root = path.scoped_data_path()?;
+
+        Ok(StatelessMailbox {
+            log_prefix,
+            path,
+            root,
+            read_only,
+            key_store,
+            common_paths,
+        })
+    }
+
+    /// Open the identified message for reading.
+    ///
+    /// This doesn't correspond to any particular IMAP command (that would be
+    /// too easy!) but is used to implement a number of them.
+    ///
+    /// On success, returns the length in bytes, the internal date, and a
+    /// reader to access the content.
+    pub fn open_message(
+        &self,
+        uid: Uid,
+    ) -> Result<(u32, DateTime<Utc>, impl BufRead), Error> {
+        let scheme = self.message_scheme();
+        let mut file = match fs::File::open(scheme.path_for_id(uid.0.get())) {
+            Ok(f) => f,
+            Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
+                return Err(Error::ExpungedMessage)
+            }
+            Err(e) if io::ErrorKind::NotFound == e.kind() => {
+                return Err(Error::NxMessage)
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        let size_xor_a = file.read_u32::<LittleEndian>()?;
+        let stream = {
+            let mut ks = self.key_store.lock().unwrap();
+            data_stream::Reader::new(file, |k| ks.get_private_key(k))?
+        };
+        let compression = stream.metadata.compression;
+        let mut stream = compression.decompressor(stream)?;
+        let size_xor_b = stream.read_u32::<LittleEndian>()?;
+        let internal_date = stream.read_i64::<LittleEndian>()?;
+
+        Ok((
+            size_xor_a ^ size_xor_b,
+            Utc.timestamp_millis(internal_date),
+            stream,
+        ))
+    }
+
+    /// Append the given message to this mailbox.
+    ///
+    /// Returns the UID of the new message.
+    ///
+    /// This corresponds to the `APPEND` command from RFC 3501 and the
+    /// `APPENDUID` response from RFC 4315.
+    ///
+    /// RFC 3501 also allows setting flags at the same time. This is
+    /// accomplished with a follow-up call to `store_plus()` on
+    /// `StatefulMailbox`.
+    pub fn append(
+        &self,
+        internal_date: DateTime<Utc>,
+        flags: impl IntoIterator<Item = Flag>,
+        mut data: impl Read,
+    ) -> Result<Uid, Error> {
+        self.not_read_only()?;
+
+        let mut buffer_file = NamedTempFile::new_in(&self.common_paths.tmp)?;
+
+        let size_xor_a: u32;
+        let size_xor_b: u32 = OsRng.gen();
+        let compression = Compression::DEFAULT_FOR_MESSAGE;
+
+        buffer_file.write_u32::<LittleEndian>(0)?;
+        {
+            let mut crypt_writer = {
+                let mut ks = self.key_store.lock().unwrap();
+                let (key_name, pub_key) = ks.get_default_public_key()?;
+
+                data_stream::Writer::new(
+                    &mut buffer_file,
+                    pub_key,
+                    key_name.to_owned(),
+                    compression,
+                )?
+            };
+            {
+                let mut compressor =
+                    compression.compressor(&mut crypt_writer)?;
+                compressor.write_u32::<LittleEndian>(size_xor_b)?;
+                compressor.write_i64::<LittleEndian>(
+                    internal_date.timestamp_millis(),
+                )?;
+                let size = io::copy(&mut data, &mut compressor)?;
+                size_xor_a = size_xor_b ^ size.try_into().unwrap_or(u32::MAX);
+                compressor.finish()?;
+            }
+            crypt_writer.flush()?;
+        }
+
+        buffer_file.seek(io::SeekFrom::Start(0))?;
+        buffer_file.write_u32::<LittleEndian>(size_xor_a)?;
+        file_ops::chmod(buffer_file.path(), 0o440)?;
+
+        let uid = self.insert_message(buffer_file.path())?;
+        self.propagate_flags_best_effort(uid, flags);
+        Ok(uid)
+    }
+
+    /// Insert `src` into this mailbox via a hard link.
+    ///
+    /// This is used for `COPY` and `MOVE`, though it is not exactly either of
+    /// those.
+    fn insert_message(&self, src: &Path) -> Result<Uid, Error> {
+        self.not_read_only()?;
+
+        let scheme = self.message_scheme();
+
+        for _ in 0..1000 {
+            let uid = Uid::of(scheme.first_unallocated_id())
+                .ok_or(Error::MailboxFull)?;
+            if scheme.emplace(src, uid.0.get())? {
+                info!(
+                    "{} Delivered message to {}",
+                    self.log_prefix,
+                    uid.0.get()
+                );
+                return Ok(uid);
+            }
+        }
+
+        Err(Error::GaveUpInsertion)
+    }
+
+    /// Blindly set and clear the given flags on the given message.
+    ///
+    /// The caller must already know that `uid` refers to an allocated message.
+    ///
+    /// On success, returns the CID of the change, or `None` if there were not
+    /// actually any changes to make.
+    fn set_flags_blind(
+        &self,
+        uid: Uid,
+        flags: impl IntoIterator<Item = (bool, Flag)>,
+    ) -> Result<Option<Cid>, Error> {
+        self.not_read_only()?;
+
+        let mut tx = StateTransaction::new_unordered(uid);
+        for (add, flag) in flags {
+            if add {
+                tx.add_flag(uid, flag);
+            } else {
+                tx.rm_flag(uid, flag);
+            }
+        }
+
+        if tx.is_empty() {
+            return Ok(None);
+        }
+
+        let buffer_file = self.write_state_file(&tx)?;
+        let scheme = self.change_scheme();
+        for _ in 0..1000 {
+            let next_cid = Cid(scheme.first_unallocated_id());
+            if next_cid > Cid::MAX {
+                return Err(Error::MailboxFull);
+            }
+
+            if scheme.emplace(buffer_file.path(), next_cid.0)? {
+                return Ok(Some(next_cid));
+            }
+        }
+
+        Err(Error::GaveUpInsertion)
+    }
+
+    /// Try to add all the given flags to `uid`.
+    ///
+    /// On error, the error is logged.
+    fn propagate_flags_best_effort(
+        &self,
+        uid: Uid,
+        flags: impl IntoIterator<Item = Flag>,
+    ) {
+        if let Err(e) =
+            self.set_flags_blind(uid, flags.into_iter().map(|f| (true, f)))
+        {
+            // If APPEND/COPY/MOVE returns an error, the call must have had no
+            // effect, so we can't return an error to the client here since we
+            // already emplaced the new message. Transferring the flags is only
+            // a SHOULD, however, so we're fine to just log the error and carry
+            // on if anything failed.
+            warn!(
+                "{} Failed to set flags on {}: {}",
+                self.log_prefix,
+                uid.0.get(),
+                e
+            );
+        }
+    }
+
+    /// Reads a file that was written by `write_state_file()`.
+    fn read_state_file<T: DeserializeOwned>(
+        &self,
+        src: &Path,
+    ) -> Result<T, Error> {
+        let file = fs::File::open(src)?;
+        let stream = {
+            let mut ks = self.key_store.lock().unwrap();
+            data_stream::Reader::new(file, |k| ks.get_private_key(k))?
+        };
+        let compression = stream.metadata.compression;
+        let stream = compression.decompressor(stream)?;
+
+        serde_cbor::from_reader(stream).map_err(|e| e.into())
+    }
+
+    /// Writes the given data to a new `NamedTempFile` in the format used for
+    /// storing state.
+    fn write_state_file(
+        &self,
+        data: &impl Serialize,
+    ) -> Result<NamedTempFile, Error> {
+        self.not_read_only()?;
+
+        let mut buffer_file = NamedTempFile::new_in(&self.common_paths.tmp)?;
+        {
+            let compression = Compression::DEFAULT_FOR_STATE;
+            let mut crypt_writer = {
+                let mut ks = self.key_store.lock().unwrap();
+                let (key_name, pub_key) = ks.get_default_public_key()?;
+
+                data_stream::Writer::new(
+                    &mut buffer_file,
+                    pub_key,
+                    key_name.to_owned(),
+                    compression,
+                )?
+            };
+            {
+                let mut compressor =
+                    compression.compressor(&mut crypt_writer)?;
+                serde_cbor::to_writer(&mut compressor, data)?;
+                compressor.finish()?;
+            }
+            crypt_writer.flush()?;
+        }
+
+        Ok(buffer_file)
+    }
+
+    fn message_scheme(&self) -> HierIdScheme<'_> {
+        HierIdScheme {
+            root: &self.root,
+            prefix: b'u',
+            extension: "eml",
+        }
+    }
+
+    fn change_scheme(&self) -> HierIdScheme<'_> {
+        HierIdScheme {
+            root: &self.root,
+            prefix: b'c',
+            extension: "tx",
+        }
+    }
+
+    fn not_read_only(&self) -> Result<(), Error> {
+        if self.read_only {
+            Err(Error::MailboxReadOnly)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::iter;
+
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::crypt::master_key::MasterKey;
+
+    struct Setup {
+        root: TempDir,
+        stateless: StatelessMailbox,
+    }
+
+    fn set_up() -> Setup {
+        let root = TempDir::new().unwrap();
+        let common_paths = Arc::new(CommonPaths {
+            tmp: root.path().to_owned(),
+            garbage: root.path().to_owned(),
+        });
+
+        let mut key_store = KeyStore::new(
+            "key-store".to_owned(),
+            root.path().join("keys"),
+            common_paths.tmp.clone(),
+            Some(Arc::new(MasterKey::new())),
+        );
+        key_store.set_rsa_bits(1024);
+        key_store.init(&KeyStoreConfig::default()).unwrap();
+
+        let key_store = Arc::new(Mutex::new(key_store));
+
+        let mbox_path =
+            MailboxPath::root("inbox".to_owned(), root.path()).unwrap();
+        mbox_path.create(root.path(), None).unwrap();
+        let stateless = StatelessMailbox::new(
+            "mailbox".to_owned(),
+            mbox_path,
+            false,
+            key_store,
+            common_paths,
+        )
+        .unwrap();
+
+        Setup { root, stateless }
+    }
+
+    #[test]
+    fn write_and_read_messages() {
+        let setup = set_up();
+
+        let now = Utc::now();
+        let now_truncated = Utc.timestamp_millis(now.timestamp_millis());
+
+        assert_eq!(
+            Uid::u(1),
+            setup
+                .stateless
+                .append(now, iter::empty(), &mut "hello world".as_bytes())
+                .unwrap()
+        );
+        assert_eq!(
+            Uid::u(2),
+            setup
+                .stateless
+                .append(now, iter::empty(), &mut "another message".as_bytes())
+                .unwrap()
+        );
+
+        let mut content = String::new();
+        let (size, date, mut r) =
+            setup.stateless.open_message(Uid::u(1)).unwrap();
+        assert_eq!(11, size);
+        assert_eq!(now_truncated, date);
+        r.read_to_string(&mut content).unwrap();
+        assert_eq!("hello world", &content);
+
+        content.clear();
+        let (size, date, mut r) =
+            setup.stateless.open_message(Uid::u(2)).unwrap();
+        assert_eq!(15, size);
+        assert_eq!(now_truncated, date);
+        r.read_to_string(&mut content).unwrap();
+        assert_eq!("another message", &content);
+    }
+
+    #[test]
+    fn write_and_read_state_files() {
+        let setup = set_up();
+
+        assert_eq!(
+            Some(Cid(1)),
+            setup
+                .stateless
+                .set_flags_blind(Uid::u(1), vec![(true, Flag::Flagged)])
+                .unwrap()
+        );
+
+        let tx: StateTransaction = setup
+            .stateless
+            .read_state_file(&setup.stateless.change_scheme().path_for_id(1))
+            .unwrap();
+
+        // If we were able to deserialise it at all, the read operation worked.
+        // So just make sure we got something non-trivial back.
+        assert!(!tx.is_empty());
+    }
+}

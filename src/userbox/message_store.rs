@@ -318,7 +318,7 @@ impl MessageStore {
 
         let (key_name, pub_key) = key_store.get_default_public_key()?;
 
-        let compression = Compression::default();
+        let compression = Compression::DEFAULT_FOR_MESSAGE;
         let len_xor_b: u32 = OsRng.gen();
         let len_xor_a: u32;
 

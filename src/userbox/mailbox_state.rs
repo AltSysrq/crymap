@@ -690,6 +690,18 @@ enum StateMutation {
 }
 
 impl StateTransaction {
+    /// Create a transaction that is not expected to be strictly ordered with
+    /// respect to surrounding changes.
+    ///
+    /// The change itself does acquire a strict order, but the writer of such a
+    /// transaction cannot learn it without further processing.
+    pub fn new_unordered(uid: Uid) -> Self {
+        StateTransaction {
+            max_uid: uid,
+            ops: vec![],
+        }
+    }
+
     pub fn add_flag(&mut self, uid: Uid, flag: Flag) {
         assert!(uid <= self.max_uid);
         self.ops.push(StateMutation::AddFlag(uid, flag));

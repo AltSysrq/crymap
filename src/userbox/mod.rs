@@ -28,6 +28,7 @@ pub(crate) mod flag_store;
 mod hier_id_scheme;
 pub(crate) mod key_store;
 pub(crate) mod mailbox;
+pub(crate) mod mailbox2;
 pub(crate) mod mailbox_path;
 mod mailbox_state;
 pub(crate) mod message_store;

@@ -37,6 +37,12 @@ impl<W: Write> FinishWrite for zstd::Encoder<W> {
     }
 }
 
+impl<W: FinishWrite + ?Sized> FinishWrite for Box<W> {
+    fn finish(&mut self) -> io::Result<()> {
+        (**self).finish()
+    }
+}
+
 /// Various schemes of supported compression types.
 #[derive(
     Serialize_repr, Deserialize_repr, Clone, Copy, Debug, PartialEq, Eq,
@@ -45,33 +51,47 @@ impl<W: Write> FinishWrite for zstd::Encoder<W> {
 pub enum Compression {
     /// ZStandard compression, with Un-64 as a pre-compressor.
     Un64Zstd = 0,
-}
-
-impl Default for Compression {
-    fn default() -> Self {
-        Compression::Un64Zstd
-    }
+    /// Vanilla ZStandard compression
+    Zstd = 1,
 }
 
 impl Compression {
+    pub const DEFAULT_FOR_MESSAGE: Self = Compression::Un64Zstd;
+    pub const DEFAULT_FOR_STATE: Self = Compression::Zstd;
+
     /// Wrap `reader` to decompress according to this scheme.
-    pub fn decompressor(self, reader: impl Read) -> io::Result<impl BufRead> {
+    pub fn decompressor<'a>(
+        self,
+        reader: impl Read + 'a,
+    ) -> io::Result<impl BufRead + 'a> {
         match self {
             Compression::Un64Zstd => {
-                Ok(un64::Reader::new(zstd::Decoder::new(reader)?))
+                Ok(box_r(un64::Reader::new(zstd::Decoder::new(reader)?)))
+            }
+            Compression::Zstd => {
+                Ok(box_r(io::BufReader::new(zstd::Decoder::new(reader)?)))
             }
         }
     }
 
     /// Wrap `writer` to compress according to this scheme.
-    pub fn compressor(
+    pub fn compressor<'a>(
         self,
-        writer: impl Write,
-    ) -> io::Result<impl FinishWrite> {
+        writer: impl Write + 'a,
+    ) -> io::Result<impl FinishWrite + 'a> {
         match self {
             Compression::Un64Zstd => {
-                Ok(un64::Writer::new(zstd::Encoder::new(writer, 5)?))
+                Ok(box_w(un64::Writer::new(zstd::Encoder::new(writer, 5)?)))
             }
+            Compression::Zstd => Ok(box_w(zstd::Encoder::new(writer, 5)?)),
         }
     }
+}
+
+fn box_r<'a>(r: impl BufRead + 'a) -> Box<dyn BufRead + 'a> {
+    Box::new(r)
+}
+
+fn box_w<'a>(w: impl FinishWrite + 'a) -> Box<dyn FinishWrite + 'a> {
+    Box::new(w)
 }

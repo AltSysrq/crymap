@@ -54,6 +54,8 @@ pub enum Error {
     NxFlag,
     #[error("Corrupted flag bitmap")]
     CorruptFlag,
+    #[error("Gave up atomic insertion after too many retries")]
+    GaveUpInsertion,
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]

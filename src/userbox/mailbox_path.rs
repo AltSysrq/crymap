@@ -134,6 +134,23 @@ impl MailboxPath {
         &self.name
     }
 
+    /// Return the root of the mailbox data.
+    pub fn data_path(&self) -> &Path {
+        &self.data_path
+    }
+
+    /// Return the UID-specific root of the mailbox data.
+    pub fn scoped_data_path(&self) -> Result<PathBuf, Error> {
+        // TODO It'd probably be better to readlink() this data out of
+        // data_path().
+        let uid_validity = self.metadata()?.imap.uid_validity;
+        Ok(self.scoped_data_path_for_uid_validity(uid_validity))
+    }
+
+    fn scoped_data_path_for_uid_validity(&self, uid_validity: u32) -> PathBuf {
+        self.base_path.join(format!("%{:x}", uid_validity))
+    }
+
     /// Return the root of the `MessageStore`.
     pub fn msgs_path(&self) -> &Path {
         &self.msgs_path
@@ -187,6 +204,15 @@ impl MailboxPath {
         tmp: &Path,
         special_use: Option<MailboxAttribute>,
     ) -> Result<(), Error> {
+        // Generate the UID validity by using the lower 32 bits of the
+        // UNIX time. It is fine that this will wrap in 2106. To even
+        // have a chance of colliding, the mail server would need to be
+        // in use for 136 years.
+        let uid_validity = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as u32;
+
         // Stage the new mailbox hierarchy inside tmp, then move the whole
         // thing in when done.
         let stage = TempDir::new_in(tmp)?;
@@ -194,9 +220,13 @@ impl MailboxPath {
             String::new(),
             stage.path().to_owned(),
         );
-        fs::DirBuilder::new()
-            .mode(0o750)
-            .create(&stage_mbox.data_path)?;
+        let scoped_path =
+            stage_mbox.scoped_data_path_for_uid_validity(uid_validity);
+        fs::DirBuilder::new().mode(0o750).create(&scoped_path)?;
+        std::os::unix::fs::symlink(
+            scoped_path.file_name().unwrap(),
+            &stage_mbox.data_path,
+        )?;
         fs::DirBuilder::new()
             .mode(0o700)
             .create(&stage_mbox.flags_path)?;
@@ -205,14 +235,7 @@ impl MailboxPath {
             .create(&stage_mbox.msgs_path)?;
         let metadata = MailboxMetadata {
             imap: MailboxImapMetadata {
-                // Generate the UID validity by using the lower 32 bits of the
-                // UNIX time. It is fine that this will wrap in 2106. To even
-                // have a chance of colliding, the mail server would need to be
-                // in use for 136 years.
-                uid_validity: std::time::SystemTime::now()
-                    .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as u32,
+                uid_validity,
                 special_use,
             },
         };
@@ -270,12 +293,19 @@ impl MailboxPath {
                 .on_not_found(Error::NxMailbox)
         } else {
             // Atomically turn into a \Noselect mailbox if we were selectable
-            let selectable =
-                match file_ops::delete_async(&self.data_path, garbage) {
-                    Ok(()) => true,
-                    Err(e) if io::ErrorKind::NotFound == e.kind() => false,
-                    Err(e) => return Err(e.into()),
-                };
+            let selectable = match self.scoped_data_path().and_then(|p| {
+                file_ops::delete_async(p, garbage).map_err(|e| e.into())
+            }) {
+                Ok(()) => true,
+                Err(Error::Io(e)) if io::ErrorKind::NotFound == e.kind() => {
+                    false
+                }
+                Err(e) => return Err(e),
+            };
+
+            // Regardless of selectability, the %UV directory is gone, so
+            // remove the symlink to
+            let _ = fs::remove_file(&self.data_path);
 
             if selectable {
                 // OK, silently keep existing as a \Noselect

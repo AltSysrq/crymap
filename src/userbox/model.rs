@@ -19,6 +19,7 @@
 use std::convert::TryInto;
 use std::fmt;
 use std::num::{NonZeroU32, NonZeroU64};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -332,4 +333,20 @@ impl FromStr for Flag {
             Err(Error::UnsafeName)
         }
     }
+}
+
+/// Holder for common paths used pervasively through a process.
+#[derive(Clone, Debug)]
+pub struct CommonPaths {
+    /// The per-user temporary directory.
+    ///
+    /// This directory is used to stage files before moving them into their
+    /// final home. Files orphaned for over 24hr are cleaned up automatically.
+    pub tmp: PathBuf,
+    /// The per-user garbage directory.
+    ///
+    /// Whole directory trees are moved here to simulate an atomic, instant
+    /// deletion. Usually, the process that does that move also deletes the
+    /// directory tree from here itself. Orphans are cleaned up aggressively.
+    pub garbage: PathBuf,
 }
