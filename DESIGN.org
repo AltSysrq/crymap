@@ -539,3 +539,76 @@ got killed while idling).
 
 This system should work on pretty much everything but Windows, which isn't
 supported for other reasons anyway.
+* On the \Recent thing
+
+\Recent is a very weird thing. Designs before <2020-06-14 So> treated it as a
+mostly regular flag (albeit one stored inverted so that it is set by default),
+with the semantics that a message has \Recent for all sessions until some
+session fetches the message, at which point \Recent is cleared for all
+sessions.
+
+This is not what RFC 3501 wants. The standard's semantics are that \Recent is
+set for the first session to "see" the message, and remains set forever in that
+session, while no other session sets \Recent on the same message.
+
+The RFC also has this paragraph:
+
+> If it is not possible to determine whether or not this
+> session is the first session to be notified about a message,
+> then that message SHOULD be considered recent.
+
+This would appear to make it compliant to just say /every/ message is recent,
+all the time.
+
+So while the standard allows wildly varying behaviours, the current
+design is objectively incorrect.
+
+Resolution: Strictly correct behaviour via "recency tokens". It's not that
+complicated and doesn't come with a huge slew of drawbacks, so we'll go with
+the spirit of the standard.
+
+** Nothing is \Recent
+
+This is what GMail does.
+
+Because clients do not have visibility into other sessions, there is no way for
+a client to tell the difference between a server which does not implement
+\Recent and one in which another session is constantly "seeing" everything
+first.
+
+This is naturally the simplest and most effective solution.
+
+** Everything is \Recent
+
+This is a variant of making nothing \Recent, but complies with the letter of
+the standard, though certainly not the spirit.
+
+This seems more likely to invoke weird client behaviours though.
+
+** Strictly correct behaviour
+
+Each instance maintains an in-memory, transient set of UIDs which are marked
+\Recent. Whenever it learns of a new UID, it tries to "claim" it by some means,
+and if successful, adds that UID to the set.
+
+The biggest disadvantage of this is that it makes the system even more
+stateful. In the filesystem-as-a-database model, it also means we have more
+stuff that may need to be cleaned up. And we really don't want to have a
+parallel hier-id-scheme with a marker for every message.
+
+Maybe a "recency token"? To claim a UID as recent:
+- Scan the mail directory for a file whose name matchek "recent.%d"
+- If none found, atomically create one named "recent.$MAXUID" and the recency
+  claim fails. (This is so we don't recover by marking _every_ UID recent.)
+- If found but it has a greater UID, recency claim fails.
+- If found, rename the one with the greatest UID (without allowing replacement)
+  to "recent.$UID". If this fails due to ENOENT, retry the whole process. If it
+  fails due to EEXISTS, recency claim fails.
+- Unlink any extraneous tokens found.
+
+Multiple UIDs can be claimed at once by renaming across a range.
+
+Ordinarily, there should be exactly one token; the steps to create a new one or
+remove an old one are a recovery process in case the token is lost somehow. The
+create step is not atomic since multiple processes could concurrently claim
+different UIDs in different orders.
