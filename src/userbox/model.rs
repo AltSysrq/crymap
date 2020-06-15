@@ -276,6 +276,8 @@ impl Modseq {
 /// The `Display` format of this type is the exact string value that would be
 /// sent over the wire. `FromStr` does the reverse conversion, and also
 /// understands non-standard casing of the system flags.
+///
+/// `\Recent` is not represented by this enum since it isn't _really_ a flag.
 #[derive(
     Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
@@ -284,7 +286,6 @@ pub enum Flag {
     Deleted,
     Draft,
     Flagged,
-    Recent,
     Seen,
     Keyword(String),
 }
@@ -296,7 +297,6 @@ impl fmt::Display for Flag {
             &Flag::Deleted => write!(f, "\\Deleted"),
             &Flag::Draft => write!(f, "\\Draft"),
             &Flag::Flagged => write!(f, "\\Flagged"),
-            &Flag::Recent => write!(f, "\\Recent"),
             &Flag::Seen => write!(f, "\\Seen"),
             &Flag::Keyword(ref kw) => write!(f, "{}", kw),
         }
@@ -322,8 +322,6 @@ impl FromStr for Flag {
         } else if s.eq_ignore_ascii_case("\\flagged") {
             Ok(Flag::Flagged)
         } else if s.eq_ignore_ascii_case("\\recent") {
-            Ok(Flag::Recent)
-        } else if s.eq_ignore_ascii_case("\\seen") {
             Ok(Flag::Seen)
         } else if s.starts_with("\\") {
             Err(Error::NxFlag)

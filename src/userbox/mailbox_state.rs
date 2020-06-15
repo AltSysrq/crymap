@@ -42,6 +42,9 @@ const MAX_RECENT_EXPUNGEMENTS: usize = 4;
 ///
 /// All mutations take the form of message creation and `StateTransaction`
 /// values.
+///
+/// This struct holds the `\\Recent` status for every message, but does not
+/// contain the logic to maintain it.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct MailboxState {
     /// The table of known flags.
@@ -139,14 +142,14 @@ struct MessageStatus {
     ///
     /// This is a bitset. Flag N is found at byte N/8 and bit N%8. Bytes past
     /// the end of the vec are implicitly 0.
-    ///
-    /// The `\Recent` is inverted: a value of 0 indicates set, and 1 indicates
-    /// clear.
     #[serde(rename = "f", with = "serde_bytes")]
     flags: Vec<u8>,
     /// The `Modseq` of the last point at which this message was modified.
     #[serde(rename = "m")]
     last_modified: Modseq,
+    /// The per-session recency status.
+    #[serde(skip)]
+    recent: bool,
 }
 
 impl MailboxState {
@@ -183,6 +186,7 @@ impl MailboxState {
                     MessageStatus {
                         flags: vec![],
                         last_modified: Modseq::new(uid, Cid::GENESIS),
+                        recent: false,
                     },
                 );
             }
@@ -468,18 +472,35 @@ impl MailboxState {
         let flag = flag.0;
         let byte = flag / 8;
         let bit = flag % 8;
-        let invert = &Flag::Recent == &self.flags[flag];
 
         if let Some(status) = self.message_status.get(&message) {
-            invert
-                ^ if let Some(b) = status.flags.get(byte) {
-                    0 != (b & (1 << bit))
-                } else {
-                    false
-                }
+            if let Some(b) = status.flags.get(byte) {
+                0 != (b & (1 << bit))
+            } else {
+                false
+            }
         } else {
             false
         }
+    }
+
+    /// Permanently set the `\\Recent` "flag" on the given message.
+    ///
+    /// Has no effect if the message has been expunged.
+    pub fn set_recent(&mut self, uid: Uid) {
+        if let Some(status) = self.message_status.get_mut(&uid) {
+            status.recent = true;
+        }
+    }
+
+    /// Return whether the given message has the `\\Recent` "flag".
+    ///
+    /// Returns false if the message has been expunged.
+    pub fn is_recent(&self, uid: Uid) -> bool {
+        self.message_status
+            .get(&uid)
+            .map(|m| m.recent)
+            .unwrap_or(false)
     }
 
     /// Return an iterator to the UIDs within the current snapshot.
@@ -606,9 +627,6 @@ impl MailboxState {
         val: bool,
         notify: bool,
     ) {
-        // Invert \Recent
-        let val = val ^ (Flag::Recent == flag);
-
         let flag = self.flag_ix_mut(flag);
         let byte = flag / 8;
         let bit = flag % 8;
@@ -1034,30 +1052,33 @@ mod test {
         state.seen(Uid::u(10));
         state.flush();
 
-        let recent_flag = state.flag_id_mut(Flag::Recent);
+        let flagged_flag = state.flag_id_mut(Flag::Flagged);
         let seen_flag = state.flag_id_mut(Flag::Seen);
         let kw_flag = state.flag_id_mut(Flag::Keyword("NotJunk".to_owned()));
 
-        assert!(state.test_flag(recent_flag, Uid::u(1)));
+        assert!(!state.test_flag(flagged_flag, Uid::u(1)));
         assert!(!state.test_flag(seen_flag, Uid::u(1)));
         assert!(!state.test_flag(kw_flag, Uid::u(1)));
 
-        assert!(!state.test_flag(recent_flag, Uid::u(11)));
+        assert!(!state.test_flag(flagged_flag, Uid::u(11)));
         assert!(!state.test_flag(seen_flag, Uid::u(11)));
         assert!(!state.test_flag(kw_flag, Uid::u(11)));
 
         let (cid, mut tx) = state.start_tx().unwrap();
         tx.add_flag(Uid::u(1), Flag::Seen);
-        tx.rm_flag(Uid::u(2), Flag::Recent);
+        tx.add_flag(Uid::u(2), Flag::Flagged);
         state.commit(cid, tx, true);
+
+        assert!(state.test_flag(flagged_flag, Uid::u(2)));
 
         let (cid, mut tx) = state.start_tx().unwrap();
         tx.add_flag(Uid::u(3), Flag::Keyword("NotJunk".to_owned()));
+        tx.rm_flag(Uid::u(2), Flag::Flagged);
         state.commit(cid, tx, false);
 
-        assert!(state.test_flag(recent_flag, Uid::u(1)));
-        assert!(!state.test_flag(recent_flag, Uid::u(2)));
-        assert!(state.test_flag(recent_flag, Uid::u(3)));
+        assert!(!state.test_flag(flagged_flag, Uid::u(1)));
+        assert!(!state.test_flag(flagged_flag, Uid::u(2)));
+        assert!(!state.test_flag(flagged_flag, Uid::u(3)));
 
         assert!(state.test_flag(seen_flag, Uid::u(1)));
         assert!(!state.test_flag(seen_flag, Uid::u(2)));

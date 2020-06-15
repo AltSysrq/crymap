@@ -40,6 +40,9 @@
 //! - `%UV/unsubscribe`. Marker file; if present, the mailbox is not
 //!   subscribed. Managed by `MailboxPath`.
 //!
+//! - `%UV/recent`. Maintains a token for the `\Recent` flag. See
+//!   `recency_token`.
+//!
 //! - Directories containing child mailboxes, each of which is in a
 //!   subdirectory corresponding to its name. Managed by `MailboxPath`.
 //!
