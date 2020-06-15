@@ -69,6 +69,8 @@ pub enum MailboxAttribute {
     Junk,
     Sent,
     Trash,
+    // RFC 8457
+    Important,
 }
 
 impl fmt::Display for MailboxAttribute {
@@ -83,6 +85,7 @@ impl fmt::Display for MailboxAttribute {
             &MailboxAttribute::Junk => write!(f, "\\Junk"),
             &MailboxAttribute::Sent => write!(f, "\\Sent"),
             &MailboxAttribute::Trash => write!(f, "\\Trash"),
+            &MailboxAttribute::Important => write!(f, "\\Important"),
         }
     }
 }

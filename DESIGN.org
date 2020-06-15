@@ -341,6 +341,9 @@ LIST-EXTENDED [RFC 5258] is also incorporated into IMAP4rev2.
 
 [RFC 5530] defines additional error codes.
 
+[RFC 8457] defines an extra keyword flag (which we support for free) and
+special-use attribute (which is trivial to add).
+
 IMAP4rev2 draft: https://datatracker.ietf.org/doc/draft-ietf-extra-imap4rev2/?include_text=1
 
 * Special mailboxes
