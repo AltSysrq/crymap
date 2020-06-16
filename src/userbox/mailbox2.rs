@@ -1041,6 +1041,10 @@ impl StatefulMailbox {
     ) -> Result<R, Error> {
         let (mut cid, mut tx) = self.state.start_tx()?;
         let mut res = f(self, &mut tx)?;
+        if tx.is_empty() {
+            return Ok(res);
+        }
+
         let mut buffer_file = self.s.write_state_file(&tx)?;
 
         for _ in 0..1024 {
@@ -1059,6 +1063,9 @@ impl StatefulMailbox {
                 cid = c;
                 tx = t;
                 res = f(self, &mut tx)?;
+                if tx.is_empty() {
+                    return Ok(res);
+                }
                 buffer_file = self.s.write_state_file(&tx)?;
             } else {
                 cid = self.state.retry_tx(cid)?;
