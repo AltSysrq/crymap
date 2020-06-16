@@ -616,6 +616,10 @@ impl StatefulMailbox {
         &mut self,
         request: &StoreRequest<'_, Uid>,
     ) -> Result<StoreResponse<Uid>, Error> {
+        if self.s.read_only {
+            return Err(Error::MailboxReadOnly);
+        }
+
         let flags: Vec<FlagId> = request
             .flags
             .iter()
@@ -674,6 +678,49 @@ impl StatefulMailbox {
         }
 
         Ok(ret)
+    }
+
+    /// Expunge all messages with the `\Deleted` flag in the current snapshot.
+    ///
+    /// This is the `EXPUNGE` operation from RFC 3501, and is also used for
+    /// `CLOSE`.
+    pub fn expunge_all_deleted(&mut self) -> Result<(), Error> {
+        let mut all_uids = SeqRange::new();
+        all_uids.insert(Uid::MIN, Uid::MAX);
+        self.expunge_deleted(&all_uids)
+    }
+
+    /// Expunge messages with the `\Deleted` flag and which are in the given
+    /// UID set and the current snapshot.
+    ///
+    /// This is the `UID EXPUNGE` operation from RFC 4315.
+    pub fn expunge_deleted(
+        &mut self,
+        uids: &SeqRange<Uid>,
+    ) -> Result<(), Error> {
+        if self.s.read_only {
+            return Err(Error::MailboxReadOnly);
+        }
+
+        let deleted = match self.state.flag_id(&Flag::Deleted) {
+            Some(deleted) => deleted,
+            // If the flag hasn't been interned yet, no messages have it.
+            None => return Ok(()),
+        };
+
+        self.change_transaction(false, |this, tx| {
+            // NB We can't iterate the HashMap<Uid, MessageStatus> directly because
+            // we must only consider messages in the current snapshot
+            for uid in this.state.uids() {
+                if let Some(status) = this.state.message_status(uid) {
+                    if status.test_flag(deleted) && uids.contains(uid) {
+                        tx.expunge(uid);
+                    }
+                }
+            }
+
+            Ok(())
+        })
     }
 
     /// Do a "mini" poll, appropriate for use after a `FETCH`, `STORE`, or
