@@ -604,6 +604,7 @@ impl StatefulMailbox {
             unchanged_since: request.unchanged_since,
         })
         .map(|resp| StoreResponse {
+            ok: resp.ok,
             modified: self
                 .state
                 .uid_range_to_seqnum(&resp.modified, true)
@@ -629,11 +630,21 @@ impl StatefulMailbox {
         let fragile = request.unchanged_since.is_some();
         let ret = self.change_transaction(fragile, |this, tx| {
             let mut modified = SeqRange::new();
+            let mut ok = true;
 
             for uid in request.ids.items() {
+                if !this.state.is_assigned_uid(uid) {
+                    return Err(Error::NxMessage);
+                }
+
                 let status = match this.state.message_status(uid) {
                     Some(status) => status,
-                    None => continue,
+                    None => {
+                        // RFC 7162 shows an example of a STORE to an expunged
+                        // UID as returning NO but otherwise succeeding.
+                        ok = false;
+                        continue;
+                    }
                 };
 
                 if request
@@ -646,7 +657,7 @@ impl StatefulMailbox {
                 }
 
                 for &flag in &flags {
-                    if request.remove_listed != status.test_flag(flag) {
+                    if request.remove_listed == status.test_flag(flag) {
                         if let Some(flag_obj) = this.state.flag(flag) {
                             if request.remove_listed {
                                 tx.rm_flag(uid, flag_obj.to_owned());
@@ -668,7 +679,7 @@ impl StatefulMailbox {
                 }
             }
 
-            Ok(StoreResponse { modified })
+            Ok(StoreResponse { ok, modified })
         })?;
 
         if request.loud {
@@ -685,9 +696,7 @@ impl StatefulMailbox {
     /// This is the `EXPUNGE` operation from RFC 3501, and is also used for
     /// `CLOSE`.
     pub fn expunge_all_deleted(&mut self) -> Result<(), Error> {
-        let mut all_uids = SeqRange::new();
-        all_uids.insert(Uid::MIN, Uid::MAX);
-        self.expunge_deleted(&all_uids)
+        self.expunge_deleted(&SeqRange::range(Uid::MIN, Uid::MAX))
     }
 
     /// Expunge messages with the `\Deleted` flag and which are in the given
@@ -1004,6 +1013,7 @@ impl StatefulMailbox {
             uidnext: this.state.next_uid().unwrap_or(Uid::MAX),
             uidvalidity: this.s.uid_validity()?,
             read_only: this.s.read_only,
+            max_modseq: this.state.report_max_modseq(),
         };
         Ok((this, select_response))
     }
@@ -1272,5 +1282,66 @@ mod test {
             setup.stateless.path().current_uid_validity().unwrap()
         );
         assert!(!setup.stateless.is_ok());
+    }
+
+    #[test]
+    fn single_client_message_operations() {
+        let setup = set_up();
+
+        let (mut mb, select_res) = setup.stateless.select().unwrap();
+        assert_eq!(0, select_res.exists);
+        assert_eq!(0, select_res.recent);
+        assert_eq!(None, select_res.unseen);
+        assert_eq!(Uid::MIN, select_res.uidnext);
+        assert!(!select_res.read_only);
+        assert_eq!(None, select_res.max_modseq);
+
+        assert_eq!(Uid::u(1), simple_append(mb.stateless()));
+
+        let poll = mb.poll().unwrap();
+        assert_eq!(Vec::<(Seqnum, Uid)>::new(), poll.expunge);
+        assert_eq!(Some(1), poll.exists);
+        assert_eq!(Some(1), poll.recent);
+        assert_eq!(vec![Uid::u(1)], poll.fetch);
+        assert_eq!(Some(Modseq::new(Uid::u(1), Cid::GENESIS)), poll.max_modseq);
+
+        assert_eq!(Uid::u(2), simple_append(mb.stateless()));
+        assert_eq!(Uid::u(3), simple_append(mb.stateless()));
+
+        let poll = mb.poll().unwrap();
+        assert_eq!(Vec::<(Seqnum, Uid)>::new(), poll.expunge);
+        assert_eq!(Some(3), poll.exists);
+        assert_eq!(Some(3), poll.recent);
+        assert_eq!(vec![Uid::u(2), Uid::u(3)], poll.fetch);
+        assert_eq!(Some(Modseq::new(Uid::u(3), Cid::GENESIS)), poll.max_modseq);
+
+        mb.store(&StoreRequest {
+            ids: &SeqRange::just(Uid::u(2)),
+            flags: &[Flag::Deleted],
+            remove_listed: false,
+            remove_unlisted: false,
+            loud: false,
+            unchanged_since: None,
+        })
+        .unwrap();
+
+        assert_eq!(vec![Uid::u(2)], mb.mini_poll());
+        assert!(mb
+            .state
+            .test_flag(mb.state.flag_id(&Flag::Deleted).unwrap(), Uid::u(2)));
+
+        mb.expunge_all_deleted().unwrap();
+
+        let poll = mb.poll().unwrap();
+        assert_eq!(vec![(Seqnum::u(2), Uid::u(2))], poll.expunge);
+        assert_eq!(None, poll.exists);
+        assert_eq!(None, poll.recent);
+        assert_eq!(Vec::<Uid>::new(), poll.fetch);
+        assert_ne!(Cid::GENESIS, poll.max_modseq.unwrap().cid());
+    }
+
+    fn simple_append(dst: &StatelessMailbox) -> Uid {
+        dst.append(Utc::now(), iter::empty(), &mut "foobar".as_bytes())
+            .unwrap()
     }
 }

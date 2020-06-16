@@ -322,6 +322,20 @@ impl<T: TryFrom<u32> + Into<u32> + PartialOrd> SeqRange<T> {
         }
     }
 
+    /// Create a range containing just the given item.
+    pub fn just(item: T) -> Self {
+        let mut this = SeqRange::new();
+        this.append(item);
+        this
+    }
+
+    /// Create a range containing just a single, simple range.
+    pub fn range(start: T, end: T) -> Self {
+        let mut this = SeqRange::new();
+        this.insert(start, end);
+        this
+    }
+
     /// Return whether this range is empty (invalid for IMAP wire format).
     pub fn is_empty(&self) -> bool {
         self.parts.is_empty()
@@ -553,6 +567,7 @@ impl FromStr for Flag {
 /// command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectResponse {
+    // ==================== RFC 3501 ====================
     /// The currently-defined flags. Used for both the `FLAGS` response and the
     /// `PERMANENTFLAGS` response-code. For the latter, `\*` must also be
     /// added.
@@ -579,6 +594,12 @@ pub struct SelectResponse {
     /// Whether the mailbox is read-only.
     /// `TAG OK [READ-WRITE|READ-ONLY]`
     pub read_only: bool,
+    // ==================== RFC 7162 ====================
+    /// The greatest `Modseq` currently in the mailbox, or `None` if
+    /// primordial.
+    ///
+    /// `* OK [HIGHESTMODSEQ max_modseq.unwrap_or(1)]`
+    pub max_modseq: Option<Modseq>,
 }
 
 /// Unsolicited responses that can be sent after commands (other than `FETCH`,
@@ -690,6 +711,28 @@ pub struct StoreResponse<ID>
 where
     SeqRange<ID>: fmt::Debug,
 {
+    // ==================== RFC 3501 ====================
+    /// Whether to return OK or NO.
+    ///
+    /// The semantics of trying to do a `STORE` against a message which has
+    /// since been expunged are murky. RFC 3501 provides absolutely no
+    /// guidance. RFC 7162 incidentally shows an example (Example 10 on Page
+    /// 14) in which the server executes the request as much as it can, then
+    /// returns NO and leaves the client to figure out what actually happened
+    /// on its own. Existing implementations vary wildly according to
+    /// https://imapwiki.org/ImapTest/ServerStatus (see "Expunge store"
+    /// column).
+    ///
+    /// The IMAP wiki describes the most compliant servers as actually allowing
+    /// a `STORE` to an expunged message to succeed. It's unclear whether that
+    /// column is informative or expresses an opinion that it _should_ work
+    /// that way. But RFC 7162 does make it clear enough that it's _not_
+    /// supposed to work that way since the client needs to see that
+    /// _something_ went wrong so that it knows to update its state.
+    ///
+    /// Strangely, RFC 7162 doesn't permit a `VANISHED (EARLIER)` response to
+    /// `UID STORE` which would make this whole thing more graceful.
+    pub ok: bool,
     // ==================== RFC 7162 ====================
     /// If empty, the operation completed successfully.
     ///
