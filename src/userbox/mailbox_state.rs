@@ -158,13 +158,6 @@ impl MailboxState {
         Self::default()
     }
 
-    /// Return the expected next CID
-    pub fn next_cid(&self) -> Option<Cid> {
-        self.max_modseq
-            .map(|m| m.cid().next())
-            .unwrap_or(Some(Cid::MIN))
-    }
-
     /// Notify the metadata tracker that the given UID has been observed.
     ///
     /// If this is a formerly unseen message, it is assumed to exist and is
@@ -429,6 +422,13 @@ impl MailboxState {
             })
     }
 
+    /// Return whether the given UID currently has an assigned sequence number.
+    pub fn is_assigned_uid(&self, uid: Uid) -> bool {
+        self.extant_messages[..self.num_messages()]
+            .binary_search(&uid)
+            .is_ok()
+    }
+
     /// Ensure `uid` is valid.
     ///
     /// If it references an expunged message, return
@@ -523,16 +523,28 @@ impl MailboxState {
         self.message_status.get(&message).map(|m| m.last_modified)
     }
 
+    /// Return the true maximum `Modseq`
+    pub fn max_modseq(&self) -> Option<Modseq> {
+        self.max_modseq
+    }
+
     /// Return the `Modseq` to report to the client through `HIGHESTMODSEQ`.
     pub fn report_max_modseq(&self) -> Option<Modseq> {
         self.report_max_modseq
     }
 
     /// Return the expected next UID.
-    pub fn next_uid(&self) -> Uid {
+    pub fn next_uid(&self) -> Option<Uid> {
         self.max_modseq
-            .map(|m| m.uid().saturating_next())
-            .unwrap_or(Uid::MIN)
+            .map(|m| m.uid().next())
+            .unwrap_or(Some(Uid::MIN))
+    }
+
+    /// Return the expected next CID
+    pub fn next_cid(&self) -> Option<Cid> {
+        self.max_modseq
+            .map(|m| m.cid().next())
+            .unwrap_or(Some(Cid::MIN))
     }
 
     /// Perform the "QRESYNC" operation.
@@ -763,15 +775,6 @@ pub struct FlushResponse {
     pub stillborn: Vec<Uid>,
     /// The new `HIGHESTMODSEQ`, or `None` if still primordial.
     pub max_modseq: Option<Modseq>,
-}
-
-/// The result from a `QRESYNC` operation.
-pub struct QresyncResponse {
-    /// Messages that have been expunged since the reference point or best
-    /// guess thereof.
-    pub expunged: Vec<Uid>,
-    /// Messages that have been changed or created since the reference time.
-    pub changed: Vec<Uid>,
 }
 
 /// An interned ID for a flag, valid in one `MailboxState`.

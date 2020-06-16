@@ -16,9 +16,12 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-use std::convert::TryInto;
+use std::collections::BTreeMap;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::marker::PhantomData;
 use std::num::{NonZeroU32, NonZeroU64};
+use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -85,19 +88,16 @@ impl Cid {
 ///
 /// In this implementation, UIDs are assigned strictly sequentially.
 #[derive(
-    Deserialize,
-    Serialize,
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
+    Deserialize, Serialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
 #[serde(transparent)]
 pub struct Uid(pub NonZeroU32);
+
+impl fmt::Debug for Uid {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Uid({})", self.0.get())
+    }
+}
 
 impl Uid {
     // Unsafe because new() isn't const for some reason
@@ -132,22 +132,27 @@ impl Uid {
     }
 }
 
+impl TryFrom<u32> for Uid {
+    type Error = ();
+
+    fn try_from(v: u32) -> Result<Self, ()> {
+        Self::of(v).ok_or(())
+    }
+}
+
+impl Into<u32> for Uid {
+    fn into(self) -> u32 {
+        self.0.get()
+    }
+}
+
 /// An abomination.
 ///
 /// The sequence number of a message is one plus the number of non-expunged
 /// messages that have a UID less than it, counting based on a point-in-time
 /// snapshot instead of the real message state.
 #[derive(
-    Deserialize,
-    Serialize,
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
+    Deserialize, Serialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
 #[serde(transparent)]
 pub struct Seqnum(pub NonZeroU32);
@@ -174,6 +179,26 @@ impl Seqnum {
 
     pub fn from_index(ix: usize) -> Self {
         Seqnum::of((ix + 1).try_into().unwrap()).unwrap()
+    }
+}
+
+impl TryFrom<u32> for Seqnum {
+    type Error = ();
+
+    fn try_from(v: u32) -> Result<Self, ()> {
+        Self::of(v).ok_or(())
+    }
+}
+
+impl Into<u32> for Seqnum {
+    fn into(self) -> u32 {
+        self.0.get()
+    }
+}
+
+impl fmt::Debug for Seqnum {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Seqnum({})", self.0.get())
     }
 }
 
@@ -205,16 +230,7 @@ impl Seqnum {
 /// The "primordial" modifier sequence number, used for a brand new mailbox, is
 /// not representable by this structure. It is sent over the wire as 1.
 #[derive(
-    Deserialize,
-    Serialize,
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
+    Deserialize, Serialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
 #[serde(transparent)]
 pub struct Modseq(NonZeroU64);
@@ -265,6 +281,187 @@ impl Modseq {
 
     pub fn next(self) -> Option<Self> {
         self.cid().next().map(|cid| self.with_cid(cid))
+    }
+}
+
+impl fmt::Debug for Modseq {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "Modseq({}:{}={})",
+            self.uid().0.get(),
+            self.cid().0,
+            self.0.get()
+        )
+    }
+}
+
+/// A "sequence set range" of sequence numbers or UIDs.
+///
+/// Internally, this is maintained as a minimal sorted set of inclusive ranges.
+/// It does not maintain information on the original fragmentation, ordering,
+/// or duplication.
+///
+/// There is no support for removal.
+///
+/// The `Display` format puts this into minimal IMAP wire format. Note that
+/// IMAP does not have a way to represent an empty sequence set. `Display`
+/// produces an empty string in that case, which is invalid.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct SeqRange<T> {
+    parts: BTreeMap<u32, u32>,
+    _t: PhantomData<T>,
+}
+
+impl<T: TryFrom<u32> + Into<u32> + PartialOrd> SeqRange<T> {
+    /// Create a new, empty range.
+    pub fn new() -> Self {
+        SeqRange {
+            parts: BTreeMap::new(),
+            _t: PhantomData,
+        }
+    }
+
+    /// Return whether this range is empty (invalid for IMAP wire format).
+    pub fn is_empty(&self) -> bool {
+        self.parts.is_empty()
+    }
+
+    /// Insert the given inclusive range (which must be in the correct order)
+    /// into this sequence set.
+    pub fn insert(&mut self, start_incl: T, end_incl: T) {
+        assert!(end_incl >= start_incl);
+        self.insert_raw(start_incl.into(), end_incl.into());
+    }
+
+    fn insert_raw(&mut self, start_incl: u32, mut end_incl: u32) {
+        // If this range overlaps any later ranges, fuse them.
+        loop {
+            let following = self
+                .parts
+                .range((Excluded(start_incl), Unbounded))
+                .next()
+                .map(|(&start, &end)| (start, end));
+
+            if let Some((following_start, following_end)) = following {
+                if following_start - 1 <= end_incl {
+                    end_incl = end_incl.max(following_end);
+                    self.parts.remove(&following_start);
+                    continue;
+                }
+            }
+
+            break;
+        }
+
+        let preceding = self
+            .parts
+            .range((Unbounded, Included(end_incl)))
+            .next_back()
+            .map(|(&start, &end)| (start, end));
+        if let Some((preceding_start, preceding_end)) = preceding {
+            if preceding_end + 1 >= start_incl {
+                // Overlap with the new range
+                if start_incl < preceding_start {
+                    self.parts.remove(&preceding_start);
+                    self.parts.insert(start_incl, end_incl.max(preceding_end));
+                } else {
+                    self.parts
+                        .insert(preceding_start, end_incl.max(preceding_end));
+                }
+                return;
+            }
+        }
+
+        // No overlap
+        self.parts.insert(start_incl, end_incl);
+    }
+
+    /// Return whether the given item is present in this set.
+    pub fn contains(&self, v: T) -> bool {
+        let v: u32 = v.into();
+        self.parts
+            .range(..=v)
+            .next_back()
+            .filter(|&(_, &end)| end >= v)
+            .is_some()
+    }
+
+    /// Return an iterator to the items in this set.
+    ///
+    /// Invalid items are silently excluded.
+    ///
+    /// Items are delivered in strictly ascending order.
+    pub fn items<'a>(&'a self) -> impl Iterator<Item = T> + 'a {
+        self.parts
+            .iter()
+            .map(|(&start, &end)| (start, end))
+            .flat_map(|(start, end)| (start..=end).into_iter())
+            .filter_map(|v| T::try_from(v).ok())
+    }
+
+    /// Parse the IMAP-format of the sequence set.
+    ///
+    /// `splat` is used as the value of elements which specify `*`.
+    pub fn parse(raw: &str, splat: T) -> Option<Self> {
+        fn do_parse(r: &str, splat: u32) -> Option<u32> {
+            if "*" == r {
+                Some(splat)
+            } else {
+                r.parse().ok()
+            }
+        }
+
+        let splat = splat.into();
+
+        let mut this = Self::new();
+        for part in raw.split(',') {
+            let mut subs = part.split(':');
+            match (subs.next(), subs.next(), subs.next()) {
+                (Some(only), None, None) => {
+                    let only = do_parse(only, splat)?;
+                    this.insert_raw(only, only);
+                }
+                (Some(start), Some(end), None) => {
+                    let start = do_parse(start, splat)?;
+                    let end = do_parse(end, splat)?;
+                    // RFC 3501 allows the endpoints to be in either order for
+                    // some reason
+                    this.insert_raw(start.min(end), end.max(start));
+                }
+                _ => return None,
+            }
+        }
+
+        Some(this)
+    }
+}
+
+impl<T> fmt::Display for SeqRange<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (ix, (&start, &end)) in self.parts.iter().enumerate() {
+            let delim = if 0 == ix { "" } else { "," };
+
+            if start == end {
+                write!(f, "{}{}", delim, start)?;
+            } else {
+                write!(f, "{}{}:{}", delim, start, end)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl fmt::Debug for SeqRange<Seqnum> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[Seqnum {}]", self)
+    }
+}
+
+impl fmt::Debug for SeqRange<Uid> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[Uid {}]", self)
     }
 }
 
@@ -333,6 +530,92 @@ impl FromStr for Flag {
     }
 }
 
+/// All information needed to produce a response to a `SELECT` or `EXAMINE`
+/// command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectResponse {
+    /// The currently-defined flags. Used for both the `FLAGS` response and the
+    /// `PERMANENTFLAGS` response-code. For the latter, `\*` must also be
+    /// added.
+    /// `* FLAGS (flags...)`
+    /// `* OK [PERMANENTFLAGS (flags... \*)]`
+    pub flags: Vec<Flag>,
+    /// The number of messages that currently exist.
+    /// `* exists EXISTS`
+    pub exists: usize,
+    /// The number of messages with the `\Recent` pseudo-flag.
+    /// `* recent RECENT`
+    pub recent: usize,
+    /// The sequence number of the first message without the `\Seen` flag.
+    /// `None` if all messages are seen. IMAP offers no way to indicate the
+    /// latter state.
+    /// `* OK [UNSEEN unseen]`
+    pub unseen: Option<Seqnum>,
+    /// The probable next UID.
+    /// `* OK [UIDNEXT uidnext]`
+    pub uidnext: Uid,
+    /// The current UID validity.
+    /// `* OK [UIDVALIDITY uidvalidity]`
+    pub uidvalidity: u32,
+    /// Whether the mailbox is read-only.
+    /// `TAG OK [READ-WRITE|READ-ONLY]`
+    pub read_only: bool,
+}
+
+/// Unsolicited responses that can be sent after commands (other than `FETCH`,
+/// `STORE`, `SEARCH`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PollResponse {
+    /// Any messages to report as expunged.
+    ///
+    /// This is sorted ascending. For QRESYNC clients, this should be sent
+    /// as a `VANISHED` response:
+    ///
+    /// ```
+    /// * VANISHED expunge[0],expunge[1],...
+    /// ```
+    ///
+    /// For non-QRESYNC clients, this must be sent as `EXPUNGED` responses in
+    /// *reverse* order.
+    ///
+    /// ```
+    /// * expunge[99] EXPUNGE
+    /// * expunge[98] EXPUNGE
+    /// ...
+    /// ```
+    pub expunge: Vec<(Seqnum, Uid)>,
+    /// If the mailbox size has changed, the new size.
+    /// `* exists EXISTS`
+    pub exists: Option<usize>,
+    /// If there are new messages, the new recent count.
+    /// `* recent RECENT`
+    pub recent: Option<usize>,
+    /// UIDs of messages that should be sent in unsolicited `FETCH` responses
+    /// because their metadata changed or they recently came into existence.
+    pub fetch: Vec<Uid>,
+    /// The new `HIGHESTMODSEQ`, or `None` if still primordial.
+    pub max_modseq: Option<Modseq>,
+}
+
+/// The result from a `QRESYNC` operation.
+#[derive(Clone, Debug)]
+pub struct QresyncResponse {
+    /// Messages that have been expunged since the reference point or best
+    /// guess thereof.
+    ///
+    /// ```
+    /// * VANISHED (EARLIER) uid,uid,...
+    /// ```
+    pub expunged: Vec<Uid>,
+    /// Messages that have been changed or created since the reference time.
+    ///
+    /// ```
+    /// * seqnum FETCH (UID uid FLAGS (...) MODSEQ (...))
+    /// ...
+    /// ```
+    pub changed: Vec<Uid>,
+}
+
 /// Holder for common paths used pervasively through a process.
 #[derive(Clone, Debug)]
 pub struct CommonPaths {
@@ -347,4 +630,184 @@ pub struct CommonPaths {
     /// deletion. Usually, the process that does that move also deletes the
     /// directory tree from here itself. Orphans are cleaned up aggressively.
     pub garbage: PathBuf,
+}
+
+#[cfg(test)]
+mod test {
+    use proptest::prelude::*;
+
+    use super::*;
+
+    fn assert_sr(
+        expected_content: &[u32],
+        expected_string: &str,
+        seqrange: SeqRange<Uid>,
+    ) {
+        let actual: Vec<u32> = seqrange.items().map(|u| u.0.get()).collect();
+        assert_eq!(expected_content, &actual[..]);
+        assert_eq!(expected_string, &seqrange.to_string());
+    }
+
+    #[test]
+    fn seqrange_parsing() {
+        assert_sr(&[1], "1", SeqRange::parse("1", Uid::u(10)).unwrap());
+        assert_sr(&[10], "10", SeqRange::parse("*", Uid::u(10)).unwrap());
+        assert_sr(&[1, 2], "1:2", SeqRange::parse("1:2", Uid::u(10)).unwrap());
+        assert_sr(&[1, 2], "1:2", SeqRange::parse("2:1", Uid::u(10)).unwrap());
+        assert_sr(
+            &[9, 10],
+            "9:10",
+            SeqRange::parse("9:*", Uid::u(10)).unwrap(),
+        );
+        assert_sr(
+            &[9, 10],
+            "9:10",
+            SeqRange::parse("*:9", Uid::u(10)).unwrap(),
+        );
+
+        assert_sr(
+            &[1, 3, 5],
+            "1,3,5",
+            SeqRange::parse("1,3,5", Uid::u(10)).unwrap(),
+        );
+        assert_sr(
+            &[1, 3, 5],
+            "1,3,5",
+            SeqRange::parse("3,1,5", Uid::u(10)).unwrap(),
+        );
+        assert_sr(
+            &[1, 3, 5],
+            "1,3,5",
+            SeqRange::parse("3,5,1", Uid::u(10)).unwrap(),
+        );
+        assert_sr(
+            &[1, 2, 9, 10],
+            "1:2,9:10",
+            SeqRange::parse("1:2,9:*", Uid::u(10)).unwrap(),
+        );
+        assert_sr(
+            &[1, 2, 9, 10],
+            "1:2,9:10",
+            SeqRange::parse("*:9,2:1", Uid::u(10)).unwrap(),
+        );
+
+        // Adjacent ranges
+        assert_sr(
+            &[1, 2, 3, 4],
+            "1:4",
+            SeqRange::parse("1,2,3,4", Uid::u(10)).unwrap(),
+        );
+        assert_sr(
+            &[1, 2, 3, 4],
+            "1:4",
+            SeqRange::parse("1:2,3,4", Uid::u(10)).unwrap(),
+        );
+        assert_sr(
+            &[1, 2, 3, 4],
+            "1:4",
+            SeqRange::parse("1:3,4", Uid::u(10)).unwrap(),
+        );
+        assert_sr(
+            &[1, 2, 3, 4],
+            "1:4",
+            SeqRange::parse("1,2:3,4", Uid::u(10)).unwrap(),
+        );
+        assert_sr(
+            &[1, 2, 3, 4],
+            "1:4",
+            SeqRange::parse("1,2:4", Uid::u(10)).unwrap(),
+        );
+        assert_sr(
+            &[1, 2, 3, 4],
+            "1:4",
+            SeqRange::parse("1:2,3:4", Uid::u(10)).unwrap(),
+        );
+        // Overlapping ranges, one strictly inside another
+        assert_sr(
+            &[1, 2, 3, 4],
+            "1:4",
+            SeqRange::parse("1:4,2:3", Uid::u(10)).unwrap(),
+        );
+        assert_sr(
+            &[1, 2, 3, 4],
+            "1:4",
+            SeqRange::parse("2:3,1:4", Uid::u(10)).unwrap(),
+        );
+        // Overlapping ranges with shared endpoint(s)
+        assert_sr(
+            &[1, 2, 3, 4],
+            "1:4",
+            SeqRange::parse("1:4,2,4", Uid::u(10)).unwrap(),
+        );
+        assert_sr(
+            &[1, 2, 3, 4],
+            "1:4",
+            SeqRange::parse("2:4,1,4", Uid::u(10)).unwrap(),
+        );
+        assert_sr(
+            &[1, 2, 3, 4],
+            "1:4",
+            SeqRange::parse("1:4,1:2", Uid::u(10)).unwrap(),
+        );
+        assert_sr(
+            &[1, 2, 3, 4],
+            "1:4",
+            SeqRange::parse("1:2,1:4", Uid::u(10)).unwrap(),
+        );
+        assert_sr(
+            &[1, 2, 3, 4],
+            "1:4",
+            SeqRange::parse("1:4,1:4", Uid::u(10)).unwrap(),
+        );
+        // Overlapping ranges, neither a subset of the other, no shared
+        // endpoints
+        assert_sr(
+            &[1, 2, 3, 4],
+            "1:4",
+            SeqRange::parse("1,3:2,4", Uid::u(10)).unwrap(),
+        );
+        assert_sr(
+            &[1, 2, 3, 4],
+            "1:4",
+            SeqRange::parse("2,4:1,3", Uid::u(10)).unwrap(),
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn seqrange_properties(
+            ranges in prop::collection::vec((1u32..30, 1u32..=10), 1..=5)
+        ) {
+            let mut expected = Vec::new();
+            let mut seqrange = SeqRange::new();
+
+            for &(start, extent) in &ranges {
+                seqrange.insert(Uid::u(start), Uid::u(start + extent));
+                expected.extend((start..=start + extent).into_iter());
+            }
+
+            expected.sort();
+            expected.dedup();
+
+            // Ensure we built the correct set
+            let actual: Vec<u32> = seqrange.items().map(
+                |u| u.0.get()).collect();
+            assert_eq!(expected, actual);
+
+            // contains() works
+            for i in 1..50 {
+                assert_eq!(
+                    expected.contains(&i),
+                    seqrange.contains(Uid::u(i)),
+                    "Bad contains result for {}",
+                    i
+                );
+            }
+
+            // It can be stringified and parsed back into the same value
+            assert_eq!(
+                seqrange,
+                SeqRange::parse(&seqrange.to_string(), Uid::MAX).unwrap());
+        }
+    }
 }
