@@ -327,6 +327,25 @@ impl<T: TryFrom<u32> + Into<u32> + PartialOrd> SeqRange<T> {
         self.parts.is_empty()
     }
 
+    /// Append a single item to this range.
+    ///
+    /// The item must be strictly greater than all other items already
+    /// inserted.
+    pub fn append(&mut self, item: T) {
+        let item: u32 = item.into();
+
+        if let Some(end) = self.parts.values_mut().next_back() {
+            assert!(item > *end);
+
+            if item == *end + 1 {
+                *end = item;
+                return;
+            }
+        }
+
+        self.parts.insert(item, item);
+    }
+
     /// Insert the given inclusive range (which must be in the correct order)
     /// into this sequence set.
     pub fn insert(&mut self, start_incl: T, end_incl: T) {
@@ -616,6 +635,77 @@ pub struct QresyncResponse {
     pub changed: Vec<Uid>,
 }
 
+/// Request information for `STORE` and `UID_STORE`.
+#[derive(Clone, Debug)]
+pub struct StoreRequest<'a, ID>
+where
+    SeqRange<ID>: fmt::Debug,
+{
+    // ==================== RFC 3501 ====================
+    /// The message(s) to affect.
+    pub ids: &'a SeqRange<ID>,
+    /// The flags to control.
+    pub flags: &'a [Flag],
+    /// If false, add any flag within `ids` which is not set. This is used for
+    /// `FLAGS` and `+FLAGS`.
+    ///
+    /// If true, remove any flag within `ids` which is set. This is used for
+    /// `-FLAGS`.
+    pub remove_listed: bool,
+    /// If true, remove any flag on a message which is not present in `ids`.
+    ///
+    /// This is used for `FLAGS`.
+    pub remove_unlisted: bool,
+    /// If true, mark all entries in `ids` as having changed flags, even if
+    /// they haven't been changed.
+    ///
+    /// This is used for the `.SILENT` modifier, or rather, its absence.
+    ///
+    /// RFC 3501 indicates that, given `.SILENT`, the server SHOULD assume that
+    /// the client isn't interested in a `FETCH` response indicating a change
+    /// which it made itself. However, RFC 7162 specifies:
+    ///
+    /// > An untagged `FETCH` response MUST be sent, even if the
+    /// > `.SILENT` suffix is specified, and the response MUST include the
+    /// > MODSEQ message data item.
+    ///
+    /// For simplicity, we adopt the RFC 7162 behaviour in all cases, which
+    /// means that `.SILENT` only suppresses `FETCH` responses for messages
+    /// that were totally unchanged.
+    pub loud: bool,
+    // ==================== RFC 7162 ====================
+    /// If set, do not change messages which were modified after this point.
+    ///
+    /// This corresponds to `UNCHANGEDSINCE`.
+    pub unchanged_since: Option<Modseq>,
+}
+
+/// Response information for `STORE` and `UID STORE`.
+///
+/// This does not include which UIDs to fetch for the follow-up `FETCH`
+/// response(s). Those must be found by a `mini_poll()` call after the store
+/// operation.
+#[derive(Clone, Debug)]
+pub struct StoreResponse<ID>
+where
+    SeqRange<ID>: fmt::Debug,
+{
+    // ==================== RFC 7162 ====================
+    /// If empty, the operation completed successfully.
+    ///
+    /// ```
+    /// tag OK
+    /// ```
+    ///
+    /// If non-empty, one or more messages could not be updated because the
+    /// `unchanged_since` requirement failed.
+    ///
+    /// ```
+    /// tag OK [MODIFIED modified]
+    /// ```
+    pub modified: SeqRange<ID>,
+}
+
 /// Holder for common paths used pervasively through a process.
 #[derive(Clone, Debug)]
 pub struct CommonPaths {
@@ -771,6 +861,21 @@ mod test {
             "1:4",
             SeqRange::parse("2,4:1,3", Uid::u(10)).unwrap(),
         );
+    }
+
+    #[test]
+    fn seqrange_append() {
+        let mut seqrange = SeqRange::new();
+        seqrange.append(Uid::u(1));
+        assert_eq!("1", &seqrange.to_string());
+        seqrange.append(Uid::u(2));
+        assert_eq!("1:2", &seqrange.to_string());
+        seqrange.append(Uid::u(3));
+        assert_eq!("1:3", &seqrange.to_string());
+        seqrange.append(Uid::u(5));
+        assert_eq!("1:3,5", &seqrange.to_string());
+        seqrange.append(Uid::u(6));
+        assert_eq!("1:3,5:6", &seqrange.to_string());
     }
 
     proptest! {

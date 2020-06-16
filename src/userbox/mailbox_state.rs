@@ -136,8 +136,9 @@ pub struct MailboxState {
     changed_flags_uids: Vec<Uid>,
 }
 
+/// The current status for a single message.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct MessageStatus {
+pub struct MessageStatus {
     /// The flags currently set on this message.
     ///
     /// This is a bitset. Flag N is found at byte N/8 and bit N%8. Bytes past
@@ -379,6 +380,12 @@ impl MailboxState {
         mem::replace(&mut self.changed_flags_uids, Vec::new())
     }
 
+    /// Add the given UID to the next value that will be returned from
+    /// `take_changed_flags_uids()`.
+    pub fn add_changed_flags_uid(&mut self, uid: Uid) {
+        self.changed_flags_uids.push(uid);
+    }
+
     /// Returns the number of messages currently addressable by sequence
     /// numbers.
     pub fn num_messages(&self) -> usize {
@@ -393,6 +400,28 @@ impl MailboxState {
             .get(seqnum.to_index())
             .copied()
             .ok_or(Error::NxMessage)
+    }
+
+    /// Translate a `SeqRange<Seqnum>` to `SeqRange<Uid>`.
+    ///
+    /// If `silent` is true, errors will be silently swallowed and the call
+    /// never fails. Otherwise, the first failure from `seqnum_to_uid()` is
+    /// propagated.
+    pub fn seqnum_range_to_uid(
+        &self,
+        seqnums: &SeqRange<Seqnum>,
+        silent: bool,
+    ) -> Result<SeqRange<Uid>, Error> {
+        let mut ret = SeqRange::new();
+        for seqnum in seqnums.items() {
+            match self.seqnum_to_uid(seqnum) {
+                Ok(uid) => ret.append(uid),
+                Err(_) if silent => (),
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(ret)
     }
 
     /// Translate the given UID into a sequence number according to the current
@@ -420,6 +449,28 @@ impl MailboxState {
                     Error::ExpungedMessage
                 }
             })
+    }
+
+    /// Translate a `SeqRange<Uid>` to `SeqRange<Seqnum>`.
+    ///
+    /// If `silent` is true, errors will be silently swallowed and the call
+    /// never fails. Otherwise, the first failure from `uid_to_seqnum()` is
+    /// propagated.
+    pub fn uid_range_to_seqnum(
+        &self,
+        uids: &SeqRange<Uid>,
+        silent: bool,
+    ) -> Result<SeqRange<Seqnum>, Error> {
+        let mut ret = SeqRange::new();
+        for uid in uids.items() {
+            match self.uid_to_seqnum(uid) {
+                Ok(seqnum) => ret.append(seqnum),
+                Err(_) if silent => (),
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(ret)
     }
 
     /// Return whether the given UID currently has an assigned sequence number.
@@ -456,6 +507,11 @@ impl MailboxState {
     /// one assigned.
     pub fn flag_id(&self, flag: &Flag) -> Option<FlagId> {
         self.flag_ix(flag).map(FlagId)
+    }
+
+    /// Return the flag corresponding to the given flag ID.
+    pub fn flag(&self, flag_id: FlagId) -> Option<&Flag> {
+        self.flags.get(flag_id.0)
     }
 
     /// Return an iterator to the flags in this state and their IDs.
@@ -501,6 +557,11 @@ impl MailboxState {
             .get(&uid)
             .map(|m| m.recent)
             .unwrap_or(false)
+    }
+
+    /// Return the status for a single message, if present
+    pub fn message_status(&self, uid: Uid) -> Option<&MessageStatus> {
+        self.message_status.get(&uid)
     }
 
     /// Return an iterator to the UIDs within the current snapshot.
@@ -690,6 +751,44 @@ impl MailboxState {
             .filter(|&(_, f)| f == flag)
             .next()
             .map(|(ix, _)| ix)
+    }
+}
+
+impl MessageStatus {
+    /// Returns whether this message is \Recent.
+    pub fn is_recent(&self) -> bool {
+        self.recent
+    }
+
+    /// Returns the flags currently on this message.
+    pub fn flags<'a>(&'a self) -> impl Iterator<Item = FlagId> + 'a {
+        self.flags
+            .iter()
+            .copied()
+            .flat_map(|byte| {
+                (0..8).into_iter().map(move |bit| 0 != byte & (1 << bit))
+            })
+            .enumerate()
+            .filter(|&(_, set)| set)
+            .map(|(id, _)| FlagId(id))
+    }
+
+    /// Returns whether the given flag is currently set.
+    pub fn test_flag(&self, flag: FlagId) -> bool {
+        let flag = flag.0;
+        let byte = flag / 8;
+        let bit = flag % 8;
+
+        if let Some(b) = self.flags.get(byte) {
+            0 != (b & (1 << bit))
+        } else {
+            false
+        }
+    }
+
+    /// Returns the last `Modseq` of this message.
+    pub fn last_modified(&self) -> Modseq {
+        self.last_modified
     }
 }
 

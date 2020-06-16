@@ -199,12 +199,14 @@
 use std::convert::TryInto;
 use std::fs;
 use std::io::{self, BufRead, Read, Seek, Write};
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::prelude::*;
-use log::{info, warn};
+use log::{error, info, warn};
 use rand::{rngs::OsRng, Rng};
 use serde::{de::DeserializeOwned, Serialize};
 use tempfile::NamedTempFile;
@@ -214,10 +216,16 @@ use super::key_store::*;
 use super::mailbox_path::*;
 use super::mailbox_state::*;
 use super::model::*;
+use super::recency_token;
 use crate::crypt::data_stream;
 use crate::support::compression::{Compression, FinishWrite};
 use crate::support::error::Error;
-use crate::support::file_ops;
+use crate::support::file_ops::{self, IgnoreKinds};
+
+#[cfg(not(test))]
+const OLD_ROLLUP_GRACE_PERIOD: Duration = Duration::from_secs(24 * 3600);
+#[cfg(test)]
+const OLD_ROLLUP_GRACE_PERIOD: Duration = Duration::from_secs(1);
 
 /// A stateless view of a mailbox.
 ///
@@ -284,6 +292,15 @@ impl StatelessMailbox {
     /// futilely try to do operations on the mailbox.
     pub fn is_ok(&self) -> bool {
         self.root.is_dir()
+    }
+
+    /// Bring this mailbox into stateful mode.
+    ///
+    /// This corresponds to `SELECT`, `EXAMINE`, and `STATUS`.
+    ///
+    /// `QRESYNC` is performed with a separate call after selection.
+    pub fn select(self) -> Result<(StatefulMailbox, SelectResponse), Error> {
+        StatefulMailbox::select(self)
     }
 
     /// Open the identified message for reading.
@@ -551,6 +568,516 @@ impl StatelessMailbox {
             Ok(())
         }
     }
+}
+
+/// A stateful view of a mailbox.
+///
+/// This has full capabilities of doing all mailbox-specific IMAP commands.
+///
+/// Stateful mailboxes cannot be opened with anonymous key stores.
+#[derive(Clone)]
+pub struct StatefulMailbox {
+    s: StatelessMailbox,
+    state: MailboxState,
+    recency_frontier: Option<Uid>,
+    suggest_rollup: bool,
+}
+
+impl StatefulMailbox {
+    /// Return the stateless view of this mailbox.
+    pub fn stateless(&self) -> &StatelessMailbox {
+        &self.s
+    }
+
+    /// Perform a `STORE` operation.
+    pub fn seqnum_store(
+        &mut self,
+        request: &StoreRequest<'_, Seqnum>,
+    ) -> Result<StoreResponse<Seqnum>, Error> {
+        let ids = self.state.seqnum_range_to_uid(request.ids, false)?;
+        self.store(&StoreRequest {
+            ids: &ids,
+            flags: request.flags,
+            remove_listed: request.remove_listed,
+            remove_unlisted: request.remove_unlisted,
+            loud: request.loud,
+            unchanged_since: request.unchanged_since,
+        })
+        .map(|resp| StoreResponse {
+            modified: self
+                .state
+                .uid_range_to_seqnum(&resp.modified, true)
+                .unwrap(),
+        })
+    }
+
+    /// Perform a `UID STORE` operation.
+    pub fn store(
+        &mut self,
+        request: &StoreRequest<'_, Uid>,
+    ) -> Result<StoreResponse<Uid>, Error> {
+        let flags: Vec<FlagId> = request
+            .flags
+            .iter()
+            .map(|f| self.state.flag_id_mut(f.to_owned()))
+            .collect();
+
+        let fragile = request.unchanged_since.is_some();
+        let ret = self.change_transaction(fragile, |this, tx| {
+            let mut modified = SeqRange::new();
+
+            for uid in request.ids.items() {
+                let status = match this.state.message_status(uid) {
+                    Some(status) => status,
+                    None => continue,
+                };
+
+                if request
+                    .unchanged_since
+                    .map(|uc| uc < status.last_modified())
+                    .unwrap_or(false)
+                {
+                    modified.append(uid);
+                    continue;
+                }
+
+                for &flag in &flags {
+                    if request.remove_listed != status.test_flag(flag) {
+                        if let Some(flag_obj) = this.state.flag(flag) {
+                            if request.remove_listed {
+                                tx.rm_flag(uid, flag_obj.to_owned());
+                            } else {
+                                tx.add_flag(uid, flag_obj.to_owned());
+                            }
+                        }
+                    }
+                }
+
+                if request.remove_unlisted {
+                    for flag in status.flags() {
+                        if !flags.contains(&flag) {
+                            if let Some(flag_obj) = this.state.flag(flag) {
+                                tx.rm_flag(uid, flag_obj.to_owned());
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok(StoreResponse { modified })
+        })?;
+
+        if request.loud {
+            for uid in request.ids.items() {
+                self.state.add_changed_flags_uid(uid);
+            }
+        }
+
+        Ok(ret)
+    }
+
+    /// Do a "mini" poll, appropriate for use after a `FETCH`, `STORE`, or
+    /// `SEARCH` operation.
+    ///
+    /// This will not affect the sequence number mapping, and only reports
+    /// information that was discovered incidentally since the last poll.
+    ///
+    /// Returns a list of UIDs that should be sent in unsolicited `FETCH`
+    /// responses (as per RFC 7162). This only includes UIDs currently mapped
+    /// to sequence numbers, but may include UIDs that have since been
+    /// expunged. Flag updates on UIDs not yet mapped to sequence numbers are
+    /// lost, since those `FETCH` responses are expected to happen when the
+    /// full poll announces the new messages to the client.
+    pub fn mini_poll(&mut self) -> Vec<Uid> {
+        let mut uids = self.state.take_changed_flags_uids();
+        uids.retain(|&u| self.state.is_assigned_uid(u));
+        uids
+    }
+
+    /// Do a full poll cycle, appropriate for use after all commands but
+    /// `FETCH`, `STORE`, or `SEARCH`, and in response to wake-ups during
+    /// `IDLE`.
+    ///
+    /// New messages and changes are detected, and the sequence number mapping
+    /// is updated.
+    ///
+    /// Returns information that must be sent to the client to inform it of any
+    /// changes that were detected.
+    ///
+    /// Errors from this call are not recoverable. If it fails, the client and
+    /// server are left in an inconsistent state.
+    pub fn poll(&mut self) -> Result<PollResponse, Error> {
+        self.poll_for_new_uids();
+        self.poll_for_new_changes(Cid::GENESIS)?;
+
+        let flush = self.state.flush();
+        let has_new = !flush.new.is_empty();
+        let mut fetch = self.mini_poll();
+        fetch.extend(flush.new.into_iter().map(|(_, u)| u));
+        fetch.sort_unstable();
+        fetch.dedup();
+
+        // If there are new UIDs, see if we can claim \Recent on any of them.
+        if let Some(max_recent_uid) = flush.max_modseq.map(Modseq::uid) {
+            let min_recent_uid = self
+                .recency_frontier
+                .and_then(Uid::next)
+                .unwrap_or(Uid::MIN);
+            if min_recent_uid <= max_recent_uid {
+                if let Some(claimed_recent_uid) = recency_token::claim(
+                    &self.s.root,
+                    min_recent_uid,
+                    max_recent_uid,
+                    self.s.read_only,
+                ) {
+                    for uid in
+                        claimed_recent_uid.0.get()..=max_recent_uid.0.get()
+                    {
+                        self.state.set_recent(Uid::of(uid).unwrap());
+                    }
+                }
+            }
+        }
+
+        // For any newly expunged messages, ensure they have gravestones.
+        if !self.s.read_only {
+            let message_scheme = self.s.message_scheme();
+            for uid in flush
+                .expunged
+                .iter()
+                .map(|&(_, u)| u)
+                .chain(flush.stillborn.into_iter())
+            {
+                if let Err(e) = message_scheme
+                    .expunge(uid.0.get(), &self.s.common_paths.tmp)
+                {
+                    warn!(
+                        "{} Failed to fully expunge {}: {}",
+                        self.s.log_prefix,
+                        uid.0.get(),
+                        e
+                    );
+                }
+            }
+        }
+
+        if !self.s.read_only && self.suggest_rollup {
+            self.suggest_rollup = false;
+            if let Err(e) = self.dump_rollup() {
+                warn!(
+                    "{} Failed to write metadata rollup: {}",
+                    self.s.log_prefix, e
+                );
+            }
+        }
+
+        Ok(PollResponse {
+            expunge: flush.expunged,
+            exists: if has_new {
+                Some(self.state.num_messages())
+            } else {
+                None
+            },
+            recent: if has_new {
+                Some(self.count_recent())
+            } else {
+                None
+            },
+            fetch: fetch,
+            max_modseq: flush.max_modseq,
+        })
+    }
+
+    /// Probe for UIDs allocated later than the last known UID.
+    fn poll_for_new_uids(&mut self) {
+        let messages_scheme = self.s.message_scheme();
+        while let Some(next_uid) = self.state.next_uid() {
+            if messages_scheme.is_allocated(next_uid.0.get()) {
+                self.state.seen(next_uid);
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Probe for and load CIDs later than the last known CID.
+    ///
+    /// If a transaction with an id of `no_notify_cid` is found, any flag
+    /// changes it makes are not added to the list of UIDs that have
+    /// outstanding flag changes to report to the client.
+    fn poll_for_new_changes(
+        &mut self,
+        no_notify_cid: Cid,
+    ) -> Result<(), Error> {
+        while let Some(next_cid) = self.state.next_cid() {
+            if self.s.change_scheme().is_allocated(next_cid.0) {
+                self.apply_change(next_cid, next_cid != no_notify_cid)?;
+            } else {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn apply_change(&mut self, cid: Cid, notify: bool) -> Result<(), Error> {
+        self.state.commit(
+            cid,
+            self.s
+                .read_state_file(&self.s.change_scheme().path_for_id(cid.0))?,
+            notify,
+        );
+
+        if 0 == cid.0 % 256 {
+            self.suggest_rollup = true;
+        }
+
+        Ok(())
+    }
+
+    fn dump_rollup(&self) -> Result<(), Error> {
+        let mut path = self.s.root.join("rollup");
+
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .ignore_already_exists()?;
+
+        let buffer_file = self.s.write_state_file(&self.state)?;
+        file_ops::chmod(buffer_file.path(), 0o400)?;
+
+        path.push(
+            self.state
+                .max_modseq()
+                .expect("Attempted rollup with no changes")
+                .raw()
+                .to_string(),
+        );
+
+        buffer_file
+            .persist_noclobber(&path)
+            .map_err(|e| e.error)
+            .map(|_| ())
+            .ignore_already_exists()?;
+        Ok(())
+    }
+
+    fn select(s: StatelessMailbox) -> Result<(Self, SelectResponse), Error> {
+        let mut rollups = Self::list_rollups(&s)?;
+        let state = rollups
+            .pop()
+            .and_then(|r| match s.read_state_file::<MailboxState>(&r.path) {
+                Ok(state) => Some(state),
+                Err(e) => {
+                    error!(
+                        "{} Error reading {}, starting from empty state: {}",
+                        s.log_prefix,
+                        r.path.display(),
+                        e
+                    );
+                    None
+                }
+            })
+            .unwrap_or_else(MailboxState::new);
+
+        let mut this = Self {
+            recency_frontier: state.max_modseq().map(Modseq::uid),
+            s,
+            state,
+            suggest_rollup: false,
+        };
+        this.poll()?;
+
+        if !this.s.read_only {
+            let s_clone = this.s.clone();
+            rayon::spawn(move || {
+                if let Err(err) = s_clone.message_scheme().gc(
+                    &s_clone.common_paths.tmp,
+                    &s_clone.common_paths.garbage,
+                    0,
+                ) {
+                    warn!(
+                        "{} Error garbage collecting messages: {}",
+                        s_clone.log_prefix, err
+                    );
+                    return;
+                }
+
+                // We can expunge all data transactions
+                let expunge_before_cid = rollups
+                    .iter()
+                    .filter(|r| r.deletion_candidate)
+                    .map(|r| r.cid)
+                    .max()
+                    .unwrap_or(Cid(0));
+
+                if let Err(err) = s_clone.change_scheme().gc(
+                    &s_clone.common_paths.tmp,
+                    &s_clone.common_paths.garbage,
+                    expunge_before_cid.0,
+                ) {
+                    warn!(
+                        "{} Error garbage collecting changes: {}",
+                        s_clone.log_prefix, err
+                    );
+                } else {
+                    for rollup in rollups {
+                        if rollup.deletion_candidate {
+                            if let Err(err) =
+                                fs::remove_file(&rollup.path).ignore_not_found()
+                            {
+                                warn!(
+                                    "{} Error removing {}: {}",
+                                    s_clone.log_prefix,
+                                    rollup.path.display(),
+                                    err
+                                );
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        let select_response = SelectResponse {
+            flags: this.state.flags().map(|(_, f)| f.to_owned()).collect(),
+            exists: this.state.num_messages(),
+            recent: this.count_recent(),
+            unseen: this
+                .state
+                .seqnums_uids()
+                .filter(|&(_, uid)| {
+                    this.state
+                        .flag_id(&Flag::Seen)
+                        .map(|fid| !this.state.test_flag(fid, uid))
+                        .unwrap_or(true)
+                })
+                .next()
+                .map(|(s, _)| s),
+            uidnext: this.state.next_uid().unwrap_or(Uid::MAX),
+            uidvalidity: this.s.uid_validity()?,
+            read_only: this.s.read_only,
+        };
+        Ok((this, select_response))
+    }
+
+    fn list_rollups(s: &StatelessMailbox) -> Result<Vec<RollupInfo>, Error> {
+        match fs::read_dir(s.root.join("rollup")) {
+            Err(e) if io::ErrorKind::NotFound == e.kind() => Ok(vec![]),
+            Err(e) => Err(e.into()),
+            Ok(it) => {
+                let mut ret = Vec::new();
+                let now = SystemTime::now();
+
+                for entry in it {
+                    let entry = entry?;
+                    let modseq = match entry
+                        .file_name()
+                        .to_str()
+                        .and_then(|n| u64::from_str_radix(n, 10).ok())
+                        .and_then(Modseq::of)
+                    {
+                        Some(ms) => ms,
+                        // Ignore inscrutable filenames
+                        None => continue,
+                    };
+
+                    let md = match entry.metadata() {
+                        Ok(md) => md,
+                        // NotFound => we lost a race with another process
+                        // Ignore the now-deleted file and carry on
+                        Err(e) if io::ErrorKind::NotFound == e.kind() => {
+                            continue
+                        }
+                        Err(e) => return Err(e.into()),
+                    };
+
+                    let deletion_candidate = md
+                        .modified()
+                        .ok()
+                        .and_then(|modified| now.duration_since(modified).ok())
+                        .unwrap_or(Duration::from_secs(0))
+                        >= OLD_ROLLUP_GRACE_PERIOD;
+
+                    ret.push(RollupInfo {
+                        cid: modseq.cid(),
+                        path: entry.path(),
+                        deletion_candidate,
+                    });
+                }
+
+                ret.sort();
+                // The most recent rollup is never a deletion candidate
+                if let Some(last) = ret.last_mut() {
+                    last.deletion_candidate = false;
+                }
+
+                Ok(ret)
+            }
+        }
+    }
+
+    fn count_recent(&self) -> usize {
+        self.state
+            .uids()
+            .filter(|&u| self.state.is_recent(u))
+            .count()
+    }
+
+    /// Perform a transactional change against the mailbox's mutable state.
+    ///
+    /// `f` is called with a transaction and `self` and is expected to modify
+    /// the transaction as desired, and return the result of the whole
+    /// transaction.
+    ///
+    /// If `fragile` is true, `f` will be reevaluated if more changes are found
+    /// while trying to process the transaction. If `fragile` is false, `f`
+    /// will be called only once, which is useful for operations that do not
+    /// depend on strict ordering.
+    fn change_transaction<R>(
+        &mut self,
+        fragile: bool,
+        mut f: impl FnMut(&Self, &mut StateTransaction) -> Result<R, Error>,
+    ) -> Result<R, Error> {
+        let (mut cid, mut tx) = self.state.start_tx()?;
+        let mut res = f(self, &mut tx)?;
+        let mut buffer_file = self.s.write_state_file(&tx)?;
+
+        for _ in 0..1024 {
+            if self.s.change_scheme().emplace(buffer_file.path(), cid.0)? {
+                // Directly commit instead of needing to do the whole
+                // poll/read/decrypt dance
+                // TODO Is there *ever* a case where we want !notify?
+                self.state.commit(cid, tx, true);
+                return Ok(res);
+            }
+
+            self.poll_for_new_changes(Cid::GENESIS)?;
+
+            if fragile {
+                let (c, t) = self.state.start_tx()?;
+                cid = c;
+                tx = t;
+                res = f(self, &mut tx)?;
+                buffer_file = self.s.write_state_file(&tx)?;
+            } else {
+                cid = self.state.retry_tx(cid)?;
+            }
+        }
+
+        Err(Error::GaveUpInsertion)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct RollupInfo {
+    // First field since it's the main thing we sort by
+    // We only include the CID since we also use this to determine which CIDs
+    // can be expunged during cleanup. While Modseqs /should/ be totally
+    // ordered, this is a more conservative behaviour.
+    cid: Cid,
+    path: PathBuf,
+    deletion_candidate: bool,
 }
 
 #[cfg(test)]
