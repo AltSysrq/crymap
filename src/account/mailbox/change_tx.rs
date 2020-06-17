@@ -105,6 +105,9 @@ impl StatefulMailbox {
         &mut self,
         mut f: impl FnMut(&Self, &mut StateTransaction) -> Result<R, Error>,
     ) -> Result<R, Error> {
+        // Ensure we're working with the latest state
+        self.poll_for_new_changes(Cid::GENESIS)?;
+
         for _ in 0..1000 {
             let (cid, mut tx) = self.state.start_tx()?;
             let res = f(self, &mut tx)?;
