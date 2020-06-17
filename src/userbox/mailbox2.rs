@@ -580,7 +580,9 @@ pub struct StatefulMailbox {
     s: StatelessMailbox,
     state: MailboxState,
     recency_frontier: Option<Uid>,
-    suggest_rollup: bool,
+    /// If non-zero, decrement at the end of the poll cycle. If it becomes
+    /// zero, generate a new rollup file.
+    suggest_rollup: u32,
 }
 
 impl StatefulMailbox {
@@ -621,14 +623,22 @@ impl StatefulMailbox {
             return Err(Error::MailboxReadOnly);
         }
 
+        // Can't start a transaction if no messages have ever existed. And the
+        // result is always the same if there are no messages at all.
+        if 0 == self.state.num_messages() {
+            return Ok(StoreResponse {
+                ok: false,
+                modified: SeqRange::new(),
+            });
+        }
+
         let flags: Vec<FlagId> = request
             .flags
             .iter()
             .map(|f| self.state.flag_id_mut(f.to_owned()))
             .collect();
 
-        let fragile = request.unchanged_since.is_some();
-        let ret = self.change_transaction(fragile, |this, tx| {
+        let ret = self.change_transaction(|this, tx| {
             let mut modified = SeqRange::new();
             let mut ok = true;
 
@@ -717,7 +727,7 @@ impl StatefulMailbox {
             None => return Ok(()),
         };
 
-        self.change_transaction(false, |this, tx| {
+        self.change_transaction(|this, tx| {
             // NB We can't iterate the HashMap<Uid, MessageStatus> directly because
             // we must only consider messages in the current snapshot
             for uid in this.state.uids() {
@@ -817,8 +827,14 @@ impl StatefulMailbox {
             }
         }
 
-        if !self.s.read_only && self.suggest_rollup {
-            self.suggest_rollup = false;
+        let should_rollup = if self.suggest_rollup == 0 {
+            false
+        } else {
+            self.suggest_rollup -= 1;
+            self.suggest_rollup == 0
+        };
+
+        if !self.s.read_only && should_rollup {
             if let Err(e) = self.dump_rollup() {
                 warn!(
                     "{} Failed to write metadata rollup: {}",
@@ -850,6 +866,19 @@ impl StatefulMailbox {
         while let Some(next_uid) = self.state.next_uid() {
             if messages_scheme.is_allocated(next_uid.0.get()) {
                 self.state.seen(next_uid);
+                // Plan to generate a rollup at every multiple of 256 messages
+                // discovered by probing. (We don't expend effort to consider
+                // messages discovered through change transactions, since some
+                // other process already got to that same multiple of 256.) We
+                // don't want to do this *immediately* though in order to avoid
+                // O(n²) complexity when importing large numbers of messages,
+                // so we require a few poll cycles to go by without new
+                // messages first.
+                //
+                // Note that change probing runs after this point, so rollups
+                // are forced every 256 change transactions regardless of what
+                // we do here.
+                self.suggest_rollup = 4;
             } else {
                 break;
             }
@@ -885,7 +914,9 @@ impl StatefulMailbox {
         );
 
         if 0 == cid.0 % 256 {
-            self.suggest_rollup = true;
+            // Changes are fairly slow to read in, so force rollup at end of
+            // poll cycle.
+            self.suggest_rollup = 1;
         }
 
         Ok(())
@@ -940,7 +971,7 @@ impl StatefulMailbox {
             recency_frontier: state.max_modseq().map(Modseq::uid),
             s,
             state,
-            suggest_rollup: false,
+            suggest_rollup: 0,
         };
         this.poll()?;
 
@@ -959,7 +990,10 @@ impl StatefulMailbox {
                     return;
                 }
 
-                // We can expunge all data transactions
+                // We can expunge all data transactions which are included in
+                // the latest deletion candidate --- we know that all
+                // reasonable processes will be looking at that one or
+                // something later and won't care about the old rollups.
                 let expunge_before_cid = rollups
                     .iter()
                     .filter(|r| r.deletion_candidate)
@@ -1063,7 +1097,7 @@ impl StatefulMailbox {
                     });
                 }
 
-                ret.sort();
+                ret.sort_unstable();
                 // The most recent rollup is never a deletion candidate
                 if let Some(last) = ret.last_mut() {
                     last.deletion_candidate = false;
@@ -1087,24 +1121,24 @@ impl StatefulMailbox {
     /// the transaction as desired, and return the result of the whole
     /// transaction.
     ///
-    /// If `fragile` is true, `f` will be reevaluated if more changes are found
-    /// while trying to process the transaction. If `fragile` is false, `f`
-    /// will be called only once, which is useful for operations that do not
-    /// depend on strict ordering.
+    /// `f` will be reevaluated if more changes are found while trying to
+    /// process the transaction.
+    ///
+    /// If `tx` ends up being an empty transaction, nothing is committed and
+    /// the result is directly returned.
     fn change_transaction<R>(
         &mut self,
-        fragile: bool,
         mut f: impl FnMut(&Self, &mut StateTransaction) -> Result<R, Error>,
     ) -> Result<R, Error> {
-        let (mut cid, mut tx) = self.state.start_tx()?;
-        let mut res = f(self, &mut tx)?;
-        if tx.is_empty() {
-            return Ok(res);
-        }
+        for _ in 0..1000 {
+            let (cid, mut tx) = self.state.start_tx()?;
+            let res = f(self, &mut tx)?;
+            if tx.is_empty() {
+                return Ok(res);
+            }
 
-        let mut buffer_file = self.s.write_state_file(&tx)?;
+            let buffer_file = self.s.write_state_file(&tx)?;
 
-        for _ in 0..1024 {
             if self.s.change_scheme().emplace(buffer_file.path(), cid.0)? {
                 // Directly commit instead of needing to do the whole
                 // poll/read/decrypt dance
@@ -1114,19 +1148,6 @@ impl StatefulMailbox {
             }
 
             self.poll_for_new_changes(Cid::GENESIS)?;
-
-            if fragile {
-                let (c, t) = self.state.start_tx()?;
-                cid = c;
-                tx = t;
-                res = f(self, &mut tx)?;
-                if tx.is_empty() {
-                    return Ok(res);
-                }
-                buffer_file = self.s.write_state_file(&tx)?;
-            } else {
-                cid = self.state.retry_tx(cid)?;
-            }
         }
 
         Err(Error::GaveUpInsertion)
@@ -1326,9 +1347,7 @@ mod test {
         .unwrap();
 
         assert_eq!(vec![Uid::u(2)], mb.mini_poll());
-        assert!(mb
-            .state
-            .test_flag(mb.state.flag_id(&Flag::Deleted).unwrap(), Uid::u(2)));
+        assert!(mb.state.test_flag_o(&Flag::Deleted, Uid::u(2)));
 
         mb.expunge_all_deleted().unwrap();
 
@@ -1338,6 +1357,186 @@ mod test {
         assert_eq!(None, poll.recent);
         assert_eq!(Vec::<Uid>::new(), poll.fetch);
         assert_ne!(Cid::GENESIS, poll.max_modseq.unwrap().cid());
+    }
+
+    #[test]
+    fn multi_client_message_operations() {
+        let setup = set_up();
+
+        let (mut mb1, _) = setup.stateless.clone().select().unwrap();
+        let (mut mb2, _) = setup.stateless.clone().select().unwrap();
+
+        assert_eq!(Uid::u(1), simple_append(mb1.stateless()));
+
+        let poll = mb1.poll().unwrap();
+        assert_eq!(Vec::<(Seqnum, Uid)>::new(), poll.expunge);
+        assert_eq!(Some(1), poll.exists);
+        assert_eq!(Some(1), poll.recent);
+        assert_eq!(vec![Uid::u(1)], poll.fetch);
+        assert_eq!(Some(Modseq::new(Uid::u(1), Cid::GENESIS)), poll.max_modseq);
+
+        let poll = mb2.poll().unwrap();
+        assert_eq!(Vec::<(Seqnum, Uid)>::new(), poll.expunge);
+        assert_eq!(Some(1), poll.exists);
+        // mb2 is the second to see the message, so it does not get \Recent on
+        // UID 1
+        assert_eq!(Some(0), poll.recent);
+        assert_eq!(vec![Uid::u(1)], poll.fetch);
+        assert_eq!(Some(Modseq::new(Uid::u(1), Cid::GENESIS)), poll.max_modseq);
+
+        mb1.store(&StoreRequest {
+            ids: &SeqRange::just(Uid::u(1)),
+            flags: &[Flag::Deleted],
+            remove_listed: false,
+            remove_unlisted: false,
+            loud: false,
+            unchanged_since: None,
+        })
+        .unwrap();
+
+        let poll = mb2.poll().unwrap();
+        assert_eq!(Vec::<(Seqnum, Uid)>::new(), poll.expunge);
+        assert_eq!(None, poll.exists);
+        assert_eq!(None, poll.recent);
+        assert_eq!(vec![Uid::u(1)], poll.fetch);
+        assert_eq!(Some(Modseq::new(Uid::u(1), Cid(1))), poll.max_modseq);
+
+        assert!(mb1.state.test_flag_o(&Flag::Deleted, Uid::u(1)));
+
+        mb1.expunge_all_deleted().unwrap();
+
+        let poll = mb2.poll().unwrap();
+        assert_eq!(vec![(Seqnum::u(1), Uid::u(1))], poll.expunge);
+        assert_eq!(None, poll.exists);
+        assert_eq!(None, poll.recent);
+        assert_eq!(Vec::<Uid>::new(), poll.fetch);
+        assert_eq!(Some(Modseq::new(Uid::u(1), Cid(2))), poll.max_modseq);
+    }
+
+    #[test]
+    fn expunge_of_expunged_message_succeeds_quietly() {
+        let setup = set_up();
+
+        let (mut mb1, _) = setup.stateless.clone().select().unwrap();
+        let (mut mb2, _) = setup.stateless.clone().select().unwrap();
+
+        // Create a message with the \Deleted flag set
+        let uid = simple_append(mb1.stateless());
+        mb1.poll().unwrap();
+        mb1.store(&StoreRequest {
+            ids: &SeqRange::just(uid),
+            flags: &[Flag::Deleted],
+            remove_listed: false,
+            remove_unlisted: false,
+            loud: false,
+            unchanged_since: None,
+        })
+        .unwrap();
+        mb1.poll().unwrap();
+
+        // Let mb2 see it
+        mb2.poll().unwrap();
+
+        // Expunge it in mb1, and call poll() to ensure it really gets deleted
+        assert!(mb1
+            .stateless()
+            .message_scheme()
+            .path_for_id(uid.0.get())
+            .is_file());
+        mb1.expunge_all_deleted().unwrap();
+        mb1.poll().unwrap();
+        assert!(!mb1
+            .stateless()
+            .message_scheme()
+            .path_for_id(uid.0.get())
+            .is_file());
+
+        // Expunge via mb2, who thinks the message still exists
+        mb2.expunge_all_deleted().unwrap();
+        mb2.poll().unwrap();
+
+        // Also ensure that the second expunge doesn't break mb1
+        mb1.poll().unwrap();
+    }
+
+    #[test]
+    fn append_with_flags() {
+        let setup = set_up();
+        let (mut mb1, _) = setup.stateless.select().unwrap();
+
+        let uid = mb1
+            .stateless()
+            .append(
+                Utc::now(),
+                vec![Flag::Flagged, Flag::Keyword("foo".to_owned())],
+                &mut "foobar".as_bytes(),
+            )
+            .unwrap();
+        mb1.poll().unwrap();
+
+        assert!(mb1.state.test_flag_o(&Flag::Flagged, uid));
+        assert!(mb1.state.test_flag_o(&Flag::Keyword("foo".to_owned()), uid));
+    }
+
+    #[test]
+    fn misordered_blind_change_accepted() {
+        let setup = set_up();
+        let (mut mb1, _) = setup.stateless.select().unwrap();
+
+        let uid1 = simple_append(mb1.stateless());
+        let uid2 = simple_append(mb1.stateless());
+        mb1.poll().unwrap();
+        mb1.store(&StoreRequest {
+            ids: &SeqRange::just(uid2),
+            flags: &[Flag::Flagged],
+            remove_listed: false,
+            remove_unlisted: false,
+            loud: false,
+            unchanged_since: None,
+        })
+        .unwrap();
+        mb1.poll().unwrap();
+
+        // Blindly set flags on UID 1, which will create a change with nominal
+        // modseq (1,2) even though it comes after the (2,1) we just created
+        // above. When reading the stream, it should get fixed up to (2,2).
+        mb1.s
+            .set_flags_blind(uid1, vec![(true, Flag::Seen)])
+            .unwrap();
+
+        let poll = mb1.poll().unwrap();
+        assert_eq!(Some(Modseq::new(uid2, Cid(2))), poll.max_modseq);
+        assert_eq!(
+            Modseq::new(uid2, Cid(2)),
+            mb1.state.message_status(uid1).unwrap().last_modified()
+        );
+    }
+
+    #[test]
+    fn expunge_empty_mailbox() {
+        let setup = set_up();
+        let (mut mb1, _) = setup.stateless.select().unwrap();
+        mb1.expunge_all_deleted().unwrap();
+        mb1.poll().unwrap();
+    }
+
+    #[test]
+    fn store_empty_mailbox() {
+        let setup = set_up();
+        let (mut mb1, _) = setup.stateless.select().unwrap();
+        let res = mb1
+            .store(&StoreRequest {
+                ids: &SeqRange::just(Uid::MIN),
+                flags: &[Flag::Flagged],
+                remove_listed: false,
+                remove_unlisted: false,
+                loud: false,
+                unchanged_since: None,
+            })
+            .unwrap();
+        assert!(!res.ok);
+
+        mb1.poll().unwrap();
     }
 
     fn simple_append(dst: &StatelessMailbox) -> Uid {

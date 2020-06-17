@@ -540,6 +540,13 @@ impl MailboxState {
         }
     }
 
+    /// Convenience for invoking `test_flag` with a `Flag`.
+    pub fn test_flag_o(&self, flag: &Flag, message: Uid) -> bool {
+        self.flag_id(flag)
+            .map(|f| self.test_flag(f, message))
+            .unwrap_or(false)
+    }
+
     /// Permanently set the `\\Recent` "flag" on the given message.
     ///
     /// Has no effect if the message has been expunged.
