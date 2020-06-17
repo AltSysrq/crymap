@@ -18,11 +18,6 @@
 
 //! This module contains everything to do with a single user's data: their
 //! mailboxes, their settings, their keys.
-//!
-//! The name is an awkward contrivance to stand as an in-between of "mailbox"
-//! (which IMAP uses for what really should be _pigeonholes_ of the user's
-//! singular _mailbox_) and "post office" (which suggests holding mailboxes of
-//! different people, i.e., the top-level store).
 
 mod hier_id_scheme;
 pub(crate) mod key_store;

@@ -24,8 +24,8 @@ use log::warn;
 use super::defs::*;
 use crate::support::error::Error;
 use crate::support::file_ops::{self, IgnoreKinds};
-use crate::userbox::model::*;
-use crate::userbox::recency_token;
+use crate::account::model::*;
+use crate::account::recency_token;
 
 impl StatefulMailbox {
     /// Do a "mini" poll, appropriate for use after a `FETCH`, `STORE`, or

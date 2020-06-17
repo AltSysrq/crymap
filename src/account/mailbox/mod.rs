@@ -232,9 +232,9 @@ mod test_prelude {
     use tempfile::TempDir;
 
     use crate::crypt::master_key::MasterKey;
-    use crate::userbox::key_store::{KeyStore, KeyStoreConfig};
-    use crate::userbox::mailbox_path::MailboxPath;
-    use crate::userbox::model::*;
+    use crate::account::key_store::{KeyStore, KeyStoreConfig};
+    use crate::account::mailbox_path::MailboxPath;
+    use crate::account::model::*;
 
     pub(super) struct Setup {
         pub root: TempDir,

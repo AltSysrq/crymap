@@ -20,8 +20,8 @@ use log::warn;
 
 use super::defs::*;
 use crate::support::error::Error;
-use crate::userbox::mailbox_state::*;
-use crate::userbox::model::*;
+use crate::account::mailbox_state::*;
+use crate::account::model::*;
 
 impl StatelessMailbox {
     /// Blindly set and clear the given flags on the given message.

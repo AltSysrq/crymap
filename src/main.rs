@@ -20,7 +20,7 @@
 
 mod crypt;
 mod support;
-mod userbox;
+mod account;
 
 fn main() {
     println!("Hello, world!");

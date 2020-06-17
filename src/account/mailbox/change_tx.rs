@@ -27,8 +27,8 @@ use super::defs::*;
 use crate::crypt::data_stream;
 use crate::support::compression::{Compression, FinishWrite};
 use crate::support::error::Error;
-use crate::userbox::mailbox_state::*;
-use crate::userbox::model::*;
+use crate::account::mailbox_state::*;
+use crate::account::model::*;
 
 impl StatelessMailbox {
     /// Reads a file that was written by `write_state_file()`.

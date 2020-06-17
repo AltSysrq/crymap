@@ -18,7 +18,7 @@
 
 use super::defs::*;
 use crate::support::error::Error;
-use crate::userbox::model::*;
+use crate::account::model::*;
 
 impl StatefulMailbox {
     /// Expunge all messages with the `\Deleted` flag in the current snapshot.
