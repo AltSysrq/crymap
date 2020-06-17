@@ -24,11 +24,11 @@ use serde::{de::DeserializeOwned, Serialize};
 use tempfile::NamedTempFile;
 
 use super::defs::*;
+use crate::account::mailbox_state::*;
+use crate::account::model::*;
 use crate::crypt::data_stream;
 use crate::support::compression::{Compression, FinishWrite};
 use crate::support::error::Error;
-use crate::account::mailbox_state::*;
-use crate::account::model::*;
 
 impl StatelessMailbox {
     /// Reads a file that was written by `write_state_file()`.

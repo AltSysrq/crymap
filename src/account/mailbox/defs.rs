@@ -19,12 +19,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use crate::support::error::Error;
 use crate::account::hier_id_scheme::HierIdScheme;
 use crate::account::key_store::KeyStore;
 use crate::account::mailbox_path::*;
 use crate::account::mailbox_state::*;
 use crate::account::model::*;
+use crate::support::error::Error;
 
 /// A stateless view of a mailbox.
 ///

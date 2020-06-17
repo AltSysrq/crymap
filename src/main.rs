@@ -18,9 +18,9 @@
 
 #![allow(dead_code)]
 
+mod account;
 mod crypt;
 mod support;
-mod account;
 
 fn main() {
     println!("Hello, world!");

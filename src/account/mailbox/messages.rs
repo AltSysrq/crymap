@@ -28,11 +28,11 @@ use rand::{rngs::OsRng, Rng};
 use tempfile::NamedTempFile;
 
 use super::defs::*;
+use crate::account::model::*;
 use crate::crypt::data_stream;
 use crate::support::compression::{Compression, FinishWrite};
 use crate::support::error::Error;
 use crate::support::file_ops;
-use crate::account::model::*;
 
 impl StatelessMailbox {
     /// Open the identified message for reading.

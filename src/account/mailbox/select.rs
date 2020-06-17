@@ -24,10 +24,10 @@ use std::time::{Duration, SystemTime};
 use log::{error, warn};
 
 use super::defs::*;
-use crate::support::error::Error;
-use crate::support::file_ops::IgnoreKinds;
 use crate::account::mailbox_state::*;
 use crate::account::model::*;
+use crate::support::error::Error;
+use crate::support::file_ops::IgnoreKinds;
 
 #[cfg(not(test))]
 const OLD_ROLLUP_GRACE_PERIOD: Duration = Duration::from_secs(24 * 3600);

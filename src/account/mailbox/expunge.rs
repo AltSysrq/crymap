@@ -17,8 +17,8 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use super::defs::*;
-use crate::support::error::Error;
 use crate::account::model::*;
+use crate::support::error::Error;
 
 impl StatefulMailbox {
     /// Expunge all messages with the `\Deleted` flag in the current snapshot.

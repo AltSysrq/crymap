@@ -231,10 +231,10 @@ mod test_prelude {
     use chrono::prelude::*;
     use tempfile::TempDir;
 
-    use crate::crypt::master_key::MasterKey;
     use crate::account::key_store::{KeyStore, KeyStoreConfig};
     use crate::account::mailbox_path::MailboxPath;
     use crate::account::model::*;
+    use crate::crypt::master_key::MasterKey;
 
     pub(super) struct Setup {
         pub root: TempDir,
