@@ -151,6 +151,23 @@ impl Into<u32> for Uid {
 /// The sequence number of a message is one plus the number of non-expunged
 /// messages that have a UID less than it, counting based on a point-in-time
 /// snapshot instead of the real message state.
+///
+/// (Rant) Sequence numbers are an abomination. They should have been EXPUNGEd
+/// with the IMAP4 revision, compatibility with IMAP2 be damned. It's
+/// inconvenient for the client as it forces the client to keep track of a set
+/// of ever-changing identifiers. It's inconvenient for the server, which has
+/// to emulate these ever-changing identifiers even though any practical server
+/// implementation will have the messages stored by some fixed identifier. The
+/// shifting of sequence numbers happens based on events in the protocol and
+/// not in real time, so you can't even off-load it to a shared database since
+/// each process needs to track the sequence numbers independently. The one and
+/// only model where it is convenient for the server is in a system which
+/// doesn't allow concurrent mailbox access and stores a list of message
+/// references in a naïve list in memory, or which simply does a linear
+/// iteration over an `mbox` file for every operation. UIDs should have wholly
+/// replace sequence numbers and IMAP2 clients connecting to IMAP4 be left to
+/// deal with the resulting holes in the sequence in whatever failure mode that
+/// bring. (/Rant)
 #[derive(
     Deserialize, Serialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]

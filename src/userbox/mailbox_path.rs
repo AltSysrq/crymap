@@ -43,8 +43,6 @@ pub struct MailboxPath {
     pub(super) name: String,
     pub(super) base_path: PathBuf,
     pub(super) data_path: PathBuf,
-    pub(super) msgs_path: PathBuf,
-    pub(super) flags_path: PathBuf,
     pub(super) metadata_path: PathBuf,
     pub(super) unsub_path: PathBuf,
 }
@@ -100,8 +98,6 @@ impl MailboxPath {
     fn from_name_and_path(name: String, base_path: PathBuf) -> Self {
         let data_path = base_path.join("%");
         MailboxPath {
-            msgs_path: data_path.join("msgs"),
-            flags_path: data_path.join("flags"),
             metadata_path: data_path.join("mailbox.toml"),
             unsub_path: data_path.join("unsubscribe"),
             name,
@@ -162,16 +158,6 @@ impl MailboxPath {
 
     fn scoped_data_path_for_uid_validity(&self, uid_validity: u32) -> PathBuf {
         self.base_path.join(format!("%{:x}", uid_validity))
-    }
-
-    /// Return the root of the `MessageStore`.
-    pub fn msgs_path(&self) -> &Path {
-        &self.msgs_path
-    }
-
-    /// Return the root of the `FlagStore`.
-    pub fn flags_path(&self) -> &Path {
-        &self.flags_path
     }
 
     /// Whether this mailbox can be selected (i.e., whether it can contain
@@ -240,12 +226,6 @@ impl MailboxPath {
             scoped_path.file_name().unwrap(),
             &stage_mbox.data_path,
         )?;
-        fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&stage_mbox.flags_path)?;
-        fs::DirBuilder::new()
-            .mode(0o770)
-            .create(&stage_mbox.msgs_path)?;
         let metadata = MailboxMetadata {
             imap: MailboxImapMetadata { special_use },
         };

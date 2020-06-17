@@ -19,7 +19,6 @@
 pub const AES_BLOCK: usize = 16;
 
 pub(crate) mod data_stream;
-pub(crate) mod item_stream;
 pub(crate) mod master_key;
 pub(crate) mod naked;
 #[cfg(test)]
