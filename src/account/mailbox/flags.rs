@@ -894,4 +894,68 @@ mod test {
         assert!(!mb.state.test_flag_o(&Flag::Seen, uid1));
         assert!(mb.state.test_flag_o(&Flag::Flagged, uid1));
     }
+
+    #[test]
+    fn seqnum_store_cond_modified() {
+        let (uid1, mut mb, _root) = store_set_up();
+        let uid2 = simple_append(mb.stateless());
+        let uid3 = simple_append(mb.stateless());
+        mb.poll().unwrap();
+        mb.vanquish(iter::once(uid1)).unwrap();
+        assert_eq!(
+            Some(Modseq::new(uid3, Cid(1))),
+            mb.poll().unwrap().max_modseq
+        );
+
+        let res = mb
+            .store(&StoreRequest {
+                ids: &SeqRange::just(uid2),
+                flags: &[Flag::Flagged],
+                remove_listed: false,
+                remove_unlisted: false,
+                loud: false,
+                unchanged_since: None,
+            })
+            .unwrap();
+        assert_eq!(
+            StoreResponse {
+                ok: true,
+                modified: SeqRange::new()
+            },
+            res
+        );
+        // Discard pending notifications
+        assert_eq!(
+            Some(Modseq::new(uid3, Cid(2))),
+            mb.poll().unwrap().max_modseq
+        );
+
+        let res = mb
+            .seqnum_store(&StoreRequest {
+                ids: &SeqRange::range(Seqnum::u(1), Seqnum::u(2)),
+                flags: &[Flag::Seen],
+                remove_listed: false,
+                remove_unlisted: false,
+                loud: false,
+                unchanged_since: Some(Modseq::new(uid3, Cid(1)).raw().get()),
+            })
+            .unwrap();
+        assert_eq!(
+            StoreResponse {
+                ok: true,
+                modified: SeqRange::just(Seqnum::u(1))
+            },
+            res
+        );
+
+        // Only the changed message get unsolicited FETCH responses
+        assert_eq!(vec![uid3], mb.mini_poll());
+
+        mb.poll().unwrap();
+
+        // The flag got set only on the message that passed the UNCHANGEDSINCE
+        // clause
+        assert!(!mb.state.test_flag_o(&Flag::Seen, uid2));
+        assert!(mb.state.test_flag_o(&Flag::Seen, uid3));
+    }
 }
