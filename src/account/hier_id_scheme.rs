@@ -112,6 +112,15 @@ impl<'a> HierIdScheme<'a> {
     ) -> Result<(), Error> {
         let mut stage: PathBuf;
 
+        // To avoid making a bunch of redundant writes to the FS, see if the
+        // file is already a gravestone and short-circuit if it is.
+        match fs::metadata(path) {
+            Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
+                return Ok(())
+            }
+            _ => (),
+        }
+
         loop {
             stage =
                 tmp.join(format!("expunge.{}.{}", target, OsRng.gen::<u64>()));
