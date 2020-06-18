@@ -958,4 +958,22 @@ mod test {
         assert!(!mb.state.test_flag_o(&Flag::Seen, uid2));
         assert!(mb.state.test_flag_o(&Flag::Seen, uid3));
     }
+
+    #[test]
+    fn store_rejected_when_read_only() {
+        let (uid1, mut mb, _root) = store_set_up();
+        mb.s.read_only = true;
+
+        assert!(matches!(
+            mb.store(&StoreRequest {
+                ids: &SeqRange::just(uid1),
+                flags: &[Flag::Seen],
+                remove_listed: false,
+                remove_unlisted: false,
+                loud: false,
+                unchanged_since: None,
+            }),
+            Err(Error::MailboxReadOnly)
+        ));
+    }
 }

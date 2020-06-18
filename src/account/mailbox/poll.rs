@@ -527,4 +527,29 @@ mod test {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
     }
+
+    #[test]
+    fn no_gc_or_rollups_if_read_only() {
+        let setup = set_up();
+        let (mut mb1, _) = setup.stateless.clone().select().unwrap();
+        mb1.s.read_only = true;
+
+        let uid = simple_append(&setup.stateless);
+        mb1.poll().unwrap();
+
+        for _ in 0..4000 {
+            setup
+                .stateless
+                .set_flags_blind(uid, [(true, Flag::Flagged)].iter().cloned())
+                .unwrap();
+            mb1.poll().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        assert!(list_rollups(mb1.stateless()).unwrap().is_empty());
+
+        // The earliest change should not get expunged
+        assert!(mb1.stateless().change_scheme().path_for_id(1).is_file());
+    }
 }
