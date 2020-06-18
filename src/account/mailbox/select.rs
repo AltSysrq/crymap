@@ -311,6 +311,7 @@ pub(super) struct RollupInfo {
 
 #[cfg(test)]
 mod test {
+    use super::super::test_prelude::*;
     use super::*;
 
     fn r(cid: u32, age_ms: u64) -> RollupInfo {
@@ -405,5 +406,65 @@ mod test {
             ],
             rollups
         );
+    }
+
+    #[test]
+    fn resume_from_rollup() {
+        let setup = set_up();
+        let uid = simple_append(&setup.stateless);
+
+        {
+            let (mut mb1, _) = setup.stateless.clone().select().unwrap();
+            // The first change, and only the first change, sets \Seen. This
+            // change will be garbage collected later as rollups are generated.
+            mb1.store(&StoreRequest {
+                ids: &SeqRange::just(uid),
+                flags: &[Flag::Seen],
+                remove_listed: false,
+                remove_unlisted: false,
+                loud: false,
+                unchanged_since: None,
+            })
+            .unwrap();
+
+            for _ in 0..4000 {
+                mb1.store(&StoreRequest {
+                    ids: &SeqRange::just(uid),
+                    flags: &[Flag::Flagged],
+                    remove_listed: false,
+                    remove_unlisted: false,
+                    loud: false,
+                    unchanged_since: None,
+                })
+                .unwrap();
+                mb1.store(&StoreRequest {
+                    ids: &SeqRange::just(uid),
+                    flags: &[Flag::Flagged],
+                    remove_listed: true,
+                    remove_unlisted: false,
+                    loud: false,
+                    unchanged_since: None,
+                })
+                .unwrap();
+                mb1.poll().unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+
+            // The earliest change should get expunged
+            let change1 = mb1.stateless().change_scheme().path_for_id(1);
+            for i in 0.. {
+                if !change1.is_file() {
+                    break;
+                }
+
+                assert!(i < 500, "CID 1 never got garbage collected");
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+
+        let (mb2, _) = setup.stateless.clone().select().unwrap();
+        // The only way the \Seen flag can get set is if it properly read the
+        // rollup in.
+        assert!(mb2.state.test_flag_o(&Flag::Seen, uid));
     }
 }
