@@ -17,7 +17,7 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
 use crate::account::hier_id_scheme::HierIdScheme;
 use crate::account::key_store::KeyStore;
@@ -54,6 +54,8 @@ pub struct StatefulMailbox {
     /// If non-zero, decrement at the end of the poll cycle. If it becomes
     /// zero, generate a new rollup file.
     pub(super) suggest_rollup: u32,
+    pub(super) rollups_since_gc: u32,
+    pub(super) gc_in_progress: Arc<AtomicBool>,
 }
 
 impl StatelessMailbox {

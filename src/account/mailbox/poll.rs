@@ -27,6 +27,12 @@ use crate::account::recency_token;
 use crate::support::error::Error;
 use crate::support::file_ops::{self, IgnoreKinds};
 
+/// Schedule a GC after generating this many rollup files in a single session.
+///
+/// This is to ensure that rollups do not accumulate during a long session
+/// making large numbers of changes.
+const START_GC_AFTER_ROLLUPS: u32 = 4;
+
 impl StatefulMailbox {
     /// Do a "mini" poll, appropriate for use after a `FETCH`, `STORE`, or
     /// `SEARCH` operation.
@@ -208,7 +214,7 @@ impl StatefulMailbox {
         Ok(())
     }
 
-    fn dump_rollup(&self) -> Result<(), Error> {
+    fn dump_rollup(&mut self) -> Result<(), Error> {
         let mut path = self.s.root.join("rollup");
 
         fs::DirBuilder::new()
@@ -232,6 +238,15 @@ impl StatefulMailbox {
             .map_err(|e| e.error)
             .map(|_| ())
             .ignore_already_exists()?;
+
+        self.rollups_since_gc += 1;
+        if self.rollups_since_gc > START_GC_AFTER_ROLLUPS {
+            self.rollups_since_gc = 0;
+            if let Err(e) = self.schedule_gc() {
+                warn!("{} Failed to schedule GC: {}", self.s.log_prefix, e);
+            }
+        }
+
         Ok(())
     }
 }

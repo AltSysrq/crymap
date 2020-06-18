@@ -19,6 +19,10 @@
 use std::fs;
 use std::io;
 use std::path::PathBuf;
+use std::sync::{
+    atomic::{AtomicBool, Ordering::SeqCst},
+    Arc,
+};
 use std::time::{Duration, SystemTime};
 
 use log::{error, warn};
@@ -58,11 +62,64 @@ impl StatelessMailbox {
     pub fn select(self) -> Result<(StatefulMailbox, SelectResponse), Error> {
         StatefulMailbox::select(self)
     }
+
+    fn do_gc(&self, rollups: Vec<RollupInfo>) {
+        assert!(!self.read_only);
+
+        if let Err(err) = self.message_scheme().gc(
+            &self.common_paths.tmp,
+            &self.common_paths.garbage,
+            0,
+        ) {
+            warn!(
+                "{} Error garbage collecting messages: {}",
+                self.log_prefix, err
+            );
+            return;
+        }
+
+        // We can expunge all data transactions which are included in
+        // the latest one with `delete_transactions` set --- we know
+        // that all reasonable processes will be looking at that one or
+        // something later and won't care about the old rollups.
+        let expunge_before_cid = rollups
+            .iter()
+            .filter(|r| r.delete_transactions)
+            .map(|r| r.cid)
+            .max()
+            .unwrap_or(Cid(0));
+
+        if let Err(err) = self.change_scheme().gc(
+            &self.common_paths.tmp,
+            &self.common_paths.garbage,
+            expunge_before_cid.0,
+        ) {
+            warn!(
+                "{} Error garbage collecting changes: {}",
+                self.log_prefix, err
+            );
+        } else {
+            for rollup in rollups {
+                if rollup.delete_rollup {
+                    if let Err(err) =
+                        fs::remove_file(&rollup.path).ignore_not_found()
+                    {
+                        warn!(
+                            "{} Error removing {}: {}",
+                            self.log_prefix,
+                            rollup.path.display(),
+                            err
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl StatefulMailbox {
     fn select(s: StatelessMailbox) -> Result<(Self, SelectResponse), Error> {
-        let mut rollups = Self::list_rollups(&s)?;
+        let mut rollups = list_rollups(&s)?;
         let state = rollups
             .pop()
             .and_then(|r| match s.read_state_file::<MailboxState>(&r.path) {
@@ -84,62 +141,11 @@ impl StatefulMailbox {
             s,
             state,
             suggest_rollup: 0,
+            rollups_since_gc: 0,
+            gc_in_progress: Arc::new(AtomicBool::new(false)),
         };
         this.poll()?;
-
-        if !this.s.read_only {
-            let s_clone = this.s.clone();
-            rayon::spawn(move || {
-                if let Err(err) = s_clone.message_scheme().gc(
-                    &s_clone.common_paths.tmp,
-                    &s_clone.common_paths.garbage,
-                    0,
-                ) {
-                    warn!(
-                        "{} Error garbage collecting messages: {}",
-                        s_clone.log_prefix, err
-                    );
-                    return;
-                }
-
-                // We can expunge all data transactions which are included in
-                // the latest one with `delete_transactions` set --- we know
-                // that all reasonable processes will be looking at that one or
-                // something later and won't care about the old rollups.
-                let expunge_before_cid = rollups
-                    .iter()
-                    .filter(|r| r.delete_transactions)
-                    .map(|r| r.cid)
-                    .max()
-                    .unwrap_or(Cid(0));
-
-                if let Err(err) = s_clone.change_scheme().gc(
-                    &s_clone.common_paths.tmp,
-                    &s_clone.common_paths.garbage,
-                    expunge_before_cid.0,
-                ) {
-                    warn!(
-                        "{} Error garbage collecting changes: {}",
-                        s_clone.log_prefix, err
-                    );
-                } else {
-                    for rollup in rollups {
-                        if rollup.delete_rollup {
-                            if let Err(err) =
-                                fs::remove_file(&rollup.path).ignore_not_found()
-                            {
-                                warn!(
-                                    "{} Error removing {}: {}",
-                                    s_clone.log_prefix,
-                                    rollup.path.display(),
-                                    err
-                                );
-                            }
-                        }
-                    }
-                }
-            });
-        }
+        this.start_gc(rollups);
 
         let select_response = SelectResponse {
             flags: this.state.flags().map(|(_, f)| f.to_owned()).collect(),
@@ -164,55 +170,82 @@ impl StatefulMailbox {
         Ok((this, select_response))
     }
 
-    fn list_rollups(s: &StatelessMailbox) -> Result<Vec<RollupInfo>, Error> {
-        match fs::read_dir(s.root.join("rollup")) {
-            Err(e) if io::ErrorKind::NotFound == e.kind() => Ok(vec![]),
-            Err(e) => Err(e.into()),
-            Ok(it) => {
-                let mut ret = Vec::new();
-                let now = SystemTime::now();
+    fn start_gc(&self, rollups: Vec<RollupInfo>) {
+        if self.s.read_only {
+            return;
+        }
 
-                for entry in it {
-                    let entry = entry?;
-                    let modseq = match entry
-                        .file_name()
-                        .to_str()
-                        .and_then(|n| u64::from_str_radix(n, 10).ok())
-                        .and_then(Modseq::of)
-                    {
-                        Some(ms) => ms,
-                        // Ignore inscrutable filenames
-                        None => continue,
-                    };
+        if self.gc_in_progress.compare_and_swap(false, true, SeqCst) {
+            // Another GC is already in progress; do nothing
+            return;
+        }
 
-                    let md = match entry.metadata() {
-                        Ok(md) => md,
-                        // NotFound => we lost a race with another process
-                        // Ignore the now-deleted file and carry on
-                        Err(e) if io::ErrorKind::NotFound == e.kind() => {
-                            continue
-                        }
-                        Err(e) => return Err(e.into()),
-                    };
+        let s_clone = self.s.clone();
+        let gc_in_progress = Arc::clone(&self.gc_in_progress);
+        rayon::spawn(move || {
+            s_clone.do_gc(rollups);
+            gc_in_progress.store(false, SeqCst);
+        });
+    }
 
-                    ret.push(RollupInfo {
-                        cid: modseq.cid(),
-                        path: entry.path(),
-                        age: md
-                            .modified()
-                            .ok()
-                            .and_then(|modified| {
-                                now.duration_since(modified).ok()
-                            })
-                            .unwrap_or(Duration::from_secs(0)),
-                        delete_rollup: false,
-                        delete_transactions: false,
-                    });
-                }
+    /// If there is not already a garbage-collection cycle planned or running
+    /// and this is not a read-only mailbox, arrange for a GC cycle to happen.
+    ///
+    /// Returns as soon as the task is scheduled.
+    pub(super) fn schedule_gc(&self) -> Result<(), Error> {
+        if self.s.read_only {
+            return Ok(());
+        }
 
-                classify_rollups(&mut ret);
-                Ok(ret)
+        self.start_gc(list_rollups(&self.s)?);
+        Ok(())
+    }
+}
+
+fn list_rollups(s: &StatelessMailbox) -> Result<Vec<RollupInfo>, Error> {
+    match fs::read_dir(s.root.join("rollup")) {
+        Err(e) if io::ErrorKind::NotFound == e.kind() => Ok(vec![]),
+        Err(e) => Err(e.into()),
+        Ok(it) => {
+            let mut ret = Vec::new();
+            let now = SystemTime::now();
+
+            for entry in it {
+                let entry = entry?;
+                let modseq = match entry
+                    .file_name()
+                    .to_str()
+                    .and_then(|n| u64::from_str_radix(n, 10).ok())
+                    .and_then(Modseq::of)
+                {
+                    Some(ms) => ms,
+                    // Ignore inscrutable filenames
+                    None => continue,
+                };
+
+                let md = match entry.metadata() {
+                    Ok(md) => md,
+                    // NotFound => we lost a race with another process
+                    // Ignore the now-deleted file and carry on
+                    Err(e) if io::ErrorKind::NotFound == e.kind() => continue,
+                    Err(e) => return Err(e.into()),
+                };
+
+                ret.push(RollupInfo {
+                    cid: modseq.cid(),
+                    path: entry.path(),
+                    age: md
+                        .modified()
+                        .ok()
+                        .and_then(|modified| now.duration_since(modified).ok())
+                        .unwrap_or(Duration::from_secs(0)),
+                    delete_rollup: false,
+                    delete_transactions: false,
+                });
             }
+
+            classify_rollups(&mut ret);
+            Ok(ret)
         }
     }
 }

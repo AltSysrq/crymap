@@ -219,7 +219,7 @@ mod messages; // Also includes low-level APPEND-like operation
 mod expunge; // EXPUNGE, UID EXPUNGE
 mod flags; // STORE, UID STORE
 mod poll; // NOOP, CHECK, during IDLE, after commands
-mod select; // SELECT, EXAMINE, STATUS
+mod select; // SELECT, EXAMINE, STATUS, also garbage collection
 
 #[cfg(test)]
 mod test_prelude {
