@@ -29,10 +29,25 @@ use crate::account::model::*;
 use crate::support::error::Error;
 use crate::support::file_ops::IgnoreKinds;
 
+/// The maximum number of rollup files that can exist before we start deleting
+/// them (but not the transactions they contain) with a shorter grace period to
+/// avoid filling up disk.
+const EXCESS_ROLLUP_THRESHOLD: usize = 4;
+
+/// Rollups other than the most recent which are older than this age are
+/// candidates for deletion, including any transactions they contain.
 #[cfg(not(test))]
 const OLD_ROLLUP_GRACE_PERIOD: Duration = Duration::from_secs(24 * 3600);
+/// Rollups other than the `EXCESS_ROLLUP_THRESHOLD` most recent rollups which
+/// are older than this age are candidates for deletion, but not including any
+/// transactions they contain.
+#[cfg(not(test))]
+const EXCESS_ROLLUP_GRACE_PERIOD: Duration = Duration::from_secs(60);
+
 #[cfg(test)]
-const OLD_ROLLUP_GRACE_PERIOD: Duration = Duration::from_secs(1);
+const OLD_ROLLUP_GRACE_PERIOD: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const EXCESS_ROLLUP_GRACE_PERIOD: Duration = Duration::from_secs(1);
 
 impl StatelessMailbox {
     /// Bring this mailbox into stateful mode.
@@ -88,12 +103,12 @@ impl StatefulMailbox {
                 }
 
                 // We can expunge all data transactions which are included in
-                // the latest deletion candidate --- we know that all
-                // reasonable processes will be looking at that one or
+                // the latest one with `delete_transactions` set --- we know
+                // that all reasonable processes will be looking at that one or
                 // something later and won't care about the old rollups.
                 let expunge_before_cid = rollups
                     .iter()
-                    .filter(|r| r.deletion_candidate)
+                    .filter(|r| r.delete_transactions)
                     .map(|r| r.cid)
                     .max()
                     .unwrap_or(Cid(0));
@@ -109,7 +124,7 @@ impl StatefulMailbox {
                     );
                 } else {
                     for rollup in rollups {
-                        if rollup.deletion_candidate {
+                        if rollup.delete_rollup {
                             if let Err(err) =
                                 fs::remove_file(&rollup.path).ignore_not_found()
                             {
@@ -180,27 +195,55 @@ impl StatefulMailbox {
                         Err(e) => return Err(e.into()),
                     };
 
-                    let deletion_candidate = md
-                        .modified()
-                        .ok()
-                        .and_then(|modified| now.duration_since(modified).ok())
-                        .unwrap_or(Duration::from_secs(0))
-                        >= OLD_ROLLUP_GRACE_PERIOD;
-
                     ret.push(RollupInfo {
                         cid: modseq.cid(),
                         path: entry.path(),
-                        deletion_candidate,
+                        age: md
+                            .modified()
+                            .ok()
+                            .and_then(|modified| {
+                                now.duration_since(modified).ok()
+                            })
+                            .unwrap_or(Duration::from_secs(0)),
+                        delete_rollup: false,
+                        delete_transactions: false,
                     });
                 }
 
-                ret.sort_unstable();
-                // The most recent rollup is never a deletion candidate
-                if let Some(last) = ret.last_mut() {
-                    last.deletion_candidate = false;
-                }
-
+                classify_rollups(&mut ret);
                 Ok(ret)
+            }
+        }
+    }
+}
+
+/// Order `rollups` so that the "latest" (i.e., the one to load from) is at the
+/// end, and `delete_rollup` and `delete_transactions` are set appropriately.
+fn classify_rollups(rollups: &mut [RollupInfo]) {
+    if rollups.is_empty() {
+        return;
+    }
+
+    rollups.sort_unstable();
+
+    let len = rollups.len();
+
+    // Any rollup other than the one with the greatest CID which is older than
+    // the "OLD" threshold can be deleted along with any transactions it
+    // contains.
+    for rollup in &mut rollups[..len - 1] {
+        if rollup.age >= OLD_ROLLUP_GRACE_PERIOD {
+            rollup.delete_rollup = true;
+            rollup.delete_transactions = true;
+        }
+    }
+
+    // If we're starting to accumulate too many rollups, get rid of the oldest
+    // ones more aggressively, but leave the transactions around.
+    if len > EXCESS_ROLLUP_THRESHOLD {
+        for rollup in &mut rollups[..len - EXCESS_ROLLUP_THRESHOLD] {
+            if rollup.age >= EXCESS_ROLLUP_GRACE_PERIOD {
+                rollup.delete_rollup = true;
             }
         }
     }
@@ -213,6 +256,107 @@ struct RollupInfo {
     // can be expunged during cleanup. While Modseqs /should/ be totally
     // ordered, this is a more conservative behaviour.
     cid: Cid,
+    age: Duration,
     path: PathBuf,
-    deletion_candidate: bool,
+    delete_rollup: bool,
+    delete_transactions: bool,
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn r(cid: u32, age_ms: u64) -> RollupInfo {
+        RollupInfo {
+            cid: Cid(cid),
+            path: PathBuf::new(),
+            age: Duration::from_millis(age_ms),
+            delete_rollup: false,
+            delete_transactions: false,
+        }
+    }
+
+    #[test]
+    fn classify_rollups_empty() {
+        classify_rollups(&mut []);
+    }
+
+    #[test]
+    fn classify_rollups_single_young() {
+        let mut rollups = [r(1234, 100)];
+        classify_rollups(&mut rollups);
+        assert_eq!([r(1234, 100)], rollups);
+    }
+
+    #[test]
+    fn classify_rollups_single_old() {
+        let mut rollups = [r(1234, 10_000_000)];
+        classify_rollups(&mut rollups);
+        assert_eq!([r(1234, 10_000_000)], rollups);
+    }
+
+    #[test]
+    fn classify_rollups_one_young_one_old() {
+        let mut rollups = [r(1000, 100), r(900, 10_000_000)];
+        classify_rollups(&mut rollups);
+        assert_eq!(
+            [
+                RollupInfo {
+                    delete_rollup: true,
+                    delete_transactions: true,
+                    ..r(900, 10_000_000)
+                },
+                r(1000, 100)
+            ],
+            rollups
+        );
+    }
+
+    #[test]
+    fn classify_rollups_one_old_one_young() {
+        let mut rollups = [r(900, 10_000_000), r(1000, 100)];
+        classify_rollups(&mut rollups);
+        assert_eq!(
+            [
+                RollupInfo {
+                    delete_rollup: true,
+                    delete_transactions: true,
+                    ..r(900, 10_000_000)
+                },
+                r(1000, 100)
+            ],
+            rollups
+        );
+    }
+
+    #[test]
+    fn classify_rollups_excess() {
+        let mut rollups = [
+            r(1, 5_000), // delete everything
+            r(2, 1_900), // delete rollup only
+            r(3, 1_800), // excess allowance
+            r(4, 1_700), // excess allowance
+            r(5, 1_600), // excess allowance
+            r(6, 1_500), // most recent
+        ];
+        classify_rollups(&mut rollups);
+        assert_eq!(
+            [
+                RollupInfo {
+                    delete_rollup: true,
+                    delete_transactions: true,
+                    ..r(1, 5_000)
+                },
+                RollupInfo {
+                    delete_rollup: true,
+                    ..r(2, 1_900)
+                },
+                r(3, 1_800),
+                r(4, 1_700),
+                r(5, 1_600),
+                r(6, 1_500),
+            ],
+            rollups
+        );
+    }
 }
