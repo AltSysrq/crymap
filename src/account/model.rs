@@ -715,7 +715,18 @@ where
     /// If set, do not change messages which were modified after this point.
     ///
     /// This corresponds to `UNCHANGEDSINCE`.
-    pub unchanged_since: Option<Modseq>,
+    ///
+    /// This is a raw value that nominally should be a `Modseq`. This is
+    /// because we must allow clients to submit values less than `Modseq::MIN`,
+    /// even though they are doomed to failure. At that, RFC 7162 *requires*
+    /// that an `UNCHANGEDSINCE` of 0 MUST fail (Page 12, Example 6):
+    ///
+    /// > Use of UNCHANGEDSINCE with a modification sequence of 0 always fails
+    /// > if the metadata item exists.  A system flag MUST always be considered
+    /// > existent, whether it was set or not.
+    ///
+    /// (Hooray for novel hard requirements set out in examples...)
+    pub unchanged_since: Option<u64>,
 }
 
 /// Response information for `STORE` and `UID STORE`.
@@ -723,7 +734,7 @@ where
 /// This does not include which UIDs to fetch for the follow-up `FETCH`
 /// response(s). Those must be found by a `mini_poll()` call after the store
 /// operation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoreResponse<ID>
 where
     SeqRange<ID>: fmt::Debug,
@@ -747,8 +758,49 @@ where
     /// supposed to work that way since the client needs to see that
     /// _something_ went wrong so that it knows to update its state.
     ///
+    /// RFC 2180, which predates IMAP4rev1, does provide some guidance:
+    ///
+    /// > 4.2.1 If the ".SILENT" suffix is used, and the STORE completed
+    /// > successfully for all the non-expunged messages, the server SHOULD
+    /// > return a tagged OK.
+    /// >
+    /// > 4.2.2. If the ".SILENT" suffix is not used, and only expunged
+    /// > messages are referenced, the server SHOULD return only a tagged NO.
+    /// >
+    /// > 4.2.3. If the ".SILENT" suffix is not used, and a mixture of expunged
+    /// > and non-expunged messages are referenced, the server MAY set the
+    /// > flags and return a FETCH response for the non-expunged messages
+    /// > along with a tagged NO.
+    /// >
+    /// > 4.2.4. If the ".SILENT" suffix is not used, and a mixture of expunged
+    /// > and non-expunged messages are referenced, the server MAY return
+    /// > an untagged NO and not set any flags.
+    ///
+    /// This field reflects RFC 2180's recommendations (opting for 4.2.3
+    /// instead of 4.2.4) and RFC 7162's example. It is `false` if `loud` was
+    /// set on the request and at least one expunged message was referenced.
+    ///
     /// Strangely, RFC 7162 doesn't permit a `VANISHED (EARLIER)` response to
-    /// `UID STORE` which would make this whole thing more graceful.
+    /// `UID STORE` which would make this whole thing more graceful at least
+    /// for QRESYNC clients.
+    ///
+    /// Section 6.4.8 of RFC 3501 would appear to suggest that a `UID STORE`
+    /// referencing an expunged UID should silently ignore the expunged UID
+    /// regardless:
+    ///
+    /// > Note: in the above example, the UID range 443:557
+    /// > appears.  The same comment about a non-existent unique
+    /// > identifier being ignored without any error message also
+    /// > applies here.  Hence, even if neither UID 443 or 557
+    /// > exist, this range is valid and would include an existing
+    /// > UID 495.
+    ///
+    /// The term "existent" here probably refers to "is assigned a sequence
+    /// number" rather than a present/expunged status, since IMAP4rev1
+    /// extensively disregards the possibility of concurrent access and
+    /// pervasively assumes that a message exists if and only if it has a
+    /// sequence number. This is the interpretation this implementation uses,
+    /// so as to keep `STORE` and `UID STORE` consistent.
     pub ok: bool,
     // ==================== RFC 7162 ====================
     /// If empty, the operation completed successfully.

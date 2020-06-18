@@ -77,6 +77,36 @@ impl StatefulMailbox {
             Ok(())
         })
     }
+
+    /// Directly expunge the given UIDs, without going through the \Deleted
+    /// dance.
+    ///
+    /// This would make a good extension, but it isn't one. It's used
+    /// internally as a convenience function.
+    pub fn vanquish(
+        &mut self,
+        uids: impl IntoIterator<Item = Uid> + Clone,
+    ) -> Result<(), Error> {
+        self.s.not_read_only()?;
+
+        if 0 == self.state.num_messages() {
+            return Ok(());
+        }
+
+        self.change_transaction(|this, tx| {
+            for uid in uids.clone() {
+                if !this.state.is_assigned_uid(uid) {
+                    return Err(Error::NxMessage);
+                }
+
+                if this.state.message_status(uid).is_some() {
+                    tx.expunge(uid);
+                }
+            }
+
+            Ok(())
+        })
+    }
 }
 
 #[cfg(test)]
