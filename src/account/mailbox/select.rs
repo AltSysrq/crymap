@@ -145,7 +145,19 @@ impl StatefulMailbox {
             gc_in_progress: Arc::new(AtomicBool::new(false)),
         };
         this.poll()?;
-        this.start_gc(rollups);
+        // If there's any rollups we can get rid of, schedule a GC, which will
+        // also clean up the changes and messages trees. Even if no rollups are
+        // deletion candidates, there could be some use in cleaning up the
+        // trees, but it would be fairly small, and we would rather not
+        // generate a bunch of load every time a mailbox is opened.
+        //
+        // poll() above could also have scheduled a GC --- in this case, our
+        // call here won't have any effect since we only allow one at a time
+        // (unless the GC is so fast it completed already, in which case doing
+        // it again isn't a big deal).
+        if rollups.iter().any(|r| r.delete_rollup) {
+            this.start_gc(rollups);
+        }
 
         let select_response = SelectResponse {
             flags: this.state.flags().map(|(_, f)| f.to_owned()).collect(),
@@ -202,7 +214,9 @@ impl StatefulMailbox {
     }
 }
 
-fn list_rollups(s: &StatelessMailbox) -> Result<Vec<RollupInfo>, Error> {
+pub(super) fn list_rollups(
+    s: &StatelessMailbox,
+) -> Result<Vec<RollupInfo>, Error> {
     match fs::read_dir(s.root.join("rollup")) {
         Err(e) if io::ErrorKind::NotFound == e.kind() => Ok(vec![]),
         Err(e) => Err(e.into()),
@@ -283,7 +297,7 @@ fn classify_rollups(rollups: &mut [RollupInfo]) {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct RollupInfo {
+pub(super) struct RollupInfo {
     // First field since it's the main thing we sort by
     // We only include the CID since we also use this to determine which CIDs
     // can be expunged during cleanup. While Modseqs /should/ be totally

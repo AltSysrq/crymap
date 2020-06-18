@@ -122,6 +122,7 @@ impl StatefulMailbox {
                 // poll/read/decrypt dance
                 // TODO Is there *ever* a case where we want !notify?
                 self.state.commit(cid, tx, true);
+                self.see_cid(cid);
                 return Ok(res);
             }
 

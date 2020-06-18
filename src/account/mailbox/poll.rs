@@ -170,7 +170,9 @@ impl StatefulMailbox {
                 // Note that change probing runs after this point, so rollups
                 // are forced every 256 change transactions regardless of what
                 // we do here.
-                self.suggest_rollup = 4;
+                if 0 == next_uid.0.get() % 256 {
+                    self.suggest_rollup = 4;
+                }
             } else {
                 break;
             }
@@ -205,13 +207,17 @@ impl StatefulMailbox {
             notify,
         );
 
-        if 0 == cid.0 % 256 {
-            // Changes are fairly slow to read in, so force rollup at end of
-            // poll cycle.
-            self.suggest_rollup = 1;
-        }
+        self.see_cid(cid);
 
         Ok(())
+    }
+
+    pub(super) fn see_cid(&mut self, cid: Cid) {
+        if 0 == cid.0 % 256 {
+            // Changes are fairly slow to read in, so force rollup at end of
+            // the current or next poll cycle.
+            self.suggest_rollup = 1;
+        }
     }
 
     fn dump_rollup(&mut self) -> Result<(), Error> {
@@ -253,6 +259,7 @@ impl StatefulMailbox {
 
 #[cfg(test)]
 mod test {
+    use super::super::select::list_rollups;
     use super::super::test_prelude::*;
     use super::*;
 
@@ -362,5 +369,162 @@ mod test {
         assert_eq!(None, poll.recent);
         assert_eq!(Vec::<Uid>::new(), poll.fetch);
         assert_eq!(Some(Modseq::new(Uid::u(1), Cid(2))), poll.max_modseq);
+    }
+
+    #[test]
+    fn rollup_generated_after_many_deliveries() {
+        let setup = set_up();
+        let (mut mb1, _) = setup.stateless.clone().select().unwrap();
+
+        for _ in 0..500 {
+            simple_append(mb1.stateless());
+        }
+
+        assert_eq!(Some(500), mb1.poll().unwrap().exists);
+        // Rollup hasn't happened yet --- we expect there could be more
+        // deliveries incoming
+        assert!(list_rollups(mb1.stateless()).unwrap().is_empty());
+
+        for _ in 0..4 {
+            mb1.poll().unwrap();
+        }
+
+        // Now that there's been some cycles without activity, we get a new
+        // rollup
+        assert_eq!(1, list_rollups(mb1.stateless()).unwrap().len());
+
+        // Delivering one more message isn't sufficient to make a new rollup
+        simple_append(mb1.stateless());
+        for _ in 0..5 {
+            mb1.poll().unwrap();
+        }
+        assert_eq!(1, list_rollups(mb1.stateless()).unwrap().len());
+    }
+
+    #[test]
+    fn rollup_generated_after_many_self_changes() {
+        let setup = set_up();
+        let (mut mb1, _) = setup.stateless.clone().select().unwrap();
+        let uid = simple_append(mb1.stateless());
+        mb1.poll().unwrap();
+
+        for _ in 0..300 {
+            mb1.store(&StoreRequest {
+                ids: &SeqRange::just(uid),
+                flags: &[Flag::Flagged],
+                remove_listed: false,
+                remove_unlisted: false,
+                loud: false,
+                unchanged_since: None,
+            })
+            .unwrap();
+            mb1.store(&StoreRequest {
+                ids: &SeqRange::just(uid),
+                flags: &[Flag::Flagged],
+                remove_listed: true,
+                remove_unlisted: false,
+                loud: false,
+                unchanged_since: None,
+            })
+            .unwrap();
+        }
+
+        assert_eq!(
+            Some(Modseq::new(uid, Cid(600))),
+            mb1.poll().unwrap().max_modseq
+        );
+        assert_eq!(1, list_rollups(mb1.stateless()).unwrap().len());
+
+        // One more change isn't sufficient to make a new rollup
+        mb1.store(&StoreRequest {
+            ids: &SeqRange::just(uid),
+            flags: &[Flag::Seen],
+            remove_listed: false,
+            remove_unlisted: false,
+            loud: false,
+            unchanged_since: None,
+        })
+        .unwrap();
+        for _ in 0..5 {
+            mb1.poll().unwrap();
+        }
+        assert_eq!(1, list_rollups(mb1.stateless()).unwrap().len());
+    }
+
+    #[test]
+    fn rollup_generated_after_many_external_changes() {
+        let setup = set_up();
+        let (mut mb1, _) = setup.stateless.clone().select().unwrap();
+        let uid = simple_append(mb1.stateless());
+        mb1.poll().unwrap();
+
+        for _ in 0..300 {
+            mb1.stateless()
+                .set_flags_blind(uid, [(true, Flag::Flagged)].iter().cloned())
+                .unwrap();
+        }
+
+        assert_eq!(
+            Some(Modseq::new(uid, Cid(300))),
+            mb1.poll().unwrap().max_modseq
+        );
+        assert_eq!(1, list_rollups(mb1.stateless()).unwrap().len());
+
+        // One more change isn't sufficient to make a new rollup
+        mb1.store(&StoreRequest {
+            ids: &SeqRange::just(uid),
+            flags: &[Flag::Seen],
+            remove_listed: false,
+            remove_unlisted: false,
+            loud: false,
+            unchanged_since: None,
+        })
+        .unwrap();
+        for _ in 0..5 {
+            mb1.poll().unwrap();
+        }
+        assert_eq!(1, list_rollups(mb1.stateless()).unwrap().len());
+    }
+
+    #[test]
+    fn gc_triggered_after_many_rollups() {
+        let setup = set_up();
+        let (mut mb1, _) = setup.stateless.clone().select().unwrap();
+        let uid = simple_append(mb1.stateless());
+        mb1.poll().unwrap();
+
+        for _ in 0..4000 {
+            mb1.store(&StoreRequest {
+                ids: &SeqRange::just(uid),
+                flags: &[Flag::Flagged],
+                remove_listed: false,
+                remove_unlisted: false,
+                loud: false,
+                unchanged_since: None,
+            })
+            .unwrap();
+            mb1.store(&StoreRequest {
+                ids: &SeqRange::just(uid),
+                flags: &[Flag::Flagged],
+                remove_listed: true,
+                remove_unlisted: false,
+                loud: false,
+                unchanged_since: None,
+            })
+            .unwrap();
+            mb1.poll().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        // The earliest change should get expunged
+        let change1 = mb1.stateless().change_scheme().path_for_id(1);
+        for i in 0.. {
+            if !change1.is_file() {
+                break;
+            }
+
+            assert!(i < 500, "CID 1 never got garbage collected");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 }
