@@ -25,6 +25,7 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use chrono::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::support::error::Error;
@@ -832,6 +833,20 @@ pub struct CommonPaths {
     /// deletion. Usually, the process that does that move also deletes the
     /// directory tree from here itself. Orphans are cleaned up aggressively.
     pub garbage: PathBuf,
+}
+
+/// Metadata about a message which is stored encrypted in the message file.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageMetadata {
+    /// The uncompressed, unencrypted size of the message.
+    ///
+    /// In storage, this is actually a random value that must be XORed with
+    /// `size_xor`.
+    #[serde(alias = "s")]
+    pub size: u32,
+    /// The `INTERNALDATE` of the message.
+    #[serde(alias = "d", with = "chrono::serde::ts_milliseconds")]
+    pub internal_date: DateTime<Utc>,
 }
 
 #[cfg(test)]

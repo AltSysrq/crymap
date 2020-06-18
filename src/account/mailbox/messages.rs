@@ -45,7 +45,7 @@ impl StatelessMailbox {
     pub fn open_message(
         &self,
         uid: Uid,
-    ) -> Result<(u32, DateTime<Utc>, impl BufRead), Error> {
+    ) -> Result<(MessageMetadata, impl BufRead), Error> {
         let scheme = self.message_scheme();
         let mut file = match fs::File::open(scheme.path_for_id(uid.0.get())) {
             Ok(f) => f,
@@ -58,21 +58,20 @@ impl StatelessMailbox {
             Err(e) => return Err(e.into()),
         };
 
-        let size_xor_a = file.read_u32::<LittleEndian>()?;
+        let size_xor = file.read_u32::<LittleEndian>()?;
         let stream = {
             let mut ks = self.key_store.lock().unwrap();
             data_stream::Reader::new(file, |k| ks.get_private_key(k))?
         };
         let compression = stream.metadata.compression;
         let mut stream = compression.decompressor(stream)?;
-        let size_xor_b = stream.read_u32::<LittleEndian>()?;
-        let internal_date = stream.read_i64::<LittleEndian>()?;
+        let metadata_length = stream.read_u16::<LittleEndian>()?;
+        let mut metadata: MessageMetadata = serde_cbor::from_reader(
+            stream.by_ref().take(metadata_length.into()),
+        )?;
+        metadata.size ^= size_xor;
 
-        Ok((
-            size_xor_a ^ size_xor_b,
-            Utc.timestamp_millis(internal_date),
-            stream,
-        ))
+        Ok((metadata, stream))
     }
 
     /// Append the given message to this mailbox.
@@ -95,8 +94,11 @@ impl StatelessMailbox {
 
         let mut buffer_file = NamedTempFile::new_in(&self.common_paths.tmp)?;
 
-        let size_xor_a: u32;
-        let size_xor_b: u32 = OsRng.gen();
+        let size_xor: u32;
+        let metadata = MessageMetadata {
+            size: OsRng.gen(),
+            internal_date: internal_date,
+        };
         let compression = Compression::DEFAULT_FOR_MESSAGE;
 
         buffer_file.write_u32::<LittleEndian>(0)?;
@@ -115,19 +117,21 @@ impl StatelessMailbox {
             {
                 let mut compressor =
                     compression.compressor(&mut crypt_writer)?;
-                compressor.write_u32::<LittleEndian>(size_xor_b)?;
-                compressor.write_i64::<LittleEndian>(
-                    internal_date.timestamp_millis(),
+                let metadata_bytes = serde_cbor::to_vec(&metadata)?;
+                compressor.write_u16::<LittleEndian>(
+                    metadata_bytes.len().try_into().unwrap(),
                 )?;
+                compressor.write_all(&metadata_bytes)?;
+
                 let size = io::copy(&mut data, &mut compressor)?;
-                size_xor_a = size_xor_b ^ size.try_into().unwrap_or(u32::MAX);
+                size_xor = metadata.size ^ size.try_into().unwrap_or(u32::MAX);
                 compressor.finish()?;
             }
             crypt_writer.flush()?;
         }
 
         buffer_file.seek(io::SeekFrom::Start(0))?;
-        buffer_file.write_u32::<LittleEndian>(size_xor_a)?;
+        buffer_file.write_u32::<LittleEndian>(size_xor)?;
         file_ops::chmod(buffer_file.path(), 0o440)?;
 
         let uid = self.insert_message(buffer_file.path())?;
@@ -193,18 +197,16 @@ mod test {
         );
 
         let mut content = String::new();
-        let (size, date, mut r) =
-            setup.stateless.open_message(Uid::u(1)).unwrap();
-        assert_eq!(11, size);
-        assert_eq!(now_truncated, date);
+        let (md, mut r) = setup.stateless.open_message(Uid::u(1)).unwrap();
+        assert_eq!(11, md.size);
+        assert_eq!(now_truncated, md.internal_date);
         r.read_to_string(&mut content).unwrap();
         assert_eq!("hello world", &content);
 
         content.clear();
-        let (size, date, mut r) =
-            setup.stateless.open_message(Uid::u(2)).unwrap();
-        assert_eq!(15, size);
-        assert_eq!(now_truncated, date);
+        let (md, mut r) = setup.stateless.open_message(Uid::u(2)).unwrap();
+        assert_eq!(15, md.size);
+        assert_eq!(now_truncated, md.internal_date);
         r.read_to_string(&mut content).unwrap();
         assert_eq!("another message", &content);
     }

@@ -180,16 +180,17 @@
 //!
 //! ## Message format
 //!
-//! Each message consists of a u32 LE `size_xor_a` immediately followed by a
-//! data stream. The data stream contains a u32 LE `size_xor_b`, a i64 LE
-//! `internal_date`, followed by the raw message text.
+//! Each message consists of a u32 LE `size_xor` immediately followed by a data
+//! stream. The data stream starts with a `u16` indicating the size of the
+//! metadata, then a `MessageMetadata` element in CBOR, and then the raw
+//! message text.
 //!
-//! The two size fields together encode the size of the message before
-//! compression without revealing this in the cleartext and without requiring
-//! buffering. `size_xor_a` is initially written to 0 and a random value is
-//! chosen for `size_xor_b`. Once the message is fully written, the actual
-//! length is XORed with `size_xor_b` and the result is written over
-//! `size_xor_a`.
+//! The two size fields (`size_xor` and the one in the metadata) together
+//! encode the size of the message before compression without revealing this in
+//! the cleartext and without requiring buffering. `size_xor` is initially
+//! written to 0 and a random value is chosen for `size`. Once the message is
+//! fully written, the actual length is XORed with `size` and the result is
+//! written over `size_xor`.
 //!
 //! ## Change transaction format and rollup format
 //!
