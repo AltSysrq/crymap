@@ -133,6 +133,7 @@ impl StatelessMailbox {
         buffer_file.seek(io::SeekFrom::Start(0))?;
         buffer_file.write_u32::<LittleEndian>(size_xor)?;
         file_ops::chmod(buffer_file.path(), 0o440)?;
+        buffer_file.as_file_mut().sync_all()?;
 
         let uid = self.insert_message(buffer_file.path())?;
         self.propagate_flags_best_effort(uid, flags);

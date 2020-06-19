@@ -77,6 +77,7 @@ impl StatelessMailbox {
             }
             crypt_writer.flush()?;
         }
+        buffer_file.as_file_mut().sync_all()?;
 
         Ok(buffer_file)
     }
