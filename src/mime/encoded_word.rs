@@ -154,6 +154,99 @@ mod test {
             "םולש ןב ילטפנ",
             ew_decode("=?iso-8859-8?b?7eXs+SDv4SDp7Oj08A==?=").unwrap()
         );
+
+        // Examples from my (Jason Lingle's) mail
+        assert_eq!(
+            concat!(
+                "The Jade Scorpion Commands You To Meet With Colorado ",
+                "School Of Mines Prof. Xxxxx X. Xxxxx from The United States"
+            ),
+            ew_decode(concat!(
+                "=?windows-1252?Q?The_Jade_Scorpion_Commands_You_",
+                "To_Meet_With_Colorado_",
+                "School_Of_Mines_Prof._Xxxxx_X._Xxxxx_",
+                "from_The_United_States?="
+            ))
+            .unwrap()
+        );
+        assert_eq!(
+            r"\( (税)))*++( (票)) )^$",
+            ew_decode("=?utf-8?B?XCggKOeojikpKSorKyggKOelqCkpICleJA==?=")
+                .unwrap()
+        );
+        assert_eq!(
+            "🎉 Lawful Masses with Leonard French just sh",
+            ew_decode(concat!(
+                "=?utf-8?q?=F0=9F=8E=89_Lawful_Masses_",
+                "with_Leonard_French_just_sh?="
+            ))
+            .unwrap()
+        );
+        assert_eq!(
+            "ared \"Judge Royce Lamberth has invited the public to join the",
+            ew_decode(concat!(
+                "=?utf-8?q?ared_=22Judge_Royce_Lamberth_",
+                "has_invited_the_public_to_join_the?="
+            ))
+            .unwrap()
+        );
+        assert_eq!(
+            " John Bolton \"book\" hearing today at 1pm eastern.",
+            ew_decode(concat!(
+                "=?utf-8?q?_John_Bolton_=22book=22_hearing_",
+                "today_at_1pm_eastern=2E?="
+            ))
+            .unwrap()
+        );
+        assert_eq!(
+            "\" for patrons only",
+            ew_decode("=?utf-8?b?77u/IiBmb3IgcGF0cm9ucyBvbmx5?=").unwrap()
+        );
+        assert_eq!(
+            "发票代开l353774ll2O钱",
+            ew_decode("=?GB2312?B?t6LGsbT6v6psMzUzNzc0bGwyT8eu?=").unwrap()
+        );
+        assert_eq!(
+            "Scrolls® Online – Neues Kapite",
+            ew_decode(
+                "=?UTF-8?B?U2Nyb2xsc8KuIE9ubGluZSDigJMgTmV1ZXMgS2FwaXRl?="
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            "l verfügbar",
+            ew_decode("=?UTF-8?B?bCB2ZXJmw7xnYmFy?=").unwrap()
+        );
+        assert_eq!(
+            "\"ゴールデンカムイ 16 ",
+            ew_decode("=?UTF-8?B?IuOCtOODvOODq+ODh+ODs+OCq+ODoOOCpCAxNiA=?=")
+                .unwrap()
+        );
+        assert_eq!(
+            "(ヤングジャンプコミックス",
+            ew_decode(concat!(
+                "=?UTF-8?B?KOODpOODs+OCsOOCuOODo+ODs",
+                "+ODl+OCs+ODn+ODg+OCr+OCuQ==?="
+            ))
+            .unwrap()
+        );
+        assert_eq!(
+            ")\" by 野田 サトル and more Books",
+            ew_decode(concat!(
+                "=?UTF-8?B?KSIgYnkg6YeO55SwIOOCteODiOODqyBhbmQ",
+                "gbW9yZSBCb29rcw==?="
+            ))
+            .unwrap()
+        );
+        assert_eq!("🎆", ew_decode("=?utf-8?Q?=F0=9F=8E=86?=").unwrap());
+        assert_eq!(
+            "📦\u{a0}Kailh BOX Switches shipping now @switchTOP\u{a0}",
+            ew_decode(concat!(
+                "=?utf-8?Q?=F0=9F=93=A6=C2=A0Kailh=20BOX=20",
+                "Switches=20shipping=20now=20=40switchTOP=C2=A0?="
+            ))
+            .unwrap()
+        );
     }
 
     proptest! {
