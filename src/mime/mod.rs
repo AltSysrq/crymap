@@ -17,3 +17,4 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 mod grovel;
+mod quoted_printable;
