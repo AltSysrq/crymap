@@ -18,3 +18,4 @@
 
 mod grovel;
 mod quoted_printable;
+mod utf7;
