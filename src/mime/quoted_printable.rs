@@ -99,6 +99,8 @@ pub fn qp_decode(s: &[u8]) -> (Cow<[u8]>, &[u8]) {
 
 #[cfg(test)]
 mod test {
+    use proptest::prelude::*;
+
     use super::*;
 
     fn assert_qp(expected: &[u8], expected_dangling: &[u8], input: &[u8]) {
@@ -131,5 +133,19 @@ mod test {
         assert_qp(b"foo", b"=", b"foo=");
         assert_qp(b"foo", b"=A", b"foo=A");
         assert_qp(b"foo", b"=\r", b"foo=\r");
+    }
+
+    proptest! {
+        #[test]
+        fn qp_decode_never_fails_for_str(s in ".*") {
+            qp_decode(s.as_bytes());
+        }
+
+        #[test]
+        fn qp_decode_never_fails_for_bytes(
+            s in prop::collection::vec(prop::num::u8::ANY, 0..20)
+        ) {
+            qp_decode(&s);
+        }
     }
 }
