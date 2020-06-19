@@ -257,7 +257,7 @@ mod test {
 
     proptest! {
         #[test]
-        fn ew_decode_never_panics(s in r"=\?.*\?.*\?.*\?=") {
+        fn ew_decode_never_panics(s in r"=\?(.*|us-ascii)\?(.*|q|b)\?.*\?=") {
             ew_decode(&s);
         }
     }
