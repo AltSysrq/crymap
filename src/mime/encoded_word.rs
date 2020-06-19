@@ -247,6 +247,12 @@ mod test {
             ))
             .unwrap()
         );
+        // I have apparently never, ever received an email using UTF-7 in an
+        // encoded word, so this is just a basic smoke test that it works.
+        assert_eq!(
+            "Hi Mom ☺!",
+            ew_decode("=?utf-7?q?Hi_Mom_+Jjo-!?=").unwrap()
+        );
     }
 
     proptest! {
