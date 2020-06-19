@@ -143,6 +143,7 @@ impl StatefulMailbox {
             suggest_rollup: 0,
             rollups_since_gc: 0,
             gc_in_progress: Arc::new(AtomicBool::new(false)),
+            synchronous_gc: false,
         };
         this.poll()?;
         // If there's any rollups we can get rid of, schedule a GC, which will
@@ -194,10 +195,15 @@ impl StatefulMailbox {
 
         let s_clone = self.s.clone();
         let gc_in_progress = Arc::clone(&self.gc_in_progress);
-        rayon::spawn(move || {
+        if self.synchronous_gc {
             s_clone.do_gc(rollups);
             gc_in_progress.store(false, SeqCst);
-        });
+        } else {
+            rayon::spawn(move || {
+                s_clone.do_gc(rollups);
+                gc_in_progress.store(false, SeqCst);
+            });
+        }
     }
 
     /// If there is not already a garbage-collection cycle planned or running
@@ -415,6 +421,7 @@ mod test {
 
         {
             let (mut mb1, _) = setup.stateless.clone().select().unwrap();
+            mb1.synchronous_gc = true;
             // The first change, and only the first change, sets \Seen. This
             // change will be garbage collected later as rollups are generated.
             mb1.store(&StoreRequest {
@@ -447,19 +454,11 @@ mod test {
                 })
                 .unwrap();
                 mb1.poll().unwrap();
-                std::thread::sleep(std::time::Duration::from_millis(1));
+                std::thread::sleep(std::time::Duration::from_millis(2));
             }
 
             // The earliest change should get expunged
-            let change1 = mb1.stateless().change_scheme().path_for_id(1);
-            for i in 0.. {
-                if !change1.is_file() {
-                    break;
-                }
-
-                assert!(i < 500, "CID 1 never got garbage collected");
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
+            assert!(!mb1.stateless().change_scheme().path_for_id(1).is_file());
         }
 
         let (mb2, _) = setup.stateless.clone().select().unwrap();

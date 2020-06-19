@@ -490,6 +490,7 @@ mod test {
     fn gc_triggered_after_many_rollups() {
         let setup = set_up();
         let (mut mb1, _) = setup.stateless.clone().select().unwrap();
+        mb1.synchronous_gc = true;
         let uid = simple_append(mb1.stateless());
         mb1.poll().unwrap();
 
@@ -513,25 +514,18 @@ mod test {
             })
             .unwrap();
             mb1.poll().unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(1));
+            std::thread::sleep(std::time::Duration::from_millis(2));
         }
 
         // The earliest change should get expunged
-        let change1 = mb1.stateless().change_scheme().path_for_id(1);
-        for i in 0.. {
-            if !change1.is_file() {
-                break;
-            }
-
-            assert!(i < 500, "CID 1 never got garbage collected");
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        assert!(!mb1.stateless().change_scheme().path_for_id(1).is_file());
     }
 
     #[test]
     fn no_gc_or_rollups_if_read_only() {
         let setup = set_up();
         let (mut mb1, _) = setup.stateless.clone().select().unwrap();
+        mb1.synchronous_gc = true;
         mb1.s.read_only = true;
 
         let uid = simple_append(&setup.stateless);
@@ -543,7 +537,7 @@ mod test {
                 .set_flags_blind(uid, [(true, Flag::Flagged)].iter().cloned())
                 .unwrap();
             mb1.poll().unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(1));
+            std::thread::sleep(std::time::Duration::from_millis(2));
         }
 
         std::thread::sleep(std::time::Duration::from_secs(2));

@@ -56,6 +56,9 @@ pub struct StatefulMailbox {
     pub(super) suggest_rollup: u32,
     pub(super) rollups_since_gc: u32,
     pub(super) gc_in_progress: Arc<AtomicBool>,
+    /// Used by tests to force GCs to occur synchronously to keep the tests
+    /// deterministic
+    pub(super) synchronous_gc: bool,
 }
 
 impl StatelessMailbox {
