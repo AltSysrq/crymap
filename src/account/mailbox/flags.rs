@@ -976,4 +976,20 @@ mod test {
             Err(Error::MailboxReadOnly)
         ));
     }
+
+    #[test]
+    fn seqnum_store_bad_seqnum() {
+        let (_, mut mb, _root) = store_set_up();
+        assert!(matches!(
+            mb.seqnum_store(&StoreRequest {
+                ids: &SeqRange::range(Seqnum::u(1), Seqnum::u(2)),
+                flags: &[Flag::Seen],
+                remove_listed: false,
+                remove_unlisted: false,
+                loud: false,
+                unchanged_since: None,
+            }),
+            Err(Error::NxMessage)
+        ));
+    }
 }
