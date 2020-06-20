@@ -182,6 +182,7 @@ dependencies = [
  "lazy_static",
  "log",
  "nix",
+ "nom",
  "openssl",
  "proptest",
  "rand",
@@ -359,6 +360,17 @@ dependencies = [
  "cfg-if",
  "libc",
  "void",
+]
+
+[[package]]
+name = "nom"
+version = "5.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffb4262d26ed83a1c0a33a38fe2bb15797329c85770da05e6b828ddb782627af"
+dependencies = [
+ "memchr",
+ "regex",
+ "version_check",
 ]
 
 [[package]]

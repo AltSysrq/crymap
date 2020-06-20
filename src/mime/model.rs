@@ -16,9 +16,28 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-mod encoded_word;
-mod grovel;
-mod header;
-mod model;
-mod quoted_printable;
-mod utf7;
+use std::borrow::Cow;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AddrSpec<'a> {
+    pub local: Vec<Cow<'a, [u8]>>,
+    pub domain: Vec<Cow<'a, [u8]>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MailboxSpec<'a> {
+    pub addr: AddrSpec<'a>,
+    pub name: Vec<Cow<'a, [u8]>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupSpec<'a> {
+    pub name: Vec<Cow<'a, [u8]>>,
+    pub boxes: Vec<MailboxSpec<'a>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Address<'a> {
+    Mailbox(MailboxSpec<'a>),
+    Group(GroupSpec<'a>),
+}
