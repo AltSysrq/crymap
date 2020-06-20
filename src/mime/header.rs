@@ -23,28 +23,66 @@
 // references here to match.
 
 use std::borrow::Cow;
+use std::fmt;
 use std::str;
 
 use chrono::prelude::*;
 use nom::bytes::complete::{is_a, is_not, tag};
 use nom::*;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct AddrSpec<'a> {
     pub local: Vec<Cow<'a, [u8]>>,
     pub domain: Vec<Cow<'a, [u8]>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+impl<'a> fmt::Debug for AddrSpec<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "<")?;
+        for part in &self.local {
+            write!(f, "({})", String::from_utf8_lossy(part))?;
+        }
+        write!(f, "@")?;
+        for part in &self.domain {
+            write!(f, "({})", String::from_utf8_lossy(part))?;
+        }
+        write!(f, ">")?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub struct Mailbox<'a> {
     pub addr: AddrSpec<'a>,
     pub name: Vec<Cow<'a, [u8]>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+impl<'a> fmt::Debug for Mailbox<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for part in &self.name {
+            write!(f, "({})", String::from_utf8_lossy(part))?;
+        }
+        write!(f, "{:?}", self.addr)?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub struct Group<'a> {
     pub name: Vec<Cow<'a, [u8]>>,
     pub boxes: Vec<Mailbox<'a>>,
+}
+
+impl<'a> fmt::Debug for Group<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for part in &self.name {
+            write!(f, "({})", String::from_utf8_lossy(part))?;
+        }
+        for mbox in &self.boxes {
+            write!(f, "[{:?}]", mbox)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,6 +93,18 @@ pub enum Address<'a> {
 
 pub fn parse_datetime(date_str: &str) -> Option<DateTime<FixedOffset>> {
     date_time(date_str.as_bytes()).ok().and_then(|r| r.1)
+}
+
+pub fn parse_mailbox(i: &[u8]) -> Option<Mailbox<'_>> {
+    mailbox(i).ok().map(|r| r.1)
+}
+
+pub fn parse_mailbox_list(i: &[u8]) -> Option<Vec<Mailbox<'_>>> {
+    mailbox_list(i).ok().map(|r| r.1)
+}
+
+pub fn parse_address_list(i: &[u8]) -> Option<Vec<Address<'_>>> {
+    address_list(i).ok().map(|r| r.1)
 }
 
 // RFC 2822 3.2.1 "text", including the "obsolete text" syntax that's 8-bit
@@ -400,8 +450,60 @@ fn date_time(i: &[u8]) -> IResult<&[u8], Option<DateTime<FixedOffset>>> {
 // Formally, this is `dot-atom / quoted-string / obs-local-part`, with
 // `obs-local-part` being `word *("." word)`. Any dot-atom or quoted-string
 // conforms to obs-local-part, so we just parse that.
+// Samples from the ENRON corpus frequently have consecutive dots, so we allow
+// the word to be totally empty.
 fn local_part(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
-    multi::separated_nonempty_list(tag(b"."), word)(i)
+    combinator::map(
+        sequence::tuple((
+            // Need to parse leading dots in separately because
+            // separated_nonempty_list won't allow the first element to be
+            // empty.
+            local_leading_dots,
+            multi::separated_nonempty_list(
+                local_separator,
+                combinator::map(combinator::opt(word), |o| {
+                    o.unwrap_or(Cow::Borrowed(&[]))
+                }),
+            ),
+            // Some agent (possibly Mailman?) indicates mailing lists by
+            // placing an unquoted colon immediately before the @
+            combinator::opt(tag(b":")),
+        )),
+        |(leading, mut parts, colon)| {
+            if let Some(colon) = colon {
+                parts.push(Cow::Borrowed(colon));
+            }
+
+            if 0 == leading {
+                parts
+            } else {
+                let mut v = Vec::new();
+                for _ in 0..leading {
+                    v.push(Cow::Borrowed(&[] as &[u8]));
+                }
+                v.append(&mut parts);
+                v
+            }
+        },
+    )(i)
+}
+
+fn local_leading_dots(i: &[u8]) -> IResult<&[u8], usize> {
+    multi::many0_count(sequence::pair(ocfws, local_separator))(i)
+}
+
+fn local_separator(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    branch::alt((
+        // Some agent (JavaMail?) would improperly quote (?) dots in email
+        // addresses like this. It's unclear if it's supposed to have some
+        // other meaning, but in any case it's so far away from being valid
+        // syntax that the best we can do is munch through it and hope for the
+        // best.
+        tag(b"\".'\""),
+        tag(b".\".'\""),
+        tag(b"\".\""),
+        tag(b"."),
+    ))(i)
 }
 
 // RFC 2822 4.4 obsolete domain format
@@ -482,8 +584,39 @@ fn obs_domain_list(i: &[u8]) -> IResult<&[u8], ()> {
 // information.
 fn angle_addr(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
     sequence::delimited(
-        sequence::tuple((ocfws, tag(b"<"), combinator::opt(obs_domain_list))),
-        addr_spec,
+        sequence::tuple((
+            ocfws,
+            tag(b"<"),
+            combinator::opt(sequence::pair(obs_domain_list, tag(b":"))),
+            // Older versions of Outlook stick a spurious apostrophe before the
+            // local part. We can generally take a GIGO approach to this, but
+            // parsing would fail if we didn't handle the case where the local
+            // part starts with '".
+            combinator::opt(sequence::pair(
+                tag(b"'"),
+                combinator::peek(tag(b"\"")),
+            )),
+            // Another agent would put empty double quotes immediately abutting
+            // the local part.
+            combinator::opt(tag(b"\"\"")),
+        )),
+        // Though not described by RFC 2822, some agents will include a totally
+        // empty <> pair. Some will also include only a local part.
+        combinator::map(
+            combinator::opt(branch::alt((
+                addr_spec,
+                combinator::map(local_part, |l| AddrSpec {
+                    local: l,
+                    domain: vec![],
+                }),
+            ))),
+            |a| {
+                a.unwrap_or_else(|| AddrSpec {
+                    local: vec![],
+                    domain: vec![],
+                })
+            },
+        ),
         sequence::pair(tag(b">"), ocfws),
     )(i)
 }
@@ -515,22 +648,33 @@ fn obs_list_delim(i: &[u8]) -> IResult<&[u8], ()> {
 // RFC 2822 3.4 mailbox list, including 4.4 obsolete syntax
 fn mailbox_list(i: &[u8]) -> IResult<&[u8], Vec<Mailbox<'_>>> {
     sequence::delimited(
-        obs_list_delim,
+        combinator::opt(obs_list_delim),
         multi::separated_nonempty_list(obs_list_delim, mailbox),
-        obs_list_delim,
+        combinator::opt(obs_list_delim),
     )(i)
 }
 
 // RFC 2822 3.4 group
 fn group(i: &[u8]) -> IResult<&[u8], Group<'_>> {
     let (i, name) = sequence::terminated(phrase, tag(b":"))(i)?;
-    let (i, boxes) = sequence::terminated(
-        combinator::opt(mailbox_list),
-        sequence::tuple((ocfws, tag(";"), ocfws)),
-    )(i)?;
-
+    // RFC 2822 doesn't allow ; to be missing even in the obsolete syntax.
+    // However, Mark Crispin mentioned the possibility of it being missing
+    // on the IMAP mailing list, so we allow it to be missing here too.
+    // Further (and again not mentioned in RFC 2822), some agents place
+    // *multiple* semicolons here for some reason. Even worse, some agents
+    // don't include the comma to separate multiple groups. For all these
+    // reasons, we don't handle semicolon here, but instead treat it as another
+    // address list delimiter.
+    let (i, boxes) = combinator::opt(mailbox_list)(i)?;
     let boxes = boxes.unwrap_or(vec![]);
     Ok((i, Group { name, boxes }))
+}
+
+fn obs_addr_list_delim(i: &[u8]) -> IResult<&[u8], ()> {
+    combinator::map(
+        multi::many1_count(sequence::tuple((ocfws, is_a(",;"), ocfws))),
+        |_| (),
+    )(i)
 }
 
 // RFC 2822 3.4 address
@@ -544,9 +688,9 @@ fn address(i: &[u8]) -> IResult<&[u8], Address<'_>> {
 // RFC 2822 3.4 address list, including 4.4 obsolete syntax
 fn address_list(i: &[u8]) -> IResult<&[u8], Vec<Address<'_>>> {
     sequence::delimited(
-        obs_list_delim,
-        multi::separated_nonempty_list(obs_list_delim, address),
-        obs_list_delim,
+        combinator::opt(obs_addr_list_delim),
+        multi::separated_nonempty_list(obs_addr_list_delim, address),
+        combinator::opt(obs_addr_list_delim),
     )(i)
 }
 
@@ -616,6 +760,301 @@ mod test {
             }
             if parse_datetime(date_string).is_none() {
                 panic!("Failed to parse: {}", date_string);
+            }
+        }
+    }
+
+    fn mbox(input: &str) -> String {
+        if let Some(m) = parse_mailbox(input.as_bytes()) {
+            format!("{:?}", m)
+        } else {
+            panic!("Failed to parse: {}", input);
+        }
+    }
+
+    #[test]
+    fn test_parse_mailbox() {
+        assert_eq!("<(foo)@(bar)(com)>", mbox("foo@bar.com"));
+        assert_eq!("<(foo)@(bar)(com)>", mbox("<foo@bar.com>"));
+        // Examples from RFC 2822
+        // There aren't many single mailboxes, so this also pulls some out of
+        // lists.
+        assert_eq!(
+            "(Michael)(Jones)<(mjones)@(machine)(example)>",
+            mbox("Michael Jones <mjones@machine.example>")
+        );
+        assert_eq!(
+            "(Joe Q. Public)<(john)(q)(public)@(example)(com)>",
+            mbox("\"Joe Q. Public\" <john.q.public@example.com>")
+        );
+        assert_eq!(
+            "(Giant; \"Big\" Box)<(sysservices)@(example)(net)>",
+            mbox("\"Giant; \\\"Big\\\" Box\" <sysservices@example.net>")
+        );
+        assert_eq!("(Who?)<(one)@(y)(test)>", mbox("Who? <one@y.test>"));
+        assert_eq!(
+            "(Pete)<(pete)@(silly)(test)>",
+            mbox(concat!(
+                "Pete(A wonderful \\) chap) ",
+                "<pete(his account)@silly.test(his host)>"
+            ))
+        );
+        assert_eq!(
+            "(Mary)(Smith)<(mary)@(example)(net)>",
+            mbox("Mary Smith <@machine.tld:mary@example.net>")
+        );
+        assert_eq!(
+            "(John)(Doe)<(jdoe)@(machine)(example)>",
+            mbox("John Doe <jdoe@machine(comment).  example>")
+        );
+        // ENRON-style with illegal dots
+        assert_eq!("<()(ed)()(dy)()@(enron)(com)>", mbox(".ed..dy.@enron.com"));
+        // Mailman's (?) illegal list syntax
+        assert_eq!(
+            "<(the.desk)(:)@(enron)(com)>",
+            mbox("<\"the.desk\":@enron.com>")
+        );
+        // Whatever this is, found commonly in the ENRON corpus
+        assert_eq!(
+            "<(katz)(andy)@(enron)(com)>",
+            mbox("<katz\".'\"andy@enron.com>")
+        );
+        assert_eq!(
+            "<(katz)(andy)@(enron)(com)>",
+            mbox("<katz.\".'\"andy@enron.com>")
+        );
+        assert_eq!(
+            "<(katz)(andy)@(enron)(com)>",
+            mbox("<katz\".\"andy@enron.com>")
+        );
+        // Older versions of outlook's apostrophe bug
+        assert_eq!("<(foo)@(bar)(com)>", mbox("<'\"foo\"@bar.com>"));
+    }
+
+    fn mbox_list(input: &str) -> String {
+        if let Some(m) = parse_mailbox_list(input.as_bytes()) {
+            format!("{:?}", m)
+        } else {
+            panic!("Failed to parse: {}", input);
+        }
+    }
+
+    #[test]
+    fn test_parse_mailbox_list() {
+        assert_eq!("[<(foo)@(bar)(com)>]", mbox_list("foo@bar.com"));
+        assert_eq!("[<(foo)@(bar)(com)>]", mbox_list("<foo@bar.com>"));
+        // RFC 2822 examples
+        assert_eq!(
+            "[(Joe Q. Public)<(john)(q)(public)@(example)(com)>]",
+            mbox_list("\"Joe Q. Public\" <john.q.public@example.com>")
+        );
+        assert_eq!(
+            concat!(
+                "[",
+                "(Mary)(Smith)<(mary)@(x)(test)>, ",
+                "<(jdoe)@(example)(org)>, ",
+                "(Who?)<(one)@(y)(test)>",
+                "]"
+            ),
+            mbox_list(concat!(
+                "Mary Smith <mary@x.test>, jdoe@example.org, ",
+                "Who? <one@y.test>"
+            ))
+        );
+        assert_eq!(
+            concat!(
+                "[",
+                "<(boss)@(nil)(test)>, ",
+                "(Giant; \"Big\" Box)<(sysservices)@(example)(net)>",
+                "]"
+            ),
+            mbox_list(concat!(
+                "<boss@nil.test>, ",
+                "\"Giant; \\\"Big\\\" Box\" <sysservices@example.net>"
+            ))
+        );
+    }
+
+    fn addr_list(input: &str) -> String {
+        if let Some(m) = parse_address_list(input.as_bytes()) {
+            format!("{:?}", m)
+        } else {
+            panic!("Failed to parse: {}", input);
+        }
+    }
+
+    #[test]
+    fn test_parse_address_list() {
+        assert_eq!("[Mailbox(<(foo)@(bar)(com)>)]", addr_list("foo@bar.com"));
+        assert_eq!("[Mailbox(<(foo)@(bar)(com)>)]", addr_list("<foo@bar.com>"));
+        // RFC 2822 examples
+        assert_eq!(
+            "[Mailbox((Joe Q. Public)<(john)(q)(public)@(example)(com)>)]",
+            addr_list("\"Joe Q. Public\" <john.q.public@example.com>")
+        );
+        assert_eq!(
+            concat!(
+                "[",
+                "Mailbox((Mary)(Smith)<(mary)@(x)(test)>), ",
+                "Mailbox(<(jdoe)@(example)(org)>), ",
+                "Mailbox((Who?)<(one)@(y)(test)>)",
+                "]"
+            ),
+            addr_list(concat!(
+                "Mary Smith <mary@x.test>, jdoe@example.org, ",
+                "Who? <one@y.test>"
+            ))
+        );
+        assert_eq!(
+            concat!(
+                "[",
+                "Mailbox(<(boss)@(nil)(test)>), ",
+                "Mailbox((Giant; \"Big\" Box)<(sysservices)@(example)(net)>)",
+                "]"
+            ),
+            addr_list(concat!(
+                "<boss@nil.test>, ",
+                "\"Giant; \\\"Big\\\" Box\" <sysservices@example.net>"
+            ))
+        );
+
+        assert_eq!(
+            concat!(
+                "[Group((A)(Group)",
+                "[(Chris)(Jones)<(c)@(a)(test)>]",
+                "[<(joe)@(where)(test)>]",
+                "[(John)<(jdoe)@(one)(test)>]",
+                ")]"
+            ),
+            addr_list(concat!(
+                "A Group:Chris Jones <c@a.test>,",
+                "joe@where.test,John <jdoe@one.test>;"
+            ))
+        );
+        assert_eq!(
+            "[Group((Undisclosed)(recipients))]",
+            addr_list("Undisclosed recipients:;")
+        );
+        assert_eq!(
+            concat!(
+                "[Group((A)(Group)",
+                "[(Chris)(Jones)<(c)@(public)(example)>]",
+                "[<(joe)@(example)(org)>]",
+                "[(John)<(jdoe)@(one)(test)>]",
+                ")]"
+            ),
+            addr_list(concat!(
+                "A Group(Some people)\r\n",
+                "     :Chris Jones <c@(Chris's host.)public.example>,\r\n",
+                "         joe@example.org,\r\n",
+                "  John <jdoe@one.test> (my dear friend); ",
+                "(the end of the group)"
+            ))
+        );
+
+        // Test address lists including more than just one group
+        assert_eq!(
+            "[Group((A)[<(foo)@(bar)(com)>]), Group((B)[<(bar)@(baz)(com)>])]",
+            // Note missing terminator on the last group
+            addr_list("A:foo@bar.com;,B:bar@baz.com")
+        );
+        assert_eq!(
+            "[Mailbox(<(foo)@(bar)(com)>), Group((B)[<(bar)@(baz)(com)>])]",
+            addr_list("foo@bar.com,B:bar@baz.com")
+        );
+        assert_eq!(
+            "[Group((A)[<(foo)@(bar)(com)>]), Mailbox(<(bar)@(baz)(com)>)]",
+            addr_list("A:foo@bar.com;,bar@baz.com")
+        );
+    }
+
+    #[test]
+    fn address_list_parse_jlingle_corpus() {
+        // This holds the unfolded content of every From, To, CC, and BCC
+        // header of every email I (Jason Lingle) have ever received as of
+        // 2020-06-20, with all alphanumerics replaced with 'X' (since the
+        // actual values do not affect syntax), and finally deduplicated. A few
+        // uncensored Unicode characters are present in there as well.
+        //
+        // There was some samples that were removed manually:
+        //
+        // "XXXXX! XXXXXXXX"
+        // Since the parser is greedy, supporting this would require manual
+        // look-ahead. But since this is abjectly an invalid address list, we
+        // just don't support it.
+        //
+        // XXXXXXXXXXX-XXXXXXXXXX:;;;;XXXXXXXXXXX-XXXXXXXXXX:;@XXX.XXX;;;;;;
+        // originally:
+        // undisclosed-recipients:;;;;undisclosed-recipients:;@MIT.EDU;;;;;;
+        // The main problem here, as far as our permissive parser is concerned,
+        // is the @MIT.EDU part with no local part. This was also excluded
+        // since there's not really any meaning we can ascribe to this
+        // regardless.
+        let data = include_str!("address-list-corpus-jlingle.txt");
+        address_list_parse_corpus(data);
+    }
+
+    #[test]
+    fn address_list_parse_enron_corpus() {
+        local_part(b".foo").unwrap();
+
+        // Similar to the above, but the text is pulled from the entire ENRON
+        // email corpus. The text is still censored just to reduce the number
+        // of distinct strings.
+        //
+        // Removed:
+        //
+        // No address:
+        // XXXX.X
+        // XXXXXXXXXX: XXXX
+        // XXXXX.XXXXXX@XXXXX.XXX, XXXX.XXXXXXX@XXXX, XXXX XXXX
+        // And other variations of this
+        //
+        // No ascribable meaning:
+        // <"XXXXX".@XXXXX@XXXXX.XXX>
+        // <"X@XXXXXXXX".@XXXXX@XXXXX.XXX>
+        // <"XXXXX"@XXXXXX.XXX.XXX@XXXXX.XXX>
+        // <"XXX/XXXXXXX"@XXXXX.XX.XXX@XXXXX.XXX>
+        // <"XXXXX"@XXXXXX.XXX.XXX@XXXXX.XXX>
+        // and other variations of this double-@ syntax
+        //
+        // Using an email address as a list name (and several much larger
+        // variants of this line):
+        // XXXX.XXXXXXX@XXXXXXX-XX: <XXXXXXXX.XXXXXXXXXXXXX.XXXXXXXX.XXXXX@XXXXX>
+        //
+        // A line containing this, which is probably corruption and not actual
+        // syntax (and a couple similar):
+        // <XXXXXXXXX\"@XXXXX.<??X"X.@XXXXX.XXX>
+        //
+        // A line which ended with a stray ')'. The rest of the line was
+        // parsed.
+        //
+        // A line which had a closing, but no opening, double-quote around a
+        // string.
+        //
+        // All lines after 55482 were removed due to decreasing value of the
+        // test data (i.e. more and more common occurrences of the above
+        // issues due to each line having more and more items).
+        let data = include_str!("address-list-corpus-enron.txt");
+        address_list_parse_corpus(data);
+    }
+
+    fn address_list_parse_corpus(data: &str) {
+        for (lineno, line) in data.lines().enumerate() {
+            if line.is_empty() {
+                continue;
+            }
+
+            if let Ok((remaining, _)) = address_list(line.as_bytes()) {
+                assert!(
+                    remaining.is_empty(),
+                    "Didn't parse all of line {}:\n{}\nRemaining:\n{}",
+                    lineno + 1,
+                    line,
+                    String::from_utf8_lossy(remaining)
+                );
+            } else {
+                panic!("Failed to parse line {}:\n{}", lineno + 1, line);
             }
         }
     }
