@@ -18,60 +18,109 @@
 
 //! Utilities for working with individual RFC 2822 headers.
 
+// TODO RFC 2822 was obsoleted by RFC 5322. It looks like it's mostly just more
+// regression away from 8-bit cleanliness, but we'll want to update our
+// references here to match.
+
 use std::borrow::Cow;
 use std::str;
 
-use chrono::*;
+use chrono::prelude::*;
+use nom::bytes::complete::{is_a, is_not, tag};
 use nom::*;
 
-use super::model::*;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AddrSpec<'a> {
+    pub local: Vec<Cow<'a, [u8]>>,
+    pub domain: Vec<Cow<'a, [u8]>>,
+}
 
-fn ascii_digit(b: u8) -> bool {
-    b >= b'0' && b <= b'9'
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Mailbox<'a> {
+    pub addr: AddrSpec<'a>,
+    pub name: Vec<Cow<'a, [u8]>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Group<'a> {
+    pub name: Vec<Cow<'a, [u8]>>,
+    pub boxes: Vec<Mailbox<'a>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Address<'a> {
+    Mailbox(Mailbox<'a>),
+    Group(Group<'a>),
+}
+
+pub fn parse_datetime(date_str: &str) -> Option<DateTime<FixedOffset>> {
+    date_time(date_str.as_bytes()).ok().and_then(|r| r.1)
 }
 
 // RFC 2822 3.2.1 "text", including the "obsolete text" syntax that's 8-bit
 // clean.
 // RFC 6532 updates the definition to include all non-ASCII characters.
-named!(text, is_not!("\r\n"));
+fn text(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    is_not("\r\n")(i)
+}
+
 // RFC 2822 3.2.2 "quoted-pair", including the 8-bit clean "obsolete" syntax
-named!(quoted_pair, preceded!(char!('\\'), take!(1)));
+fn quoted_pair(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    let (i, _) = tag(b"\\")(i)?;
+    bytes::complete::take(1usize)(i)
+}
 
 // RFC 2822 3.2.3 "Folding white space".
 // The formal syntax describes the folding syntax itself, but unfolding is
 // partially performed by a different mechanism, so we just treat the
 // line-ending characters as simple whitespace.
-named!(fws, map!(is_a!(" \t\r\n"), |_| &b" "[..]));
+fn fws(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    let (i, _) = is_a(" \t\r\n")(i)?;
+    Ok((i, b" "))
+}
+
 // RFC 2822 3.2.3 "Comment text".
-named!(ctext, is_not!("()\\ \t\r\n"));
+fn ctext(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    is_not("()\\ \t\r\n")(i)
+}
+
 // RFC 2822 3.2.3 "Comment content".
 // The original definition includes FWS in the comment syntax instead of here,
 // which makes it a lot more complicated.
-named!(
-    ccontent<()>,
-    alt!(
-        map!(ctext, |_| ())
-            | map!(quoted_pair, |_| ())
-            | map!(fws, |_| ())
-            | comment
-    )
-);
+fn ccontent(i: &[u8]) -> IResult<&[u8], ()> {
+    let (i, _) = branch::alt((ctext, quoted_pair, fws))(i)?;
+    Ok((i, ()))
+}
+
 // RFC 2822 3.2.3 "Comment". Note it is recursive.
-named!(
-    comment<()>,
-    delimited!(char!('('), map!(many0_count!(ccontent), |_| ()), char!(')'))
-);
+fn comment(i: &[u8]) -> IResult<&[u8], ()> {
+    let (i, _) = sequence::delimited(
+        tag(b"("),
+        multi::many0_count(ccontent),
+        tag(b")"),
+    )(i)?;
+    Ok((i, ()))
+}
+
 // RFC 2822 3.2.3 "Comment or folding white space".
-named!(
-    cfws<()>,
-    map!(many0_count!(alt!(map!(fws, |_| ()) | comment)), |_| ())
-);
+fn cfws(i: &[u8]) -> IResult<&[u8], ()> {
+    let (i, _) = multi::many1_count(branch::alt((
+        comment,
+        combinator::map(fws, |_| ()),
+    )))(i)?;
+    Ok((i, ()))
+}
+
+// Convenience for opt(cfws)
+fn ocfws(i: &[u8]) -> IResult<&[u8], ()> {
+    let (i, _) = combinator::opt(cfws)(i)?;
+    Ok((i, ()))
+}
 
 // RFC 2822 3.2.4 "Atom text"
 // Amended by RFC 6532 to include all non-ASCII characters
-named!(
-    atext,
-    take_while!(|ch| {
+fn atext(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    bytes::complete::take_while1(|ch| {
         // RFC2822 ALPHA
         (ch >= b'A' && ch <= b'Z') ||
             (ch >= b'a' && ch <= b'z') ||
@@ -92,37 +141,44 @@ named!(
             (ch >= b'{' && ch <= b'~') || // {|}~
             // RFC 6532 Unicode
             ch >= 0x80
-    })
-);
+    })(i)
+}
 
 // RFC 2822 3.2.4 "Atom"
-named!(atom, delimited!(opt!(cfws), atext, opt!(cfws)));
+fn atom(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    sequence::delimited(ocfws, atext, ocfws)(i)
+}
 
 // RFC 2822 3.2.4 "Dot atom text"
-named!(
-    dot_atom_text<Vec<&[u8]>>,
-    separated_nonempty_list!(char!('.'), atext)
-);
+fn dot_atom_text(i: &[u8]) -> IResult<&[u8], Vec<&[u8]>> {
+    multi::separated_nonempty_list(tag(b"."), atext)(i)
+}
 
 // RFC 2822 3.2.4 "Dot atom"
-named!(
-    dot_atom<Vec<&[u8]>>,
-    delimited!(opt!(cfws), dot_atom_text, opt!(cfws))
-);
+fn dot_atom(i: &[u8]) -> IResult<&[u8], Vec<&[u8]>> {
+    sequence::delimited(ocfws, dot_atom_text, ocfws)(i)
+}
 
 // RFC 2822 3.2.5 "Quoted [string] text"
 // Amended by RFC 6532 to include all non-ASCII characters
-named!(qtext, is_not!(" \t\r\n\\\""));
+// The RFC describes the syntax as if FWS has its normal folding behaviour
+// between the quotes, but it doesn't, so we just treat it as part of qtext.
+fn qtext(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    is_not("\\\"")(i)
+}
+
 // RFC 2822 3.2.5 "Quoted [string] content
 // The original spec puts FWS in the quoted-string definition for some reason,
 // which would make it much more complex.
-named!(qcontent, alt!(qtext | quoted_pair | fws));
+fn qcontent(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    branch::alt((qtext, quoted_pair))(i)
+}
+
 // RFC 2822 3.2.5 "Quoted string"
-named!(
-    quoted_string<Cow<[u8]>>,
-    delimited!(
-        pair!(opt!(cfws), char!('"')),
-        fold_many0!(
+fn quoted_string(i: &[u8]) -> IResult<&[u8], Cow<'_, [u8]>> {
+    sequence::delimited(
+        sequence::pair(ocfws, tag(b"\"")),
+        multi::fold_many0(
             qcontent,
             Cow::Borrowed(&[] as &[u8]),
             |mut acc: Cow<[u8]>, item| {
@@ -132,336 +188,359 @@ named!(
                     acc.to_mut().extend_from_slice(item);
                 }
                 acc
-            }
+            },
         ),
-        pair!(char!('"'), opt!(cfws))
-    )
-);
+        sequence::pair(tag(b"\""), ocfws),
+    )(i)
+}
 
 // RFC 2822 3.2.6 "word"
-named!(
-    word<Cow<[u8]>>,
-    alt!(map!(atom, Cow::Borrowed) | quoted_string)
-);
+fn word(i: &[u8]) -> IResult<&[u8], Cow<'_, [u8]>> {
+    branch::alt((combinator::map(atom, Cow::Borrowed), quoted_string))(i)
+}
 
 // Not formally specified by RFC 2822, but part of the `obs-phrase` grammar.
 // Defined here as a separate element for simplicity.
-named!(
-    obs_dot<Cow<[u8]>>,
+fn obs_dot(i: &[u8]) -> IResult<&[u8], Cow<'_, [u8]>> {
     // Only need to handle CFWS at end since there is always a preceding token
     // that allows CFWS.
-    terminated!(
-        map!(char!('.'), |_| Cow::Borrowed(b"." as &[u8])),
-        opt!(cfws)
-    )
-);
+    sequence::terminated(combinator::map(tag(b"."), Cow::Borrowed), ocfws)(i)
+}
 
 // RFC 2822 3.2.6 "phrase", plus "obsolete phrase" syntax which accounts for
 // the '.' that many agents put unquoted into display names.
-named!(
-    phrase<Vec<Cow<[u8]>>>,
-    map!(pair!(word, many0!(alt!(word | obs_dot))), |(
-        head,
-        mut tail,
-    )| {
-        tail.insert(0, head);
-        tail
-    })
-);
+fn phrase(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
+    combinator::map(
+        sequence::pair(word, multi::many0(branch::alt((word, obs_dot)))),
+        |(head, mut tail)| {
+            tail.insert(0, head);
+            tail
+        },
+    )(i)
+}
 
 // RFC 2822 3.2.6 also defines "unstructured text", but once the "obsolete"
 // syntax and RFC 6532 revision is considered, there is no syntax at all and it
 // is just a raw byte string, so there's nothing to define here.
 
+fn parse_u32_infallible(i: &[u8]) -> u32 {
+    str::from_utf8(i).unwrap().parse::<u32>().unwrap()
+}
+
 // RFC 2822 3.3 date/time syntax, including obsolete forms.
 // In general, the obsolete forms allow CFWS between all terms, so we just
 // write that in the whole date/time definitions instead of the rather
 // arbitrary distribution the RFC uses.
-named!(
-    year<u32>,
-    map!(take_while_m_n!(2, 4, ascii_digit), |s| {
-        // Infallible since we know s is [0-9]{2,4}
-        let mut y: u32 = str::from_utf8(s).unwrap().parse().unwrap();
-        // Y2K compliance workarounds described by RFC 2822 4.3
-        if s.len() == 2 && y < 50 {
-            y += 2000;
-        } else if s.len() < 4 {
-            y += 1900;
-        }
-        y
-    })
-);
-
-named!(
-    month<u32>,
-    alt!(
-        map!(tag_no_case!("jan"), |_| 1)
-            | map!(tag_no_case!("feb"), |_| 2)
-            | map!(tag_no_case!("mar"), |_| 3)
-            | map!(tag_no_case!("apr"), |_| 4)
-            | map!(tag_no_case!("may"), |_| 5)
-            | map!(tag_no_case!("jun"), |_| 6)
-            | map!(tag_no_case!("jul"), |_| 7)
-            | map!(tag_no_case!("aug"), |_| 8)
-            | map!(tag_no_case!("sep"), |_| 9)
-            | map!(tag_no_case!("oct"), |_| 10)
-            | map!(tag_no_case!("nov"), |_| 11)
-            | map!(tag_no_case!("dec"), |_| 12)
-    )
-);
-
-named!(
-    day<u32>,
-    map!(
-        take_while_m_n!(1, 2, ascii_digit),
-        // Infallible since we know the exact format
-        |s| str::from_utf8(s).unwrap().parse::<u32>().unwrap()
-    )
-);
-
-named!(
-    date<(u32, u32, u32)>,
-    map!(
-        tuple!(
-            terminated!(day, opt!(cfws)),
-            terminated!(month, opt!(cfws)),
-            terminated!(year, opt!(cfws))
-        ),
-        |(d, m, y)| (y, m, d)
-    )
-);
-
-named!(
-    two_digit<u32>,
-    map!(
-        take_while_m_n!(2, 2, ascii_digit),
-        // Infallible since we know the exact format
-        |s| str::from_utf8(s).unwrap().parse::<u32>().unwrap()
-    )
-);
-
-named!(
-    time_of_day<(u32, u32, u32)>,
-    tuple!(
-        terminated!(two_digit, tuple!(opt!(cfws), char!(':'), opt!(cfws))),
-        terminated!(two_digit, tuple!(opt!(cfws), char!(':'), opt!(cfws))),
-        terminated!(two_digit, opt!(cfws))
-    )
-);
-
-named!(
-    numeric_zone<i32>,
-    map!(
-        pair!(
-            alt!(char!('+') | char!('-')),
-            take_while_m_n!(4, 4, ascii_digit)
-        ),
-        |(sign, s)| {
-            let mut n = str::from_utf8(s).unwrap().parse::<i32>().unwrap();
-            if '-' == sign {
-                n = -n;
+fn year(i: &[u8]) -> IResult<&[u8], u32> {
+    combinator::map(
+        bytes::complete::take_while_m_n(2, 4, character::is_digit),
+        |s| {
+            // Infallible since we know s is [0-9]{2,4}
+            let mut y = parse_u32_infallible(s);
+            // Y2K compliance workarounds described by RFC 2822 4.3
+            if s.len() == 2 && y < 50 {
+                y += 2000;
+            } else if s.len() < 4 {
+                y += 1900;
             }
-            n
-        }
-    )
-);
+            y
+        },
+    )(i)
+}
 
-named!(
-    zone<i32>,
-    alt!(
-        numeric_zone |
-        // UTC
-        map!(alt!(tag_no_case!("ut") | tag_no_case!("gmt")), |_| 0) |
-        // US time zones
-        map!(tag_no_case!("edt"), |_| -400) |
-        map!(alt!(tag_no_case!("est") | tag_no_case!("cdt")), |_| -500) |
-        map!(alt!(tag_no_case!("cst") | tag_no_case!("mdt")), |_| -600) |
-        map!(alt!(tag_no_case!("mst") | tag_no_case!("pdt")), |_| -700) |
-        map!(tag_no_case!("pst"), |_| -800) |
-        // (US?) Military time zones and unrecognised zones
-        // RFC 2822 indicates that the military time zones were so poorly
-        // defined that they must be treated as 0 unless additional information
-        // is available. Unknown time zones must also be treated as 0.
-        map!(atext, |_| 0)
-    )
-);
+static MONTH_NAMES: [&str; 12] = [
+    "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct",
+    "nov", "dec",
+];
+fn month(i: &[u8]) -> IResult<&[u8], u32> {
+    combinator::map_opt(atext, |name| {
+        str::from_utf8(name).ok().and_then(|name| {
+            MONTH_NAMES
+                .iter()
+                .enumerate()
+                .filter(|&(_, n)| n.eq_ignore_ascii_case(name))
+                .map(|(ix, _)| ix as u32 + 1)
+                .next()
+        })
+    })(i)
+}
 
-named!(
-    time<((u32, u32, u32), i32)>,
-    // time already allows a CFWS at the end so we don't need something between
-    // time and zone.
-    terminated!(pair!(time_of_day, zone), opt!(cfws))
-);
+fn day(i: &[u8]) -> IResult<&[u8], u32> {
+    combinator::map(
+        bytes::complete::take_while_m_n(1, 2, character::is_digit),
+        parse_u32_infallible,
+    )(i)
+}
 
-named!(
-    date_time<Option<DateTime<FixedOffset>>>,
-    map!(
-        // We don't care what day of week it was
-        preceded!(
-            tuple!(atom, char!(','), cfws),
-            // Each of these ends with CFWS so we don't need to add more here
-            tuple!(date, time)
+fn date(i: &[u8]) -> IResult<&[u8], (u32, u32, u32)> {
+    let (i, d) = sequence::terminated(day, ocfws)(i)?;
+    let (i, m) = sequence::terminated(month, ocfws)(i)?;
+    let (i, y) = sequence::terminated(year, ocfws)(i)?;
+    Ok((i, (y, m, d)))
+}
+
+fn two_digit(i: &[u8]) -> IResult<&[u8], u32> {
+    combinator::map(
+        bytes::complete::take_while_m_n(2, 2, character::is_digit),
+        parse_u32_infallible,
+    )(i)
+}
+
+fn time_colon(i: &[u8]) -> IResult<&[u8], ()> {
+    let (i, _) = sequence::tuple((ocfws, tag(b":"), ocfws))(i)?;
+    Ok((i, ()))
+}
+
+fn time_of_day(i: &[u8]) -> IResult<&[u8], (u32, u32, u32)> {
+    sequence::tuple((
+        sequence::terminated(two_digit, time_colon),
+        sequence::terminated(two_digit, time_colon),
+        sequence::terminated(two_digit, ocfws),
+    ))(i)
+}
+
+fn numeric_zone(i: &[u8]) -> IResult<&[u8], i32> {
+    combinator::map(
+        sequence::pair(
+            branch::alt((tag(b"+"), tag(b"-"))),
+            sequence::pair(two_digit, two_digit),
         ),
-        |((year, month, day), ((hour, minute, second), zone))| {
-            FixedOffset::east_opt(zone)
-                .and_then(|off| off.ymd_opt(year as i32, month, day).latest())
-                .and_then(|date| date.and_hms_opt(hour, minute, second))
-        }
-    )
-);
+        |(sign, (h, m))| {
+            let n = (h * 60 + m) as i32;
+            if b"-" == sign {
+                -n
+            } else {
+                n
+            }
+        },
+    )(i)
+}
+
+static OBSOLETE_ZONES: &[(&str, i32)] = &[
+    // UTC
+    ("ut", 0),
+    ("gmt", 0),
+    // US time zones
+    ("edt", -4 * 60),
+    ("est", -5 * 60),
+    ("cdt", -5 * 60),
+    ("cst", -6 * 60),
+    ("mdt", -6 * 60),
+    ("mst", -7 * 60),
+    ("pdt", -7 * 60),
+    ("pst", -8 * 60),
+];
+
+fn obsolete_zone(i: &[u8]) -> IResult<&[u8], i32> {
+    combinator::map(atext, |name| {
+        str::from_utf8(name)
+            .ok()
+            .and_then(|name| {
+                OBSOLETE_ZONES
+                    .iter()
+                    .filter(|&&(zone, _)| zone.eq_ignore_ascii_case(name))
+                    .map(|&(_, offset)| offset)
+                    .next()
+            })
+            // (US?) Military time zones and unrecognised zones RFC 2822
+            // indicates that the military time zones were so poorly defined
+            // that they must be treated as 0 unless additional information is
+            // available. Unknown time zones must also be treated as 0.
+            .unwrap_or(0)
+    })(i)
+}
+
+fn zone(i: &[u8]) -> IResult<&[u8], i32> {
+    branch::alt((numeric_zone, obsolete_zone))(i)
+}
+
+fn time(i: &[u8]) -> IResult<&[u8], ((u32, u32, u32), i32)> {
+    // time already allows a CFWS at the end so we don't need anything between
+    // time and zone.
+    sequence::terminated(sequence::pair(time_of_day, zone), ocfws)(i)
+}
+
+fn date_time(i: &[u8]) -> IResult<&[u8], Option<DateTime<FixedOffset>>> {
+    // We don't care what day of week it was
+    let (i, _) = sequence::tuple((atom, tag(b","), cfws))(i)?;
+    let (i, (year, month, day)) = date(i)?;
+    let (i, ((hour, minute, second), zone)) = time(i)?;
+
+    let res = FixedOffset::east_opt(zone * 60)
+        .and_then(|off| off.ymd_opt(year as i32, month, day).latest())
+        .and_then(|date| date.and_hms_opt(hour, minute, second));
+
+    Ok((i, res))
+}
 
 // RFC 2822 3.4.1 local part of address
 // Formally, this is `dot-atom / quoted-string / obs-local-part`, with
 // `obs-local-part` being `word *("." word)`. Any dot-atom or quoted-string
 // conforms to obs-local-part, so we just parse that.
-named!(
-    local_part<Vec<Cow<[u8]>>>,
-    separated_nonempty_list!(char!('.'), word)
-);
+fn local_part(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
+    multi::separated_nonempty_list(tag(b"."), word)(i)
+}
 
 // RFC 2822 4.4 obsolete domain format
-named!(
-    obs_domain<Vec<Cow<[u8]>>>,
-    separated_nonempty_list!(char!('.'), map!(atom, Cow::Borrowed))
-);
+fn obs_domain(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
+    multi::separated_nonempty_list(
+        tag(b"."),
+        combinator::map(atom, Cow::Borrowed),
+    )(i)
+}
 
 // RFC 2822 3.4.1 domain name text
 // Amended by RFC 6532 to include all non-ASCII
-named!(dtext, is_not!("[]\\ \t\r\n"));
+fn dtext(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    is_not("[]\\ \t\r\n")(i)
+}
 
 // RFC 2822 3.4.1 domain literal content
 // As with quoted strings, we move the FWS part into the content to simplify
 // the syntax definition.
-named!(dcontent, alt!(dtext | quoted_pair | fws));
+fn dcontent(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    branch::alt((dtext, quoted_pair, fws))(i)
+}
 
 // RFC 2822 3.4.1 domain literal
-named!(
-    domain_literal<Vec<u8>>,
-    map!(
-        delimited!(
-            pair!(opt!(cfws), char!('[')),
-            fold_many0!(dcontent, vec![b'['], |mut acc, item| {
+fn domain_literal(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
+    combinator::map(
+        sequence::delimited(
+            sequence::pair(ocfws, tag(b"[")),
+            multi::fold_many0(dcontent, vec![b'['], |mut acc, item| {
                 acc.extend_from_slice(item);
                 acc
             }),
-            pair!(char!(']'), opt!(cfws))
+            sequence::pair(tag(b"]"), ocfws),
         ),
         |mut res| {
             res.push(b']');
             res
-        }
-    )
-);
+        },
+    )(i)
+}
 
 // RFC 2822 3.4.1 domain
 // dot-atom is encompassed by obs_domain
-named!(
-    domain<Vec<Cow<[u8]>>>,
-    alt!(obs_domain | map!(domain_literal, |v| vec![Cow::Owned(v)]))
-);
+fn domain(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
+    branch::alt((
+        obs_domain,
+        combinator::map(domain_literal, |v| vec![Cow::Owned(v)]),
+    ))(i)
+}
 
 // RFC 2822 3.4.1 address specification
-named!(
-    addr_spec<AddrSpec>,
-    map!(pair!(local_part, preceded!(char!('@'), domain)), |(
-        local,
-        domain,
-    )| {
-        AddrSpec { local, domain }
-    })
-);
+fn addr_spec(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
+    let (i, local) = local_part(i)?;
+    let (i, domain) = sequence::preceded(tag(b"@"), domain)(i)?;
+    Ok((i, AddrSpec { local, domain }))
+}
 
 // RFC 2822 4.4 obsolete routing information
 // We just discard all this
-named!(
-    obs_domain_list<()>,
-    map!(
-        tuple!(
-            char!('@'),
+fn obs_domain_list(i: &[u8]) -> IResult<&[u8], ()> {
+    let (i, _) = sequence::tuple((
+        tag(b"@"),
+        domain,
+        multi::many0_count(sequence::tuple((
+            multi::many0_count(branch::alt((
+                cfws,
+                combinator::map(tag(b","), |_| ()),
+            ))),
+            ocfws,
+            tag(b"@"),
             domain,
-            many0_count!(tuple!(
-                many0_count!(alt!(cfws | map!(char!(','), |_| ()))),
-                opt!(cfws),
-                char!('@'),
-                domain
-            ))
-        ),
-        |_| ()
-    )
-);
+        ))),
+    ))(i)?;
+    Ok((i, ()))
+}
 
 // RFC 2822 3.4 angle-delimited address, including the 4.4 obsolete routing
 // information.
-named!(
-    angle_addr<AddrSpec>,
-    delimited!(
-        tuple!(opt!(cfws), char!('<'), opt!(obs_domain_list)),
+fn angle_addr(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
+    sequence::delimited(
+        sequence::tuple((ocfws, tag(b"<"), combinator::opt(obs_domain_list))),
         addr_spec,
-        pair!(char!('>'), opt!(cfws))
-    )
-);
+        sequence::pair(tag(b">"), ocfws),
+    )(i)
+}
 
 // RFC 2822 3.4 mailbox
-named!(
-    mailbox<MailboxSpec>,
-    map!(
-        alt!(pair!(opt!(phrase), angle_addr) | map!(addr_spec, |a| (None, a))),
-        |(name, addr)| MailboxSpec {
-            name: name.unwrap_or(vec![]),
-            addr
-        }
-    )
-);
+fn mailbox(i: &[u8]) -> IResult<&[u8], Mailbox<'_>> {
+    combinator::map(
+        branch::alt((
+            sequence::pair(
+                combinator::map(combinator::opt(phrase), |o| {
+                    o.unwrap_or(vec![])
+                }),
+                angle_addr,
+            ),
+            combinator::map(addr_spec, |a| (vec![], a)),
+        )),
+        |(name, addr)| Mailbox { name, addr },
+    )(i)
+}
 
 // Used in obsolete list syntax
-named!(
-    obs_list_delim<()>,
-    map!(
-        many1_count!(tuple!(opt!(cfws), char!(','), opt!(cfws))),
-        |_| ()
-    )
-);
+fn obs_list_delim(i: &[u8]) -> IResult<&[u8], ()> {
+    combinator::map(
+        multi::many1_count(sequence::tuple((ocfws, tag(b","), ocfws))),
+        |_| (),
+    )(i)
+}
 
 // RFC 2822 3.4 mailbox list, including 4.4 obsolete syntax
-named!(
-    mailbox_list<Vec<MailboxSpec>>,
-    delimited!(
+fn mailbox_list(i: &[u8]) -> IResult<&[u8], Vec<Mailbox<'_>>> {
+    sequence::delimited(
         obs_list_delim,
-        separated_nonempty_list!(obs_list_delim, mailbox),
-        obs_list_delim
-    )
-);
+        multi::separated_nonempty_list(obs_list_delim, mailbox),
+        obs_list_delim,
+    )(i)
+}
 
 // RFC 2822 3.4 group
-named!(
-    group<GroupSpec>,
-    map!(
-        pair!(
-            terminated!(phrase, char!(':')),
-            terminated!(
-                opt!(mailbox_list),
-                tuple!(opt!(cfws), char!(';'), opt!(cfws))
-            )
-        ),
-        |(name, boxes)| GroupSpec {
-            name,
-            boxes: boxes.unwrap_or(vec![]),
-        }
-    )
-);
+fn group(i: &[u8]) -> IResult<&[u8], Group<'_>> {
+    let (i, name) = sequence::terminated(phrase, tag(b":"))(i)?;
+    let (i, boxes) = sequence::terminated(
+        combinator::opt(mailbox_list),
+        sequence::tuple((ocfws, tag(";"), ocfws)),
+    )(i)?;
+
+    let boxes = boxes.unwrap_or(vec![]);
+    Ok((i, Group { name, boxes }))
+}
 
 // RFC 2822 3.4 address
-named!(
-    address<Address>,
-    alt!(map!(mailbox, Address::Mailbox) | map!(group, Address::Group))
-);
+fn address(i: &[u8]) -> IResult<&[u8], Address<'_>> {
+    branch::alt((
+        combinator::map(mailbox, Address::Mailbox),
+        combinator::map(group, Address::Group),
+    ))(i)
+}
 
 // RFC 2822 3.4 address list, including 4.4 obsolete syntax
-named!(
-    address_list<Vec<Address>>,
-    delimited!(
+fn address_list(i: &[u8]) -> IResult<&[u8], Vec<Address<'_>>> {
+    sequence::delimited(
         obs_list_delim,
-        separated_nonempty_list!(obs_list_delim, address),
-        obs_list_delim
-    )
-);
+        multi::separated_nonempty_list(obs_list_delim, address),
+        obs_list_delim,
+    )(i)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_date_parsing() {
+        fn dt(input: &str) -> String {
+            parse_datetime(input).unwrap().to_rfc3339()
+        }
+
+        // Examples from RFC 2822
+        assert_eq!(
+            "1997-11-21T09:55:06-06:00",
+            dt("Fri, 21 Nov 1997 09:55:06 -0600")
+        );
+    }
+}

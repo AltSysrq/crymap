@@ -19,6 +19,5 @@
 mod encoded_word;
 mod grovel;
 mod header;
-mod model;
 mod quoted_printable;
 mod utf7;
