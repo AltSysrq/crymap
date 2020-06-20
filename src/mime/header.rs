@@ -254,14 +254,20 @@ static MONTH_NAMES: [&str; 12] = [
 ];
 fn month(i: &[u8]) -> IResult<&[u8], u32> {
     combinator::map_opt(atext, |name| {
-        str::from_utf8(name).ok().and_then(|name| {
-            MONTH_NAMES
-                .iter()
-                .enumerate()
-                .filter(|&(_, n)| n.eq_ignore_ascii_case(name))
-                .map(|(ix, _)| ix as u32 + 1)
-                .next()
-        })
+        str::from_utf8(name)
+            .ok()
+            // RFC 2822 doesn't allow full month names even in the obsolete
+            // syntax, but some agents use them anyway, so just look at the
+            // first 3 letters.
+            .and_then(|name| name.get(..3))
+            .and_then(|name| {
+                MONTH_NAMES
+                    .iter()
+                    .enumerate()
+                    .filter(|&(_, n)| n.eq_ignore_ascii_case(name))
+                    .map(|(ix, _)| ix as u32 + 1)
+                    .next()
+            })
     })(i)
 }
 
@@ -292,11 +298,19 @@ fn time_colon(i: &[u8]) -> IResult<&[u8], ()> {
 }
 
 fn time_of_day(i: &[u8]) -> IResult<&[u8], (u32, u32, u32)> {
-    sequence::tuple((
-        sequence::terminated(two_digit, time_colon),
-        sequence::terminated(two_digit, time_colon),
-        sequence::terminated(two_digit, ocfws),
-    ))(i)
+    sequence::terminated(
+        sequence::tuple((
+            two_digit,
+            sequence::preceded(time_colon, two_digit),
+            // RFC 2822 does not describe optional seconds in the obsolete
+            // syntax, but does have it in an example.
+            combinator::map(
+                combinator::opt(sequence::preceded(time_colon, two_digit)),
+                |sec| sec.unwrap_or(0),
+            ),
+        )),
+        ocfws,
+    )(i)
 }
 
 fn numeric_zone(i: &[u8]) -> IResult<&[u8], i32> {
@@ -351,7 +365,10 @@ fn obsolete_zone(i: &[u8]) -> IResult<&[u8], i32> {
 }
 
 fn zone(i: &[u8]) -> IResult<&[u8], i32> {
-    branch::alt((numeric_zone, obsolete_zone))(i)
+    combinator::map(
+        combinator::opt(branch::alt((numeric_zone, obsolete_zone))),
+        |zone| zone.unwrap_or(0),
+    )(i)
 }
 
 fn time(i: &[u8]) -> IResult<&[u8], ((u32, u32, u32), i32)> {
@@ -362,7 +379,13 @@ fn time(i: &[u8]) -> IResult<&[u8], ((u32, u32, u32), i32)> {
 
 fn date_time(i: &[u8]) -> IResult<&[u8], Option<DateTime<FixedOffset>>> {
     // We don't care what day of week it was
-    let (i, _) = sequence::tuple((atom, tag(b","), cfws))(i)?;
+    let (i, _) = sequence::tuple((
+        ocfws,
+        bytes::complete::take_while(character::is_alphabetic),
+        ocfws,
+        combinator::opt(tag(b",")),
+        ocfws,
+    ))(i)?;
     let (i, (year, month, day)) = date(i)?;
     let (i, ((hour, minute, second), zone)) = time(i)?;
 
@@ -534,7 +557,11 @@ mod test {
     #[test]
     fn test_date_parsing() {
         fn dt(input: &str) -> String {
-            parse_datetime(input).unwrap().to_rfc3339()
+            if let Some(result) = parse_datetime(input) {
+                result.to_rfc3339()
+            } else {
+                panic!("Failed to parse {}", input);
+            }
         }
 
         // Examples from RFC 2822
@@ -542,5 +569,50 @@ mod test {
             "1997-11-21T09:55:06-06:00",
             dt("Fri, 21 Nov 1997 09:55:06 -0600")
         );
+        assert_eq!(
+            "2003-07-01T10:52:37+02:00",
+            dt("Tue, 1 Jul 2003 10:52:37 +0200")
+        );
+        assert_eq!(
+            "1969-02-13T23:32:54-03:30",
+            dt("Thu, 13 Feb 1969 23:32:54 -0330")
+        );
+        assert_eq!(
+            "1997-11-21T10:01:10-06:00",
+            dt("Fri, 21 Nov 1997 10:01:10 -0600")
+        );
+        assert_eq!(
+            "1969-02-13T23:32:00-03:30",
+            dt("Thu 13 Feb 1969 23:32 -0330")
+        );
+        assert_eq!(
+            "1969-02-13T23:32:00-03:30",
+            dt(concat!(
+                "Thu\r\n      13\r\n        Feb\r\n          1969\r\n",
+                "      23:32\r\n               -0330 (Newfoundland Time)"
+            ))
+        );
+        assert_eq!("1997-11-21T09:55:06+00:00", dt("21 Nov 97 09:55:06 GMT"));
+        // Other specific examples found in the wild
+        assert_eq!(
+            "2011-03-21T03:12:57+00:00",
+            dt("Mon, 21 Mar 2011 03:12:57")
+        );
+    }
+
+    // I was planning on having an ENRON corpus too, but as far as I can tell,
+    // the Date headers in the ENRON email corpus are entirely uniform and
+    // uninteresting.
+    #[test]
+    fn date_parse_jlingle_corpus() {
+        let data = include_str!("date-corpus-jlingle.txt");
+        for date_string in data.split('\n') {
+            if date_string.is_empty() {
+                continue;
+            }
+            if parse_datetime(date_string).is_none() {
+                panic!("Failed to parse: {}", date_string);
+            }
+        }
     }
 }
