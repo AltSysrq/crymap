@@ -593,6 +593,10 @@ mod test {
             ))
         );
         assert_eq!("1997-11-21T09:55:06+00:00", dt("21 Nov 97 09:55:06 GMT"));
+        assert_eq!(
+            "1997-11-21T09:55:06-06:00",
+            dt("Fri, 21 Nov 1997 09(comment):   55  :  06 -0600")
+        );
         // Other specific examples found in the wild
         assert_eq!(
             "2011-03-21T03:12:57+00:00",
