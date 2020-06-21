@@ -43,6 +43,11 @@ pub trait Visitor: fmt::Debug {
         Ok(())
     }
 
+    /// Receives the last modified `Modseq` of the message.
+    fn last_modified(&mut self, modseq: Modseq) -> Result<(), Self::Output> {
+        Ok(())
+    }
+
     /// Indicates whether loading the flags for the message would be useful.
     fn want_flags(&self) -> bool {
         false
@@ -168,6 +173,7 @@ pub trait MessageAccessor {
     type Reader: BufRead;
 
     fn uid(&self) -> Uid;
+    fn last_modified(&self) -> Modseq;
     fn is_recent(&self) -> bool;
     fn flags(&self) -> Vec<Flag>;
     fn open(&self) -> Result<(MessageMetadata, Self::Reader), Error>;
@@ -279,6 +285,7 @@ impl<V: Visitor> Groveller<V> {
 
     fn check_info(&mut self, accessor: &impl MessageAccessor) -> Result<(), V> {
         self.visitor.uid(accessor.uid())?;
+        self.visitor.last_modified(accessor.last_modified())?;
 
         if self.visitor.want_flags() {
             if accessor.is_recent() {
