@@ -106,6 +106,10 @@ fn decode_charset<'a>(
     charset: &str,
     content: &'a [u8],
 ) -> Option<Cow<'a, str>> {
+    // RFC 2045 (updated by RFC 2184) felt the need to allow specifying the
+    // language in the charset field, but there's nothing we can do with it.
+    let charset = charset.split('*').next().unwrap();
+
     // encoding-rs doesn't do UTF-7...
     if "utf-7".eq_ignore_ascii_case(charset) {
         Some(utf7::STD.decode(str::from_utf8(&content).ok()?))
@@ -252,6 +256,11 @@ mod test {
         assert_eq!(
             "Hi Mom ☺!",
             ew_decode("=?utf-7?q?Hi_Mom_+Jjo-!?=").unwrap()
+        );
+        // RFC 2047 silliness
+        assert_eq!(
+            "Keith Moore",
+            ew_decode("=?US-ASCII*EN?Q?Keith_Moore?=").unwrap()
         );
     }
 

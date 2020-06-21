@@ -25,6 +25,11 @@
 //!
 //! Also supports the RFC 2045 content headers.
 //!
+//! RFC 2047's extension to the Content-Type header, allowing parameters to be
+//! split into pieces, is NOT implemented, on the grounds that it does not
+//! appear that anyone ever uses this feature (it occurs neither in any of my
+//! (Jason Lingle's) mail or in the ENRON corpus).
+//!
 //! The public functions here are permissive in that they silently succeed with
 //! partial results if part of, but not the whole, header is parsable. This is
 //! to support things like ENVELOPE, SEARCH, and SORT which must work with
