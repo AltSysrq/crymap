@@ -206,17 +206,23 @@ fn dot_atom(i: &[u8]) -> IResult<&[u8], Vec<&[u8]>> {
 // RFC 5322 3.2.4 "Quoted [string] text"
 // Amended by RFC 6532 to include all non-ASCII characters
 // The RFC describes the syntax as if FWS has its normal folding behaviour
-// between the quotes, but it doesn't, so we just treat it as part of qtext.
-// TODO CR and LF characters do need to be excluded though.
+// between the quotes, but it doesn't, so we just treat the horizontal
+// whitespace as part of qtext.
 fn qtext(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    is_not("\\\"")(i)
+    is_not("\\\"\r\n")(i)
+}
+
+// Whitespace in a quoted string which gets deleted by folding.
+fn qfws(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    let (i, _) = is_a("\r\n")(i)?;
+    Ok((i, &[]))
 }
 
 // RFC 5322 3.2.4 "Quoted [string] content
 // The original spec puts FWS in the quoted-string definition for some reason,
 // which would make it much more complex.
 fn qcontent(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    branch::alt((qtext, quoted_pair))(i)
+    branch::alt((qtext, quoted_pair, qfws))(i)
 }
 
 // RFC 5322 3.2.4 "Quoted string"
@@ -824,6 +830,11 @@ mod test {
         );
         // Older versions of outlook's apostrophe bug
         assert_eq!("<(foo)@(bar)(com)>", mbox("<'\"foo\"@bar.com>"));
+        // Ensure quoted strings interpret whitespace properly
+        assert_eq!(
+            "<(foo \tbar)@(baz)(com)>",
+            mbox("<\"foo\r\n \tbar\"@baz.com>")
+        );
     }
 
     fn mbox_list(input: &str) -> String {
