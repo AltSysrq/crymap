@@ -43,6 +43,114 @@ use chrono::prelude::*;
 use nom::bytes::complete::{is_a, is_not, tag};
 use nom::*;
 
+/// Parse a MIME-format date, as defined by RFC 5322.
+pub fn parse_datetime(date_str: &str) -> Option<DateTime<FixedOffset>> {
+    date_time(date_str.as_bytes()).ok().and_then(|r| r.1)
+}
+
+/// Parse a singular mailbox, as defined by RFC 5322.
+pub fn parse_mailbox(i: &[u8]) -> Option<Mailbox<'_>> {
+    mailbox(i).ok().map(|r| r.1)
+}
+
+/// Parse a mailbox list, as defined by RFC 5322.
+pub fn parse_mailbox_list(i: &[u8]) -> Option<Vec<Mailbox<'_>>> {
+    mailbox_list(i).ok().map(|r| r.1)
+}
+
+/// Parse a address list, as defined by RFC 5322.
+pub fn parse_address_list(i: &[u8]) -> Option<Vec<Address<'_>>> {
+    address_list(i).ok().map(|r| r.1)
+}
+
+/// Parse the `Content-Type` header, as defined by RFC 2045.
+pub fn parse_content_type(i: &[u8]) -> Option<ContentType<'_>> {
+    content_type(i).ok().map(|r| r.1)
+}
+
+/// Parse the `Content-Transfer-Encoding` header, as defined by RFC 2045.
+pub fn parse_content_transfer_encoding(
+    i: &[u8],
+) -> Option<ContentTransferEncoding> {
+    token(i)
+        .ok()
+        .map(|r| r.1)
+        .and_then(|s| str::from_utf8(s).ok())
+        .and_then(|cte| {
+            if "7bit".eq_ignore_ascii_case(cte) {
+                Some(ContentTransferEncoding::SevenBit)
+            } else if "8bit".eq_ignore_ascii_case(cte) {
+                Some(ContentTransferEncoding::EightBit)
+            } else if "binary".eq_ignore_ascii_case(cte) {
+                Some(ContentTransferEncoding::Binary)
+            } else if "base64".eq_ignore_ascii_case(cte) {
+                Some(ContentTransferEncoding::Base64)
+            } else if "quoted-printable".eq_ignore_ascii_case(cte) {
+                Some(ContentTransferEncoding::QuotedPrintable)
+            } else {
+                None
+            }
+        })
+}
+
+/// Parse the `Content-Language` header as per the intersection of RFC 3306 and
+/// RFC 3282.
+pub fn parse_content_language(i: &[u8]) -> Option<&[u8]> {
+    // RFC 3282 allows Content-Language to contain a list, but IMAP (RFC 3501)
+    // requires the value we parse out to conform to RFC 3306, which simply
+    // describes a single language token. At the same time, this is more
+    // permissive than RFC 3306 in that it allows anything matching an RFC 2045
+    // "token" as a language. In general, though, the client can be expected to
+    // ignore languages it cannot parse, so this way we return a valid language
+    // if there is any and only an invalid string if the header itself is
+    // invalid.
+    token(i).ok().map(|r| r.1)
+}
+
+/// Parse the `Content-Location` header as defined by RFC 2557.
+pub fn parse_content_location(i: &[u8]) -> Option<&str> {
+    // RFC 2557 specifies the URI must be valid; we just pass it on to the
+    // client and let them figure it out.
+    //
+    // RFC 3501 calls for us to return a "string list", which implies the
+    // possibility of more than one URI, but RFC 2557 forbids multiple URIs.
+    //
+    // RFC 2557 describes that long URIs must be wrapped, but does not describe
+    // how this wrapping is done, further complicated by the fact that the
+    // header does not conform to either "unstructured text" or structured text
+    // as defined by the RFC 2822 family.
+    //
+    // Not a single instance of "content-location" occurs either in my (Jason
+    // Lingle's) mail history or the entire ENRON corpus so it's unlikely that
+    // anyone cares about this.
+    str::from_utf8(i).ok().map(str::trim)
+}
+
+/// Parse the `Content-Disposition` header as defined by RFC 2183.
+pub fn parse_content_disposition(i: &[u8]) -> Option<ContentDisposition<'_>> {
+    content_disposition(i).ok().map(|r| r.1)
+}
+
+/// Parse the `Message-ID` header as described by RFC 5322 and all other
+/// headers of the same format.
+///
+/// This does not actually parse the syntax described by RFC 5322 or anything
+/// resembling it, because values which do not conform to that syntax are so
+/// wide-spread (for example, as of 2019-08-25, AliExpress's promotional emails
+/// have `Message-ID`s which do not contain angle brackets or `@`, but do
+/// contain an unquoted `$`) that trying to conform to the standard is futile
+/// at this point.
+///
+/// The main lossage here are the obsolete forms which have spaces or comments
+/// between parts of the ID (which now get left in) and conforming IDs
+/// containing quoted strings (which now just get passed through verbatim,
+/// quotes and all). Since the situation is as dire as it is, it is likely most
+/// other agents also treat the message ID as an opaque string so any
+/// improperly handled forms will probably stay in the same form regardless.
+pub fn parse_message_id(i: &[u8]) -> Option<&str> {
+    str::from_utf8(i).ok().map(str::trim)
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct AddrSpec<'a> {
     pub local: Vec<Cow<'a, [u8]>>,
@@ -162,48 +270,27 @@ pub enum ContentTransferEncoding {
     Base64,
 }
 
-pub fn parse_datetime(date_str: &str) -> Option<DateTime<FixedOffset>> {
-    date_time(date_str.as_bytes()).ok().and_then(|r| r.1)
+#[derive(Clone, PartialEq, Eq)]
+pub struct ContentDisposition<'a> {
+    pub disposition: Cow<'a, [u8]>,
+    pub parms: Vec<(Cow<'a, [u8]>, Cow<'a, [u8]>)>,
 }
 
-pub fn parse_mailbox(i: &[u8]) -> Option<Mailbox<'_>> {
-    mailbox(i).ok().map(|r| r.1)
-}
+impl<'a> fmt::Debug for ContentDisposition<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "({})", String::from_utf8_lossy(&self.disposition))?;
 
-pub fn parse_mailbox_list(i: &[u8]) -> Option<Vec<Mailbox<'_>>> {
-    mailbox_list(i).ok().map(|r| r.1)
-}
+        for &(ref attr, ref val) in &self.parms {
+            write!(
+                f,
+                "; ({})=({})",
+                String::from_utf8_lossy(attr),
+                String::from_utf8_lossy(val)
+            )?;
+        }
 
-pub fn parse_address_list(i: &[u8]) -> Option<Vec<Address<'_>>> {
-    address_list(i).ok().map(|r| r.1)
-}
-
-pub fn parse_content_type(i: &[u8]) -> Option<ContentType<'_>> {
-    content_type(i).ok().map(|r| r.1)
-}
-
-pub fn parse_content_transfer_encoding(
-    i: &[u8],
-) -> Option<ContentTransferEncoding> {
-    token(i)
-        .ok()
-        .map(|r| r.1)
-        .and_then(|s| str::from_utf8(s).ok())
-        .and_then(|cte| {
-            if "7bit".eq_ignore_ascii_case(cte) {
-                Some(ContentTransferEncoding::SevenBit)
-            } else if "8bit".eq_ignore_ascii_case(cte) {
-                Some(ContentTransferEncoding::EightBit)
-            } else if "binary".eq_ignore_ascii_case(cte) {
-                Some(ContentTransferEncoding::Binary)
-            } else if "base64".eq_ignore_ascii_case(cte) {
-                Some(ContentTransferEncoding::Base64)
-            } else if "quoted-printable".eq_ignore_ascii_case(cte) {
-                Some(ContentTransferEncoding::QuotedPrintable)
-            } else {
-                None
-            }
-        })
+        Ok(())
+    }
 }
 
 // RFC 5322 3.2.1 "quoted-pair", including the 8-bit clean "obsolete" syntax
@@ -869,6 +956,23 @@ fn content_type(i: &[u8]) -> IResult<&[u8], ContentType<'_>> {
     ))
 }
 
+// RFC 2183 Content-Disposition
+// Ultimately, we don't care much about the parameter name/values, and IMAP
+// doesn't require us to do anything other than spit them at the client if it
+// asks for them.
+fn content_disposition(i: &[u8]) -> IResult<&[u8], ContentDisposition<'_>> {
+    let (i, disposition) = token(i)?;
+    let (i, parms) =
+        multi::many0(sequence::preceded(tag(b";"), content_type_parm))(i)?;
+    Ok((
+        i,
+        ContentDisposition {
+            disposition: Cow::Borrowed(disposition),
+            parms,
+        },
+    ))
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1368,5 +1472,31 @@ mod test {
             parse_content_transfer_encoding(b"BINary")
         );
         assert_eq!(None, parse_content_transfer_encoding(b"chunked"));
+    }
+
+    fn cdispos(input: &str) -> String {
+        if let Some(cd) = parse_content_disposition(input.as_bytes()) {
+            format!("{:?}", cd)
+        } else {
+            panic!("Failed to parse: {}", input);
+        }
+    }
+
+    #[test]
+    fn test_parse_content_disposition() {
+        // RFC 2183 examples
+        assert_eq!("(inline)", cdispos("inline"));
+        assert_eq!(
+            concat!(
+                "(attachment); ",
+                "(filename)=(genome.jpeg); ",
+                "(modification-date)=(Wed, 12 Feb 1997 16:29:51 -0500)"
+            ),
+            cdispos(concat!(
+                "attachment; ",
+                "filename=genome.jpeg; ",
+                "modification-date=\"Wed, 12 Feb 1997 16:29:51 -0500\";"
+            ))
+        );
     }
 }
