@@ -131,18 +131,38 @@ fn ctext(i: &[u8]) -> IResult<&[u8], &[u8]> {
 // RFC 5322 3.2.2 "Comment content".
 // The original definition includes FWS in the comment syntax instead of here,
 // which makes it a lot more complicated.
+// We don't recur to `comment` here because `comment` handles nesting
+// procedurally itself.
 fn ccontent(i: &[u8]) -> IResult<&[u8], ()> {
-    let (i, _) = branch::alt((ctext, quoted_pair, fws))(i)?;
-    Ok((i, ()))
+    branch::alt((
+        combinator::map(ctext, |_| ()),
+        combinator::map(quoted_pair, |_| ()),
+        combinator::map(fws, |_| ()),
+    ))(i)
 }
 
-// RFC 5322 3.2.2 "Comment". Note it is recursive.
+// RFC 5322 3.2.2 "Comment".
+//
+// The implementation here is procedural with manual nesting counting instead
+// of recursive to ensure we never overflow the stack.
 fn comment(i: &[u8]) -> IResult<&[u8], ()> {
-    let (i, _) = sequence::delimited(
-        tag(b"("),
-        multi::many0_count(ccontent),
-        tag(b")"),
-    )(i)?;
+    let enter_comment = tag(b"(");
+    let (mut i, _) = enter_comment(i)?;
+
+    let mut nesting_depth = 1u32;
+    while nesting_depth > 0 {
+        if let Ok((j, _)) = ccontent(i) {
+            i = j;
+        } else if let Ok((j, _)) = enter_comment(i) {
+            nesting_depth += 1;
+            i = j;
+        } else {
+            let (j, _) = tag(b")")(i)?;
+            nesting_depth -= 1;
+            i = j;
+        }
+    }
+
     Ok((i, ()))
 }
 
@@ -835,6 +855,8 @@ mod test {
             "<(foo \tbar)@(baz)(com)>",
             mbox("<\"foo\r\n \tbar\"@baz.com>")
         );
+        // Ensure comments are nestable
+        assert_eq!("<(foo)@(bar)(com)>", mbox("((comment))foo@bar.com"));
     }
 
     fn mbox_list(input: &str) -> String {
@@ -1002,8 +1024,6 @@ mod test {
 
     #[test]
     fn address_list_parse_enron_corpus() {
-        local_part(b".foo").unwrap();
-
         // Similar to the above, but the text is pulled from the entire ENRON
         // email corpus. The text is still censored just to reduce the number
         // of distinct strings.
@@ -1063,5 +1083,11 @@ mod test {
                 panic!("Failed to parse line {}:\n{}", lineno + 1, line);
             }
         }
+    }
+
+    #[test]
+    fn no_stack_overflow_on_nested_comments() {
+        let s = "(".repeat(50000);
+        assert!(mailbox(s.as_bytes()).is_err());
     }
 }
