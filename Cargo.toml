@@ -14,6 +14,7 @@ encoding_rs = "0.8"
 fern = "0.6"
 lazy_static = "1.4"
 log = "0.4.8"
+memchr = "2.3"
 nix = "0.17"
 nom = { version = "5.1", default-features = false, features = ["regexp", "std"] }
 openssl = "0.10.29"

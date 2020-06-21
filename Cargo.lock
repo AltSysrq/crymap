@@ -181,6 +181,7 @@ dependencies = [
  "fern",
  "lazy_static",
  "log",
+ "memchr",
  "nix",
  "nom",
  "openssl",

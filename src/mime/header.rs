@@ -133,6 +133,26 @@ impl<'a> fmt::Debug for ContentType<'a> {
     }
 }
 
+impl<'a> ContentType<'a> {
+    pub fn is_type(&self, typ: &str) -> bool {
+        typ.as_bytes().eq_ignore_ascii_case(&self.typ)
+    }
+
+    pub fn is_subtype(&self, subtype: &str) -> bool {
+        subtype.as_bytes().eq_ignore_ascii_case(&self.subtype)
+    }
+
+    pub fn parm(&self, name: &str) -> Option<&[u8]> {
+        for parm in &self.parms {
+            if name.as_bytes().eq_ignore_ascii_case(&parm.0) {
+                return Some(&parm.1);
+            }
+        }
+
+        None
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ContentTransferEncoding {
     SevenBit,
