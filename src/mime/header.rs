@@ -22,6 +22,13 @@
 //! obsoleted RFC 822. RFC 5322 has obsoleted 2822 with no real changes for
 //! parsers (it just moved some more syntax into "obsolete"). RFC 6532
 //! additionally extends it to allow UTF-8 everywhere.
+//!
+//! Also supports the RFC 2045 content headers.
+//!
+//! The public functions here are permissive in that they silently succeed with
+//! partial results if part of, but not the whole, header is parsable. This is
+//! to support things like ENVELOPE, SEARCH, and SORT which must work with
+//! whatever they can instead of failing.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -92,6 +99,35 @@ pub enum Address<'a> {
     Group(Group<'a>),
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub struct ContentType<'a> {
+    pub typ: Cow<'a, [u8]>,
+    pub subtype: Cow<'a, [u8]>,
+    pub parms: Vec<(Cow<'a, [u8]>, Cow<'a, [u8]>)>,
+}
+
+impl<'a> fmt::Debug for ContentType<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "({})/({})",
+            String::from_utf8_lossy(&self.typ),
+            String::from_utf8_lossy(&self.subtype)
+        )?;
+
+        for &(ref attr, ref val) in &self.parms {
+            write!(
+                f,
+                "; ({})=({})",
+                String::from_utf8_lossy(attr),
+                String::from_utf8_lossy(val)
+            )?;
+        }
+
+        Ok(())
+    }
+}
+
 pub fn parse_datetime(date_str: &str) -> Option<DateTime<FixedOffset>> {
     date_time(date_str.as_bytes()).ok().and_then(|r| r.1)
 }
@@ -106,6 +142,10 @@ pub fn parse_mailbox_list(i: &[u8]) -> Option<Vec<Mailbox<'_>>> {
 
 pub fn parse_address_list(i: &[u8]) -> Option<Vec<Address<'_>>> {
     address_list(i).ok().map(|r| r.1)
+}
+
+pub fn parse_content_type(i: &[u8]) -> Option<ContentType<'_>> {
+    content_type(i).ok().map(|r| r.1)
 }
 
 // RFC 5322 3.2.1 "quoted-pair", including the 8-bit clean "obsolete" syntax
@@ -715,6 +755,62 @@ fn address_list(i: &[u8]) -> IResult<&[u8], Vec<Address<'_>>> {
     )(i)
 }
 
+// General notes about RFC 2045
+// The formal syntax permits *no whitespace whatsoever*. However, even the
+// RFC's own examples have whitespace. In this implementation, we just allow
+// CFWS around every value. (The standard never allows adjacent
+// non-tokens/values so we only need to add it around token since quoted_string
+// already comes with its own.)
+
+// RFC 2045 5.1 token
+// Why couldn't they just reuse the atom definition? This one is subtly
+// different.
+fn token(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    sequence::delimited(ocfws, is_not("()<>@,;:\\\"/[]?= \t\r\n"), ocfws)(i)
+}
+
+// RFC 2045 5.1 value
+// Basically RFC 822/2822/5322's "word", but with their special _token_
+// replacing _atom_. At least they kept the same definition for quoted_string.
+fn value(i: &[u8]) -> IResult<&[u8], Cow<'_, [u8]>> {
+    branch::alt((combinator::map(token, Cow::Borrowed), quoted_string))(i)
+}
+
+// RFC 2045 5.1 type parameter
+fn content_type_parm(
+    i: &[u8],
+) -> IResult<&[u8], (Cow<'_, [u8]>, Cow<'_, [u8]>)> {
+    // Due the critcality of parsing Content-Type, if we can't parse the proper
+    // syntax, just gobble everything up through the next ; and call it a parm
+    // with a name but no value.
+    branch::alt((
+        sequence::separated_pair(
+            combinator::map(token, Cow::Borrowed),
+            tag(b"="),
+            value,
+        ),
+        combinator::map(is_not(";"), |s| {
+            (Cow::Borrowed(s), Cow::Borrowed(&[] as &[u8]))
+        }),
+    ))(i)
+}
+
+// RFC 2045 5.1 Content-Type
+fn content_type(i: &[u8]) -> IResult<&[u8], ContentType<'_>> {
+    let (i, typ) = token(i)?;
+    let (i, subtyp) = sequence::preceded(tag(b"/"), token)(i)?;
+    let (i, parms) =
+        multi::many0(sequence::preceded(tag(b";"), content_type_parm))(i)?;
+    Ok((
+        i,
+        ContentType {
+            typ: Cow::Borrowed(typ),
+            subtype: Cow::Borrowed(subtyp),
+            parms,
+        },
+    ))
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1089,5 +1185,101 @@ mod test {
     fn no_stack_overflow_on_nested_comments() {
         let s = "(".repeat(50000);
         assert!(mailbox(s.as_bytes()).is_err());
+    }
+
+    fn ctype(input: &str) -> String {
+        if let Some(ct) = parse_content_type(input.as_bytes()) {
+            format!("{:?}", ct)
+        } else {
+            panic!("Failed to parse: {}", input);
+        }
+    }
+
+    #[test]
+    fn test_parse_content_type() {
+        assert_eq!("(text)/(plain)", ctype("text/plain"));
+        assert_eq!(
+            "(text)/(plain); (foo)=(bar)",
+            ctype("\ttext / plain ; foo = \"bar\"\t")
+        );
+        // Examples from RFC 2045
+        assert_eq!(
+            "(text)/(plain); (charset)=(ISO-8859-1)",
+            ctype("text/plain; charset=ISO-8859-1")
+        );
+        assert_eq!(
+            "(text)/(plain); (charset)=(us-ascii)",
+            ctype("text/plain; charset=us-ascii (Plain text)")
+        );
+        assert_eq!(
+            "(text)/(plain); (charset)=(us-ascii)",
+            ctype("text/plain; charset=\"us-ascii\"")
+        );
+
+        // Examples found in the wild
+        assert_eq!(
+            concat!(
+                "(application)/(msword); ",
+                "(name)=(123456 Participant Fee Disclosure.doc)"
+            ),
+            ctype(concat!(
+                "application/msword;",
+                "\tname=\"123456 Participant Fee Disclosure.doc\""
+            ))
+        );
+        assert_eq!(
+            "(application)/(octet-stream); (name)=(PGPipe-1000.asc)",
+            ctype("application/octet-stream;\tname=\"PGPipe-1000.asc\"")
+        );
+        assert_eq!(
+            "(application)/(pdf); (name)=(SPDs & SMMs.pdf)",
+            ctype("application/pdf; name=\"SPDs & SMMs.pdf\"")
+        );
+        assert_eq!(
+            concat!(
+                "(application)/(pkcs7-mime); ",
+                "(smime-type)=(signed-data); (name)=(smime.p7m)"
+            ),
+            ctype(concat!(
+                "application/pkcs7-mime; ",
+                "smime-type=signed-data; name=\"smime.p7m\""
+            ))
+        );
+        assert_eq!(
+            concat!(
+                "(multipart)/(alternative); ",
+                "(boundary)=(Apple-Mail=_01B5A0AD-",
+                "9508-48B2-B309-1FA4444F1310)"
+            ),
+            ctype(concat!(
+                "multipart/alternative;  ",
+                "boundary=\"Apple-Mail=_01B5A0AD-",
+                "9508-48B2-B309-1FA4444F1310\""
+            ))
+        );
+        assert_eq!(
+            concat!(
+                "(multipart)/(signed); ",
+                "(boundary)=(----=_NextPart_000_004B_01D04D20.0C896ED0); ",
+                "(protocol)=(application/x-pkcs7-signature); ",
+                "(micalg)=(2.16.840.1.101.3.4.2.3)"
+            ),
+            ctype(concat!(
+                "multipart/signed;       ",
+                "boundary=\"----=_NextPart_000_004B_01D04D20.0C896ED0\";  ",
+                "protocol=\"application/x-pkcs7-signature\"; ",
+                "micalg=2.16.840.1.101.3.4.2.3"
+            ))
+        );
+
+        // Test for recovery
+        assert_eq!(
+            "(text)/(plain); ( foo)=(); (xyzzy)=(plugh)",
+            ctype("text/plain; foo; xyzzy=plugh")
+        );
+        assert_eq!(
+            "(text)/(plain); ( foo=)=(); (xyzzy)=(plugh)",
+            ctype("text/plain; foo=; xyzzy=plugh")
+        );
     }
 }
