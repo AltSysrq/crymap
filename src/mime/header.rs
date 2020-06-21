@@ -16,11 +16,12 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-//! Utilities for working with individual RFC 2822 headers.
-
-// TODO RFC 2822 was obsoleted by RFC 5322. It looks like it's mostly just more
-// regression away from 8-bit cleanliness, but we'll want to update our
-// references here to match.
+//! Utilities for working with individual RFC 5322 headers.
+//!
+//! IMAP4rev1 is defined in terms of RFC 2822 but under the name of the
+//! obsoleted RFC 822. RFC 5322 has obsoleted 2822 with no real changes for
+//! parsers (it just moved some more syntax into "obsolete"). RFC 6532
+//! additionally extends it to allow UTF-8 everywhere.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -107,20 +108,13 @@ pub fn parse_address_list(i: &[u8]) -> Option<Vec<Address<'_>>> {
     address_list(i).ok().map(|r| r.1)
 }
 
-// RFC 2822 3.2.1 "text", including the "obsolete text" syntax that's 8-bit
-// clean.
-// RFC 6532 updates the definition to include all non-ASCII characters.
-fn text(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    is_not("\r\n")(i)
-}
-
-// RFC 2822 3.2.2 "quoted-pair", including the 8-bit clean "obsolete" syntax
+// RFC 5322 3.2.1 "quoted-pair", including the 8-bit clean "obsolete" syntax
 fn quoted_pair(i: &[u8]) -> IResult<&[u8], &[u8]> {
     let (i, _) = tag(b"\\")(i)?;
     bytes::complete::take(1usize)(i)
 }
 
-// RFC 2822 3.2.3 "Folding white space".
+// RFC 5322 3.2.2 "Folding white space".
 // The formal syntax describes the folding syntax itself, but unfolding is
 // partially performed by a different mechanism, so we just treat the
 // line-ending characters as simple whitespace.
@@ -129,12 +123,12 @@ fn fws(i: &[u8]) -> IResult<&[u8], &[u8]> {
     Ok((i, b" "))
 }
 
-// RFC 2822 3.2.3 "Comment text".
+// RFC 5322 3.2.2 "Comment text".
 fn ctext(i: &[u8]) -> IResult<&[u8], &[u8]> {
     is_not("()\\ \t\r\n")(i)
 }
 
-// RFC 2822 3.2.3 "Comment content".
+// RFC 5322 3.2.2 "Comment content".
 // The original definition includes FWS in the comment syntax instead of here,
 // which makes it a lot more complicated.
 fn ccontent(i: &[u8]) -> IResult<&[u8], ()> {
@@ -142,7 +136,7 @@ fn ccontent(i: &[u8]) -> IResult<&[u8], ()> {
     Ok((i, ()))
 }
 
-// RFC 2822 3.2.3 "Comment". Note it is recursive.
+// RFC 5322 3.2.2 "Comment". Note it is recursive.
 fn comment(i: &[u8]) -> IResult<&[u8], ()> {
     let (i, _) = sequence::delimited(
         tag(b"("),
@@ -152,7 +146,7 @@ fn comment(i: &[u8]) -> IResult<&[u8], ()> {
     Ok((i, ()))
 }
 
-// RFC 2822 3.2.3 "Comment or folding white space".
+// RFC 5322 3.2.2 "Comment or folding white space".
 fn cfws(i: &[u8]) -> IResult<&[u8], ()> {
     let (i, _) = multi::many1_count(branch::alt((
         comment,
@@ -167,16 +161,16 @@ fn ocfws(i: &[u8]) -> IResult<&[u8], ()> {
     Ok((i, ()))
 }
 
-// RFC 2822 3.2.4 "Atom text"
+// RFC 5322 3.2.3 "Atom text"
 // Amended by RFC 6532 to include all non-ASCII characters
 fn atext(i: &[u8]) -> IResult<&[u8], &[u8]> {
     bytes::complete::take_while1(|ch| {
-        // RFC2822 ALPHA
+        // RFC5322 ALPHA
         (ch >= b'A' && ch <= b'Z') ||
             (ch >= b'a' && ch <= b'z') ||
-            // RFC 2822 DIGIT
+            // RFC 5322 DIGIT
             (ch >= b'0' && ch <= b'9') ||
-            // RFC 2822 non-specials
+            // RFC 5322 non-specials
             ch == b'!' ||
             (ch >= b'#' && ch <= b'\'') || // #$%&'
             ch == b'*' ||
@@ -194,37 +188,38 @@ fn atext(i: &[u8]) -> IResult<&[u8], &[u8]> {
     })(i)
 }
 
-// RFC 2822 3.2.4 "Atom"
+// RFC 5322 3.2.3 "Atom"
 fn atom(i: &[u8]) -> IResult<&[u8], &[u8]> {
     sequence::delimited(ocfws, atext, ocfws)(i)
 }
 
-// RFC 2822 3.2.4 "Dot atom text"
+// RFC 5322 3.2.3 "Dot atom text"
 fn dot_atom_text(i: &[u8]) -> IResult<&[u8], Vec<&[u8]>> {
     multi::separated_nonempty_list(tag(b"."), atext)(i)
 }
 
-// RFC 2822 3.2.4 "Dot atom"
+// RFC 5322 3.2.3 "Dot atom"
 fn dot_atom(i: &[u8]) -> IResult<&[u8], Vec<&[u8]>> {
     sequence::delimited(ocfws, dot_atom_text, ocfws)(i)
 }
 
-// RFC 2822 3.2.5 "Quoted [string] text"
+// RFC 5322 3.2.4 "Quoted [string] text"
 // Amended by RFC 6532 to include all non-ASCII characters
 // The RFC describes the syntax as if FWS has its normal folding behaviour
 // between the quotes, but it doesn't, so we just treat it as part of qtext.
+// TODO CR and LF characters do need to be excluded though.
 fn qtext(i: &[u8]) -> IResult<&[u8], &[u8]> {
     is_not("\\\"")(i)
 }
 
-// RFC 2822 3.2.5 "Quoted [string] content
+// RFC 5322 3.2.4 "Quoted [string] content
 // The original spec puts FWS in the quoted-string definition for some reason,
 // which would make it much more complex.
 fn qcontent(i: &[u8]) -> IResult<&[u8], &[u8]> {
     branch::alt((qtext, quoted_pair))(i)
 }
 
-// RFC 2822 3.2.5 "Quoted string"
+// RFC 5322 3.2.4 "Quoted string"
 fn quoted_string(i: &[u8]) -> IResult<&[u8], Cow<'_, [u8]>> {
     sequence::delimited(
         sequence::pair(ocfws, tag(b"\"")),
@@ -244,12 +239,12 @@ fn quoted_string(i: &[u8]) -> IResult<&[u8], Cow<'_, [u8]>> {
     )(i)
 }
 
-// RFC 2822 3.2.6 "word"
+// RFC 5322 3.2.5 "word"
 fn word(i: &[u8]) -> IResult<&[u8], Cow<'_, [u8]>> {
     branch::alt((combinator::map(atom, Cow::Borrowed), quoted_string))(i)
 }
 
-// Not formally specified by RFC 2822, but part of the `obs-phrase` grammar.
+// Not formally specified by RFC 5322, but part of the `obs-phrase` grammar.
 // Defined here as a separate element for simplicity.
 fn obs_dot(i: &[u8]) -> IResult<&[u8], Cow<'_, [u8]>> {
     // Only need to handle CFWS at end since there is always a preceding token
@@ -257,7 +252,7 @@ fn obs_dot(i: &[u8]) -> IResult<&[u8], Cow<'_, [u8]>> {
     sequence::terminated(combinator::map(tag(b"."), Cow::Borrowed), ocfws)(i)
 }
 
-// RFC 2822 3.2.6 "phrase", plus "obsolete phrase" syntax which accounts for
+// RFC 5322 3.2.5 "phrase", plus "obsolete phrase" syntax which accounts for
 // the '.' that many agents put unquoted into display names.
 fn phrase(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
     combinator::map(
@@ -269,7 +264,7 @@ fn phrase(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
     )(i)
 }
 
-// RFC 2822 3.2.6 also defines "unstructured text", but once the "obsolete"
+// RFC 5322 3.2.5 also defines "unstructured text", but once the "obsolete"
 // syntax and RFC 6532 revision is considered, there is no syntax at all and it
 // is just a raw byte string, so there's nothing to define here.
 
@@ -277,7 +272,7 @@ fn parse_u32_infallible(i: &[u8]) -> u32 {
     str::from_utf8(i).unwrap().parse::<u32>().unwrap()
 }
 
-// RFC 2822 3.3 date/time syntax, including obsolete forms.
+// RFC 5322 3.3 date/time syntax, including obsolete forms.
 // In general, the obsolete forms allow CFWS between all terms, so we just
 // write that in the whole date/time definitions instead of the rather
 // arbitrary distribution the RFC uses.
@@ -287,7 +282,7 @@ fn year(i: &[u8]) -> IResult<&[u8], u32> {
         |s| {
             // Infallible since we know s is [0-9]{2,4}
             let mut y = parse_u32_infallible(s);
-            // Y2K compliance workarounds described by RFC 2822 4.3
+            // Y2K compliance workarounds described by RFC 5322 4.3
             if s.len() == 2 && y < 50 {
                 y += 2000;
             } else if s.len() < 4 {
@@ -306,7 +301,7 @@ fn month(i: &[u8]) -> IResult<&[u8], u32> {
     combinator::map_opt(atext, |name| {
         str::from_utf8(name)
             .ok()
-            // RFC 2822 doesn't allow full month names even in the obsolete
+            // RFC 5322 doesn't allow full month names even in the obsolete
             // syntax, but some agents use them anyway, so just look at the
             // first 3 letters.
             .and_then(|name| name.get(..3))
@@ -352,7 +347,7 @@ fn time_of_day(i: &[u8]) -> IResult<&[u8], (u32, u32, u32)> {
         sequence::tuple((
             two_digit,
             sequence::preceded(time_colon, two_digit),
-            // RFC 2822 does not describe optional seconds in the obsolete
+            // RFC 5322 does not describe optional seconds in the obsolete
             // syntax, but does have it in an example.
             combinator::map(
                 combinator::opt(sequence::preceded(time_colon, two_digit)),
@@ -406,7 +401,7 @@ fn obsolete_zone(i: &[u8]) -> IResult<&[u8], i32> {
                     .map(|&(_, offset)| offset)
                     .next()
             })
-            // (US?) Military time zones and unrecognised zones RFC 2822
+            // (US?) Military time zones and unrecognised zones RFC 5322
             // indicates that the military time zones were so poorly defined
             // that they must be treated as 0 unless additional information is
             // available. Unknown time zones must also be treated as 0.
@@ -446,7 +441,7 @@ fn date_time(i: &[u8]) -> IResult<&[u8], Option<DateTime<FixedOffset>>> {
     Ok((i, res))
 }
 
-// RFC 2822 3.4.1 local part of address
+// RFC 5322 3.4.1 local part of address
 // Formally, this is `dot-atom / quoted-string / obs-local-part`, with
 // `obs-local-part` being `word *("." word)`. Any dot-atom or quoted-string
 // conforms to obs-local-part, so we just parse that.
@@ -506,7 +501,7 @@ fn local_separator(i: &[u8]) -> IResult<&[u8], &[u8]> {
     ))(i)
 }
 
-// RFC 2822 4.4 obsolete domain format
+// RFC 5322 4.4 obsolete domain format
 fn obs_domain(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
     multi::separated_nonempty_list(
         tag(b"."),
@@ -514,20 +509,20 @@ fn obs_domain(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
     )(i)
 }
 
-// RFC 2822 3.4.1 domain name text
+// RFC 5322 3.4.1 domain name text
 // Amended by RFC 6532 to include all non-ASCII
 fn dtext(i: &[u8]) -> IResult<&[u8], &[u8]> {
     is_not("[]\\ \t\r\n")(i)
 }
 
-// RFC 2822 3.4.1 domain literal content
+// RFC 5322 3.4.1 domain literal content
 // As with quoted strings, we move the FWS part into the content to simplify
 // the syntax definition.
 fn dcontent(i: &[u8]) -> IResult<&[u8], &[u8]> {
     branch::alt((dtext, quoted_pair, fws))(i)
 }
 
-// RFC 2822 3.4.1 domain literal
+// RFC 5322 3.4.1 domain literal
 fn domain_literal(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
     combinator::map(
         sequence::delimited(
@@ -545,7 +540,7 @@ fn domain_literal(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
     )(i)
 }
 
-// RFC 2822 3.4.1 domain
+// RFC 5322 3.4.1 domain
 // dot-atom is encompassed by obs_domain
 fn domain(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
     branch::alt((
@@ -554,14 +549,14 @@ fn domain(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
     ))(i)
 }
 
-// RFC 2822 3.4.1 address specification
+// RFC 5322 3.4.1 address specification
 fn addr_spec(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
     let (i, local) = local_part(i)?;
     let (i, domain) = sequence::preceded(tag(b"@"), domain)(i)?;
     Ok((i, AddrSpec { local, domain }))
 }
 
-// RFC 2822 4.4 obsolete routing information
+// RFC 5322 4.4 obsolete routing information
 // We just discard all this
 fn obs_domain_list(i: &[u8]) -> IResult<&[u8], ()> {
     let (i, _) = sequence::tuple((
@@ -580,7 +575,7 @@ fn obs_domain_list(i: &[u8]) -> IResult<&[u8], ()> {
     Ok((i, ()))
 }
 
-// RFC 2822 3.4 angle-delimited address, including the 4.4 obsolete routing
+// RFC 5322 3.4 angle-delimited address, including the 4.4 obsolete routing
 // information.
 fn angle_addr(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
     sequence::delimited(
@@ -600,7 +595,7 @@ fn angle_addr(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
             // the local part.
             combinator::opt(tag(b"\"\"")),
         )),
-        // Though not described by RFC 2822, some agents will include a totally
+        // Though not described by RFC 5322, some agents will include a totally
         // empty <> pair. Some will also include only a local part.
         combinator::map(
             combinator::opt(branch::alt((
@@ -621,7 +616,7 @@ fn angle_addr(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
     )(i)
 }
 
-// RFC 2822 3.4 mailbox
+// RFC 5322 3.4 mailbox
 fn mailbox(i: &[u8]) -> IResult<&[u8], Mailbox<'_>> {
     combinator::map(
         branch::alt((
@@ -645,7 +640,7 @@ fn obs_list_delim(i: &[u8]) -> IResult<&[u8], ()> {
     )(i)
 }
 
-// RFC 2822 3.4 mailbox list, including 4.4 obsolete syntax
+// RFC 5322 3.4 mailbox list, including 4.4 obsolete syntax
 fn mailbox_list(i: &[u8]) -> IResult<&[u8], Vec<Mailbox<'_>>> {
     sequence::delimited(
         combinator::opt(obs_list_delim),
@@ -654,13 +649,13 @@ fn mailbox_list(i: &[u8]) -> IResult<&[u8], Vec<Mailbox<'_>>> {
     )(i)
 }
 
-// RFC 2822 3.4 group
+// RFC 5322 3.4 group
 fn group(i: &[u8]) -> IResult<&[u8], Group<'_>> {
     let (i, name) = sequence::terminated(phrase, tag(b":"))(i)?;
-    // RFC 2822 doesn't allow ; to be missing even in the obsolete syntax.
+    // RFC 5322 doesn't allow ; to be missing even in the obsolete syntax.
     // However, Mark Crispin mentioned the possibility of it being missing
     // on the IMAP mailing list, so we allow it to be missing here too.
-    // Further (and again not mentioned in RFC 2822), some agents place
+    // Further (and again not mentioned in RFC 5322), some agents place
     // *multiple* semicolons here for some reason. Even worse, some agents
     // don't include the comma to separate multiple groups. For all these
     // reasons, we don't handle semicolon here, but instead treat it as another
@@ -677,7 +672,7 @@ fn obs_addr_list_delim(i: &[u8]) -> IResult<&[u8], ()> {
     )(i)
 }
 
-// RFC 2822 3.4 address
+// RFC 5322 3.4 address
 fn address(i: &[u8]) -> IResult<&[u8], Address<'_>> {
     branch::alt((
         combinator::map(mailbox, Address::Mailbox),
@@ -685,7 +680,7 @@ fn address(i: &[u8]) -> IResult<&[u8], Address<'_>> {
     ))(i)
 }
 
-// RFC 2822 3.4 address list, including 4.4 obsolete syntax
+// RFC 5322 3.4 address list, including 4.4 obsolete syntax
 fn address_list(i: &[u8]) -> IResult<&[u8], Vec<Address<'_>>> {
     sequence::delimited(
         combinator::opt(obs_addr_list_delim),
