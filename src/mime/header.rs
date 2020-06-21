@@ -133,6 +133,15 @@ impl<'a> fmt::Debug for ContentType<'a> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContentTransferEncoding {
+    SevenBit,
+    EightBit,
+    Binary,
+    QuotedPrintable,
+    Base64,
+}
+
 pub fn parse_datetime(date_str: &str) -> Option<DateTime<FixedOffset>> {
     date_time(date_str.as_bytes()).ok().and_then(|r| r.1)
 }
@@ -151,6 +160,30 @@ pub fn parse_address_list(i: &[u8]) -> Option<Vec<Address<'_>>> {
 
 pub fn parse_content_type(i: &[u8]) -> Option<ContentType<'_>> {
     content_type(i).ok().map(|r| r.1)
+}
+
+pub fn parse_content_transfer_encoding(
+    i: &[u8],
+) -> Option<ContentTransferEncoding> {
+    token(i)
+        .ok()
+        .map(|r| r.1)
+        .and_then(|s| str::from_utf8(s).ok())
+        .and_then(|cte| {
+            if "7bit".eq_ignore_ascii_case(cte) {
+                Some(ContentTransferEncoding::SevenBit)
+            } else if "8bit".eq_ignore_ascii_case(cte) {
+                Some(ContentTransferEncoding::EightBit)
+            } else if "binary".eq_ignore_ascii_case(cte) {
+                Some(ContentTransferEncoding::Binary)
+            } else if "base64".eq_ignore_ascii_case(cte) {
+                Some(ContentTransferEncoding::Base64)
+            } else if "quoted-printable".eq_ignore_ascii_case(cte) {
+                Some(ContentTransferEncoding::QuotedPrintable)
+            } else {
+                None
+            }
+        })
 }
 
 // RFC 5322 3.2.1 "quoted-pair", including the 8-bit clean "obsolete" syntax
@@ -1286,5 +1319,34 @@ mod test {
             "(text)/(plain); ( foo=)=(); (xyzzy)=(plugh)",
             ctype("text/plain; foo=; xyzzy=plugh")
         );
+    }
+
+    #[test]
+    fn test_parse_content_transfer_encoding() {
+        assert_eq!(
+            Some(ContentTransferEncoding::SevenBit),
+            parse_content_transfer_encoding(b"7bit")
+        );
+        assert_eq!(
+            Some(ContentTransferEncoding::SevenBit),
+            parse_content_transfer_encoding(b"7BIT")
+        );
+        assert_eq!(
+            Some(ContentTransferEncoding::EightBit),
+            parse_content_transfer_encoding(b"8BiT")
+        );
+        assert_eq!(
+            Some(ContentTransferEncoding::Base64),
+            parse_content_transfer_encoding(b"\tbase64")
+        );
+        assert_eq!(
+            Some(ContentTransferEncoding::QuotedPrintable),
+            parse_content_transfer_encoding(b"(qp) quoted-printable")
+        );
+        assert_eq!(
+            Some(ContentTransferEncoding::Binary),
+            parse_content_transfer_encoding(b"BINary")
+        );
+        assert_eq!(None, parse_content_transfer_encoding(b"chunked"));
     }
 }
