@@ -17,6 +17,7 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
+use std::iter;
 use std::str;
 
 use encoding_rs::*;
@@ -29,6 +30,47 @@ use super::utf7;
 lazy_static! {
     static ref ENCODED_WORD: Regex =
         Regex::new(r"^=\?([!->@-~]*)\?([!->@-~]*)\?([!->@-~]*)\?=$").unwrap();
+}
+
+/// Decode all encoded words in the given unstructured string.
+pub fn ew_decode_unstructured(text: &str) -> Cow<str> {
+    let mut transformed = String::new();
+
+    let mut untransformed_ix = 0;
+    let mut word_start = 0;
+    let mut last_was_encoded = false;
+
+    for word_end in text
+        .as_bytes()
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|&(_, c)| c == b' ' || c == b'\t' || c == b'\n' || c == b'\r')
+        .map(|(ix, _)| ix)
+        .chain(iter::once(text.len()))
+    {
+        let word = &text[word_start..word_end];
+
+        if let Some(decoded) = ew_decode(word) {
+            if !last_was_encoded {
+                transformed.push_str(&text[untransformed_ix..word_start]);
+            }
+            transformed.push_str(&decoded);
+            untransformed_ix = word_end;
+            last_was_encoded = true;
+        } else if !word.is_empty() {
+            last_was_encoded = false;
+        }
+
+        word_start = word_end + 1;
+    }
+
+    if !transformed.is_empty() {
+        transformed.push_str(&text[untransformed_ix..]);
+        Cow::Owned(transformed)
+    } else {
+        Cow::Borrowed(text)
+    }
 }
 
 /// Test if `word` (in its entirety) is an RFC 2047 "encoded word".
@@ -133,6 +175,7 @@ mod test {
     #[test]
     fn test_ew_decode() {
         assert_eq!(None, ew_decode("hello world"));
+        assert_eq!("test", ew_decode("=?us-ascii?q?test?=").unwrap());
 
         // Examples from RFC 2047
         assert_eq!(
@@ -257,7 +300,7 @@ mod test {
             "Hi Mom ☺!",
             ew_decode("=?utf-7?q?Hi_Mom_+Jjo-!?=").unwrap()
         );
-        // RFC 2047 silliness
+        // RFC 2045 silliness
         assert_eq!(
             "Keith Moore",
             ew_decode("=?US-ASCII*EN?Q?Keith_Moore?=").unwrap()
@@ -269,5 +312,29 @@ mod test {
         fn ew_decode_never_panics(s in r"=\?(.*|us-ascii)\?(.*|q|b)\?.*\?=") {
             ew_decode(&s);
         }
+    }
+
+    #[test]
+    fn test_ew_decode_unstructured() {
+        assert_eq!("hello world", ew_decode_unstructured("hello world"));
+        assert_eq!(
+            "this is a test",
+            ew_decode_unstructured("=?us-ascii?q?this?= is a test")
+        );
+        assert_eq!(
+            "this is a test",
+            ew_decode_unstructured("this =?us-ascii?q?is?= a test")
+        );
+        assert_eq!(
+            "this is a test",
+            ew_decode_unstructured("this is a =?us-ascii?q?test?=")
+        );
+        assert_eq!(
+            "this isa test",
+            ew_decode_unstructured(
+                "this =?us-ascii?q?is?= \t\r\n=?us-ascii?q?a?= test"
+            )
+        );
+        assert_eq!("", ew_decode_unstructured(""));
     }
 }

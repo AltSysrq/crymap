@@ -18,8 +18,9 @@
 
 use std::borrow::Cow;
 use std::fmt;
-use std::io::{BufRead, Read};
+use std::io::{self, BufRead, Read};
 use std::mem;
+use std::str;
 
 use super::header::{self, ContentType};
 use crate::account::model::*;
@@ -96,13 +97,9 @@ pub trait Visitor: fmt::Debug {
     ///
     /// `name` and `value` are in their raw form.
     ///
-    /// Only called for headers that pass rudimentary validity checks (valid
-    /// UTF-8, not too long).
-    fn header(
-        &mut self,
-        name: &[u8],
-        value: &[u8],
-    ) -> Result<(), Self::Output> {
+    /// Only called for headers that pass rudimentary validity checks
+    /// (splittable, not too long, name is valid UTF-8).
+    fn header(&mut self, name: &str, value: &[u8]) -> Result<(), Self::Output> {
         Ok(())
     }
 
@@ -179,6 +176,67 @@ pub trait MessageAccessor {
     fn open(&self) -> Result<(MessageMetadata, Self::Reader), Error>;
 }
 
+#[cfg(test)]
+pub struct SimpleAccessor {
+    pub uid: Uid,
+    pub last_modified: Modseq,
+    pub recent: bool,
+    pub flags: Vec<Flag>,
+    pub metadata: MessageMetadata,
+    pub data: Vec<u8>,
+}
+
+#[cfg(test)]
+impl Default for SimpleAccessor {
+    fn default() -> Self {
+        use chrono::prelude::*;
+
+        SimpleAccessor {
+            uid: Uid::MIN,
+            last_modified: Modseq::MIN,
+            recent: false,
+            flags: vec![],
+            metadata: MessageMetadata {
+                size: 0,
+                internal_date: Utc.timestamp_millis(0),
+            },
+            data: vec![],
+        }
+    }
+}
+
+#[cfg(test)]
+impl MessageAccessor for SimpleAccessor {
+    type Reader = io::Cursor<Vec<u8>>;
+
+    fn uid(&self) -> Uid {
+        self.uid
+    }
+
+    fn last_modified(&self) -> Modseq {
+        self.last_modified
+    }
+
+    fn is_recent(&self) -> bool {
+        self.recent
+    }
+
+    fn flags(&self) -> Vec<Flag> {
+        self.flags.clone()
+    }
+
+    fn open(&self) -> Result<(MessageMetadata, Self::Reader), Error> {
+        Ok((self.metadata.clone(), io::Cursor::new(self.data.clone())))
+    }
+}
+
+pub fn grovel<V: Visitor + 'static>(
+    accessor: &impl MessageAccessor,
+    visitor: V,
+) -> Result<V::Output, Error> {
+    Groveller::new(Box::new(visitor)).grovel(accessor)
+}
+
 /// A push-parser which descends through a MIME message.
 ///
 /// It is designed to be robust moreso than strictly correct. That is, it will
@@ -191,7 +249,7 @@ pub trait MessageAccessor {
 /// and does not handle character encoding or transfer encoding. Any 8-bit
 /// characters are required to be UTF-8 to be considered as text.
 #[derive(Debug)]
-pub struct Groveller<V> {
+struct Groveller<V> {
     visitor: Box<dyn Visitor<Output = V>>,
     /// Whether we are currently in the header part of the message.
     in_headers: bool,
@@ -244,9 +302,9 @@ const CT_MESSAGE_RFC822: ContentType<'static> = ContentType {
 const MAX_BUFFER: usize = 65536;
 const MAX_RECURSION: u32 = 20;
 
-impl<V: Visitor> Groveller<V> {
+impl<V> Groveller<V> {
     /// Create a new `Groveller` which will operate on the given visitor.
-    pub fn new(visitor: Box<dyn Visitor<Output = V>>) -> Self {
+    fn new(visitor: Box<dyn Visitor<Output = V>>) -> Self {
         Groveller {
             visitor,
             in_headers: true,
@@ -267,10 +325,7 @@ impl<V: Visitor> Groveller<V> {
     }
 
     /// Process the message produced by the given accessor.
-    pub fn grovel(
-        mut self,
-        accessor: &impl MessageAccessor,
-    ) -> Result<V, Error> {
+    fn grovel(mut self, accessor: &impl MessageAccessor) -> Result<V, Error> {
         if let Err(result) = self.check_info(accessor) {
             return Ok(result);
         }
@@ -471,9 +526,14 @@ impl<V: Visitor> Groveller<V> {
             _ => return Ok(()),
         };
 
+        let name = match str::from_utf8(name) {
+            Err(_) => return Ok(()),
+            Ok(name) => name.trim(),
+        };
+
         self.visitor.header(name, value)?;
 
-        if b"Content-Type".eq_ignore_ascii_case(name) {
+        if "Content-Type".eq_ignore_ascii_case(name) {
             if let Some(ct) = header::parse_content_type(value) {
                 self.content_type(&ct)?;
             }

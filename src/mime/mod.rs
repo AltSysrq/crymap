@@ -17,6 +17,7 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 mod encoded_word;
+mod fetch;
 mod grovel;
 mod header;
 mod quoted_printable;

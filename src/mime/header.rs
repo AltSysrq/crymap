@@ -270,6 +270,12 @@ pub enum ContentTransferEncoding {
     Base64,
 }
 
+impl Default for ContentTransferEncoding {
+    fn default() -> Self {
+        ContentTransferEncoding::SevenBit
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct ContentDisposition<'a> {
     pub disposition: Cow<'a, [u8]>,
