@@ -481,8 +481,8 @@ impl<V> Groveller<V> {
                     self.buffered_line_ending = b"";
                     if self.seen_multipart_delim {
                         self.end_multipart_part()?;
-                        self.seen_multipart_delim = true;
                     }
+                    self.seen_multipart_delim = true;
 
                     if !is_final {
                         self.start_multipart_part()?;
@@ -647,6 +647,13 @@ impl<V> Groveller<V> {
     fn end_multipart_part(&mut self) -> Result<(), V> {
         if !self.do_multipart_bookkeeping() {
             return Ok(());
+        }
+
+        // In a pseudo-multipart with no boundaries (i.e., message/rfc822), the
+        // trailing newline is also part of the child content.
+        if self.boundary.is_none() && !self.buffered_line_ending.is_empty() {
+            let ble = self.buffered_line_ending;
+            self.on_child(|child| child.push_content(ble))?;
         }
 
         if let Some(child) = self.child.take() {

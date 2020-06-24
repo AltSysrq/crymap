@@ -314,4 +314,81 @@ hello world
         assert_eq!(1, bs.size_lines);
         assert_eq!("a0f2a3c1dcd5b1cac71bf0c03f2ff1bd", bs.md5);
     }
+
+    #[test]
+    fn parse_simple_multipart() {
+        let bs = parse(
+            "\
+From: foo@bar.com
+Content-Type: multipart/alternative; boundary=\"bound\"
+
+This is the prologue.
+
+--bound
+
+hello world
+
+--bound
+Content-Type: text/html
+
+<html/>
+--bound--
+
+This is the epilogue.
+",
+        );
+        assert_eq!("multipart", bs.content_type.0);
+        assert_eq!("alternative", bs.content_type.1);
+        assert_eq!(
+            vec![("boundary".to_owned(), "bound".to_owned())],
+            bs.content_type_parms
+        );
+        assert_eq!(2, bs.children.len());
+
+        assert_eq!("text", bs.children[0].content_type.0);
+        assert_eq!("plain", bs.children[0].content_type.1);
+        assert_eq!(13, bs.children[0].size_octets);
+        assert_eq!(1, bs.children[0].size_lines);
+        assert_eq!("a0f2a3c1dcd5b1cac71bf0c03f2ff1bd", bs.children[0].md5);
+
+        assert_eq!("text", bs.children[1].content_type.0);
+        assert_eq!("html", bs.children[1].content_type.1);
+        // The CRLF after `<html/>` is not part of that part's content, so
+        // there is only a single, incomplete line.
+        assert_eq!(7, bs.children[1].size_octets);
+        assert_eq!(0, bs.children[1].size_lines);
+        assert_eq!("7682d345add5f360f96f3c8f359ca5c7", bs.children[1].md5);
+    }
+
+    #[test]
+    fn parse_simple_embedded_message() {
+        let bs = parse(
+            "\
+From: foo@bar.com
+Content-Type: message/rfc822
+
+From: bar@foo.com
+
+hello world
+",
+        );
+        assert_eq!("message", bs.content_type.0);
+        assert_eq!("rfc822", bs.content_type.1);
+        assert_eq!(1, bs.children.len());
+
+        assert_eq!("text", bs.children[0].content_type.0);
+        assert_eq!("plain", bs.children[0].content_type.1);
+        assert_eq!(
+            vec![EnvelopeAddress {
+                name: None,
+                routing: (),
+                local: Some("bar".to_owned()),
+                domain: Some("foo.com".to_owned()),
+            }],
+            bs.children[0].envelope.from
+        );
+        assert_eq!(13, bs.children[0].size_octets);
+        assert_eq!(1, bs.children[0].size_lines);
+        assert_eq!("a0f2a3c1dcd5b1cac71bf0c03f2ff1bd", bs.children[0].md5);
+    }
 }
