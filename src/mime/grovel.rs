@@ -256,6 +256,9 @@ struct Groveller<V> {
     visitor: Box<dyn Visitor<Output = V>>,
     /// Whether we are currently in the header part of the message.
     in_headers: bool,
+    /// Whether we have passed the blank line before the start of content
+    /// proper.
+    in_content: bool,
     /// Whether any Content-Type header has been seen.
     seen_content_type: bool,
     /// Whether any multipart delimiter has been seen yet.
@@ -311,6 +314,7 @@ impl<V> Groveller<V> {
         Groveller {
             visitor,
             in_headers: true,
+            in_content: false,
             seen_content_type: false,
             seen_multipart_delim: false,
 
@@ -378,9 +382,10 @@ impl<V> Groveller<V> {
                     let tail = &r_buf[lf + 1..];
                     let could_be_continuation = !tail.is_empty()
                         && (tail.starts_with(b" ") || tail.starts_with(b"\t"));
-                    if let Err(output) =
-                        self.push(&r_buf[..=lf], could_be_continuation)
-                    {
+                    if let Err(output) = self.push_line_and_content(
+                        &r_buf[..=lf],
+                        could_be_continuation,
+                    ) {
                         return Ok(output);
                     }
                 }
@@ -403,15 +408,21 @@ impl<V> Groveller<V> {
                 break;
             }
 
-            if let Err(output) = self.push(&buf, true) {
-                return Ok(output);
-            }
-            if let Err(output) = self.push_content(&buf) {
+            if let Err(output) = self.push_line_and_content(&buf, true) {
                 return Ok(output);
             }
         }
 
         Ok(self.end())
+    }
+
+    fn push_line_and_content(
+        &mut self,
+        line: &[u8],
+        next_could_be_continuation: bool,
+    ) -> Result<(), V> {
+        self.push(line, next_could_be_continuation)?;
+        self.push_content(line)
     }
 
     fn push(
@@ -429,7 +440,7 @@ impl<V> Groveller<V> {
                 self.process_buffered_header()?;
             }
 
-            if line.is_empty() {
+            if b"\n" == line || b"\r\n" == line {
                 self.end_headers()?;
             } else if is_continuation {
                 if !self.buffered_header.is_empty() {
@@ -499,6 +510,9 @@ impl<V> Groveller<V> {
                 line
             };
 
+            self.on_child(|child| {
+                child.push(line, next_could_be_continuation)
+            })?;
             self.on_child(|child| child.push_content(content))?;
         }
 
@@ -506,9 +520,12 @@ impl<V> Groveller<V> {
     }
 
     fn push_content(&mut self, content: &[u8]) -> Result<(), V> {
-        if !self.in_headers {
+        if self.in_headers {
+            Ok(())
+        } else if self.in_content {
             self.visitor.content(content)
         } else {
+            self.in_content |= b"\n" == content || b"\r\n" == content;
             Ok(())
         }
     }
