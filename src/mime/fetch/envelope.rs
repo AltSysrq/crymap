@@ -141,7 +141,7 @@ impl grovel::Visitor for EnvelopeFetcher {
         } else if "From".eq_ignore_ascii_case(name) {
             self.addr_list(E::FROM, |e| &mut e.from, value)
         } else if "Sender".eq_ignore_ascii_case(name) {
-            self.addr_list(E::SENDER, |e| &mut e.from, value)
+            self.addr_list(E::SENDER, |e| &mut e.sender, value)
         } else if "Reply-To".eq_ignore_ascii_case(name) {
             self.addr_list(E::REPLY_TO, |e| &mut e.reply_to, value)
         } else if "To".eq_ignore_ascii_case(name) {
@@ -333,5 +333,197 @@ X-FileName: Lay, Kenneth.pst
              Olympic Commit tee 7.16-19.01",
             envelope.subject.unwrap()
         );
+    }
+
+    #[test]
+    fn parse_rfc2047() {
+        let envelope = parse(
+            "\
+From: =?US-ASCII?Q?Keith_Moore?= <moore@cs.utk.edu>
+To: =?ISO-8859-1?Q?Keld_J=F8rn_Simonsen?= <keld@dkuug.dk>
+CC: =?ISO-8859-1?Q?Andr=E9?= Pirard <PIRARD@vm1.ulg.ac.be>
+Subject: =?ISO-8859-1?B?SWYgeW91IGNhbiByZWFkIHRoaXMgeW8=?=
+    =?ISO-8859-2?B?dSB1bmRlcnN0YW5kIHRoZSBleGFtcGxlLg==?=
+
+",
+        );
+        assert_eq!(
+            vec![EnvelopeAddress {
+                name: Some("Keith Moore".to_owned()),
+                routing: (),
+                local: Some("moore".to_owned()),
+                domain: Some("cs.utk.edu".to_owned()),
+            }],
+            envelope.from
+        );
+        assert_eq!(
+            vec![EnvelopeAddress {
+                name: Some("Keld Jørn Simonsen".to_owned()),
+                routing: (),
+                local: Some("keld".to_owned()),
+                domain: Some("dkuug.dk".to_owned()),
+            }],
+            envelope.to
+        );
+        assert_eq!(
+            vec![EnvelopeAddress {
+                name: Some("André Pirard".to_owned()),
+                routing: (),
+                local: Some("PIRARD".to_owned()),
+                domain: Some("vm1.ulg.ac.be".to_owned()),
+            }],
+            envelope.cc
+        );
+        assert_eq!(
+            "If you can read this you understand the example.",
+            envelope.subject.unwrap()
+        );
+    }
+
+    #[test]
+    fn parse_address_groups() {
+        let envelope = parse(
+            "\
+To: A Group:Ed Jones <c@a.test>,joe@where.test,John <jdoe@one.test>;
+Cc: Undisclosed recipients:;
+Date: Thu, 13 Feb 1969 23:32:54 -0330
+Message-ID: <testabcd.1234@silly.example>
+
+",
+        );
+        assert_eq!(
+            vec![
+                EnvelopeAddress {
+                    name: None,
+                    routing: (),
+                    local: Some("A Group".to_owned()),
+                    domain: None,
+                },
+                EnvelopeAddress {
+                    name: Some("Ed Jones".to_owned()),
+                    routing: (),
+                    local: Some("c".to_owned()),
+                    domain: Some("a.test".to_owned()),
+                },
+                EnvelopeAddress {
+                    name: None,
+                    routing: (),
+                    local: Some("joe".to_owned()),
+                    domain: Some("where.test".to_owned()),
+                },
+                EnvelopeAddress {
+                    name: Some("John".to_owned()),
+                    routing: (),
+                    local: Some("jdoe".to_owned()),
+                    domain: Some("one.test".to_owned()),
+                },
+                EnvelopeAddress {
+                    name: None,
+                    routing: (),
+                    local: None,
+                    domain: None,
+                }
+            ],
+            envelope.to
+        );
+
+        assert_eq!(
+            vec![
+                EnvelopeAddress {
+                    name: None,
+                    routing: (),
+                    local: Some("Undisclosed recipients".to_owned()),
+                    domain: None,
+                },
+                EnvelopeAddress {
+                    name: None,
+                    routing: (),
+                    local: None,
+                    domain: None,
+                }
+            ],
+            envelope.cc
+        );
+    }
+
+    #[test]
+    fn parse_all_fields() {
+        let envelope = parse(
+            "\
+from: Mary Smith <mary@example.net>
+sender: Jane Doe <jane@machine.example>
+to: John Doe <jdoe@machine.example>
+cc: foo@bar.cc
+bcc: foo@plugh.cc
+reply-to: \"Mary Smith: Personal Account\" <smith@home.example>
+subject: Re: Saying Hello
+date: Fri, 21 Nov 1997 10:01:10 -0600
+message-id: <3456@example.net>
+in-reply-to: <78910@local.machine.example>
+references: <1234@local.machine.example>
+
+",
+        );
+        assert_eq!("Fri, 21 Nov 1997 10:01:10 -0600", envelope.date.unwrap());
+        assert_eq!("Re: Saying Hello", envelope.subject.unwrap());
+        assert_eq!(
+            vec![EnvelopeAddress {
+                name: Some("Mary Smith".to_owned()),
+                routing: (),
+                local: Some("mary".to_owned()),
+                domain: Some("example.net".to_owned()),
+            }],
+            envelope.from
+        );
+        assert_eq!(
+            vec![EnvelopeAddress {
+                name: Some("Jane Doe".to_owned()),
+                routing: (),
+                local: Some("jane".to_owned()),
+                domain: Some("machine.example".to_owned()),
+            }],
+            envelope.sender
+        );
+        assert_eq!(
+            vec![EnvelopeAddress {
+                name: Some("Mary Smith: Personal Account".to_owned()),
+                routing: (),
+                local: Some("smith".to_owned()),
+                domain: Some("home.example".to_owned()),
+            }],
+            envelope.reply_to
+        );
+        assert_eq!(
+            vec![EnvelopeAddress {
+                name: Some("John Doe".to_owned()),
+                routing: (),
+                local: Some("jdoe".to_owned()),
+                domain: Some("machine.example".to_owned()),
+            }],
+            envelope.to
+        );
+        assert_eq!(
+            vec![EnvelopeAddress {
+                name: None,
+                routing: (),
+                local: Some("foo".to_owned()),
+                domain: Some("bar.cc".to_owned()),
+            }],
+            envelope.cc
+        );
+        assert_eq!(
+            vec![EnvelopeAddress {
+                name: None,
+                routing: (),
+                local: Some("foo".to_owned()),
+                domain: Some("plugh.cc".to_owned()),
+            }],
+            envelope.bcc
+        );
+        assert_eq!(
+            "<78910@local.machine.example>",
+            envelope.in_reply_to.unwrap()
+        );
+        assert_eq!("<3456@example.net>", envelope.message_id.unwrap());
     }
 }
