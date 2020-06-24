@@ -207,7 +207,9 @@ impl Default for SimpleAccessor {
 
 #[cfg(test)]
 impl MessageAccessor for SimpleAccessor {
-    type Reader = std::io::Cursor<Vec<u8>>;
+    // The extra BufReader layer is to forcibly split up the byte array so we
+    // can actually test buffering paths
+    type Reader = std::io::BufReader<std::io::Cursor<Vec<u8>>>;
 
     fn uid(&self) -> Uid {
         self.uid
@@ -228,7 +230,10 @@ impl MessageAccessor for SimpleAccessor {
     fn open(&self) -> Result<(MessageMetadata, Self::Reader), Error> {
         Ok((
             self.metadata.clone(),
-            std::io::Cursor::new(self.data.clone()),
+            std::io::BufReader::with_capacity(
+                80,
+                std::io::Cursor::new(self.data.clone()),
+            ),
         ))
     }
 }
@@ -259,10 +264,22 @@ struct Groveller<V> {
     /// Whether we have passed the blank line before the start of content
     /// proper.
     in_content: bool,
+    /// Whether the next content line is the first. This is used to be able to
+    /// handle the case of a multipart boundary occurring at the very start of
+    /// the multipart content, since we need to be able to distinguish between
+    /// text occurring before something that isn't a line break and something
+    /// occurring before nothing at all.
+    first_line_of_content: bool,
     /// Whether any Content-Type header has been seen.
     seen_content_type: bool,
     /// Whether any multipart delimiter has been seen yet.
     seen_multipart_delim: bool,
+
+    /// Whether the final line ending of any line that passes through should be
+    /// considered part of the content.
+    ///
+    /// This is true until nested in any proper multipart.
+    last_line_ending_is_content: bool,
 
     /// The current header, buffered until it reaches maximum size or we hit a
     /// non-continuation.
@@ -305,7 +322,13 @@ const CT_MESSAGE_RFC822: ContentType<'static> = ContentType {
     parms: vec![],
 };
 
+#[cfg(not(test))]
 const MAX_BUFFER: usize = 65536;
+// Substantially reduce the maximum line length in testing to make it easier to
+// find problems with overflow handling.
+#[cfg(test)]
+pub(super) const MAX_BUFFER: usize = 256;
+
 const MAX_RECURSION: u32 = 20;
 
 impl<V> Groveller<V> {
@@ -315,8 +338,11 @@ impl<V> Groveller<V> {
             visitor,
             in_headers: true,
             in_content: false,
+            first_line_of_content: true,
             seen_content_type: false,
             seen_multipart_delim: false,
+
+            last_line_ending_is_content: true,
 
             buffered_header: vec![],
             buffered_line_ending: b"",
@@ -364,9 +390,13 @@ impl<V> Groveller<V> {
 
     fn read_through(mut self, mut r: impl BufRead) -> Result<V, Error> {
         let mut buf = Vec::new();
+        let mut wrapped_cr = false;
 
         loop {
-            let direct_consumed = {
+            let direct_consumed = if wrapped_cr {
+                // Can't do zero-copy because of the lingering CR character
+                None
+            } else {
                 // See if we can get a full line at once without copying
                 let r_buf = r.fill_buf()?;
                 if r_buf.is_empty() {
@@ -379,9 +409,8 @@ impl<V> Groveller<V> {
                     // Peek at whether we *know* the next line won't be a
                     // continuation so that we can do zero-copy parsing in the
                     // common case where there is no unfolding to be done.
-                    let tail = &r_buf[lf + 1..];
-                    let could_be_continuation = !tail.is_empty()
-                        && (tail.starts_with(b" ") || tail.starts_with(b"\t"));
+                    let could_be_continuation =
+                        could_be_continuation(&r_buf[lf + 1..]);
                     if let Err(output) = self.push_line_and_content(
                         &r_buf[..=lf],
                         could_be_continuation,
@@ -399,16 +428,36 @@ impl<V> Groveller<V> {
 
             // Nope, need to buffer the line
             buf.clear();
-            let nread = r
-                .by_ref()
+            if wrapped_cr {
+                buf.push(b'\r');
+                wrapped_cr = false;
+            }
+            r.by_ref()
                 .take(MAX_BUFFER as u64)
                 .read_until(b'\n', &mut buf)?;
-            if 0 == nread {
+            if buf.is_empty() {
                 // EOF
                 break;
             }
 
-            if let Err(output) = self.push_line_and_content(&buf, true) {
+            // If there is a CR at the end of the buffer and we filled the
+            // buffer completely, chop the CR off and add it to the start of
+            // the next buffer. This is necessary since the next input could be
+            // a LF followed by a multipart boundary, in which case this CR
+            // must not become part of the child content. We don't need to do
+            // this if the buffer is not full since that indicates we hit EOF.
+            // We also don't need to worry about additional CR bytes before the
+            // one we chop off since at this point we know they are not
+            // followed by a LF.
+            if MAX_BUFFER == buf.len() && Some(&b'\r') == buf.last() {
+                wrapped_cr = true;
+                buf.pop();
+            }
+
+            let could_be_continuation = could_be_continuation(r.fill_buf()?);
+            if let Err(output) =
+                self.push_line_and_content(&buf, could_be_continuation)
+            {
                 return Ok(output);
             }
         }
@@ -458,13 +507,16 @@ impl<V> Groveller<V> {
                 }
             }
         } else {
+            let is_first = self.first_line_of_content;
+            self.first_line_of_content = false;
+
             // Multipart boundary can occur anywhere after a line ending.
             //
             // (Strictly, it's supposed to only be after DOS line endings, but
             // we handle UNIX here too since it's unlikely any agent will ever
             // pick a boundary which exists in a binary payload but only after
             // a sane line ending.)
-            if !self.buffered_line_ending.is_empty() {
+            if is_first || !self.buffered_line_ending.is_empty() {
                 let (at_boundary, is_final) = self
                     .boundary
                     .as_ref()
@@ -625,6 +677,8 @@ impl<V> Groveller<V> {
             child.default_content_type =
                 self.child_default_content_type.clone();
             child.recursion_depth = self.recursion_depth + 1;
+            child.last_line_ending_is_content =
+                self.last_line_ending_is_content && self.is_message_rfc822;
             self.child = Some(Box::new(child));
         }
 
@@ -651,7 +705,10 @@ impl<V> Groveller<V> {
 
         // In a pseudo-multipart with no boundaries (i.e., message/rfc822), the
         // trailing newline is also part of the child content.
-        if self.boundary.is_none() && !self.buffered_line_ending.is_empty() {
+        if self.boundary.is_none()
+            && !self.buffered_line_ending.is_empty()
+            && self.last_line_ending_is_content
+        {
             let ble = self.buffered_line_ending;
             self.on_child(|child| child.push_content(ble))?;
         }
@@ -669,4 +726,8 @@ impl<V> Groveller<V> {
 
         self.visitor.end()
     }
+}
+
+fn could_be_continuation(tail: &[u8]) -> bool {
+    !tail.is_empty() && (tail.starts_with(b" ") || tail.starts_with(b"\t"))
 }

@@ -270,8 +270,15 @@ fn extend_parms(
 
 #[cfg(test)]
 mod test {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    use chrono::prelude::*;
+
     use super::*;
+    use crate::account::model::*;
     use crate::mime::grovel;
+    use crate::support::error::Error;
 
     fn parse(message: &str) -> BodyStructure {
         let message = message.replace('\n', "\r\n");
@@ -285,6 +292,7 @@ mod test {
         .unwrap()
     }
 
+    // NB These tests double as the unit tests for `grovel`.
     #[test]
     fn parse_simple() {
         let bs = parse(
@@ -361,6 +369,34 @@ This is the epilogue.
     }
 
     #[test]
+    fn parse_minimal_multipart() {
+        let bs = parse(
+            "\
+From: foo@bar.com
+Content-Type: multipart/alternative; boundary=\"bound\"
+
+--bound
+
+hello world
+
+--bound--",
+        );
+        assert_eq!("multipart", bs.content_type.0);
+        assert_eq!("alternative", bs.content_type.1);
+        assert_eq!(
+            vec![("boundary".to_owned(), "bound".to_owned())],
+            bs.content_type_parms
+        );
+        assert_eq!(1, bs.children.len());
+
+        assert_eq!("text", bs.children[0].content_type.0);
+        assert_eq!("plain", bs.children[0].content_type.1);
+        assert_eq!(13, bs.children[0].size_octets);
+        assert_eq!(1, bs.children[0].size_lines);
+        assert_eq!("a0f2a3c1dcd5b1cac71bf0c03f2ff1bd", bs.children[0].md5);
+    }
+
+    #[test]
     fn parse_simple_embedded_message() {
         let bs = parse(
             "\
@@ -427,5 +463,238 @@ content-transfer-encoding: 8bit
             header::ContentTransferEncoding::EightBit,
             bs.content_transfer_encoding
         );
+    }
+
+    #[test]
+    fn parse_nested_multipart() {
+        let bs = parse(
+            "\
+Content-Type: multipart/alternative; boundary=outer
+
+Outer prologue
+
+--outer
+Content-Type: multipart/parallel; boundary=inner
+
+Inner 1 prologue
+
+--inner
+
+Content A
+--inner
+
+Content B
+--inner--
+Inner 1 epilogue
+--outer
+Content-Type: multipart/parallel; boundary=inner
+
+Inner 2 prologue
+
+--inner
+
+Content C
+--inner
+
+Content D
+--inner--
+Inner 2 epilogue
+--outer--
+
+Outer epilogue",
+        );
+
+        assert_eq!(2, bs.children.len());
+        assert_eq!(2, bs.children[0].children.len());
+        assert_eq!(
+            "0ee839c7c234a29c5072e6469d5054f4",
+            bs.children[0].children[0].md5
+        );
+        assert_eq!(
+            "b37336f3bd5b8646798fd9ab65afdde8",
+            bs.children[0].children[1].md5
+        );
+        assert_eq!(2, bs.children[1].children.len());
+        assert_eq!(
+            "7b8fdf40404049204ed4feb3c8e99480",
+            bs.children[1].children[0].md5
+        );
+        assert_eq!(
+            "586fb32b19b9e81470a6e418f22ffa2e",
+            bs.children[1].children[1].md5
+        );
+    }
+
+    #[test]
+    fn parse_digest() {
+        let bs = parse(
+            "\
+Content-Type: multipart/digest; boundary=bound
+
+--bound
+
+From: foo@bar.com
+
+Content A
+
+--bound
+
+From: bar@foo.com
+
+Content B
+
+--bound--
+",
+        );
+        assert_eq!(2, bs.children.len());
+
+        assert_eq!("message", bs.children[0].content_type.0);
+        assert_eq!("rfc822", bs.children[0].content_type.1);
+        assert_eq!(1, bs.children[0].children.len());
+        assert_eq!("text", bs.children[0].children[0].content_type.0);
+        assert_eq!("plain", bs.children[0].children[0].content_type.1);
+        assert_eq!(
+            vec![EnvelopeAddress {
+                name: None,
+                routing: (),
+                local: Some("foo".to_owned()),
+                domain: Some("bar.com".to_owned()),
+            }],
+            bs.children[0].children[0].envelope.from
+        );
+        assert_eq!(
+            "83dbaf5d87b23cb7849cf36db562365a",
+            bs.children[0].children[0].md5
+        );
+
+        assert_eq!("message", bs.children[1].content_type.0);
+        assert_eq!("rfc822", bs.children[1].content_type.1);
+        assert_eq!(1, bs.children[1].children.len());
+        assert_eq!("text", bs.children[1].children[0].content_type.0);
+        assert_eq!("plain", bs.children[1].children[0].content_type.1);
+        assert_eq!(
+            vec![EnvelopeAddress {
+                name: None,
+                routing: (),
+                local: Some("bar".to_owned()),
+                domain: Some("foo.com".to_owned()),
+            }],
+            bs.children[1].children[0].envelope.from
+        );
+        assert_eq!(
+            "7182af2fa6079e8d616316f4a6df7cbe",
+            bs.children[1].children[0].md5
+        );
+    }
+
+    #[test]
+    fn strict_binary_boundary_handling() {
+        let body0 = "a".repeat(grovel::MAX_BUFFER - 3);
+        let body1 = "b".repeat(grovel::MAX_BUFFER - 2);
+        let body2 = "c".repeat(grovel::MAX_BUFFER - 1);
+        let body3 = "d".repeat(grovel::MAX_BUFFER);
+        let body4 = "e".repeat(grovel::MAX_BUFFER + 1);
+        let body5 = "\r".repeat(grovel::MAX_BUFFER + 1);
+
+        let bs = parse(&format!(
+            "\
+Content-Type: multipart/alternative; boundary=bound
+
+--bound
+Content-Transfer-Encoding: binary
+
+{}
+--bound
+Content-Transfer-Encoding: binary
+
+{}
+--bound
+Content-Transfer-Encoding: binary
+
+{}
+--bound
+Content-Transfer-Encoding: binary
+
+{}
+--bound
+Content-Transfer-Encoding: binary
+
+{}
+--bound
+Content-Transfer-Encoding: binary
+
+{}
+--bound--
+",
+            body0, body1, body2, body3, body4, body5
+        ));
+
+        assert_eq!(6, bs.children.len());
+        assert_eq!(grovel::MAX_BUFFER - 3, bs.children[0].size_octets as usize);
+        assert_eq!(grovel::MAX_BUFFER - 2, bs.children[1].size_octets as usize);
+        assert_eq!(grovel::MAX_BUFFER - 1, bs.children[2].size_octets as usize);
+        assert_eq!(grovel::MAX_BUFFER, bs.children[3].size_octets as usize);
+        assert_eq!(grovel::MAX_BUFFER + 1, bs.children[4].size_octets as usize);
+        assert_eq!(grovel::MAX_BUFFER + 1, bs.children[5].size_octets as usize);
+    }
+
+    // Ignored -- Corpus not included.
+    // Comment #[ignore] and set BODYSTRUCTURE_CORPUS=/path/to/corpus to test.
+    // This just tests that all the messages can be parsed without panicking.
+    // It also acts as a sort of rough benchmark.
+    #[test]
+    #[ignore]
+    fn test_corpus() {
+        do_test_corpus(std::env::var("BODYSTRUCTURE_CORPUS").unwrap());
+    }
+
+    fn do_test_corpus(dir: impl AsRef<Path>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_file() {
+                println!("Testing {}...", path.display());
+
+                struct Accessor(PathBuf);
+                impl grovel::MessageAccessor for Accessor {
+                    type Reader = std::io::BufReader<fs::File>;
+
+                    fn uid(&self) -> Uid {
+                        Uid::MIN
+                    }
+
+                    fn last_modified(&self) -> Modseq {
+                        Modseq::MIN
+                    }
+
+                    fn is_recent(&self) -> bool {
+                        false
+                    }
+
+                    fn flags(&self) -> Vec<Flag> {
+                        vec![]
+                    }
+
+                    fn open(
+                        &self,
+                    ) -> Result<(MessageMetadata, Self::Reader), Error>
+                    {
+                        Ok((
+                            MessageMetadata {
+                                size: 0,
+                                internal_date: Utc.timestamp_millis(0),
+                            },
+                            std::io::BufReader::new(
+                                fs::File::open(&self.0).unwrap(),
+                            ),
+                        ))
+                    }
+                }
+
+                grovel::grovel(&Accessor(path), BodyStructureFetcher::new())
+                    .unwrap();
+            } else if path.is_dir() {
+                do_test_corpus(path);
+            }
+        }
     }
 }
