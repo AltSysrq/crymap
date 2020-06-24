@@ -526,6 +526,56 @@ Outer epilogue",
     }
 
     #[test]
+    fn parse_minimal_nested_multipart() {
+        let bs = parse(
+            "\
+Content-Type: multipart/alternative; boundary=outer
+
+--outer
+Content-Type: multipart/parallel; boundary=inner
+
+--inner
+
+Content A
+--inner
+
+Content B
+--inner--
+--outer
+Content-Type: multipart/parallel; boundary=inner
+
+--inner
+
+Content C
+--inner
+
+Content D
+--inner--
+--outer--",
+        );
+
+        assert_eq!(2, bs.children.len());
+        assert_eq!(2, bs.children[0].children.len());
+        assert_eq!(
+            "0ee839c7c234a29c5072e6469d5054f4",
+            bs.children[0].children[0].md5
+        );
+        assert_eq!(
+            "b37336f3bd5b8646798fd9ab65afdde8",
+            bs.children[0].children[1].md5
+        );
+        assert_eq!(2, bs.children[1].children.len());
+        assert_eq!(
+            "7b8fdf40404049204ed4feb3c8e99480",
+            bs.children[1].children[0].md5
+        );
+        assert_eq!(
+            "586fb32b19b9e81470a6e418f22ffa2e",
+            bs.children[1].children[1].md5
+        );
+    }
+
+    #[test]
     fn parse_digest() {
         let bs = parse(
             "\
@@ -636,6 +686,195 @@ Content-Transfer-Encoding: binary
         assert_eq!(grovel::MAX_BUFFER, bs.children[3].size_octets as usize);
         assert_eq!(grovel::MAX_BUFFER + 1, bs.children[4].size_octets as usize);
         assert_eq!(grovel::MAX_BUFFER + 1, bs.children[5].size_octets as usize);
+    }
+
+    #[test]
+    fn parse_truncated_top_level_multipart() {
+        let bs = parse(
+            "\
+Content-Type: multipart/alternative; boundary=bound
+
+--bound
+
+hello world
+",
+        );
+        assert_eq!(1, bs.children.len());
+        // Whether the final CRLF is part of the content is undefined; we don't
+        // know if there was going to be a boundary immediately after or more
+        // content. This implementation happens to exclude it.
+        assert_eq!("5eb63bbbe01eeed093cb22bb8f5acdc3", bs.children[0].md5);
+    }
+
+    #[test]
+    fn parse_truncated_top_nested_multipart() {
+        let bs = parse(
+            "\
+Content-Type: multipart/alternative; boundary=outer
+
+--outer
+Content-Type: multipart/alternative; boundary = inner
+
+--inner
+
+hello world
+--outer--
+",
+        );
+        assert_eq!(1, bs.children.len());
+        assert_eq!(1, bs.children[0].children.len());
+        // Whether the final CRLF is part of the content is undefined; we don't
+        // know if there was going to be a boundary immediately after or more
+        // content. This implementation happens to exclude it.
+        assert_eq!(
+            "5eb63bbbe01eeed093cb22bb8f5acdc3",
+            bs.children[0].children[0].md5
+        );
+    }
+
+    #[test]
+    fn test_recursion_limit() {
+        let bs = parse(
+            "\
+Content-Type: multipart/alternative; boundary=b00
+
+--b00
+Content-Type: multipart/alternative; boundary=b01
+
+--b01
+Content-Type: multipart/alternative; boundary=b02
+
+--b02
+Content-Type: multipart/alternative; boundary=b03
+
+--b03
+Content-Type: multipart/alternative; boundary=b04
+
+--b04
+Content-Type: multipart/alternative; boundary=b05
+
+--b05
+Content-Type: multipart/alternative; boundary=b06
+
+--b06
+Content-Type: multipart/alternative; boundary=b07
+
+--b07
+Content-Type: multipart/alternative; boundary=b08
+
+--b08
+Content-Type: multipart/alternative; boundary=b09
+
+--b09
+Content-Type: multipart/alternative; boundary=b10
+
+--b10
+Content-Type: multipart/alternative; boundary=b11
+
+--b11
+Content-Type: multipart/alternative; boundary=b12
+
+--b12
+Content-Type: multipart/alternative; boundary=b13
+
+--b13
+Content-Type: multipart/alternative; boundary=b14
+
+--b14
+Content-Type: multipart/alternative; boundary=b15
+
+--b15
+Content-Type: multipart/alternative; boundary=b16
+
+--b16
+Content-Type: multipart/alternative; boundary=b17
+
+--b17
+Content-Type: multipart/alternative; boundary=b18
+
+--b18
+Content-Type: multipart/alternative; boundary=b19
+
+--b19
+Content-Type: multipart/alternative; boundary=b20
+
+--b20
+Content-Type: multipart/alternative; boundary=b21
+
+--b21
+Content-Type: multipart/alternative; boundary=b22
+
+--b22
+Content-Type: multipart/alternative; boundary=b23
+
+--b23
+Content-Type: multipart/alternative; boundary=b24
+
+--b24
+Content-Type: multipart/alternative; boundary=b25
+
+--b25
+Content-Type: multipart/alternative; boundary=b26
+
+--b26
+Content-Type: multipart/alternative; boundary=b27
+
+--b27
+Content-Type: multipart/alternative; boundary=b28
+
+--b28
+Content-Type: multipart/alternative; boundary=b29
+
+--b29
+Content-Type: text/plain
+
+hello world
+",
+        );
+
+        let mut part = Some(&bs);
+        while let Some(p) = part.take() {
+            assert_ne!("text", p.content_type.0);
+            part = p.children.first();
+        }
+    }
+
+    #[test]
+    fn test_part_limit() {
+        let mut content = "\
+Content-Type: multipart/alternative; boundary=outer
+
+"
+        .to_owned();
+
+        for outer in 0..20 {
+            content.push_str(&format!(
+                "\
+--outer
+Content-Type: multipart/alternative; boundary=inner{:02}
+
+",
+                outer
+            ));
+
+            for _inner in 0..20 {
+                content.push_str(&format!(
+                    "\
+--inner{:02}
+
+hello world
+",
+                    outer
+                ));
+            }
+
+            content.push_str(&format!("--inner{:02}--\n", outer));
+        }
+
+        content.push_str("--outer--\n");
+
+        let bs = parse(&content);
+        assert!(bs.children.len() < 20);
     }
 
     // Ignored -- Corpus not included.

@@ -17,9 +17,11 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::fmt;
 use std::io::{BufRead, Read};
 use std::mem;
+use std::rc::Rc;
 use std::str;
 
 use super::header::{self, ContentType};
@@ -308,6 +310,7 @@ struct Groveller<V> {
     is_message_rfc822: bool,
 
     recursion_depth: u32,
+    total_part_count: Rc<Cell<u32>>,
 }
 
 const CT_TEXT_PLAIN: ContentType<'static> = ContentType {
@@ -330,10 +333,18 @@ const MAX_BUFFER: usize = 65536;
 pub(super) const MAX_BUFFER: usize = 256;
 
 const MAX_RECURSION: u32 = 20;
+const MAX_PARTS: u32 = 100;
 
 impl<V> Groveller<V> {
     /// Create a new `Groveller` which will operate on the given visitor.
     fn new(visitor: Box<dyn Visitor<Output = V>>) -> Self {
+        Groveller::new_with_part_count(visitor, Rc::new(Cell::new(0)))
+    }
+
+    fn new_with_part_count(
+        visitor: Box<dyn Visitor<Output = V>>,
+        part_count: Rc<Cell<u32>>,
+    ) -> Self {
         Groveller {
             visitor,
             in_headers: true,
@@ -354,6 +365,7 @@ impl<V> Groveller<V> {
             boundary: None,
             is_message_rfc822: false,
             recursion_depth: 0,
+            total_part_count: part_count,
         }
     }
 
@@ -663,6 +675,7 @@ impl<V> Groveller<V> {
     fn do_multipart_bookkeeping(&self) -> bool {
         self.recursion_depth < MAX_RECURSION
             && (self.boundary.is_some() || self.is_message_rfc822)
+            && self.total_part_count.get() < MAX_PARTS
     }
 
     fn start_multipart_part(&mut self) -> Result<(), V> {
@@ -673,13 +686,18 @@ impl<V> Groveller<V> {
         assert!(self.child.is_none());
 
         if let Some(child_visitor) = self.visitor.start_part() {
-            let mut child = Self::new(child_visitor);
+            let mut child = Self::new_with_part_count(
+                child_visitor,
+                Rc::clone(&self.total_part_count),
+            );
             child.default_content_type =
                 self.child_default_content_type.clone();
             child.recursion_depth = self.recursion_depth + 1;
             child.last_line_ending_is_content =
                 self.last_line_ending_is_content && self.is_message_rfc822;
             self.child = Some(Box::new(child));
+
+            self.total_part_count.set(self.total_part_count.get() + 1);
         }
 
         Ok(())
@@ -699,7 +717,7 @@ impl<V> Groveller<V> {
     }
 
     fn end_multipart_part(&mut self) -> Result<(), V> {
-        if !self.do_multipart_bookkeeping() {
+        if !self.do_multipart_bookkeeping() && self.child.is_none() {
             return Ok(());
         }
 
@@ -731,3 +749,5 @@ impl<V> Groveller<V> {
 fn could_be_continuation(tail: &[u8]) -> bool {
     !tail.is_empty() && (tail.starts_with(b" ") || tail.starts_with(b"\t"))
 }
+
+// See `fetch/bodystructure.rs` for tests.
