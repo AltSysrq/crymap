@@ -391,4 +391,41 @@ hello world
         assert_eq!(1, bs.children[0].size_lines);
         assert_eq!("a0f2a3c1dcd5b1cac71bf0c03f2ff1bd", bs.children[0].md5);
     }
+
+    #[test]
+    fn parse_all_headers() {
+        let bs = parse(
+            "\
+content-type: application/xml; charset=\"UTF-8\"
+content-disposition: inline; name=\"foo.xml\"
+content-language: tlh
+content-location: http://example.com/foo
+content-id: <contentid@example.com>
+content-description: =?us-ascii?q?This_is_a?=
+    =?us-ascii?q?=20description?=
+content-transfer-encoding: 8bit
+
+<Qapla’/>",
+        );
+
+        assert_eq!("application", bs.content_type.0);
+        assert_eq!("xml", bs.content_type.1);
+        assert_eq!(
+            vec![("charset".to_owned(), "UTF-8".to_owned())],
+            bs.content_type_parms
+        );
+        assert_eq!("inline", bs.content_disposition.unwrap());
+        assert_eq!(
+            vec![("name".to_owned(), "foo.xml".to_owned())],
+            bs.content_disposition_parms
+        );
+        assert_eq!("tlh", bs.content_language.unwrap());
+        assert_eq!("http://example.com/foo", bs.content_location.unwrap());
+        assert_eq!("<contentid@example.com>", bs.content_id.unwrap());
+        assert_eq!("This is a description", bs.content_description.unwrap());
+        assert_eq!(
+            header::ContentTransferEncoding::EightBit,
+            bs.content_transfer_encoding
+        );
+    }
 }
