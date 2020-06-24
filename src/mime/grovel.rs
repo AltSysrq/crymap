@@ -18,7 +18,7 @@
 
 use std::borrow::Cow;
 use std::fmt;
-use std::io::{self, BufRead, Read};
+use std::io::{BufRead, Read};
 use std::mem;
 use std::str;
 
@@ -207,7 +207,7 @@ impl Default for SimpleAccessor {
 
 #[cfg(test)]
 impl MessageAccessor for SimpleAccessor {
-    type Reader = io::Cursor<Vec<u8>>;
+    type Reader = std::io::Cursor<Vec<u8>>;
 
     fn uid(&self) -> Uid {
         self.uid
@@ -226,7 +226,10 @@ impl MessageAccessor for SimpleAccessor {
     }
 
     fn open(&self) -> Result<(MessageMetadata, Self::Reader), Error> {
-        Ok((self.metadata.clone(), io::Cursor::new(self.data.clone())))
+        Ok((
+            self.metadata.clone(),
+            std::io::Cursor::new(self.data.clone()),
+        ))
     }
 }
 

@@ -43,6 +43,8 @@ use chrono::prelude::*;
 use nom::bytes::complete::{is_a, is_not, tag};
 use nom::*;
 
+use super::encoded_word::ew_decode;
+
 /// Parse a MIME-format date, as defined by RFC 5322.
 pub fn parse_datetime(date_str: &str) -> Option<DateTime<FixedOffset>> {
     date_time(date_str.as_bytes()).ok().and_then(|r| r.1)
@@ -457,28 +459,67 @@ fn quoted_string(i: &[u8]) -> IResult<&[u8], Cow<'_, [u8]>> {
 }
 
 // RFC 5322 3.2.5 "word"
-fn word(i: &[u8]) -> IResult<&[u8], Cow<'_, [u8]>> {
-    branch::alt((combinator::map(atom, Cow::Borrowed), quoted_string))(i)
+//
+// The output includes a flag indicating whether the word may be subject to
+// word decoding if it occurs within a phrase.
+fn word(i: &[u8]) -> IResult<&[u8], (bool, Cow<'_, [u8]>)> {
+    branch::alt((
+        combinator::map(atom, |a| (true, Cow::Borrowed(a))),
+        combinator::map(quoted_string, |s| (false, s)),
+    ))(i)
 }
 
 // Not formally specified by RFC 5322, but part of the `obs-phrase` grammar.
 // Defined here as a separate element for simplicity.
-fn obs_dot(i: &[u8]) -> IResult<&[u8], Cow<'_, [u8]>> {
+fn obs_dot(i: &[u8]) -> IResult<&[u8], (bool, Cow<'_, [u8]>)> {
     // Only need to handle CFWS at end since there is always a preceding token
     // that allows CFWS.
-    sequence::terminated(combinator::map(tag(b"."), Cow::Borrowed), ocfws)(i)
+    sequence::terminated(
+        combinator::map(tag(b"."), |d| (false, Cow::Borrowed(d))),
+        ocfws,
+    )(i)
 }
 
 // RFC 5322 3.2.5 "phrase", plus "obsolete phrase" syntax which accounts for
 // the '.' that many agents put unquoted into display names.
+//
+// RFC 2047 amends "phrase" to apply encoded word handling to the constituent
+// words, but only those that were from atoms.
 fn phrase(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
-    combinator::map(
+    let (i, parts) = combinator::map(
         sequence::pair(word, multi::many0(branch::alt((word, obs_dot)))),
         |(head, mut tail)| {
             tail.insert(0, head);
             tail
         },
-    )(i)
+    )(i)?;
+
+    let mut output = Vec::new();
+    let mut decoded_accum: Option<Vec<u8>> = None;
+    for (allow_ew, part) in parts {
+        if let Some(decoded) = if allow_ew {
+            str::from_utf8(&part).ok().and_then(ew_decode)
+        } else {
+            None
+        } {
+            if let Some(accum) = decoded_accum.as_mut() {
+                accum.extend_from_slice(decoded.as_bytes());
+            } else {
+                decoded_accum = Some(decoded.into());
+            }
+        } else {
+            if let Some(accum) = decoded_accum.take() {
+                output.push(Cow::Owned(accum));
+            }
+            output.push(part);
+        }
+    }
+
+    if let Some(accum) = decoded_accum.take() {
+        output.push(Cow::Owned(accum));
+    }
+
+    Ok((i, output))
 }
 
 // RFC 5322 3.2.5 also defines "unstructured text", but once the "obsolete"
@@ -673,9 +714,10 @@ fn local_part(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
             local_leading_dots,
             multi::separated_nonempty_list(
                 local_separator,
-                combinator::map(combinator::opt(word), |o| {
-                    o.unwrap_or(Cow::Borrowed(&[]))
-                }),
+                combinator::map(
+                    combinator::opt(combinator::map(word, |(_, w)| w)),
+                    |o| o.unwrap_or(Cow::Borrowed(&[])),
+                ),
             ),
             // Some agent (possibly Mailman?) indicates mailing lists by
             // placing an unquoted colon immediately before the @
@@ -1121,6 +1163,27 @@ mod test {
         );
         // Ensure comments are nestable
         assert_eq!("<(foo)@(bar)(com)>", mbox("((comment))foo@bar.com"));
+
+        // RFC 2047 handling
+        assert_eq!(
+            "(Keith Moore)<(moore)@(cs)(utk)(edu)>",
+            mbox("=?US-ASCII?Q?Keith_Moore?= <moore@cs.utk.edu>")
+        );
+        assert_eq!(
+            "(Keith)(Moore)<(moore)@(cs)(utk)(edu)>",
+            mbox("=?US-ASCII?Q?Keith?= Moore <moore@cs.utk.edu>")
+        );
+        assert_eq!(
+            "(Keith)(Moore)<(moore)@(cs)(utk)(edu)>",
+            mbox("Keith =?US-ASCII?Q?Moore?= <moore@cs.utk.edu>")
+        );
+        assert_eq!(
+            "(KeithMoore)<(moore)@(cs)(utk)(edu)>",
+            mbox(concat!(
+                "=?US-ASCII?Q?Keith?= ",
+                "=?US-ASCII?Q?Moore?= <moore@cs.utk.edu>"
+            ))
+        );
     }
 
     fn mbox_list(input: &str) -> String {

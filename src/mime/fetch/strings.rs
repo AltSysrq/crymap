@@ -31,8 +31,6 @@ fn to_utf8(cow: Cow<[u8]>) -> Cow<str> {
 }
 
 pub fn decode_atom(atom: Cow<[u8]>) -> String {
-    // TODO Had intended to do encoded_word handling here, but that's not sound
-    // --- it's only allowed for RFC 822 "word" items and unstructured text.
     to_utf8(atom).into_owned()
 }
 

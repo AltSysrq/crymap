@@ -83,7 +83,7 @@ pub fn ew_decode_unstructured(text: &str) -> Cow<str> {
 /// where it is not an encoded word because the distinction is significant:
 /// whitespace is supposed to be deleted between adjacent encoded words, but
 /// must be left alone in all other cases.
-pub fn ew_decode(word: &str) -> Option<Cow<str>> {
+pub fn ew_decode(word: &str) -> Option<String> {
     // RFC 2047 specifies the maximum length of an encoded word as 75
     // characters. However, there are agents that produce longer encoded words,
     // and Thunderbird at least will interpret them. For example, one email I
@@ -118,22 +118,8 @@ pub fn ew_decode(word: &str) -> Option<Cow<str>> {
         }
     }
 
-    // These match blocks let us keep borrowing as much as possible. Basically,
-    // if the cow becomes owned at any stage, it needs to stay owned the whole
-    // way through so that the borrowed case only ever borrows from `word`.
-    let content = match content {
-        Cow::Owned(content) => decode_xfer(transfer_encoding, &content)
-            .map(Cow::into_owned)
-            .map(Cow::Owned),
-        Cow::Borrowed(content) => decode_xfer(transfer_encoding, content),
-    }?;
-
-    match content {
-        Cow::Owned(content) => decode_charset(charset, &content)
-            .map(Cow::into_owned)
-            .map(Cow::Owned),
-        Cow::Borrowed(content) => decode_charset(charset, content),
-    }
+    let content = decode_xfer(transfer_encoding, &content)?;
+    decode_charset(charset, &content).map(|r| r.into_owned())
 }
 
 fn decode_xfer<'a>(xfer: &str, content: &'a [u8]) -> Option<Cow<'a, [u8]>> {
