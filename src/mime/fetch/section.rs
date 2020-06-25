@@ -413,7 +413,9 @@ impl Visitor for SectionFetcher {
                 .iter()
                 .any(|h| name.eq_ignore_ascii_case(h));
 
-            if matches_filter != target.discard_matching_headers {
+            if !target.header_filter.is_empty()
+                && matches_filter == target.discard_matching_headers
+            {
                 return Ok(());
             }
         }
@@ -758,5 +760,117 @@ mod test {
             },
         );
         assert_eq!("Part 4.2.2.2\r\n", fetched);
+    }
+
+    #[test]
+    fn header_filter_retain() {
+        let fetched = do_fetch(
+            "fOo : foo\nBar: bar\nBaz: baz\n\nContent",
+            BodySection {
+                leaf_type: LeafType::Headers,
+                header_filter: vec!["Foo".to_owned(), "Baz".to_owned()],
+                discard_matching_headers: false,
+                ..BodySection::default()
+            },
+        );
+
+        assert_eq!("fOo : foo\r\nBaz: baz\r\n\r\n", fetched);
+    }
+
+    #[test]
+    fn header_filter_remove() {
+        let fetched = do_fetch(
+            "fOo : foo\nBar: bar\nBaz: baz\n\nContent",
+            BodySection {
+                leaf_type: LeafType::Headers,
+                header_filter: vec!["Foo".to_owned(), "Baz".to_owned()],
+                discard_matching_headers: true,
+                ..BodySection::default()
+            },
+        );
+
+        assert_eq!("Bar: bar\r\n\r\n", fetched);
+    }
+
+    #[test]
+    fn header_incomplete_line() {
+        let fetched = do_fetch(
+            "Foo: bar",
+            BodySection {
+                leaf_type: LeafType::Headers,
+                ..BodySection::default()
+            },
+        );
+        // Not having a trailing blank line is correct --- RFC 3501 specifies
+        // that the line is omitted if the source also lacks it.
+        assert_eq!("Foo: bar\r\n", fetched);
+    }
+
+    #[test]
+    fn header_incomplete_line_cr() {
+        let fetched = do_fetch(
+            "Foo: bar\r",
+            BodySection {
+                leaf_type: LeafType::Headers,
+                ..BodySection::default()
+            },
+        );
+        assert_eq!("Foo: bar\r\n", fetched);
+    }
+
+    #[test]
+    fn simple_partial() {
+        let fetched = do_fetch(
+            SAMPLE_MESSAGE,
+            BodySection {
+                subscripts: vec![4, 1],
+                leaf_type: LeafType::Content,
+                partial: Some((1, 8)),
+                ..BodySection::default()
+            },
+        );
+        assert_eq!("art 4.1", fetched);
+    }
+
+    #[test]
+    fn overlength_partial() {
+        let fetched = do_fetch(
+            SAMPLE_MESSAGE,
+            BodySection {
+                subscripts: vec![4, 1],
+                leaf_type: LeafType::Content,
+                partial: Some((1, 800)),
+                ..BodySection::default()
+            },
+        );
+        assert_eq!("art 4.1\r\n", fetched);
+    }
+
+    #[test]
+    fn empty_partial() {
+        let fetched = do_fetch(
+            SAMPLE_MESSAGE,
+            BodySection {
+                subscripts: vec![4, 1],
+                leaf_type: LeafType::Content,
+                partial: Some((1, 1)),
+                ..BodySection::default()
+            },
+        );
+        assert_eq!("", fetched);
+    }
+
+    #[test]
+    fn inverted_partial() {
+        let fetched = do_fetch(
+            SAMPLE_MESSAGE,
+            BodySection {
+                subscripts: vec![4, 1],
+                leaf_type: LeafType::Content,
+                partial: Some((8, 1)),
+                ..BodySection::default()
+            },
+        );
+        assert_eq!("", fetched);
     }
 }
