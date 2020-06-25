@@ -58,6 +58,8 @@ pub enum Error {
     GaveUpInsertion,
     #[error("File/directory layout is corrupt")]
     CorruptFileLayout,
+    #[error("Requested message section does not exist")]
+    NoSuchMessageSection,
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]

@@ -131,7 +131,12 @@ impl EnvelopeFetcher {
 impl grovel::Visitor for EnvelopeFetcher {
     type Output = Envelope;
 
-    fn header(&mut self, name: &str, value: &[u8]) -> Result<(), Envelope> {
+    fn header(
+        &mut self,
+        _raw: &[u8],
+        name: &str,
+        value: &[u8],
+    ) -> Result<(), Envelope> {
         use EnvelopeParts as E;
 
         if "Date".eq_ignore_ascii_case(name) {

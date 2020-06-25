@@ -101,7 +101,12 @@ pub trait Visitor: fmt::Debug {
     ///
     /// Only called for headers that pass rudimentary validity checks
     /// (splittable, not too long, name is valid UTF-8).
-    fn header(&mut self, name: &str, value: &[u8]) -> Result<(), Self::Output> {
+    fn header(
+        &mut self,
+        raw: &[u8],
+        name: &str,
+        value: &[u8],
+    ) -> Result<(), Self::Output> {
         Ok(())
     }
 
@@ -240,11 +245,11 @@ impl MessageAccessor for SimpleAccessor {
     }
 }
 
-pub fn grovel<V: Visitor + 'static>(
+pub fn grovel<V>(
     accessor: &impl MessageAccessor,
-    visitor: V,
-) -> Result<V::Output, Error> {
-    Groveller::new(Box::new(visitor)).grovel(accessor)
+    visitor: impl IntoBoxedVisitor<V>,
+) -> Result<V, Error> {
+    Groveller::new(visitor.into_boxed_visitor()).grovel(accessor)
 }
 
 /// A push-parser which descends through a MIME message.
@@ -334,6 +339,22 @@ pub(super) const MAX_BUFFER: usize = 256;
 
 const MAX_RECURSION: u32 = 20;
 const MAX_PARTS: u32 = 100;
+
+pub trait IntoBoxedVisitor<V> {
+    fn into_boxed_visitor(self) -> Box<dyn Visitor<Output = V>>;
+}
+
+impl<V: Visitor + 'static> IntoBoxedVisitor<V::Output> for V {
+    fn into_boxed_visitor(self) -> Box<dyn Visitor<Output = V::Output>> {
+        Box::new(self)
+    }
+}
+
+impl<V> IntoBoxedVisitor<V> for Box<dyn Visitor<Output = V>> {
+    fn into_boxed_visitor(self) -> Self {
+        self
+    }
+}
 
 impl<V> Groveller<V> {
     /// Create a new `Groveller` which will operate on the given visitor.
@@ -615,7 +636,7 @@ impl<V> Groveller<V> {
             Ok(name) => name.trim(),
         };
 
-        self.visitor.header(name, value)?;
+        self.visitor.header(header, name, value)?;
 
         if "Content-Type".eq_ignore_ascii_case(name) {
             if let Some(ct) = header::parse_content_type(value) {

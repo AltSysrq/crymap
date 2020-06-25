@@ -131,8 +131,13 @@ impl BodyStructureFetcher {
 impl Visitor for BodyStructureFetcher {
     type Output = BodyStructure;
 
-    fn header(&mut self, name: &str, value: &[u8]) -> Result<(), Self::Output> {
-        self.on_envelope(|e| e.header(name, value));
+    fn header(
+        &mut self,
+        raw: &[u8],
+        name: &str,
+        value: &[u8],
+    ) -> Result<(), Self::Output> {
+        self.on_envelope(|e| e.header(raw, name, value));
 
         if "Content-Disposition".eq_ignore_ascii_case(name) {
             self.content_disposition(value);
