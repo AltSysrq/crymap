@@ -160,11 +160,6 @@ pub trait Visitor: fmt::Debug {
         Ok(())
     }
 
-    /// Indicates that a multipart part has completed.
-    fn end_part(&mut self) -> Result<(), Self::Output> {
-        Ok(())
-    }
-
     /// Indicates that the end of the segment has been reached.
     ///
     /// This is always the last method to be called. It takes `&mut self` to
@@ -755,7 +750,8 @@ impl<V> Groveller<V> {
         if let Some(child) = self.child.take() {
             self.visitor.child_result(child.end())?;
         }
-        self.visitor.end_part()
+
+        Ok(())
     }
 
     fn end(mut self) -> V {
