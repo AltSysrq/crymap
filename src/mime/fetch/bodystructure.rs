@@ -65,6 +65,9 @@ use crate::mime::header;
 ///   md5 (content-disposition content-disposition-parms) content-language
 ///   content-location
 ///
+/// (Note that RFC 3501 specifies that `content-location` is a string list, but
+/// an Erratum published by Crispin changes it to a bare string.)
+///
 /// See also http://sgerwk.altervista.org/imapbodystructure.html, which unlike
 /// the RFC, actually has useful examples, though none including a
 /// `message/rfc822`.
