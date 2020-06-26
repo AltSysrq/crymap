@@ -767,4 +767,150 @@ fn could_be_continuation(tail: &[u8]) -> bool {
     !tail.is_empty() && (tail.starts_with(b" ") || tail.starts_with(b"\t"))
 }
 
+/// Maps one `Visitor` type into another.
+///
+/// Use `VisitorMap::new()` to create.
+pub struct VisitorMap<V, FTO, FFROM> {
+    delegate: Box<dyn Visitor<Output = V>>,
+    map_to: FTO,
+    map_from: FFROM,
+}
+
+impl<V, FTO, FFROM> fmt::Debug for VisitorMap<V, FTO, FFROM> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("VisitorMap")
+            .field("delegate", &self.delegate)
+            .field("map_to", &"<function>")
+            .field("map_from", &"<function>")
+            .finish()
+    }
+}
+
+impl<
+        V: 'static,
+        R,
+        FTO: Clone + FnMut(V) -> R + 'static,
+        FFROM: Clone + FnMut(R) -> Option<V> + 'static,
+    > VisitorMap<V, FTO, FFROM>
+{
+    /// Adapt `delegate` to produce the types returned from `map_to` and to
+    /// accept that type from child visitor results.
+    ///
+    /// This isn't a `map()` method on `Visitor` since it needs to take a boxed
+    /// trait object.
+    pub fn new(
+        delegate: Box<dyn Visitor<Output = V>>,
+        map_to: FTO,
+        map_from: FFROM,
+    ) -> Self {
+        VisitorMap {
+            delegate,
+            map_to,
+            map_from,
+        }
+    }
+}
+
+impl<
+        V: 'static,
+        R,
+        FTO: Clone + FnMut(V) -> R + 'static,
+        FFROM: Clone + FnMut(R) -> Option<V> + 'static,
+    > Visitor for VisitorMap<V, FTO, FFROM>
+{
+    type Output = R;
+
+    fn uid(&mut self, uid: Uid) -> Result<(), Self::Output> {
+        self.delegate.uid(uid).map_err(&mut self.map_to)
+    }
+
+    fn last_modified(&mut self, modseq: Modseq) -> Result<(), Self::Output> {
+        self.delegate
+            .last_modified(modseq)
+            .map_err(&mut self.map_to)
+    }
+
+    fn want_flags(&self) -> bool {
+        self.delegate.want_flags()
+    }
+
+    fn flags(&mut self, flags: &[Flag]) -> Result<(), Self::Output> {
+        self.delegate.flags(flags).map_err(&mut self.map_to)
+    }
+
+    fn recent(&mut self) -> Result<(), Self::Output> {
+        self.delegate.recent().map_err(&mut self.map_to)
+    }
+
+    fn end_flags(&mut self) -> Result<(), Self::Output> {
+        self.delegate.end_flags().map_err(&mut self.map_to)
+    }
+
+    fn metadata(
+        &mut self,
+        metadata: &MessageMetadata,
+    ) -> Result<(), Self::Output> {
+        self.delegate.metadata(metadata).map_err(&mut self.map_to)
+    }
+
+    fn raw_line(&mut self, line: &[u8]) -> Result<(), Self::Output> {
+        self.delegate.raw_line(line).map_err(&mut self.map_to)
+    }
+
+    fn header(
+        &mut self,
+        raw: &[u8],
+        name: &str,
+        value: &[u8],
+    ) -> Result<(), Self::Output> {
+        self.delegate
+            .header(raw, name, value)
+            .map_err(&mut self.map_to)
+    }
+
+    fn content_type(
+        &mut self,
+        ct: &ContentType<'_>,
+    ) -> Result<(), Self::Output> {
+        self.delegate.content_type(ct).map_err(&mut self.map_to)
+    }
+
+    fn start_content(&mut self) -> Result<(), Self::Output> {
+        self.delegate.start_content().map_err(&mut self.map_to)
+    }
+
+    fn content(&mut self, data: &[u8]) -> Result<(), Self::Output> {
+        self.delegate.content(data).map_err(&mut self.map_to)
+    }
+
+    fn start_part(
+        &mut self,
+    ) -> Option<Box<dyn Visitor<Output = Self::Output>>> {
+        self.delegate.start_part().map(|delegate| {
+            Box::new(VisitorMap {
+                delegate,
+                map_to: self.map_to.clone(),
+                map_from: self.map_from.clone(),
+            }) as Box<dyn Visitor<Output = Self::Output>>
+        })
+    }
+
+    fn child_result(
+        &mut self,
+        child_result: Self::Output,
+    ) -> Result<(), Self::Output> {
+        if let Some(child_result) = (self.map_from)(child_result) {
+            self.delegate
+                .child_result(child_result)
+                .map_err(&mut self.map_to)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn end(&mut self) -> Self::Output {
+        (self.map_to)(self.delegate.end())
+    }
+}
+
 // See `fetch/bodystructure.rs` for tests.
