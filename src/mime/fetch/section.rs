@@ -47,6 +47,16 @@
 //! RFC 3501 provides no guidance on what to do if the top level component of a
 //! `message/rfc822` is another `message/rfc822`, and by all appearances, this
 //! situation is impossible to handle unambiguously.
+//!
+//! Another issue is the case where an embedded `message/rfc822` is *not* a
+//! multipart. The transparency implied by RFC 3501 would imply that there are
+//! no subscripts to the message, and `.TEXT` accesses the content. However, in
+//! Crispin's example "torture test" (see the test that uses it in
+//! `bodystructure.rs`), he gives the content of a non-multipart message a
+//! subscript of 1 (but uses all subscripts to refer to content instead of
+//! whole parts). The implementation currently reflects what RFC 3501 implies,
+//! i.e., that there is no subscript to access the content of a non-multipart
+//! message.
 
 use std::fmt;
 use std::io::{self, Write};
