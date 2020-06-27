@@ -266,13 +266,10 @@ impl MailboxState {
     /// assigned a sequence number, and expunged ones retain their old sequence
     /// number.
     ///
-    /// If `notify` is false, changes to flags will not result in the affected
-    /// UIDs being queued for client notification.
-    ///
     /// ## Panics
     ///
     /// Panics if `tx` does not have the expected next CID.
-    pub fn commit(&mut self, cid: Cid, tx: StateTransaction, notify: bool) {
+    pub fn commit(&mut self, cid: Cid, tx: StateTransaction) {
         // Ensure transactions are committed in order
         assert_eq!(self.next_cid().unwrap(), cid);
 
@@ -294,8 +291,8 @@ impl MailboxState {
         for op in tx.ops {
             use self::StateMutation::*;
             match op {
-                AddFlag(uid, flag) => self.set_flag(uid, m, flag, true, notify),
-                RmFlag(uid, flag) => self.set_flag(uid, m, flag, false, notify),
+                AddFlag(uid, flag) => self.set_flag(uid, m, flag, true),
+                RmFlag(uid, flag) => self.set_flag(uid, m, flag, false),
                 Expunge(uid) => self.expunge(uid, m),
             }
         }
@@ -744,7 +741,6 @@ impl MailboxState {
         canonical_modseq: Modseq,
         flag: Flag,
         val: bool,
-        notify: bool,
     ) {
         let flag = self.flag_ix_mut(flag);
         let byte = flag / 8;
@@ -762,9 +758,7 @@ impl MailboxState {
             status.last_modified = canonical_modseq;
         }
 
-        if notify {
-            self.changed_flags_uids.push(uid);
-        }
+        self.changed_flags_uids.push(uid);
     }
 
     fn expunge(&mut self, uid: Uid, canonical_modseq: Modseq) {
@@ -970,7 +964,7 @@ mod test {
         // Expunge a message
         let (cid, mut tx) = state.start_tx().unwrap();
         tx.expunge(Uid::u(2));
-        state.commit(cid, tx, true);
+        state.commit(cid, tx);
 
         // But it doesn't affect the snapshot yet
         assert_eq!(3, state.num_messages());
@@ -1030,7 +1024,7 @@ mod test {
         tx.expunge(Uid::u(1));
         tx.expunge(Uid::u(3));
         tx.expunge(Uid::u(5));
-        state.commit(cid, tx, true);
+        state.commit(cid, tx);
 
         let flush = state.flush();
         assert_eq!(
@@ -1044,7 +1038,7 @@ mod test {
         let (cid, mut tx) = state.start_tx().unwrap();
         tx.expunge(Uid::u(4));
         tx.expunge(Uid::u(6));
-        state.commit(cid, tx, true);
+        state.commit(cid, tx);
 
         let flush = state.flush();
         assert_eq!(vec![(Seqnum::u(2), Uid::u(7))], flush.new);
@@ -1063,7 +1057,7 @@ mod test {
         let (cid, mut tx) = state2.start_tx().unwrap();
         tx.expunge(Uid::u(4));
         // Commit to `state`, not `state2`
-        state.commit(cid, tx, true);
+        state.commit(cid, tx);
 
         let flush = state.flush();
         assert_eq!(vec![(Seqnum::u(3), Uid::u(3))], flush.new);
@@ -1078,7 +1072,7 @@ mod test {
 
         let (cid, mut tx) = state.start_tx().unwrap();
         tx.expunge(Uid::u(2));
-        state.commit(cid, tx, true);
+        state.commit(cid, tx);
         state.seen(Uid::u(4));
 
         // This does *not* happen --- we need to keep understanding the mapping
@@ -1103,7 +1097,7 @@ mod test {
 
         let (cid, mut tx) = state.start_tx().unwrap();
         tx.expunge(Uid::u(2));
-        state.commit(cid, tx, true);
+        state.commit(cid, tx);
         state.flush();
         state.seen(Uid::u(4));
 
@@ -1129,7 +1123,7 @@ mod test {
 
         let (cid, mut tx) = state.start_tx().unwrap();
         tx.expunge(Uid::u(2));
-        state.commit(cid, tx, true);
+        state.commit(cid, tx);
         state.seen(Uid::u(4));
 
         assert!(matches!(state.validate_uid(Uid::u(1)), Ok(())));
@@ -1160,7 +1154,7 @@ mod test {
 
                 let (cid, mut tx) = state.start_tx().unwrap();
                 tx.expunge(uid);
-                state.commit(cid, tx, true);
+                state.commit(cid, tx);
             }
             state.flush();
 
@@ -1177,7 +1171,7 @@ mod test {
 
                 let (cid, mut tx) = state.start_tx().unwrap();
                 tx.expunge(uid);
-                state.commit(cid, tx, true);
+                state.commit(cid, tx);
             }
             state.flush();
 
@@ -1215,14 +1209,14 @@ mod test {
         let (cid, mut tx) = state.start_tx().unwrap();
         tx.add_flag(Uid::u(1), Flag::Seen);
         tx.add_flag(Uid::u(2), Flag::Flagged);
-        state.commit(cid, tx, true);
+        state.commit(cid, tx);
 
         assert!(state.test_flag(flagged_flag, Uid::u(2)));
 
         let (cid, mut tx) = state.start_tx().unwrap();
         tx.add_flag(Uid::u(3), Flag::Keyword("NotJunk".to_owned()));
         tx.rm_flag(Uid::u(2), Flag::Flagged);
-        state.commit(cid, tx, false);
+        state.commit(cid, tx);
 
         assert!(!state.test_flag(flagged_flag, Uid::u(1)));
         assert!(!state.test_flag(flagged_flag, Uid::u(2)));
@@ -1236,9 +1230,10 @@ mod test {
         assert!(!state.test_flag(kw_flag, Uid::u(2)));
         assert!(state.test_flag(kw_flag, Uid::u(3)));
 
-        // We only get notified about changes to 1 and 2 since the commit that
-        // altered 3 indicated no notification.
-        assert_eq!(vec![Uid::u(1), Uid::u(2)], state.take_changed_flags_uids());
+        assert_eq!(
+            vec![Uid::u(1), Uid::u(2), Uid::u(3)],
+            state.take_changed_flags_uids()
+        );
         assert!(state.take_changed_flags_uids().is_empty());
     }
 }

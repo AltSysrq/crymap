@@ -69,7 +69,7 @@ impl StatefulMailbox {
 
         self.fetch_loopbreaker.clear();
         self.poll_for_new_uids();
-        self.poll_for_new_changes(Cid::GENESIS)?;
+        self.poll_for_new_changes()?;
 
         let flush = self.state.flush();
         let has_new = !flush.new.is_empty();
@@ -191,13 +191,10 @@ impl StatefulMailbox {
     /// If a transaction with an id of `no_notify_cid` is found, any flag
     /// changes it makes are not added to the list of UIDs that have
     /// outstanding flag changes to report to the client.
-    pub(super) fn poll_for_new_changes(
-        &mut self,
-        no_notify_cid: Cid,
-    ) -> Result<(), Error> {
+    pub(super) fn poll_for_new_changes(&mut self) -> Result<(), Error> {
         while let Some(next_cid) = self.state.next_cid() {
             if self.s.change_scheme().is_allocated(next_cid.0) {
-                self.apply_change(next_cid, next_cid != no_notify_cid)?;
+                self.apply_change(next_cid)?;
             } else {
                 break;
             }
@@ -206,12 +203,11 @@ impl StatefulMailbox {
         Ok(())
     }
 
-    fn apply_change(&mut self, cid: Cid, notify: bool) -> Result<(), Error> {
+    fn apply_change(&mut self, cid: Cid) -> Result<(), Error> {
         self.state.commit(
             cid,
             self.s
                 .read_state_file(&self.s.change_scheme().path_for_id(cid.0))?,
-            notify,
         );
 
         self.see_cid(cid);

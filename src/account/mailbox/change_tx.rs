@@ -107,7 +107,7 @@ impl StatefulMailbox {
         mut f: impl FnMut(&Self, &mut StateTransaction) -> Result<R, Error>,
     ) -> Result<R, Error> {
         // Ensure we're working with the latest state
-        self.poll_for_new_changes(Cid::GENESIS)?;
+        self.poll_for_new_changes()?;
 
         for _ in 0..1000 {
             let (cid, mut tx) = self.state.start_tx()?;
@@ -121,13 +121,12 @@ impl StatefulMailbox {
             if self.s.change_scheme().emplace(buffer_file.path(), cid.0)? {
                 // Directly commit instead of needing to do the whole
                 // poll/read/decrypt dance
-                // TODO Is there *ever* a case where we want !notify?
-                self.state.commit(cid, tx, true);
+                self.state.commit(cid, tx);
                 self.see_cid(cid);
                 return Ok(res);
             }
 
-            self.poll_for_new_changes(Cid::GENESIS)?;
+            self.poll_for_new_changes()?;
         }
 
         Err(Error::GaveUpInsertion)

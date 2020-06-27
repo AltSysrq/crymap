@@ -635,7 +635,7 @@ mod test {
 
         // Cause mb1 to become aware of the expungement, though it does not get
         // applied to the snapshot yet
-        setup.mb1.poll_for_new_changes(Cid::GENESIS).unwrap();
+        setup.mb1.poll_for_new_changes().unwrap();
 
         let result = setup
             .mb1

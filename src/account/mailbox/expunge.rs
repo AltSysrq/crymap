@@ -225,7 +225,7 @@ mod test {
 
         // Polling for changes will cause the \Deleted to be discovered and,
         // implicitly, uid2
-        mb2.poll_for_new_changes(Cid::GENESIS).unwrap();
+        mb2.poll_for_new_changes().unwrap();
         assert!(mb2.state.test_flag_o(&Flag::Deleted, uid2));
         mb2.expunge_all_deleted().unwrap();
 
