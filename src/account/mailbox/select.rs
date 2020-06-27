@@ -16,6 +16,7 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -140,6 +141,8 @@ impl StatefulMailbox {
             recency_frontier: state.max_modseq().map(Modseq::uid),
             s,
             state,
+            fetch_loopbreaker: HashSet::new(),
+            client_known_flags: HashSet::new(),
             suggest_rollup: 0,
             rollups_since_gc: 0,
             gc_in_progress: Arc::new(AtomicBool::new(false)),
@@ -161,7 +164,7 @@ impl StatefulMailbox {
         }
 
         let select_response = SelectResponse {
-            flags: this.state.flags().map(|(_, f)| f.to_owned()).collect(),
+            flags: this.flags_response(),
             exists: this.state.num_messages(),
             recent: this.count_recent(),
             unseen: this
@@ -217,6 +220,17 @@ impl StatefulMailbox {
 
         self.start_gc(list_rollups(&self.s)?);
         Ok(())
+    }
+
+    /// Collect the set of flags that currently exist, and mark them all as
+    /// known to the client.
+    pub(super) fn flags_response(&mut self) -> Vec<Flag> {
+        let ret: Vec<Flag> =
+            self.state.flags().map(|(_, f)| f.to_owned()).collect();
+        for flag in &ret {
+            self.client_known_flags.insert(flag.to_owned());
+        }
+        ret
     }
 }
 

@@ -63,7 +63,7 @@ impl Compression {
     pub fn decompressor<'a>(
         self,
         reader: impl Read + 'a,
-    ) -> io::Result<impl BufRead + 'a> {
+    ) -> io::Result<Box<dyn BufRead + 'a>> {
         match self {
             Compression::Un64Zstd => {
                 Ok(box_r(un64::Reader::new(zstd::Decoder::new(reader)?)))

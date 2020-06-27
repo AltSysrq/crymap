@@ -16,6 +16,7 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
@@ -51,6 +52,14 @@ pub struct StatefulMailbox {
     pub(super) s: StatelessMailbox,
     pub(super) state: MailboxState,
     pub(super) recency_frontier: Option<Uid>,
+    /// When the client tries to fetch an addressable UID that's been expunged,
+    /// we add it to this set. If it is there already, we kill the client
+    /// connection. The set gets cleared on a full poll cycle. See
+    /// `FetchResponseKind` for more details.
+    pub(super) fetch_loopbreaker: HashSet<Uid>,
+    /// The flags which have already been sent to the client in `FLAGS`
+    /// responses.
+    pub(super) client_known_flags: HashSet<Flag>,
     /// If non-zero, decrement at the end of the poll cycle. If it becomes
     /// zero, generate a new rollup file.
     pub(super) suggest_rollup: u32,

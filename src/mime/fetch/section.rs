@@ -197,6 +197,16 @@ pub struct FetchedBodySection {
     pub contains_nul: bool,
 }
 
+impl fmt::Debug for FetchedBodySection {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("FetchedBodySection")
+            .field("section", &self.section)
+            .field("buffer", &self.buffer.len())
+            .field("contains_nul", &self.contains_nul)
+            .finish()
+    }
+}
+
 struct SectionLocator {
     target: Option<BodySection>,
     level: usize,
@@ -471,11 +481,16 @@ mod test {
     use super::*;
     use crate::mime::grovel;
 
-    static SAMPLE_MESSAGE: &str = include_str!("rfc3501_p56.eml");
-
     fn do_fetch(message: &str, section: BodySection) -> String {
         let message = message.replace('\n', "\r\n");
+        do_fetch_bytes(message.into(), section)
+    }
 
+    fn do_fetch_sample(section: BodySection) -> String {
+        do_fetch_bytes(crate::test_data::RFC3501_P56.to_owned(), section)
+    }
+
+    fn do_fetch_bytes(message: Vec<u8>, section: BodySection) -> String {
         let mut result = grovel::grovel(
             &grovel::SimpleAccessor {
                 data: message.into(),
@@ -499,168 +514,132 @@ mod test {
 
     #[test]
     fn fetch_full() {
-        let fetched = do_fetch(SAMPLE_MESSAGE, BodySection::default());
+        let fetched = do_fetch_sample(BodySection::default());
         assert!(fetched.starts_with("Remark:"));
         assert!(fetched.ends_with("--toplevel--\r\n"));
     }
 
     #[test]
     fn fetch_toplevel_header() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                leaf_type: LeafType::Headers,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            leaf_type: LeafType::Headers,
+            ..BodySection::default()
+        });
         assert!(fetched.starts_with("Remark:"));
         assert!(fetched.ends_with("boundary=toplevel\r\n\r\n"));
     }
 
     #[test]
     fn fetch_toplevel_text() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                leaf_type: LeafType::Text,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            leaf_type: LeafType::Text,
+            ..BodySection::default()
+        });
         assert!(fetched.starts_with("--toplevel\r\n"));
         assert!(fetched.ends_with("--toplevel--\r\n"));
     }
 
     #[test]
     fn fetch_1_content() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![1],
-                leaf_type: LeafType::Content,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![1],
+            leaf_type: LeafType::Content,
+            ..BodySection::default()
+        });
         assert_eq!("Part 1\r\n", fetched);
     }
 
     #[test]
     fn fetch_2_content() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![2],
-                leaf_type: LeafType::Content,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![2],
+            leaf_type: LeafType::Content,
+            ..BodySection::default()
+        });
         assert_eq!("Part 2\r\n", fetched);
     }
 
     #[test]
     fn fetch_3_content() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![3],
-                leaf_type: LeafType::Content,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![3],
+            leaf_type: LeafType::Content,
+            ..BodySection::default()
+        });
         assert!(fetched.starts_with("Subject: Part 3\r\n"));
         assert!(fetched.ends_with("--part3--"));
     }
 
     #[test]
     fn fetch_3_header() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![3],
-                leaf_type: LeafType::Headers,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![3],
+            leaf_type: LeafType::Headers,
+            ..BodySection::default()
+        });
         assert!(fetched.starts_with("Subject: Part 3\r\n"));
         assert!(fetched.ends_with("boundary=part3\r\n\r\n"));
     }
 
     #[test]
     fn fetch_3_text() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![3],
-                leaf_type: LeafType::Text,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![3],
+            leaf_type: LeafType::Text,
+            ..BodySection::default()
+        });
         assert!(fetched.starts_with("--part3\r\n"));
         assert!(fetched.ends_with("--part3--"));
     }
 
     #[test]
     fn fetch_3_1_content() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![3, 1],
-                leaf_type: LeafType::Content,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![3, 1],
+            leaf_type: LeafType::Content,
+            ..BodySection::default()
+        });
         assert_eq!("Part 3.1\r\n", fetched);
     }
 
     #[test]
     fn fetch_3_2_content() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![3, 2],
-                leaf_type: LeafType::Content,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![3, 2],
+            leaf_type: LeafType::Content,
+            ..BodySection::default()
+        });
         assert_eq!("Part 3.2\r\n", fetched);
     }
 
     #[test]
     fn fetch_4_content() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![4],
-                leaf_type: LeafType::Content,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![4],
+            leaf_type: LeafType::Content,
+            ..BodySection::default()
+        });
         assert!(fetched.starts_with("--part4\r\n"));
         assert!(fetched.ends_with("--part4--"));
     }
 
     #[test]
     fn fetch_4_1_content() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![4, 1],
-                leaf_type: LeafType::Content,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![4, 1],
+            leaf_type: LeafType::Content,
+            ..BodySection::default()
+        });
         assert_eq!("Part 4.1\r\n", fetched);
     }
 
     #[test]
     fn fetch_4_1_mime() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![4, 1],
-                leaf_type: LeafType::Mime,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![4, 1],
+            leaf_type: LeafType::Mime,
+            ..BodySection::default()
+        });
         assert_eq!(
             "Content-Id: 4.1\r\nContent-Type: image/gif\r\n\r\n",
             fetched
@@ -669,96 +648,75 @@ mod test {
 
     #[test]
     fn fetch_4_2_content() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![4, 2],
-                leaf_type: LeafType::Content,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![4, 2],
+            leaf_type: LeafType::Content,
+            ..BodySection::default()
+        });
         assert!(fetched.starts_with("Subject: Part 4.2\r\n"));
         assert!(fetched.ends_with("--subpart42--"));
     }
 
     #[test]
     fn fetch_4_2_header() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![4, 2],
-                leaf_type: LeafType::Headers,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![4, 2],
+            leaf_type: LeafType::Headers,
+            ..BodySection::default()
+        });
         assert!(fetched.starts_with("Subject: Part 4.2\r\n"));
         assert!(fetched.ends_with("boundary=subpart42\r\n\r\n"));
     }
 
     #[test]
     fn fetch_4_2_text() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![4, 2],
-                leaf_type: LeafType::Text,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![4, 2],
+            leaf_type: LeafType::Text,
+            ..BodySection::default()
+        });
         assert!(fetched.starts_with("--subpart42\r\n"));
         assert!(fetched.ends_with("--subpart42--"));
     }
 
     #[test]
     fn fetch_4_2_1_content() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![4, 2, 1],
-                leaf_type: LeafType::Content,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![4, 2, 1],
+            leaf_type: LeafType::Content,
+            ..BodySection::default()
+        });
         assert_eq!("Part 4.2.1\r\n", fetched);
     }
 
     #[test]
     fn fetch_4_2_2_content() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![4, 2, 2],
-                leaf_type: LeafType::Content,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![4, 2, 2],
+            leaf_type: LeafType::Content,
+            ..BodySection::default()
+        });
         assert!(fetched.starts_with("--subsubpart422\r\n"));
         assert!(fetched.ends_with("--subsubpart422--"));
     }
 
     #[test]
     fn fetch_4_2_2_1_content() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![4, 2, 2, 1],
-                leaf_type: LeafType::Content,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![4, 2, 2, 1],
+            leaf_type: LeafType::Content,
+            ..BodySection::default()
+        });
         assert_eq!("Part 4.2.2.1\r\n", fetched);
     }
 
     #[test]
     fn fetch_4_2_2_2_content() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![4, 2, 2, 2],
-                leaf_type: LeafType::Content,
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![4, 2, 2, 2],
+            leaf_type: LeafType::Content,
+            ..BodySection::default()
+        });
         assert_eq!("Part 4.2.2.2\r\n", fetched);
     }
 
@@ -820,57 +778,45 @@ mod test {
 
     #[test]
     fn simple_partial() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![4, 1],
-                leaf_type: LeafType::Content,
-                partial: Some((1, 8)),
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![4, 1],
+            leaf_type: LeafType::Content,
+            partial: Some((1, 8)),
+            ..BodySection::default()
+        });
         assert_eq!("art 4.1", fetched);
     }
 
     #[test]
     fn overlength_partial() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![4, 1],
-                leaf_type: LeafType::Content,
-                partial: Some((1, 800)),
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![4, 1],
+            leaf_type: LeafType::Content,
+            partial: Some((1, 800)),
+            ..BodySection::default()
+        });
         assert_eq!("art 4.1\r\n", fetched);
     }
 
     #[test]
     fn empty_partial() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![4, 1],
-                leaf_type: LeafType::Content,
-                partial: Some((1, 1)),
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![4, 1],
+            leaf_type: LeafType::Content,
+            partial: Some((1, 1)),
+            ..BodySection::default()
+        });
         assert_eq!("", fetched);
     }
 
     #[test]
     fn inverted_partial() {
-        let fetched = do_fetch(
-            SAMPLE_MESSAGE,
-            BodySection {
-                subscripts: vec![4, 1],
-                leaf_type: LeafType::Content,
-                partial: Some((8, 1)),
-                ..BodySection::default()
-            },
-        );
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![4, 1],
+            leaf_type: LeafType::Content,
+            partial: Some((8, 1)),
+            ..BodySection::default()
+        });
         assert_eq!("", fetched);
     }
 }

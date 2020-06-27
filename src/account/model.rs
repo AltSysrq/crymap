@@ -26,8 +26,10 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use chrono::prelude::*;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::mime::fetch;
 use crate::support::error::Error;
 use crate::support::safe_name::is_safe_name;
 
@@ -97,6 +99,14 @@ pub struct Uid(pub NonZeroU32);
 impl fmt::Debug for Uid {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Uid({})", self.0.get())
+    }
+}
+
+// This isn't a useful default implementation, but is here so that things
+// containing SeqRange<ID> can still derive Default.
+impl Default for Uid {
+    fn default() -> Self {
+        Uid::MIN
     }
 }
 
@@ -174,6 +184,14 @@ impl Into<u32> for Uid {
 )]
 #[serde(transparent)]
 pub struct Seqnum(pub NonZeroU32);
+
+// This isn't a useful default implementation, but is here so that things
+// containing SeqRange<ID> can still derive Default.
+impl Default for Seqnum {
+    fn default() -> Self {
+        Seqnum::MIN
+    }
+}
 
 impl Seqnum {
     // Unsafe because new() isn't const for some reason
@@ -325,13 +343,13 @@ impl fmt::Debug for Modseq {
 /// The `Display` format puts this into minimal IMAP wire format. Note that
 /// IMAP does not have a way to represent an empty sequence set. `Display`
 /// produces an empty string in that case, which is invalid.
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SeqRange<T> {
     parts: BTreeMap<u32, u32>,
     _t: PhantomData<T>,
 }
 
-impl<T: TryFrom<u32> + Into<u32> + PartialOrd> SeqRange<T> {
+impl<T> SeqRange<T> {
     /// Create a new, empty range.
     pub fn new() -> Self {
         SeqRange {
@@ -339,7 +357,9 @@ impl<T: TryFrom<u32> + Into<u32> + PartialOrd> SeqRange<T> {
             _t: PhantomData,
         }
     }
+}
 
+impl<T: TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync> SeqRange<T> {
     /// Create a range containing just the given item.
     pub fn just(item: T) -> Self {
         let mut this = SeqRange::new();
@@ -440,14 +460,39 @@ impl<T: TryFrom<u32> + Into<u32> + PartialOrd> SeqRange<T> {
 
     /// Return an iterator to the items in this set.
     ///
-    /// Invalid items are silently excluded.
+    /// Invalid items and items greater than `max`. are silently excluded.
     ///
     /// Items are delivered in strictly ascending order.
-    pub fn items<'a>(&'a self) -> impl Iterator<Item = T> + 'a {
+    pub fn items<'a>(
+        &'a self,
+        max: impl Into<u32>,
+    ) -> impl Iterator<Item = T> + 'a {
+        let max: u32 = max.into();
         self.parts
             .iter()
             .map(|(&start, &end)| (start, end))
-            .flat_map(|(start, end)| (start..=end).into_iter())
+            .filter(move |&(start, _)| start <= max)
+            .flat_map(move |(start, end)| (start..=end.min(max)).into_iter())
+            .filter_map(|v| T::try_from(v).ok())
+    }
+
+    /// Return a parallel iterator to the items in this set.
+    ///
+    /// Invalid items and items greater than `max`. are silently excluded.
+    ///
+    /// Items are delivered in strictly ascending order.
+    pub fn par_items<'a>(
+        &'a self,
+        max: impl Into<u32>,
+    ) -> impl ParallelIterator<Item = T> + 'a {
+        let max: u32 = max.into();
+        self.parts
+            .par_iter()
+            .map(|(&start, &end)| (start, end))
+            .filter(move |&(start, _)| start <= max)
+            .flat_map(move |(start, end)| {
+                (start..=end.min(max)).into_par_iter()
+            })
             .filter_map(|v| T::try_from(v).ok())
     }
 
@@ -486,6 +531,14 @@ impl<T: TryFrom<u32> + Into<u32> + PartialOrd> SeqRange<T> {
 
         Some(this)
     }
+
+    /// Return the total size of the sequence set.
+    pub fn len(&self) -> usize {
+        self.parts
+            .iter()
+            .map(|(start, end)| end - start + 1)
+            .sum::<u32>() as usize
+    }
 }
 
 impl<T> fmt::Display for SeqRange<T> {
@@ -513,6 +566,12 @@ impl fmt::Debug for SeqRange<Seqnum> {
 impl fmt::Debug for SeqRange<Uid> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "[Uid {}]", self)
+    }
+}
+
+impl<T> Default for SeqRange<T> {
+    fn default() -> Self {
+        SeqRange::new()
     }
 }
 
@@ -652,6 +711,8 @@ pub struct PollResponse {
     /// because their metadata changed or they recently came into existence.
     pub fetch: Vec<Uid>,
     /// The new `HIGHESTMODSEQ`, or `None` if still primordial.
+    ///
+    /// TODO This should be `None` if it has not changed since the last poll.
     pub max_modseq: Option<Modseq>,
 }
 
@@ -819,6 +880,211 @@ where
     pub modified: SeqRange<ID>,
 }
 
+/// Request information for `FETCH` and `UID FETCH`.
+#[derive(Clone, Debug, Default)]
+pub struct FetchRequest<ID>
+where
+    SeqRange<ID>: fmt::Debug,
+{
+    // ==================== RFC 3501 ====================
+    /// The ids to fetch.
+    pub ids: SeqRange<ID>,
+    /// Return UIDs?
+    pub uid: bool,
+    /// Return flags?
+    pub flags: bool,
+    /// Return "RFC 822 size"?
+    pub rfc822size: bool,
+    /// Return internal date?
+    pub internal_date: bool,
+    /// Return envelope?
+    pub envelope: bool,
+    /// Return bodystructure?
+    pub bodystructure: bool,
+    /// Any sections to be fetched
+    pub sections: Vec<fetch::section::BodySection>,
+    // ==================== RFC 7162 ====================
+    /// Return `Modseq`s?
+    pub modseq: bool,
+    /// If set, filter out messages which have not been changed since the given
+    /// time.
+    ///
+    /// If the client requests a `Modseq` less than `Modseq::MIN`, pass `None`.
+    pub changed_since: Option<Modseq>,
+    /// Should the fetch process gather UIDs which were expunged for a
+    /// `VANISHED` response? If `changed_since` is greater than the earliest
+    /// known expunged message, only messages which were expunged after that
+    /// point are gathered. Otherwise, all expunged UIDs requested will be
+    /// gathered.
+    pub collect_vanished: bool,
+}
+
+/// What the tagged response from a `FETCH` should be.
+///
+/// This is a particularly nasty aspect of IMAP4, owing to its original
+/// development being targeted at systems that don't allow concurrent mailbox
+/// access.
+///
+/// The issue is this: The IMAP data model is that the current sequence numbers
+/// exactly represent the set of messages that exist. However, since sequence
+/// numbers are volatile, we cannot send updates about that set to the client
+/// in realtime, since that would break commands that use sequence numbers for
+/// addressing (and fetch responses, which are weirdly addressed by sequence
+/// number even for `UID FETCH`). What, then, do we do if the client attempts
+/// to FETCH a message which is still addressable in its snapshot, but has been
+/// expunged by another session?
+///
+/// RFC 2180 provides some suggestions:
+///
+/// > 4.1.1 The server MAY allow the EXPUNGE of a multi-accessed mailbox but
+/// > keep the messages available to satisfy subsequent FETCH commands until it
+/// > is able to send an EXPUNGE response to each client.
+/// >
+/// >
+/// > 4.1.2 The server MAY allow the EXPUNGE of a multi-accessed mailbox, and
+/// > on subsequent FETCH commands return FETCH responses only for non-expunged
+/// > messages and a tagged NO.
+/// >
+/// > 4.1.3 The server MAY allow the EXPUNGE of a multi-accessed mailbox, and
+/// > on subsequent FETCH commands return the usual FETCH responses for
+/// > non-expunged messages, "NIL FETCH Responses" for expunged messages, and a
+/// > tagged OK response.
+/// >
+/// > 4.1.4 To avoid the situation altogether, the server MAY fail the EXPUNGE
+/// > of a multi-accessed mailbox.
+///
+/// The author of the Dovecot server also has
+/// [suggestions](https://imapwiki.org/MultiAccessPractices):
+///
+/// 1. 4.1.1
+/// 2. 4.1.3
+/// 3. 4.1.2
+/// 4. Kill the connection when this situation arises
+/// 5. 4.1.4
+///
+/// Apparently nobody thinks of "silently return OK without the expunged
+/// messages missing" as a viable option, even though that's how a number of
+/// other commands (e.g. `STORE`) behave in some implementations.
+///
+/// Crispin believed that 4.1.2 was the worst possible option:
+///
+/// > I think that 4.1.2 is a bug, and servers that do it are broken.
+///
+/// He preferred even 4.1.4 over it, even though 4.1.2 is how essentially any
+/// other protocol would handle an access to a deleted item. RFC 3501 also
+/// explicitly permits this behaviour:
+///
+/// > Result: ... NO - fetch error: can't fetch that data
+///
+/// 4.1.2 sounds like what Courier (a maildir-based implementation) would have
+/// implemented, and the intensely bad relations between Crispin and Courier's
+/// author would have had an influence on that sentiment.
+///
+/// Crispin was a proponent of 4.1.1, but that is unnecessarily complex to
+/// implement for such a fringe case; we'd need some mechanism for all sessions
+/// to discover an impending expunge in real time, and have some kind of grace
+/// period before the message was actually expunged.
+///
+/// 4.1.4 is utterly unacceptable. Making it impossible to delete things is
+/// *not OK*. Besides, we have no way to know if there are other sessions.
+///
+/// 4.1.3 is doable, but it's not great. Apparently Cyrus does this. It forces
+/// clients to guess what happened.
+///
+/// The main concern with 4.1.2 is apparently insane clients that think it
+/// somehow makes sense to immediately retry a request that resulted in `NO`
+/// immediately. Arnt Gulbrandsen in the IMAP mailing list wrote about a hybrid
+/// approach on 2006-09-15:
+///
+/// > (Btw, I changed our code today to use 4.1.2+loopbreaker. The first time
+/// > a client fetches a message which another client has expunged, but whose
+/// > expunge has not yet been reported in this session, the server issues a
+/// > NO as in 4.1.2, and makes a note of the UID(s). If any of those UIDs
+/// > are fetched again before the server can report the expunge, the server
+/// > issues a BYE. When it reports expunges, it clears its UID set. I think
+/// > that's as good as 4.1.1+period.)
+///
+/// ("4.1.1+period" refers to a scheme of using 4.1.1 by way of a 5-minute or
+/// more grace period, followed by Dovecot 4 for attempts that happen later.)
+///
+/// On 2006-12-31, Gulbrandsen provided an update that this 4.1.2+loopbreaker
+/// worked well with clients.
+///
+/// 4.1.2+loopbreaker is what we implement here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FetchResponseKind {
+    /// Return OK.
+    ///
+    /// This happens in one of two situations:
+    ///
+    /// - The FETCH request did not reference any expunged messages.
+    ///
+    /// - The request indicated that the client is prepared to deal with
+    /// missing messages. This means that either `collect_vanished` was
+    /// specified, or `changed_since` was given and had a UID greater than any
+    /// expunged UID encountered.
+    Ok,
+    /// Return NO.
+    ///
+    /// This is returned for any case where `Ok` is not returned, unless the
+    /// client attempts to fetch the same expunged UID more than once before
+    /// the next poll.
+    No,
+    /// Return the results, then kill the connection.
+    ///
+    /// This is returned if `No` would be returned, but the client already made
+    /// another FETCH request since the last poll and got a `No` for one or
+    /// more of the same UIDs.
+    Bye,
+}
+
+impl Default for FetchResponseKind {
+    fn default() -> Self {
+        FetchResponseKind::Ok
+    }
+}
+
+/// Response from a `FETCH` or `UID FETCH` command.
+///
+/// Fields are in transmission order.
+#[derive(Debug, Default)]
+pub struct FetchResponse {
+    /// UIDs to report in a `VANISHED (EARLIER)` response.
+    ///
+    /// RFC 7162 has this curious line:
+    ///
+    /// > Any VANISHED (EARLIER) responses
+    /// > MUST be returned before any FETCH responses, otherwise the client
+    /// > might get confused about how message numbers map to UIDs.
+    ///
+    /// It's unclear what the intent is here, since `VANISHED (EARLIER)` does
+    /// not affect the sequence number mapping, so a client could only become
+    /// confused if it modified the sequence number mapping anyway, in which
+    /// case it would be better to send the `VANISHED (EARLIER)` *after* the
+    /// `FETCH` responses.
+    ///
+    /// Nonetheless, we order this first since it's a "MUST" requirement.
+    pub vanished: SeqRange<Uid>,
+    /// If non-empty, send a `FLAGS` response with these flags before the
+    /// `FETCH` responses.
+    ///
+    /// RFC 3501 does not require this, but Crispin indicates on the mailing
+    /// list that it is "common sense" that this must be sent if new flags have
+    /// been created since the last `FLAGS` response and one cannot expect a
+    /// client to determine that the presence of a flag in a `FETCH` implies
+    /// that that flag now exists.
+    pub flags: Vec<Flag>,
+    /// The message data that was fetched.
+    ///
+    /// RFC 3501
+    pub fetched: Vec<(Seqnum, Vec<fetch::multi::FetchedItem>)>,
+    /// What type of tagged response to return.
+    ///
+    /// RFC 3501, RFC 2180, and mailing list discussion (see
+    /// `FetchResponseKind`).
+    pub kind: FetchResponseKind,
+}
+
 /// Holder for common paths used pervasively through a process.
 #[derive(Clone, Debug)]
 pub struct CommonPaths {
@@ -863,7 +1129,8 @@ mod test {
         expected_string: &str,
         seqrange: SeqRange<Uid>,
     ) {
-        let actual: Vec<u32> = seqrange.items().map(|u| u.0.get()).collect();
+        let actual: Vec<u32> =
+            seqrange.items(u32::MAX).map(|u| u.0.get()).collect();
         assert_eq!(expected_content, &actual[..]);
         assert_eq!(expected_string, &seqrange.to_string());
     }
@@ -1025,7 +1292,7 @@ mod test {
             expected.dedup();
 
             // Ensure we built the correct set
-            let actual: Vec<u32> = seqrange.items().map(
+            let actual: Vec<u32> = seqrange.items(u32::MAX).map(
                 |u| u.0.get()).collect();
             assert_eq!(expected, actual);
 

@@ -65,6 +65,7 @@ impl StatefulMailbox {
     /// Errors from this call are not recoverable. If it fails, the client and
     /// server are left in an inconsistent state.
     pub fn poll(&mut self) -> Result<PollResponse, Error> {
+        self.fetch_loopbreaker.clear();
         self.poll_for_new_uids();
         self.poll_for_new_changes(Cid::GENESIS)?;
 

@@ -102,11 +102,6 @@ pub struct MailboxState {
     /// date.
     recent_expungements: VecDeque<(Modseq, Uid)>,
 
-    /// The earliest transaction that might still exist in non-rolled-up form.
-    ///
-    /// This is maintained by the mailbox garbage collection process.
-    pub earliest_possible_unrolled_cid: Option<Cid>,
-
     /// The number of new elements in `extant_messages` that are not considered
     /// to have sequence numbers.
     ///
@@ -413,7 +408,7 @@ impl MailboxState {
         silent: bool,
     ) -> Result<SeqRange<Uid>, Error> {
         let mut ret = SeqRange::new();
-        for seqnum in seqnums.items() {
+        for seqnum in seqnums.items(u32::MAX) {
             match self.seqnum_to_uid(seqnum) {
                 Ok(uid) => ret.append(uid),
                 Err(_) if silent => (),
@@ -462,7 +457,7 @@ impl MailboxState {
         silent: bool,
     ) -> Result<SeqRange<Seqnum>, Error> {
         let mut ret = SeqRange::new();
-        for uid in uids.items() {
+        for uid in uids.items(u32::MAX) {
             match self.uid_to_seqnum(uid) {
                 Ok(seqnum) => ret.append(seqnum),
                 Err(_) if silent => (),
@@ -496,6 +491,21 @@ impl MailboxState {
         } else {
             Ok(())
         }
+    }
+
+    /// Return the appropriate error code for a UID, given that it the message
+    /// it represents was just found to be missing.
+    pub fn missing_uid_error(&self, uid: Uid) -> Error {
+        if self.max_modseq.map(|m| uid > m.uid()).unwrap_or(true) {
+            Error::NxMessage
+        } else {
+            Error::ExpungedMessage
+        }
+    }
+
+    /// Return the raw value of the maximum allocated UID, or 0 if none.
+    pub fn max_uid_val(&self) -> u32 {
+        self.max_modseq.map(|m| m.uid().0.get()).unwrap_or(0)
     }
 
     /// Intern `flag` into this state, and return its internal ID.
@@ -650,6 +660,8 @@ impl MailboxState {
             .recent_expungements
             .front()
             .copied()
+            // >= not > since we're just checking that `resync_from` is
+            // included in the known range.
             .and_then(|(m, _)| resync_from.map(|r| r >= m))
             .unwrap_or(false)
         {
@@ -697,6 +709,33 @@ impl MailboxState {
             .collect::<Vec<_>>();
 
         QresyncResponse { expunged, changed }
+    }
+
+    /// If possible, return an iterator to the UIDs which have been expunged
+    /// since the given `Modseq`.
+    ///
+    /// Returns `None` if this is not precisely known.
+    pub fn uids_expunged_since<'a>(
+        &'a self,
+        since: Modseq,
+    ) -> Option<impl Iterator<Item = Uid> + 'a> {
+        if self
+            .recent_expungements
+            .front()
+            .copied()
+            .map(|(m, _)| since >= m)
+            .unwrap_or(false)
+        {
+            Some(
+                self.recent_expungements
+                    .iter()
+                    .copied()
+                    .filter(move |&(m, _)| m > since)
+                    .map(|(_, u)| u),
+            )
+        } else {
+            None
+        }
     }
 
     fn set_flag(

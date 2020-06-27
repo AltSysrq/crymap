@@ -148,7 +148,7 @@ impl StatefulMailbox {
             let mut valid_uids = Vec::new();
             let mut ok = true;
 
-            for uid in request.ids.items() {
+            for uid in request.ids.items(this.state.max_uid_val()) {
                 if !this.state.is_assigned_uid(uid) {
                     // Per RFC 3501, section 6.4.8:
                     //

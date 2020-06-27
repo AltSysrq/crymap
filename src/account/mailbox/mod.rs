@@ -205,7 +205,6 @@
 
 // Basic struct definitions
 mod defs;
-pub use defs::{StatefulMailbox, StatelessMailbox};
 
 // Internal support --- R/W of messages and state transactions
 mod change_tx;
@@ -218,9 +217,13 @@ mod messages; // Also includes low-level APPEND-like operation
 // to the IMAP protocol layer to decompose/recompose/reformat these
 // discrepancies.
 mod expunge; // EXPUNGE, UID EXPUNGE
+mod fetch; // FETCH, UID FETCH
 mod flags; // STORE, UID STORE
 mod poll; // NOOP, CHECK, during IDLE, after commands
 mod select; // SELECT, EXAMINE, STATUS, also garbage collection
+
+pub use defs::{StatefulMailbox, StatelessMailbox};
+pub use fetch::MailboxMessageAccessor;
 
 #[cfg(test)]
 mod test_prelude {
@@ -276,10 +279,17 @@ mod test_prelude {
     }
 
     pub(super) fn simple_append(dst: &StatelessMailbox) -> Uid {
+        simple_append_data(dst, "foobar".as_bytes())
+    }
+
+    pub(super) fn simple_append_data(
+        dst: &StatelessMailbox,
+        data: &[u8],
+    ) -> Uid {
         dst.append(
             FixedOffset::east(0).from_utc_datetime(&Utc::now().naive_local()),
             iter::empty(),
-            &mut "foobar".as_bytes(),
+            data,
         )
         .unwrap()
     }

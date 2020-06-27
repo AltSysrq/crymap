@@ -42,10 +42,10 @@ impl StatelessMailbox {
     ///
     /// On success, returns the length in bytes, the internal date, and a
     /// reader to access the content.
-    pub fn open_message(
-        &self,
+    pub fn open_message<'a>(
+        &'a self,
         uid: Uid,
-    ) -> Result<(MessageMetadata, impl BufRead), Error> {
+    ) -> Result<(MessageMetadata, Box<dyn BufRead + 'a>), Error> {
         let scheme = self.message_scheme();
         let mut file = match fs::File::open(scheme.path_for_id(uid.0.get())) {
             Ok(f) => f,

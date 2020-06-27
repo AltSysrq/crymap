@@ -16,7 +16,6 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-use std::fmt;
 use std::mem;
 
 use chrono::prelude::*;
@@ -31,6 +30,7 @@ use crate::mime::header;
 use crate::support::error::Error;
 
 /// The types that can be fetched in parallel by `MultiFetcher`.
+#[derive(Debug)]
 pub enum FetchedItem {
     /// A placeholder for an item not yet fetched.
     ///
@@ -72,24 +72,6 @@ impl FetchedItem {
 
     fn into_none<T>(self) -> Option<T> {
         None
-    }
-}
-
-impl fmt::Debug for FetchedItem {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &FetchedItem::Nil => write!(f, "Nil"),
-            &FetchedItem::Uid(uid) => write!(f, "Uid({:?})", uid),
-            &FetchedItem::Modseq(modseq) => write!(f, "Modseq({:?})", modseq),
-            &FetchedItem::Flags(ref flags) => write!(f, "Flags({:?})", flags),
-            &FetchedItem::Rfc822Size(sz) => write!(f, "Rfc822Size({})", sz),
-            &FetchedItem::InternalDate(id) => write!(f, "InternalDate({})", id),
-            &FetchedItem::Envelope(ref e) => write!(f, "Envelope({:?})", e),
-            &FetchedItem::BodyStructure(ref s) => {
-                write!(f, "BodyStructure({:?})", s)
-            }
-            &FetchedItem::BodySection(_) => write!(f, "BodySection(..)"),
-        }
     }
 }
 
@@ -342,8 +324,6 @@ mod test {
     use super::*;
     use crate::mime::grovel;
 
-    static SAMPLE_MESSAGE: &str = include_str!("rfc3501_p56.eml");
-
     #[test]
     fn test_multi_fetch() {
         let common_paths = Arc::new(CommonPaths {
@@ -383,13 +363,12 @@ mod test {
         fetcher.add_rfc822size();
         fetcher.add_internal_date();
 
-        let message = include_str!("rfc3501_p56.eml").replace('\n', "\r\n");
         let uid = Uid::u(42);
         let modseq = Modseq::new(Uid::u(56), Cid(100));
         let internal_date = FixedOffset::east(0).timestamp_millis(1000);
         let mut result = grovel::grovel(
             &grovel::SimpleAccessor {
-                data: message.into(),
+                data: crate::test_data::RFC3501_P56.to_owned().into(),
                 uid,
                 last_modified: modseq,
                 recent: true,

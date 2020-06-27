@@ -23,6 +23,9 @@ mod crypt;
 mod mime;
 mod support;
 
+#[cfg(test)]
+mod test_data;
+
 fn main() {
     println!("Hello, world!");
 }
