@@ -40,7 +40,7 @@ pub enum FetchedItem {
     Modseq(Modseq),
     Flags(simple::FlagsInfo),
     Rfc822Size(u32),
-    InternalDate(DateTime<Utc>),
+    InternalDate(DateTime<FixedOffset>),
     Envelope(envelope::Envelope),
     BodyStructure(bodystructure::BodyStructure),
     BodySection(Result<section::FetchedBodySection, Error>),
@@ -386,7 +386,7 @@ mod test {
         let message = include_str!("rfc3501_p56.eml").replace('\n', "\r\n");
         let uid = Uid::u(42);
         let modseq = Modseq::new(Uid::u(56), Cid(100));
-        let internal_date = Utc.timestamp_millis(1000);
+        let internal_date = FixedOffset::east(0).timestamp_millis(1000);
         let mut result = grovel::grovel(
             &grovel::SimpleAccessor {
                 data: message.into(),
@@ -464,7 +464,7 @@ mod test {
 
         match &result[8] {
             &FetchedItem::InternalDate(id) => {
-                assert_eq!(Utc.timestamp_millis(1000), id)
+                assert_eq!(FixedOffset::east(0).timestamp_millis(1000), id)
             }
             r => panic!("Unexpected internal date result: {:#?}", r),
         }

@@ -200,7 +200,7 @@ impl Default for SimpleAccessor {
             flags: vec![],
             metadata: MessageMetadata {
                 size: 0,
-                internal_date: Utc.timestamp_millis(0),
+                internal_date: FixedOffset::east(0).timestamp_millis(0),
             },
             data: vec![],
         }

@@ -276,7 +276,11 @@ mod test_prelude {
     }
 
     pub(super) fn simple_append(dst: &StatelessMailbox) -> Uid {
-        dst.append(Utc::now(), iter::empty(), &mut "foobar".as_bytes())
-            .unwrap()
+        dst.append(
+            FixedOffset::east(0).from_utc_datetime(&Utc::now().naive_local()),
+            iter::empty(),
+            &mut "foobar".as_bytes(),
+        )
+        .unwrap()
     }
 }

@@ -928,7 +928,8 @@ hello world
                         Ok((
                             MessageMetadata {
                                 size: 0,
-                                internal_date: Utc.timestamp_millis(0),
+                                internal_date: FixedOffset::east(0)
+                                    .timestamp_millis(0),
                             },
                             std::io::BufReader::new(
                                 fs::File::open(&self.0).unwrap(),

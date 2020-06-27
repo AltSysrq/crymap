@@ -171,7 +171,8 @@ mod test {
         let uid = mb1
             .stateless()
             .append(
-                Utc::now(),
+                FixedOffset::east(0)
+                    .from_utc_datetime(&Utc::now().naive_local()),
                 vec![Flag::Flagged, Flag::Keyword("foo".to_owned())],
                 &mut "foobar".as_bytes(),
             )

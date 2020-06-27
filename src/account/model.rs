@@ -845,8 +845,11 @@ pub struct MessageMetadata {
     #[serde(alias = "s")]
     pub size: u32,
     /// The `INTERNALDATE` of the message.
-    #[serde(alias = "d", with = "chrono::serde::ts_milliseconds")]
-    pub internal_date: DateTime<Utc>,
+    ///
+    /// We need to keep the timezone to correctly handle RFC 3501's odd
+    /// day-based comparisons.
+    #[serde(alias = "d")]
+    pub internal_date: DateTime<FixedOffset>,
 }
 
 #[cfg(test)]

@@ -118,13 +118,16 @@ impl Visitor for Rfc822SizeFetcher {
 pub struct InternalDateFetcher;
 
 impl Visitor for InternalDateFetcher {
-    type Output = DateTime<Utc>;
+    type Output = DateTime<FixedOffset>;
 
-    fn metadata(&mut self, md: &MessageMetadata) -> Result<(), DateTime<Utc>> {
+    fn metadata(
+        &mut self,
+        md: &MessageMetadata,
+    ) -> Result<(), DateTime<FixedOffset>> {
         Err(md.internal_date)
     }
 
-    fn end(&mut self) -> DateTime<Utc> {
+    fn end(&mut self) -> DateTime<FixedOffset> {
         panic!("InternalDateFetcher.end()")
     }
 }

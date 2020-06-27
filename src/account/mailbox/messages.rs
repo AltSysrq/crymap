@@ -86,7 +86,7 @@ impl StatelessMailbox {
     /// `StatefulMailbox`.
     pub fn append(
         &self,
-        internal_date: DateTime<Utc>,
+        internal_date: DateTime<FixedOffset>,
         flags: impl IntoIterator<Item = Flag>,
         mut data: impl Read,
     ) -> Result<Uid, Error> {
@@ -179,8 +179,8 @@ mod test {
     fn write_and_read_messages() {
         let setup = set_up();
 
-        let now = Utc::now();
-        let now_truncated = Utc.timestamp_millis(now.timestamp_millis());
+        let zone = FixedOffset::east(3600);
+        let now = zone.from_utc_datetime(&Utc::now().naive_local());
 
         assert_eq!(
             Uid::u(1),
@@ -200,14 +200,14 @@ mod test {
         let mut content = String::new();
         let (md, mut r) = setup.stateless.open_message(Uid::u(1)).unwrap();
         assert_eq!(11, md.size);
-        assert_eq!(now_truncated, md.internal_date);
+        assert_eq!(now, md.internal_date);
         r.read_to_string(&mut content).unwrap();
         assert_eq!("hello world", &content);
 
         content.clear();
         let (md, mut r) = setup.stateless.open_message(Uid::u(2)).unwrap();
         assert_eq!(15, md.size);
-        assert_eq!(now_truncated, md.internal_date);
+        assert_eq!(now, md.internal_date);
         r.read_to_string(&mut content).unwrap();
         assert_eq!("another message", &content);
     }
