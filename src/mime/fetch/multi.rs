@@ -19,9 +19,12 @@
 use std::fmt;
 use std::mem;
 
+use chrono::prelude::*;
+
 use super::bodystructure;
 use super::envelope;
 use super::section;
+use super::simple;
 use crate::account::model::*;
 use crate::mime::grovel::{Visitor, VisitorMap};
 use crate::mime::header;
@@ -33,6 +36,11 @@ pub enum FetchedItem {
     ///
     /// This is not supposed to escape `MultiFetcher`.
     Nil,
+    Uid(Uid),
+    Modseq(Modseq),
+    Flags(simple::FlagsInfo),
+    Rfc822Size(u32),
+    InternalDate(DateTime<Utc>),
     Envelope(envelope::Envelope),
     BodyStructure(bodystructure::BodyStructure),
     BodySection(Result<section::FetchedBodySection, Error>),
@@ -61,12 +69,21 @@ impl FetchedItem {
             _ => None,
         }
     }
+
+    fn into_none<T>(self) -> Option<T> {
+        None
+    }
 }
 
 impl fmt::Debug for FetchedItem {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &FetchedItem::Nil => write!(f, "Nil"),
+            &FetchedItem::Uid(uid) => write!(f, "Uid({:?})", uid),
+            &FetchedItem::Modseq(modseq) => write!(f, "Modseq({:?})", modseq),
+            &FetchedItem::Flags(ref flags) => write!(f, "Flags({:?})", flags),
+            &FetchedItem::Rfc822Size(sz) => write!(f, "Rfc822Size({})", sz),
+            &FetchedItem::InternalDate(id) => write!(f, "InternalDate({})", id),
             &FetchedItem::Envelope(ref e) => write!(f, "Envelope({:?})", e),
             &FetchedItem::BodyStructure(ref s) => {
                 write!(f, "BodyStructure({:?})", s)
@@ -94,6 +111,51 @@ impl MultiFetcher {
     /// Create a new, empty `MultiFetcher`.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Collect the UID in this fetch.
+    pub fn add_uid(&mut self) {
+        self.add_fetcher(Box::new(VisitorMap::new(
+            Box::new(simple::UidFetcher),
+            FetchedItem::Uid,
+            FetchedItem::into_none,
+        )))
+    }
+
+    /// Collect the `Modseq` in this fetch.
+    pub fn add_modseq(&mut self) {
+        self.add_fetcher(Box::new(VisitorMap::new(
+            Box::new(simple::ModseqFetcher),
+            FetchedItem::Modseq,
+            FetchedItem::into_none,
+        )))
+    }
+
+    /// Fetch the flags of the message.
+    pub fn add_flags(&mut self) {
+        self.add_fetcher(Box::new(VisitorMap::new(
+            Box::new(simple::FlagsFetcher::new()),
+            FetchedItem::Flags,
+            FetchedItem::into_none,
+        )))
+    }
+
+    /// Fetch the "RFC822 Size" of the message.
+    pub fn add_rfc822size(&mut self) {
+        self.add_fetcher(Box::new(VisitorMap::new(
+            Box::new(simple::Rfc822SizeFetcher),
+            FetchedItem::Rfc822Size,
+            FetchedItem::into_none,
+        )))
+    }
+
+    /// Fetch the "internal date" of the message.
+    pub fn add_internal_date(&mut self) {
+        self.add_fetcher(Box::new(VisitorMap::new(
+            Box::new(simple::InternalDateFetcher),
+            FetchedItem::InternalDate,
+            FetchedItem::into_none,
+        )))
     }
 
     /// Add an `EnvelopeFetcher` as a sub-fetcher.
@@ -315,18 +377,33 @@ mod test {
             }
             .fetcher(Box::new(|v| v), Arc::clone(&common_paths)),
         );
+        fetcher.add_uid();
+        fetcher.add_modseq();
+        fetcher.add_flags();
+        fetcher.add_rfc822size();
+        fetcher.add_internal_date();
 
         let message = include_str!("rfc3501_p56.eml").replace('\n', "\r\n");
+        let uid = Uid::u(42);
+        let modseq = Modseq::new(Uid::u(56), Cid(100));
+        let internal_date = Utc.timestamp_millis(1000);
         let mut result = grovel::grovel(
             &grovel::SimpleAccessor {
                 data: message.into(),
-                ..grovel::SimpleAccessor::default()
+                uid,
+                last_modified: modseq,
+                recent: true,
+                flags: vec![Flag::Deleted],
+                metadata: MessageMetadata {
+                    size: 1234,
+                    internal_date,
+                },
             },
             fetcher,
         )
         .unwrap();
 
-        assert_eq!(4, result.len());
+        assert_eq!(9, result.len());
 
         match &result[0] {
             &FetchedItem::Envelope(ref envelope) => {
@@ -360,6 +437,36 @@ mod test {
                 assert_eq!("Part 4.2.2.1\r\n", content);
             }
             r => panic!("Unexpected [4.2.2.1] result: {:#?}", r),
+        }
+
+        match &result[4] {
+            &FetchedItem::Uid(u) => assert_eq!(uid, u),
+            r => panic!("Unexpected UID result: {:#?}", r),
+        }
+
+        match &result[5] {
+            &FetchedItem::Modseq(m) => assert_eq!(modseq, m),
+            r => panic!("Unexpected Modseq result: {:#?}", r),
+        }
+
+        match &result[6] {
+            &FetchedItem::Flags(ref f) => {
+                assert!(f.recent);
+                assert_eq!(vec![Flag::Deleted], f.flags);
+            }
+            r => panic!("Unexpected Flags result: {:#?}", r),
+        }
+
+        match &result[7] {
+            &FetchedItem::Rfc822Size(s) => assert_eq!(1234, s),
+            r => panic!("Unexpected Rfc822Size result: {:#?}", r),
+        }
+
+        match &result[8] {
+            &FetchedItem::InternalDate(id) => {
+                assert_eq!(Utc.timestamp_millis(1000), id)
+            }
+            r => panic!("Unexpected internal date result: {:#?}", r),
         }
     }
 }
