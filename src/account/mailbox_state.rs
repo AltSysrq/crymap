@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use super::model::*;
 use crate::support::error::Error;
+use crate::support::small_bitset::SmallBitset;
 
 #[cfg(not(test))]
 const MAX_RECENT_EXPUNGEMENTS: usize = 1024;
@@ -135,11 +136,8 @@ pub struct MailboxState {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MessageStatus {
     /// The flags currently set on this message.
-    ///
-    /// This is a bitset. Flag N is found at byte N/8 and bit N%8. Bytes past
-    /// the end of the vec are implicitly 0.
-    #[serde(rename = "f", with = "serde_bytes")]
-    flags: Vec<u8>,
+    #[serde(rename = "f")]
+    flags: SmallBitset,
     /// The `Modseq` of the last point at which this message was modified.
     #[serde(rename = "m")]
     last_modified: Modseq,
@@ -173,7 +171,7 @@ impl MailboxState {
                 self.message_status.insert(
                     uid,
                     MessageStatus {
-                        flags: vec![],
+                        flags: SmallBitset::new(),
                         last_modified: Modseq::new(uid, Cid::GENESIS),
                         recent: false,
                     },
@@ -532,16 +530,8 @@ impl MailboxState {
     ///
     /// If the message does not exist, returns false.
     pub fn test_flag(&self, flag: FlagId, message: Uid) -> bool {
-        let flag = flag.0;
-        let byte = flag / 8;
-        let bit = flag % 8;
-
         if let Some(status) = self.message_status.get(&message) {
-            if let Some(b) = status.flags.get(byte) {
-                0 != (b & (1 << bit))
-            } else {
-                false
-            }
+            status.flags.contains(flag.0)
         } else {
             false
         }
@@ -743,16 +733,12 @@ impl MailboxState {
         val: bool,
     ) {
         let flag = self.flag_ix_mut(flag);
-        let byte = flag / 8;
-        let bit = flag % 8;
 
         if let Some(status) = self.message_status.get_mut(&uid) {
-            status.flags.resize((byte + 1).max(status.flags.len()), 0);
-
             if val {
-                status.flags[byte] |= 1 << bit;
+                status.flags.insert(flag);
             } else {
-                status.flags[byte] &= !(1 << bit);
+                status.flags.remove(flag);
             }
 
             status.last_modified = canonical_modseq;
@@ -802,28 +788,12 @@ impl MessageStatus {
 
     /// Returns the flags currently on this message.
     pub fn flags<'a>(&'a self) -> impl Iterator<Item = FlagId> + 'a {
-        self.flags
-            .iter()
-            .copied()
-            .flat_map(|byte| {
-                (0..8).into_iter().map(move |bit| 0 != byte & (1 << bit))
-            })
-            .enumerate()
-            .filter(|&(_, set)| set)
-            .map(|(id, _)| FlagId(id))
+        self.flags.iter().map(FlagId)
     }
 
     /// Returns whether the given flag is currently set.
     pub fn test_flag(&self, flag: FlagId) -> bool {
-        let flag = flag.0;
-        let byte = flag / 8;
-        let bit = flag % 8;
-
-        if let Some(b) = self.flags.get(byte) {
-            0 != (b & (1 << bit))
-        } else {
-            false
-        }
+        self.flags.contains(flag.0)
     }
 
     /// Returns the last `Modseq` of this message.

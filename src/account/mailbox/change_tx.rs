@@ -25,7 +25,6 @@ use tempfile::NamedTempFile;
 
 use super::defs::*;
 use crate::account::mailbox_state::*;
-use crate::account::model::*;
 use crate::crypt::data_stream;
 use crate::support::compression::{Compression, FinishWrite};
 use crate::support::error::Error;
@@ -139,6 +138,7 @@ mod test {
 
     use super::super::test_prelude::*;
     use super::*;
+    use crate::account::model::*;
 
     #[test]
     fn write_and_read_state_files() {
