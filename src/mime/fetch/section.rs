@@ -21,8 +21,7 @@
 //! IMAP defines a mechanism to access parts of a message based on its
 //! multipart hierarchy. Each part of a multipart is assigned a number,
 //! starting at 1. Parts can be addressed by multiple subscripts, such that,
-//! e.g., `2.3` is the third sub-part of the second part. A non-multipart
-//! element has subscript 1.
+//! e.g., `2.3` is the third sub-part of the second part.
 //!
 //! IMAP also allows traversing `message/rfc822` parts by this mechanism,
 //! though in an inconsistent and poorly-defined way.
