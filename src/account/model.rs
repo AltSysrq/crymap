@@ -710,9 +710,8 @@ pub struct PollResponse {
     /// UIDs of messages that should be sent in unsolicited `FETCH` responses
     /// because their metadata changed or they recently came into existence.
     pub fetch: Vec<Uid>,
-    /// The new `HIGHESTMODSEQ`, or `None` if still primordial.
-    ///
-    /// TODO This should be `None` if it has not changed since the last poll.
+    /// The new `HIGHESTMODSEQ`, or `None` if still primordial or hasn't
+    /// changed since the last poll.
     pub max_modseq: Option<Modseq>,
 }
 

@@ -358,7 +358,7 @@ mod test {
         assert_eq!(vec![uid1], mb.mini_poll());
         let poll = mb.poll().unwrap();
         // No spurious change inserted
-        assert_eq!(Some(Modseq::new(uid1, Cid(1))), poll.max_modseq);
+        assert_eq!(None, poll.max_modseq);
         assert!(poll.fetch.is_empty());
 
         assert!(mb.state.test_flag_o(&Flag::Flagged, uid1));
@@ -387,7 +387,7 @@ mod test {
 
         assert!(mb.mini_poll().is_empty());
         let poll = mb.poll().unwrap();
-        assert_eq!(Some(Modseq::new(uid1, Cid::GENESIS)), poll.max_modseq);
+        assert_eq!(None, poll.max_modseq);
         assert!(poll.fetch.is_empty());
 
         assert!(!mb.state.test_flag_o(&Flag::Flagged, uid1));
@@ -493,7 +493,7 @@ mod test {
         assert!(mb.mini_poll().is_empty());
         let poll = mb.poll().unwrap();
         // No spurious change inserted
-        assert_eq!(Some(Modseq::new(uid1, Cid(1))), poll.max_modseq);
+        assert_eq!(None, poll.max_modseq);
         assert!(poll.fetch.is_empty());
 
         assert!(mb.state.test_flag_o(&Flag::Flagged, uid1));
@@ -522,7 +522,7 @@ mod test {
 
         assert!(mb.mini_poll().is_empty());
         let poll = mb.poll().unwrap();
-        assert_eq!(Some(Modseq::new(uid1, Cid::GENESIS)), poll.max_modseq);
+        assert_eq!(None, poll.max_modseq);
         assert!(poll.fetch.is_empty());
 
         assert!(!mb.state.test_flag_o(&Flag::Flagged, uid1));
@@ -671,7 +671,7 @@ mod test {
 
         let poll = mb.poll().unwrap();
         // No transaction happened
-        assert_eq!(Some(Modseq::new(uid1, Cid(1))), poll.max_modseq);
+        assert_eq!(None, poll.max_modseq);
 
         // The flag didn't get set
         assert!(!mb.state.test_flag_o(&Flag::Seen, uid1));

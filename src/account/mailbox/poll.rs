@@ -65,6 +65,8 @@ impl StatefulMailbox {
     /// Errors from this call are not recoverable. If it fails, the client and
     /// server are left in an inconsistent state.
     pub fn poll(&mut self) -> Result<PollResponse, Error> {
+        let reported_modseq = self.state.report_max_modseq();
+
         self.fetch_loopbreaker.clear();
         self.poll_for_new_uids();
         self.poll_for_new_changes(Cid::GENESIS)?;
@@ -149,7 +151,11 @@ impl StatefulMailbox {
                 None
             },
             fetch: fetch,
-            max_modseq: flush.max_modseq,
+            max_modseq: if flush.max_modseq == reported_modseq {
+                None
+            } else {
+                flush.max_modseq
+            },
         })
     }
 
