@@ -183,7 +183,8 @@ impl Visitor for BodyStructureFetcher {
         // Naïvely counting line endings is sufficient to count lines.
         // Line-oriented formats are generally required to end with a
         // properly-terminated line, so we only compute an arguably incorrect
-        // value for things that aren't line-oriented.
+        // value for things that aren't line-oriented. Crispin's "answer key"
+        // for the "torture test" also uses this interpretation.
         self.bs.size_lines += memchr::memchr_iter(b'\n', data).count() as u64;
         Ok(())
     }
@@ -883,6 +884,343 @@ hello world
 
         let bs = parse(&content);
         assert!(bs.children.len() < 20);
+    }
+
+    #[test]
+    fn torture_test() {
+        // Text after > comes from a mailing list post by Mark Crispin on
+        // 2007-11-19.
+        // > That message has a body structure numbering regime looking like:
+        let bs = grovel::grovel(
+            &grovel::SimpleAccessor {
+                data: crate::test_data::TORTURE_TEST.to_owned().into(),
+                ..grovel::SimpleAccessor::default()
+            },
+            BodyStructureFetcher::new(),
+        )
+        .unwrap();
+        // > 1 TEXT/PLAIN (Explanation);CHARSET=US-ASCII (3 lines)
+        // Here and in other parts below, the CHARSET=US-ASCII part is a result
+        // of Crispin believing that the IMAP server should insert this as a
+        // default. This is neither required by RFC 3501 nor "common sense",
+        // since we have no reason to believe the content type is actually
+        // ASCII. Thus, we don't check for such defaulting.
+        let part = &bs.children[0];
+        assert_eq!("TEXT", part.content_type.0);
+        assert_eq!("PLAIN", part.content_type.1);
+        assert_eq!("Explanation", part.content_description.as_ref().unwrap());
+        assert_eq!(3, part.size_lines);
+        // > 2 MESSAGE/RFC822 (Rich Text demo) (106 lines)
+        // NB Here and below, in our model message/rfc822 is not transparent,
+        // so there'll be an extra layer of .children[0]
+        let part = &bs.children[1];
+        assert_eq!("MESSAGE", part.content_type.0);
+        assert_eq!("RFC822", part.content_type.1);
+        assert_eq!(
+            "Rich Text demo",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(106, part.size_lines);
+        // > 2.1 TEXT/PLAIN;CHARSET=US-ASCII (16 lines)
+        let part = &bs.children[1].children[0].children[0];
+        assert_eq!("text", part.content_type.0);
+        assert_eq!("plain", part.content_type.1);
+        assert_eq!(None, part.content_description);
+        assert_eq!(16, part.size_lines);
+        // > 2.2.1 TEXT/RICHTEXT;CHARSET=US-ASCII (13 lines)
+        let part = &bs.children[1].children[0].children[1].children[0];
+        assert_eq!("text", part.content_type.0);
+        assert_eq!("richtext", part.content_type.1);
+        assert_eq!(13, part.size_lines);
+        // > 2.3 APPLICATION/ANDREW-INSET (917 bytes)
+        let part = &bs.children[1].children[0].children[2];
+        assert_eq!("application", part.content_type.0);
+        assert_eq!("andrew-inset", part.content_type.1);
+        assert_eq!(917, part.size_octets);
+        // > 3 MESSAGE/RFC822 (Voice Mail demo) (7605 lines)
+        let part = &bs.children[2];
+        assert_eq!("MESSAGE", part.content_type.0);
+        assert_eq!("RFC822", part.content_type.1);
+        assert_eq!(
+            "Voice Mail demo",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(7605, part.size_lines);
+        // > 3.1 AUDIO/BASIC (Hi Mark) (561308 bytes)
+        // There's no extra .children[0] here since the message is not a
+        // multipart.
+        let part = &bs.children[2].children[0];
+        assert_eq!("audio", part.content_type.0);
+        assert_eq!("basic", part.content_type.1);
+        assert_eq!("Hi Mark", part.content_description.as_ref().unwrap());
+        assert_eq!(561308, part.size_octets);
+        // > 4 AUDIO/BASIC (Flint phone) (36234 bytes)
+        let part = &bs.children[3];
+        assert_eq!("audio", part.content_type.0);
+        assert_eq!("basic", part.content_type.1);
+        assert_eq!("Flint phone", part.content_description.as_ref().unwrap());
+        assert_eq!(36234, part.size_octets);
+        // > 5 IMAGE/PBM (MTR's photo) (1814 bytes)
+        let part = &bs.children[4];
+        assert_eq!("image", part.content_type.0);
+        assert_eq!("pbm", part.content_type.1);
+        assert_eq!("MTR's photo", part.content_description.as_ref().unwrap());
+        assert_eq!(1814, part.size_octets);
+        // > 6 MESSAGE/RFC822 (Star Trek Party) (4565 lines)
+        let part = &bs.children[5];
+        assert_eq!("MESSAGE", part.content_type.0);
+        assert_eq!("RFC822", part.content_type.1);
+        assert_eq!(
+            "Star Trek Party",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(4565, part.size_lines);
+        // > 6.1.1 TEXT/PLAIN;CHARSET=US-ASCII (16 lines)
+        let part = &bs.children[5].children[0].children[0].children[0];
+        assert_eq!("text", part.content_type.0);
+        assert_eq!("plain", part.content_type.1);
+        assert_eq!(16, part.size_lines);
+        // > 6.1.2 AUDIO/X-SUN (He's dead, Jim) (31472 bytes)
+        let part = &bs.children[5].children[0].children[0].children[1];
+        assert_eq!("audio", part.content_type.0);
+        assert_eq!("x-sun", part.content_type.1);
+        assert_eq!(
+            "He's dead, Jim",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(31472, part.size_octets);
+        // > 6.2.1 IMAGE/GIF (Kirk/Spock/McCoy) (26000 bytes)
+        let part = &bs.children[5].children[0].children[1].children[0];
+        assert_eq!("image", part.content_type.0);
+        assert_eq!("gif", part.content_type.1);
+        assert_eq!(
+            "Kirk/Spock/McCoy",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(26000, part.size_octets);
+        // > 6.2.2 IMAGE/GIF (Star Trek Next Generation) (18666 bytes)
+        let part = &bs.children[5].children[0].children[1].children[1];
+        assert_eq!("image", part.content_type.0);
+        assert_eq!("gif", part.content_type.1);
+        assert_eq!(
+            "Star Trek Next Generation",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(18666, part.size_octets);
+        // > 6.2.3 APPLICATION/X-BE2;VERSION=12 (46125 bytes)
+        let part = &bs.children[5].children[0].children[1].children[2];
+        assert_eq!("APPLICATION", part.content_type.0);
+        assert_eq!("X-BE2", part.content_type.1);
+        assert_eq!(
+            vec![("version".to_owned(), "12".to_owned())],
+            part.content_type_parms
+        );
+        assert_eq!(46125, part.size_octets);
+        // > 6.2.4 APPLICATION/ATOMICMAIL;VERSION=1.12 (9203 bytes)
+        let part = &bs.children[5].children[0].children[1].children[3];
+        assert_eq!("application", part.content_type.0);
+        assert_eq!("atomicmail", part.content_type.1);
+        assert_eq!(
+            vec![("version".to_owned(), "1.12".to_owned())],
+            part.content_type_parms
+        );
+        assert_eq!(9203, part.size_octets);
+        // > 6.3 AUDIO/X-SUN (Distress calls) (47822 bytes)
+        let part = &bs.children[5].children[0].children[2];
+        assert_eq!("audio", part.content_type.0);
+        assert_eq!("x-sun", part.content_type.1);
+        assert_eq!(
+            "Distress calls",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(47822, part.size_octets);
+        // > 7 MESSAGE/RFC822 (Digitizer test) (483 lines)
+        let part = &bs.children[6];
+        assert_eq!("MESSAGE", part.content_type.0);
+        assert_eq!("RFC822", part.content_type.1);
+        assert_eq!(
+            "Digitizer test",
+            part.content_description.as_ref().unwrap()
+        );
+        // > 7.1 TEXT/PLAIN;CHARSET=US-ASCII (0 lines)
+        let part = &bs.children[6].children[0].children[0];
+        assert_eq!("text", part.content_type.0);
+        assert_eq!("plain", part.content_type.1);
+        assert_eq!(0, part.size_lines);
+        // > 7.2 IMAGE/PGM (Bellcore mug) (84174 bytes)
+        let part = &bs.children[6].children[0].children[1];
+        assert_eq!("image", part.content_type.0);
+        assert_eq!("pgm", part.content_type.1);
+        assert_eq!("Bellcore mug", part.content_description.as_ref().unwrap());
+        assert_eq!(84174, part.size_octets);
+        // > 7.3 TEXT/PLAIN;CHARSET=US-ASCII (8 lines)
+        let part = &bs.children[6].children[0].children[2];
+        assert_eq!("text", part.content_type.0);
+        assert_eq!("plain", part.content_type.1);
+        assert_eq!(8, part.size_lines);
+        // > 8 MESSAGE/RFC822 (More Imagery) (431 lines)
+        let part = &bs.children[7];
+        assert_eq!("MESSAGE", part.content_type.0);
+        assert_eq!("RFC822", part.content_type.1);
+        assert_eq!("More Imagery", part.content_description.as_ref().unwrap());
+        assert_eq!(431, part.size_lines);
+        // > 8.1 TEXT/PLAIN;CHARSET=US-ASCII (26 lines)
+        let part = &bs.children[7].children[0].children[0];
+        assert_eq!("text", part.content_type.0);
+        assert_eq!("plain", part.content_type.1);
+        assert_eq!(26, part.size_lines);
+        // > 8.2 IMAGE/PBM (Mail architecture slide) (71686 bytes)
+        let part = &bs.children[7].children[0].children[1];
+        assert_eq!("image", part.content_type.0);
+        assert_eq!("pbm", part.content_type.1);
+        assert_eq!(
+            "Mail architecture slide",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(71686, part.size_octets);
+        // > 9 MESSAGE/RFC822 (PostScript demo) (6438 lines)
+        let part = &bs.children[8];
+        assert_eq!("MESSAGE", part.content_type.0);
+        assert_eq!("RFC822", part.content_type.1);
+        assert_eq!(
+            "PostScript demo",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(6438, part.size_lines);
+        // > 9.1 APPLICATION/POSTSCRIPT (Captain Picard) (397154 bytes)
+        // This is another non-multipart message, so no extra .children[0]
+        let part = &bs.children[8].children[0];
+        assert_eq!("application", part.content_type.0);
+        assert_eq!("postscript", part.content_type.1);
+        assert_eq!(
+            "Captain Picard",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(397154, part.size_octets);
+        // > 10 IMAGE/GIF (Quoted-Printable test) (78302 bytes)
+        let part = &bs.children[9];
+        assert_eq!("image", part.content_type.0);
+        assert_eq!("gif", part.content_type.1);
+        assert_eq!(
+            "Quoted-Printable test",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(78302, part.size_octets);
+        // > 11 MESSAGE/RFC822 (q-p vs. base64 test) (1382 lines)
+        let part = &bs.children[10];
+        assert_eq!("MESSAGE", part.content_type.0);
+        assert_eq!("RFC822", part.content_type.1);
+        assert_eq!(
+            "q-p vs. base64 test",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(1382, part.size_lines);
+        // > 11.1 AUDIO/BASIC (I'm sorry, Dave (q-p)) (62094 bytes)
+        let part = &bs.children[10].children[0].children[0];
+        assert_eq!("AUDIO", part.content_type.0);
+        assert_eq!("BASIC", part.content_type.1);
+        assert_eq!(
+            "I'm sorry, Dave (q-p)",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(62094, part.size_octets);
+        // > 11.2 AUDIO/BASIC (I'm sorry, Dave (BASE64)) (40634 bytes)
+        let part = &bs.children[10].children[0].children[1];
+        assert_eq!("AUDIO", part.content_type.0);
+        assert_eq!("BASIC", part.content_type.1);
+        assert_eq!(
+            "I'm sorry, Dave (BASE64)",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(40634, part.size_octets);
+        // > 12 MESSAGE/RFC822 (Multiple encapsulation) (3282 lines)
+        let part = &bs.children[11];
+        assert_eq!("MESSAGE", part.content_type.0);
+        assert_eq!("RFC822", part.content_type.1);
+        assert_eq!(
+            "Multiple encapsulation",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(3282, part.size_lines);
+        // > 12.1 APPLICATION/POSTSCRIPT (The Simpsons!!) (53346 bytes)
+        let part = &bs.children[11].children[0].children[0];
+        assert_eq!("APPLICATION", part.content_type.0);
+        assert_eq!("POSTSCRIPT", part.content_type.1);
+        assert_eq!(
+            "The Simpsons!!",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(53346, part.size_octets);
+        // > 12.2 BINARY/UNKNOWN (Alice's PDP-10 w/ TECO & DDT);NAME=Alices_PDP-10 (18530 bytes)
+        // Crispin expects the content type to be BINARY/UNKNOWN, but the raw
+        // message just has
+        //    Content-Type: BINARY;name="Alices_PDP-10"
+        // RFC 2045 makes the content subtype MANDATORY, and text/plain is set
+        // as the default for syntactically-invalid Content-Type headers.
+        let part = &bs.children[11].children[0].children[1];
+        assert_eq!("text", part.content_type.0);
+        assert_eq!("plain", part.content_type.1);
+        assert_eq!(
+            "Alice's PDP-10 w/ TECO & DDT",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(18530, part.size_octets);
+        // > 12.3 MESSAGE/RFC822 (Going deeper) (2094 lines)
+        let part = &bs.children[11].children[0].children[2];
+        assert_eq!("MESSAGE", part.content_type.0);
+        assert_eq!("RFC822", part.content_type.1);
+        assert_eq!("Going deeper", part.content_description.as_ref().unwrap());
+        assert_eq!(2094, part.size_lines);
+        // > 12.3.1 TEXT/PLAIN;CHARSET=US-ASCII (7 lines)
+        let part =
+            &bs.children[11].children[0].children[2].children[0].children[0];
+        assert_eq!("text", part.content_type.0);
+        assert_eq!("plain", part.content_type.1);
+        assert_eq!(7, part.size_lines);
+        // > 12.3.2.1 IMAGE/GIF (Bunny) (3276 bytes)
+        let part = &bs.children[11].children[0].children[2].children[0]
+            .children[1]
+            .children[0];
+        assert_eq!("image", part.content_type.0);
+        assert_eq!("gif", part.content_type.1);
+        assert_eq!("Bunny", part.content_description.as_ref().unwrap());
+        assert_eq!(3276, part.size_octets);
+        // > 12.3.2.2 AUDIO/BASIC (TV Theme songs) (156706 bytes)
+        let part = &bs.children[11].children[0].children[2].children[0]
+            .children[1]
+            .children[1];
+        assert_eq!("audio", part.content_type.0);
+        assert_eq!("basic", part.content_type.1);
+        assert_eq!(
+            "TV Theme songs",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(156706, part.size_octets);
+        // > 12.3.3 APPLICATION/ATOMICMAIL (4924 bytes)
+        let part =
+            &bs.children[11].children[0].children[2].children[0].children[2];
+        assert_eq!("application", part.content_type.0);
+        assert_eq!("atomicmail", part.content_type.1);
+        assert_eq!(4924, part.size_octets);
+        // > 12.3.4 MESSAGE/RFC822 (Yet another level deeper...) (1031 lines)
+        let part =
+            &bs.children[11].children[0].children[2].children[0].children[3];
+        assert_eq!("MESSAGE", part.content_type.0);
+        assert_eq!("RFC822", part.content_type.1);
+        assert_eq!(
+            "Yet another level deeper...",
+            part.content_description.as_ref().unwrap()
+        );
+        assert_eq!(1031, part.size_lines);
+        // > 12.3.4.1 AUDIO/X-SUN (I'm Twying...) (75682 bytes)
+        // Non-multipart, so only one .children[0]
+        let part = &bs.children[11].children[0].children[2].children[0]
+            .children[3]
+            .children[0];
+        assert_eq!("AUDIO", part.content_type.0);
+        assert_eq!("X-SUN", part.content_type.1);
+        assert_eq!("I'm Twying...", part.content_description.as_ref().unwrap());
+        assert_eq!(75682, part.size_octets);
     }
 
     // Ignored -- Corpus not included.

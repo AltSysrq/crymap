@@ -43,3 +43,16 @@ pub static ENRON_SMALL_MULTIPARTS: &[&[u8]] = &[
     include_bytes!("enron_scholtes-d_transmission_29.eml"),
     include_bytes!("enron_scholtes-d_transmission_35.eml"),
 ];
+
+/// Mark Crispin's "MIME torture test".
+/// > In the name of "a picture is worth 1000 words", take a look at the
+/// > infamous MIME Torture Test message at:
+/// >   ftp://ftp.cac.washington.edu/mail/mime-examples/torture-test.mbox
+/// > It's horrible, and few MIME parsers pass it the first time.
+///
+/// Extraneous stuff from the mbox format removed and converted to DOS-style
+/// line endings.
+///
+/// Note that the file contains lines with trailing whitespace, which is
+/// significant to the tests that use it.
+pub static TORTURE_TEST: &[u8] = include_bytes!("torture-test.eml");
