@@ -21,6 +21,7 @@
 pub mod bodystructure;
 pub mod envelope;
 pub mod multi;
+pub mod search;
 pub mod section;
 pub mod simple;
 mod strings;
