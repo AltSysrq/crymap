@@ -209,6 +209,7 @@ mod defs;
 // Internal support --- R/W of messages and state transactions
 mod change_tx;
 mod messages; // Also includes low-level APPEND-like operation
+mod search_backend;
 
 // IMAP commands
 // Methods are not 1:1 in cases where the IMAP model does not naturally fit the

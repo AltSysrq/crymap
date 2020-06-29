@@ -110,7 +110,7 @@ pub struct SearchData {
 
     /// A concatenation of `text` sections, fully decoded and converted to
     /// UTF-8. Each section is terminated with a NUL character.
-    pub text: Option<String>,
+    pub content: Option<String>,
 }
 
 /// Fetches search data from a message, stopping only when the evaluation
@@ -299,7 +299,7 @@ impl<F: FnMut(&SearchData) -> Option<bool>> Visitor for SearchFetcher<F> {
             internal_date: FixedOffset::east(0).timestamp_millis(0),
         });
         self.finish_headers();
-        self.data.text =
+        self.data.content =
             Some(self.content_accumulator.dst.replace(String::new()));
 
         self.eval()
@@ -451,7 +451,7 @@ mod test {
         grovel::grovel(
             &accessor,
             SearchFetcher::new(OptionalSearchParts::all(), move |sd| {
-                if sd.text.is_some() {
+                if sd.content.is_some() {
                     *capture2.borrow_mut() = sd.clone();
                     Some(true)
                 } else {
@@ -517,7 +517,7 @@ This is the content.
             result.sent.unwrap().to_rfc3339()
         );
 
-        assert_eq!("This is the content.\r\n\0", result.text.unwrap());
+        assert_eq!("This is the content.\r\n\0", result.content.unwrap());
     }
 
     #[test]
@@ -550,6 +550,6 @@ Inner epilogue
 Outer epilogue
 ",
         );
-        assert_eq!("Content A\0Content C\0", result.text.unwrap());
+        assert_eq!("Content A\0Content C\0", result.content.unwrap());
     }
 }
