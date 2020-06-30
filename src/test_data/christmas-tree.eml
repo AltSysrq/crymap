@@ -1,0 +1,24 @@
+Remark: This is a message with every interesting header set. The headers are
+        not necessarily set to *interesting* or unusual values, but they are
+        distinct.
+From: from@example.com
+To: to@example.com
+Cc: cc@example.com
+Bcc: bcc@example.com
+Sender: sender@example.com
+Date: Fri, 21 Nov 1997 09:55:06 -0600
+Subject: This is the subject
+XYZZY: Nothing happens
+Message-ID: <messageid@example.com>
+Content-ID: <contentid@example.com>
+In-Reply-To: <inreplyto@example.com>
+References: <inreplyto@example.com>, <anothermessage@example.com>
+Content-Type: text/rich; charset=utf-8; richness=low
+Content-Disposition: attachment; name="foo.txt"
+Content-Language: en
+Content-Location: /foo/bar
+Content-Description: A test message
+Content-Transfer-Encoding: 8bit
+
+That is not dead which can eternal lie.
+And with strange æons even death may die.

@@ -56,6 +56,9 @@
 //! whole parts). The implementation currently reflects what RFC 3501 implies,
 //! i.e., that there is no subscript to access the content of a non-multipart
 //! message.
+//!
+//! TODO A message from Crispin in 2011-04 indicates that a subscript 1 on a
+//! non-multipart must be equivalent to `TEXT`.
 
 use std::fmt;
 use std::io::{self, Write};
@@ -337,6 +340,9 @@ impl Visitor for SectionLocator {
     }
 
     fn end(&mut self) -> Output {
+        // TODO Per a message from Crispin in 2008-03, we need to return an
+        // empty string here. He also recommends returning empty strings as ""
+        // instead of a 0-byte literal.
         Err(Error::NoSuchMessageSection)
     }
 }

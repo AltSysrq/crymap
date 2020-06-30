@@ -1084,6 +1084,73 @@ pub struct FetchResponse {
     pub kind: FetchResponseKind,
 }
 
+/// The `SEARCH` and `UID SEARCH` commands.
+#[derive(Clone, Debug, Default)]
+pub struct SearchRequest {
+    /// The top-level queries, which get ANDed together.
+    pub queries: Vec<SearchQuery>,
+}
+
+/// The query for the `SEARCH` command and related commands.
+///
+/// Unlike most request types in these models, this is a very direct
+/// representation of the IMAP search query as an AST. This is because only
+/// some of the quirks (such as the "Un$flag" queries) are purely syntactic,
+/// and keeping all the translation logic in one place makes it easier to
+/// manage.
+#[derive(Clone, Debug)]
+pub enum SearchQuery {
+    // ==================== RFC 3501 ====================
+    SequenceSet(SeqRange<Seqnum>),
+    All,
+    Answered,
+    Bcc(String),
+    Before(NaiveDate),
+    Body(String),
+    Cc(String),
+    Deleted,
+    Draft,
+    Flagged,
+    From(String),
+    Header(String, String),
+    Keyword(String),
+    Larger(u32),
+    New,
+    Not(Box<SearchQuery>),
+    Old, // NB "NOT RECENT", not "NOT NEW"
+    On(NaiveDate),
+    Or(Box<SearchQuery>, Box<SearchQuery>),
+    Recent,
+    Seen,
+    SentBefore(NaiveDate),
+    SentOn(NaiveDate),
+    SentSince(NaiveDate),
+    Since(NaiveDate),
+    Smaller(u32),
+    Subject(String),
+    Text(String),
+    To(String),
+    UidSet(SeqRange<Uid>), // RFC 3501 calls it "UID"; "Set" for disambiguation
+    Unanswered,
+    Undeleted,
+    Undraft,
+    Unflagged,
+    Unkeyword(String),
+    Unseen,
+    And(Vec<SearchQuery>),
+}
+
+/// The response from the `SEARCH` (`ID` = `Seqnum`) or `UID SEARCH`
+/// (`ID` = `Uid`) commands.
+#[derive(Clone, Debug)]
+pub struct SearchResponse<ID> {
+    /// The ids to return in the untagged `* SEARCH` response.
+    ///
+    /// For some reason, the ids are returned as a naked list instead of using
+    /// IMAP's list syntax or sequence-set syntax.
+    pub hits: Vec<ID>,
+}
+
 /// Holder for common paths used pervasively through a process.
 #[derive(Clone, Debug)]
 pub struct CommonPaths {

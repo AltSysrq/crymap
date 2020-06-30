@@ -57,7 +57,7 @@ pub enum Op {
     AnyHeader(Arc<Regex>),
     Content(Arc<Regex>),
     InternalDateCompare(NaiveDate, bool, bool, bool),
-    SentCompare(NaiveDate, bool, bool, bool),
+    DateCompare(NaiveDate, bool, bool, bool),
     SizeCompare(u32, bool, bool, bool),
     UidIn(SeqRange<Uid>),
     #[cfg(test)]
@@ -155,8 +155,8 @@ pub fn eval(ops: &[Op], data: &SearchData) -> Option<bool> {
                     gt,
                 ));
             }
-            &Op::SentCompare(ref relative, lt, eq, gt) => {
-                s.o(cmp_date(data.sent.as_ref(), relative, lt, eq, gt));
+            &Op::DateCompare(ref relative, lt, eq, gt) => {
+                s.o(cmp_date(data.date.as_ref(), relative, lt, eq, gt));
             }
             &Op::SizeCompare(ref relative, lt, eq, gt) => {
                 s.o(cmp(
@@ -234,7 +234,7 @@ pub fn want(ops: &[Op]) -> OptionalSearchParts {
                 OptionalSearchParts::HEADER_MAP
             }
 
-            &Op::SentCompare(..) => OptionalSearchParts::SENT,
+            &Op::DateCompare(..) => OptionalSearchParts::DATE,
         }
     }
 
@@ -648,14 +648,14 @@ mod test {
             )
         );
 
-        let ops = &[Op::SentCompare(date1, true, false, false)];
+        let ops = &[Op::DateCompare(date1, true, false, false)];
         assert_eq!(None, eval(ops, &SearchData::default()));
         assert_eq!(
             Some(true),
             eval(
                 ops,
                 &SearchData {
-                    sent: Some(datetime0),
+                    date: Some(datetime0),
                     ..SearchData::default()
                 }
             )
@@ -665,7 +665,7 @@ mod test {
             eval(
                 ops,
                 &SearchData {
-                    sent: Some(datetime1),
+                    date: Some(datetime1),
                     ..SearchData::default()
                 }
             )
@@ -675,20 +675,20 @@ mod test {
             eval(
                 ops,
                 &SearchData {
-                    sent: Some(datetime2),
+                    date: Some(datetime2),
                     ..SearchData::default()
                 }
             )
         );
 
-        let ops = &[Op::SentCompare(date1, false, true, false)];
+        let ops = &[Op::DateCompare(date1, false, true, false)];
         assert_eq!(None, eval(ops, &SearchData::default()));
         assert_eq!(
             Some(false),
             eval(
                 ops,
                 &SearchData {
-                    sent: Some(datetime0),
+                    date: Some(datetime0),
                     ..SearchData::default()
                 }
             )
@@ -698,7 +698,7 @@ mod test {
             eval(
                 ops,
                 &SearchData {
-                    sent: Some(datetime1),
+                    date: Some(datetime1),
                     ..SearchData::default()
                 }
             )
@@ -708,20 +708,20 @@ mod test {
             eval(
                 ops,
                 &SearchData {
-                    sent: Some(datetime2),
+                    date: Some(datetime2),
                     ..SearchData::default()
                 }
             )
         );
 
-        let ops = &[Op::SentCompare(date1, false, false, true)];
+        let ops = &[Op::DateCompare(date1, false, false, true)];
         assert_eq!(None, eval(ops, &SearchData::default()));
         assert_eq!(
             Some(false),
             eval(
                 ops,
                 &SearchData {
-                    sent: Some(datetime0),
+                    date: Some(datetime0),
                     ..SearchData::default()
                 }
             )
@@ -731,7 +731,7 @@ mod test {
             eval(
                 ops,
                 &SearchData {
-                    sent: Some(datetime1),
+                    date: Some(datetime1),
                     ..SearchData::default()
                 }
             )
@@ -741,7 +741,7 @@ mod test {
             eval(
                 ops,
                 &SearchData {
-                    sent: Some(datetime2),
+                    date: Some(datetime2),
                     ..SearchData::default()
                 }
             )

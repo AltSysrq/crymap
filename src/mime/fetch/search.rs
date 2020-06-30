@@ -57,7 +57,7 @@ bitflags! {
         const CC = 1 << 3;
         const BCC = 1 << 4;
         const TO = 1 << 5;
-        const SENT = 1 << 6;
+        const DATE = 1 << 6;
         const SUBJECT = 1 << 7;
     }
 }
@@ -103,8 +103,8 @@ pub struct SearchData {
     pub bcc: Option<String>,
     /// The To header, in "normalised" format (see `from`).
     pub to: Option<String>,
-    /// The Sent header.
-    pub sent: Option<DateTime<FixedOffset>>,
+    /// The Date header.
+    pub date: Option<DateTime<FixedOffset>>,
     /// The Subject header, decoded.
     pub subject: Option<String>,
 
@@ -236,9 +236,9 @@ impl<F: FnMut(&SearchData) -> Option<bool>> Visitor for SearchFetcher<F> {
             self.address_header(OptionalSearchParts::BCC, |d| &mut d.bcc, value)
         } else if "To".eq_ignore_ascii_case(name) {
             self.address_header(OptionalSearchParts::TO, |d| &mut d.to, value)
-        } else if "Sent".eq_ignore_ascii_case(name) {
-            if self.want.contains(OptionalSearchParts::SENT) {
-                self.data.sent =
+        } else if "Date".eq_ignore_ascii_case(name) {
+            if self.want.contains(OptionalSearchParts::DATE) {
+                self.data.date =
                     str::from_utf8(value).ok().and_then(header::parse_datetime);
                 self.eval()
             } else {
@@ -319,7 +319,7 @@ impl<F: FnMut(&SearchData) -> Option<bool>> SearchFetcher<F> {
         self.data.bcc.get_or_insert_with(String::new);
         self.data.to.get_or_insert_with(String::new);
         self.data
-            .sent
+            .date
             .get_or_insert_with(|| FixedOffset::east(0).timestamp_millis(0));
         self.data.subject.get_or_insert_with(String::new);
     }
@@ -468,7 +468,7 @@ mod test {
     fn parse_all_the_things() {
         let result = parse(
             "\
-sent: Fri, 21 Nov 1997 09:55:06 -0600
+date: Fri, 21 Nov 1997 09:55:06 -0600
 from: foo@bar.com, \"John Doe\" <jdoe@bar.com>
 to: Some Mailing List: a@b.com, c@d.com
 cc: =?utf-8?q?Nobody_in_particular?= <nobody@example.com>
@@ -514,7 +514,7 @@ This is the content.
         assert_eq!("Hello world", result.subject.unwrap());
         assert_eq!(
             "1997-11-21T09:55:06-06:00",
-            result.sent.unwrap().to_rfc3339()
+            result.date.unwrap().to_rfc3339()
         );
 
         assert_eq!("This is the content.\r\n\0", result.content.unwrap());

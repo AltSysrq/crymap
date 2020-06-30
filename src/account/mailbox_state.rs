@@ -24,6 +24,7 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::mem;
 
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::model::*;
@@ -571,6 +572,13 @@ impl MailboxState {
     /// Return an iterator to the UIDs within the current snapshot.
     pub fn uids<'a>(&'a self) -> impl Iterator<Item = Uid> + 'a {
         self.extant_messages[..self.num_messages()].iter().copied()
+    }
+
+    /// Return a parallel iterator to the UIDs within the current snapshot.
+    pub fn par_uids<'a>(&'a self) -> impl ParallelIterator<Item = Uid> + 'a {
+        self.extant_messages[..self.num_messages()]
+            .par_iter()
+            .copied()
     }
 
     /// Return an iterator to the UIDs and sequence numbers within the current

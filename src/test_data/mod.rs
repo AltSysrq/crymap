@@ -56,3 +56,6 @@ pub static ENRON_SMALL_MULTIPARTS: &[&[u8]] = &[
 /// Note that the file contains lines with trailing whitespace, which is
 /// significant to the tests that use it.
 pub static TORTURE_TEST: &[u8] = include_bytes!("torture-test.eml");
+
+/// A syntactically simple message with every interesting header field set.
+pub static CHRISTMAS_TREE: &[u8] = include_bytes!("christmas-tree.eml");
