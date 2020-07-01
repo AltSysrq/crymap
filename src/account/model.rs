@@ -29,6 +29,7 @@ use chrono::prelude::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::account::mailbox::BufferedMessage;
 use crate::mime::fetch;
 use crate::support::error::Error;
 use crate::support::safe_name::is_safe_name;
@@ -1149,6 +1150,45 @@ pub struct SearchResponse<ID> {
     /// For some reason, the ids are returned as a naked list instead of using
     /// IMAP's list syntax or sequence-set syntax.
     pub hits: Vec<ID>,
+}
+
+/// The `APPEND` request.
+#[derive(Debug)]
+pub struct AppendRequest {
+    /// The items to append.
+    ///
+    /// Specified by RFC 3501, extended by RFC 3502 to support multiple inputs.
+    pub items: Vec<AppendItem>,
+}
+
+/// A single item to be processed by the `APPEND` command.
+#[derive(Debug)]
+pub struct AppendItem {
+    /// The message itself.
+    pub buffer_file: BufferedMessage,
+    /// Any flags to set on the newly-inserted message.
+    pub flags: Vec<Flag>,
+}
+
+/// The response for the `APPEND`, `COPY`, and `UID COPY` commands.
+///
+/// All fields are from RFC 4315.
+#[derive(Debug, Clone)]
+pub struct AppendResponse {
+    /// The UID validity value of the destination mailbox.
+    pub uid_validity: u32,
+    /// The UID(s) of any inserted message.
+    pub uids: SeqRange<Uid>,
+}
+
+/// The `COPY` and `UID COPY` requests.
+#[derive(Debug, Clone)]
+pub struct CopyRequest<ID>
+where
+    SeqRange<ID>: fmt::Debug,
+{
+    /// The IDs to copy.
+    pub ids: SeqRange<ID>,
 }
 
 /// Holder for common paths used pervasively through a process.

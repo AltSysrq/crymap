@@ -797,7 +797,9 @@ leave APPEND as the only atomic bulk operation. This lead to the decision to
 not design support for atomic bulk operations and simply not implement
 MULTIAPPEND.
 
-However, COPY *does* support multiple messages, and requires atomicity.
+However, COPY *does* support multiple messages, and requires atomicity. (Though
+copying the flags is only a SHOULD, so we don't need that to be 100% atomic to
+comply with the standard.)
 
 ** Disregard the requirements and settle for the 99.99% solution
 

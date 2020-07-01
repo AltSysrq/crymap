@@ -25,7 +25,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::prelude::*;
 use log::info;
 use rand::{rngs::OsRng, Rng};
-use tempfile::NamedTempFile;
+use tempfile::{NamedTempFile, TempPath};
 
 use super::defs::*;
 use crate::account::model::*;
@@ -33,6 +33,9 @@ use crate::crypt::data_stream;
 use crate::support::compression::{Compression, FinishWrite};
 use crate::support::error::Error;
 use crate::support::file_ops;
+
+#[derive(Debug)]
+pub struct BufferedMessage(TempPath);
 
 impl StatelessMailbox {
     /// Open the identified message for reading.
@@ -74,22 +77,79 @@ impl StatelessMailbox {
         Ok((metadata, stream))
     }
 
+    /// Append the message(s) from the request to the mailbox.
+    ///
+    /// This corresponds to the `APPEND` command from RFC 3501, the
+    /// `MULTIAPPEND` extension from RFC 3502, and the `APPENDUID` response
+    /// from RFC 4315.
+    ///
+    /// This does not handle the special case of 0-length inputs cancelling the
+    /// request. That must be handled at the protocol level.
+    ///
+    /// TODO Make this atomic (see DESIGN.org)
+    pub fn multiappend(
+        &self,
+        request: AppendRequest,
+    ) -> Result<AppendResponse, Error> {
+        let mut response = AppendResponse {
+            uid_validity: self.uid_validity()?,
+            uids: SeqRange::new(),
+        };
+
+        for item in request.items {
+            response
+                .uids
+                .append(self.append_buffered(item.buffer_file, item.flags)?);
+        }
+
+        Ok(response)
+    }
+
     /// Append the given message to this mailbox.
     ///
     /// Returns the UID of the new message.
     ///
-    /// This corresponds to the `APPEND` command from RFC 3501 and the
-    /// `APPENDUID` response from RFC 4315.
-    ///
-    /// RFC 3501 also allows setting flags at the same time. This is
-    /// accomplished with a follow-up call to `store_plus()` on
-    /// `StatefulMailbox`.
+    /// This is not exactly the RFC 3501 `APPEND` command; see `multiappend`
+    /// for that.
     pub fn append(
         &self,
         internal_date: DateTime<FixedOffset>,
         flags: impl IntoIterator<Item = Flag>,
-        mut data: impl Read,
+        data: impl Read,
     ) -> Result<Uid, Error> {
+        let buffer_file = self.buffer_message(internal_date, data)?;
+        self.append_buffered(buffer_file, flags)
+    }
+
+    /// Append a message which was buffered with `buffer_message` to this
+    /// mailbox.
+    ///
+    /// Returns the UID of the new message.
+    pub fn append_buffered(
+        &self,
+        buffer_file: BufferedMessage,
+        flags: impl IntoIterator<Item = Flag>,
+    ) -> Result<Uid, Error> {
+        let uid = self.insert_message(buffer_file.0.as_ref())?;
+        self.propagate_flags_best_effort(uid, flags);
+        Ok(uid)
+    }
+
+    /// Buffer the given data stream into a file that can later be appended
+    /// directly.
+    ///
+    /// This is used when reading `APPEND` commands to directly transfer the
+    /// network input into the final file, instead of going through the extra
+    /// time and memory use of the `crate::support::buffer` system.
+    ///
+    /// The returned object is a reference to a file in the temporary directory
+    /// which will be deleted when dropped, but does not contain an actual file
+    /// handle.
+    pub fn buffer_message(
+        &self,
+        internal_date: DateTime<FixedOffset>,
+        mut data: impl Read,
+    ) -> Result<BufferedMessage, Error> {
         self.not_read_only()?;
 
         let mut buffer_file = NamedTempFile::new_in(&self.common_paths.tmp)?;
@@ -134,10 +194,7 @@ impl StatelessMailbox {
         buffer_file.write_u32::<LittleEndian>(size_xor)?;
         file_ops::chmod(buffer_file.path(), 0o440)?;
         buffer_file.as_file_mut().sync_all()?;
-
-        let uid = self.insert_message(buffer_file.path())?;
-        self.propagate_flags_best_effort(uid, flags);
-        Ok(uid)
+        Ok(BufferedMessage(buffer_file.into_temp_path()))
     }
 
     /// Insert `src` into this mailbox via a hard link.
@@ -163,6 +220,57 @@ impl StatelessMailbox {
         }
 
         Err(Error::GaveUpInsertion)
+    }
+}
+
+impl StatefulMailbox {
+    /// The RFC 3501 `COPY` command.
+    pub fn seqnum_copy(
+        &mut self,
+        request: &CopyRequest<Seqnum>,
+        dst: &StatelessMailbox,
+    ) -> Result<AppendResponse, Error> {
+        self.copy(
+            &CopyRequest {
+                ids: self.state.seqnum_range_to_uid(&request.ids, false)?,
+            },
+            dst,
+        )
+    }
+
+    /// The RFC 3501 `UID COPY` command.
+    ///
+    /// TODO Make this atomic.
+    /// TODO Test, there's special cases involving unexpectedly expunged
+    /// messages, but it's not worth testing until the atomicity semantics are
+    /// settled.
+    pub fn copy(
+        &mut self,
+        request: &CopyRequest<Uid>,
+        dst: &StatelessMailbox,
+    ) -> Result<AppendResponse, Error> {
+        let mut response = AppendResponse {
+            uid_validity: self.s.uid_validity()?,
+            uids: SeqRange::new(),
+        };
+
+        for uid in request.ids.items(self.state.max_uid_val()) {
+            let status = match self.state.message_status(uid) {
+                Some(status) => status,
+                // RFC 3501 requires that non-existent UIDs are silently
+                // ignored.
+                None => continue,
+            };
+
+            let flags =
+                status.flags().filter_map(|id| self.state.flag(id).cloned());
+            response.uids.append(dst.insert_message(
+                &self.s.message_scheme().path_for_id(uid.0.get()),
+            )?);
+            dst.propagate_flags_best_effort(uid, flags);
+        }
+
+        Ok(response)
     }
 }
 

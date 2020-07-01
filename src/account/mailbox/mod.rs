@@ -226,6 +226,7 @@ mod select; // SELECT, EXAMINE, STATUS, also garbage collection // SEARCH, UID S
 
 pub use defs::{StatefulMailbox, StatelessMailbox};
 pub use fetch::MailboxMessageAccessor;
+pub use messages::BufferedMessage;
 
 #[cfg(test)]
 mod test_prelude {
