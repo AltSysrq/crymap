@@ -615,3 +615,374 @@ Ordinarily, there should be exactly one token; the steps to create a new one or
 remove an old one are a recovery process in case the token is lost somehow. The
 create step is not atomic since multiple processes could concurrently claim
 different UIDs in different orders.
+* On "soft expunge" and fetching of expunged messages TODO IMPLEMENT
+
+The original plan was to strictly have hard expunges, where an expunge
+immediately destroys the underlying message. This is one of the most
+contentious points in IMAP. From the code at that time (aronud
+<2020-07-01 Mi>):
+
+#+BEGIN_SRC rust
+/// What the tagged response from a `FETCH` should be.
+///
+/// This is a particularly nasty aspect of IMAP4, owing to its original
+/// development being targeted at systems that don't allow concurrent mailbox
+/// access.
+///
+/// The issue is this: The IMAP data model is that the current sequence numbers
+/// exactly represent the set of messages that exist. However, since sequence
+/// numbers are volatile, we cannot send updates about that set to the client
+/// in realtime, since that would break commands that use sequence numbers for
+/// addressing (and fetch responses, which are weirdly addressed by sequence
+/// number even for `UID FETCH`). What, then, do we do if the client attempts
+/// to FETCH a message which is still addressable in its snapshot, but has been
+/// expunged by another session?
+///
+/// RFC 2180 provides some suggestions:
+///
+/// > 4.1.1 The server MAY allow the EXPUNGE of a multi-accessed mailbox but
+/// > keep the messages available to satisfy subsequent FETCH commands until it
+/// > is able to send an EXPUNGE response to each client.
+/// >
+/// >
+/// > 4.1.2 The server MAY allow the EXPUNGE of a multi-accessed mailbox, and
+/// > on subsequent FETCH commands return FETCH responses only for non-expunged
+/// > messages and a tagged NO.
+/// >
+/// > 4.1.3 The server MAY allow the EXPUNGE of a multi-accessed mailbox, and
+/// > on subsequent FETCH commands return the usual FETCH responses for
+/// > non-expunged messages, "NIL FETCH Responses" for expunged messages, and a
+/// > tagged OK response.
+/// >
+/// > 4.1.4 To avoid the situation altogether, the server MAY fail the EXPUNGE
+/// > of a multi-accessed mailbox.
+///
+/// The author of the Dovecot server also has
+/// [suggestions](https://imapwiki.org/MultiAccessPractices):
+///
+/// 1. 4.1.1
+/// 2. 4.1.3
+/// 3. 4.1.2
+/// 4. Kill the connection when this situation arises
+/// 5. 4.1.4
+///
+/// Apparently nobody thinks of "silently return OK without the expunged
+/// messages missing" as a viable option, even though that's how a number of
+/// other commands (e.g. `STORE`) behave in some implementations.
+///
+/// Crispin believed that 4.1.2 was the worst possible option:
+///
+/// > I think that 4.1.2 is a bug, and servers that do it are broken.
+///
+/// He preferred even 4.1.4 over it, even though 4.1.2 is how essentially any
+/// other protocol would handle an access to a deleted item. RFC 3501 also
+/// explicitly permits this behaviour:
+///
+/// > Result: ... NO - fetch error: can't fetch that data
+///
+/// 4.1.2 sounds like what Courier (a maildir-based implementation) would have
+/// implemented, and the intensely bad relations between Crispin and Courier's
+/// author would have had an influence on that sentiment.
+///
+/// Crispin was a proponent of 4.1.1, but that is unnecessarily complex to
+/// implement for such a fringe case; we'd need some mechanism for all sessions
+/// to discover an impending expunge in real time, and have some kind of grace
+/// period before the message was actually expunged.
+///
+/// 4.1.4 is utterly unacceptable. Making it impossible to delete things is
+/// *not OK*. Besides, we have no way to know if there are other sessions.
+///
+/// 4.1.3 is doable, but it's not great. Apparently Cyrus does this. It forces
+/// clients to guess what happened.
+///
+/// The main concern with 4.1.2 is apparently insane clients that think it
+/// somehow makes sense to immediately retry a request that resulted in `NO`
+/// immediately. Arnt Gulbrandsen in the IMAP mailing list wrote about a hybrid
+/// approach on 2006-09-15:
+///
+/// > (Btw, I changed our code today to use 4.1.2+loopbreaker. The first time
+/// > a client fetches a message which another client has expunged, but whose
+/// > expunge has not yet been reported in this session, the server issues a
+/// > NO as in 4.1.2, and makes a note of the UID(s). If any of those UIDs
+/// > are fetched again before the server can report the expunge, the server
+/// > issues a BYE. When it reports expunges, it clears its UID set. I think
+/// > that's as good as 4.1.1+period.)
+///
+/// ("4.1.1+period" refers to a scheme of using 4.1.1 by way of a 5-minute or
+/// more grace period, followed by Dovecot 4 for attempts that happen later.)
+///
+/// On 2006-12-31, Gulbrandsen provided an update that this 4.1.2+loopbreaker
+/// worked well with clients.
+///
+/// 4.1.2+loopbreaker is what we implement here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FetchResponseKind {
+    /// Return OK.
+    ///
+    /// This happens in one of two situations:
+    ///
+    /// - The FETCH request did not reference any expunged messages.
+    ///
+    /// - The request indicated that the client is prepared to deal with
+    /// missing messages. This means that either `collect_vanished` was
+    /// specified, or `changed_since` was given and had a UID greater than any
+    /// expunged UID encountered.
+    Ok,
+    /// Return NO.
+    ///
+    /// This is returned for any case where `Ok` is not returned, unless the
+    /// client attempts to fetch the same expunged UID more than once before
+    /// the next poll.
+    No,
+    /// Return the results, then kill the connection.
+    ///
+    /// This is returned if `No` would be returned, but the client already made
+    /// another FETCH request since the last poll and got a `No` for one or
+    /// more of the same UIDs.
+    Bye,
+}
+#+END_SRC
+
+It turns out there *is* a good reason to want some kind of "soft expunge"
+though: proper interaction between naïve backup tools and move operations (be
+it by the `MOVE` extension or the traditional COPY+STORE+EXPUNGE sequence).
+With hard expunge, there's the possibility that a backup tool will see the
+destination without the moved message, then see the source after the expunge,
+and create a backup missing the message.
+
+We already have a separation between expunging a message (a change transaction)
+and destroying the underlying file (currently processed on visibility of the
+transaction). We could attack a "deadline" to expunge events that gives a grace
+period after which the actual file is destroyed. The obvious implementation ---
+just holding a queue of (deadline,uid) pairs in `MailboxState` and processing
+them on poll cycles --- is simple, but has a nasty corner case: mailboxes that
+the client doesn't usually hold open, such as \Trash. The simple system would
+give the effect that an "empty trash" operation wouldn't actually free any disk
+space until the next time the user decided to look into that mailbox.
+
+Plan: Each mailbox has a `condemned` directory. When a server instance sees an
+expunged message (which now has a `deadline: Date<Utc>`), if the deadline is in
+the future, it appends a 32-bit LE integer giving the UID to a file named
+`YYYYMMDD` in `condemned`. When the user logs in, all mailboxes are scanned for
+non-future condemnation files and processed and the condemned files destroyed.
+
+A nice side-effect of this is that we mostly get the Crispinesque snapshot
+isolation. The exception is that a client which takes no action that would let
+it receive `EXPUNGE` events for 24+ hours would run into the fetch case above,
+but even Crispin acknowledged that such a client was pathological, and
+suggested 30 minutes as an expunge grace period.
+
+This does not fully solve the naïve backup interaction, since operations like
+renaming a mailbox can still suffer the same fate. However, that's an inherent
+problem with such backup tools, and is a much less common operation than moving
+a handful of messages, e.g., from inbox to archive or trash.
+
+* On atomicity of bulk operations TODO IMPLEMENT
+
+RFC 3501 and its extensions define a number of mutating bulk (multi-message)
+operations:
+
+- EXPUNGE, explicitly documented to be non-atomic
+- STORE, explicitly documented to be non-atomic
+- APPEND (MULTIAPPEND extension)
+- COPY
+- MOVE (MOVE extension), explicitly documented to be non-atomic
+
+(Note though that Crispin claimed that EXPUNGE and STORE were also atomic, it
+was just up to the server whether the command was executed fully --- a strange
+definition, and not the one we use here.)
+
+I originally believed that COPY could only apply to one message, which would
+leave APPEND as the only atomic bulk operation. This lead to the decision to
+not design support for atomic bulk operations and simply not implement
+MULTIAPPEND.
+
+However, COPY *does* support multiple messages, and requires atomicity.
+
+** Disregard the requirements and settle for the 99.99% solution
+
+This was the original plan once the nature of COPY was discovered. There's a
+good argument to be made that the atomicity requirements are superfluous as
+long as the operations are effectively atomic in all circumstances that do not
+involve major error conditions.
+
+From a section of code that was never checked in:
+
+#+BEGIN_SRC rust
+    /// ## A general note on atomicity
+    ///
+    /// Mark Crispin was quite adamant about the bulk operations `APPEND` and
+    /// `COPY` being atomic. This implementation is not atomic --- it processes
+    /// each message one at a time (though all _preparations_ for appending the
+    /// messages, i.e., getting the files written to disk, are completed before
+    /// the mailbox mutations actually start).
+    ///
+    /// The implementation here is based on practicality and an assertion that
+    /// strict atomicity is not useful and 99.99% "happy-path" atomicity is
+    /// sufficient.
+    ///
+    /// ### What is atomicity?
+    ///
+    /// There are two facets to the usual definition of "atomic":
+    ///
+    /// 1. The operation either succeeds completely or has no effect.
+    ///
+    /// 2. It is not possible to observe an intermediate state while it is
+    /// occurring. (Point (1) covers the cases where it is _not_ in progress.)
+    ///
+    /// Point (1) is uncontroversial.
+    ///
+    /// Point (2) bears discussion. A client cannot observe an intermediate
+    /// state through queries on one connection because Crymap does not allow
+    /// concurrent operations on the same connection. Thus, to see the
+    /// intermediate state, a client would need to watch events unfold on a
+    /// separate connection. However, does that matter?
+    ///
+    /// RFC 3501 has *extremely* weak consistency requirements for concurrent
+    /// operation, and is generally written with a disregard for that
+    /// possibility. So, to answer the question of whether (2) is relevant, we
+    /// need to ask two things:
+    ///
+    /// - Does RFC 3501 permit a server to announce messages one at a time,
+    ///   i.e. `* EXISTS 1 / * EXISTS 2 / * EXISTS 3 / ...`? The answer appears
+    ///   to be yes; there isn't really anything in the RFC that would make
+    ///   this negative.
+    ///
+    /// - Does this align with "common sense"? I.e., will it cause undesirable
+    ///   behaviours in clients? A client would have to try *very hard* to
+    ///   actually observe these effects: open a second connection, select the
+    ///   same mailbox, and constantly poll it to observe the UIDs coming in
+    ///   one at a time. To any client not performing the bulk operation, the
+    ///   effect is indistinguishable from another client simply a bunch of
+    ///   single-message commands.
+    ///
+    /// ### Why is atomicity desirable?
+    ///
+    /// In June 2010, there was a lengthy flamewar on the IMAP mailing list
+    /// surrounding the proposed `MOVE` extension. A large part of the
+    /// discussion revolved around atomicity (note that the `MOVE` extension
+    /// was finalised in a form that does *not* require mailbox-level
+    /// atomicity, though at this point in time it was "atomic" like `COPY` and
+    /// `MULTIAPPEND`).
+    ///
+    /// Mark Crispin had the most to say about atomicity. The main point seems
+    /// to be that, if a bulk operation fails partially, the client will have a
+    /// harder time recovering. This is a reasonable point.
+    ///
+    /// Here, we argue that _atomicity is irrelevant if there is no possible
+    /// way for anybody to recover_, and the main focus should be to ensure
+    /// that no mail is lost.
+    ///
+    /// ### Happy-path atomicity
+    ///
+    /// The bulk operations in this implementation are atomic unless something
+    /// _extremely bad and unrecoverable_ happens:
+    ///
+    /// 1. The mailbox is deleted out from under the server. (Atomicity is
+    /// somewhat moot here though since one could say that the operation
+    /// completed the instant before the mailbox was deleted.)
+    ///
+    /// 2. The mailbox is renamed out from under the server. When this happens,
+    /// everyone loses context and has to figure things out from scratch
+    /// anyway.
+    ///
+    /// 3. We run out of numbers --- UIDs, modseqs, or inodes. If this happens,
+    /// the server wasn't going to keep working much longer anyway.
+    ///
+    /// 4. The filesystem fails; i.e., bad sector, NFS connectivity lost.
+    /// Again, the server wasn't much longer for this life anyway.
+    ///
+    /// 5. The server shuts down unexpectedly. This means a bug in the code
+    /// (and "violated the standard due to a bug" is not a controversial thing)
+    /// crashed the server, someone killed the server process (and could just
+    /// tamper with the mail store directly), or the whole machine shut down
+    /// unexpectedly (and the client will need to wait until it comes back to
+    /// life and then pick up the pieces anyway).
+    ///
+    /// None of these situations have any remedy the client can take on an
+    /// automatic basis as they make the mailbox totally unavailable. The only
+    /// reasonable follow-up action is to wait till the server is available
+    /// again, then present the current state to the user and let them decide
+    /// what to do.
+    ///
+    /// To that end, if one of the bulk operations calls fails, we close the
+    /// whole connection.
+#+END_SRC
+
+** Implement atomic bulk operations
+
+We get atomic bulk EXPUNGE and STORE for free through the change transaction
+system.
+
+Since MOVE is non-atomic, we don't need atomic cross-mailbox operations.
+
+That leaves bulk message insertion as the one operation that's not already
+atomic but needs to be.
+
+There's a lot of possibilities that *don't* work here:
+
+- Inserting messages in descending order, i.e. from (UID+N) to (UID). Another
+  racing process could fill in the hole meanwhile.
+
+- Anything involving change transactions. Change transactions do not have a
+  well-defined order with respect to message insertions, and they aren't
+  visible to stateless processing (i.e. mail delivery or copying to a different
+  mailbox).
+
+- Inserting all the new messages into a directory, then creating broken
+  symlinks from the new UIDs into tha directory's final path, then moving the
+  directory into the final location. There's an inherent race in that another
+  process cannot distinguish whether a message after the last broken symlink
+  interrupted the transaction (causing it to have no effect) or simply followed
+  the transaction and appeared between the last UID being allocated and the
+  transaction being committed.
+
+- A mechanism like we use for \Recent for allocating UIDs. We have no way to
+  tell whether a gap in the UIDs is due to an aborted transaction or an
+  in-flight transaction.
+
+*** HIS multiple allocation
+
+The hierarchical ID scheme treats single IDs as the main unit of atomic
+allocation, but it is also possible to allocate whole chunks of the ID space
+atomically. The procedure would look like this:
+
+- Round the number of IDs to be allocated up to the next natural allocation
+  size: 1=>1, 2..=256=>256, 257..=65536=65536, 65536..=16777216=16777216,
+  anything more is unsupported. This gives the allocation granularity.
+
+- Arrange the IDs to be allocated in a staging tree, laid out as if the IDs
+  started at 0 and omitting the redundant upper levels. (E.g. if the allocation
+  granularity is 256, this is just one directory; if it is 65536, it is a
+  directory of directories.)
+
+- Insert expunged IDs until the next ID is a multiple of the allocation
+  granularity. This must be done before the next step so as not to produce
+  holes in the ID space. When the granularity is coarser than 256, whole
+  expunged branches can be created.
+
+- Make one attempt to move the directory to the location that would represent
+  the next ID space. If it fails, drop the whole staging directory. We don't
+  want to retry this since each attempt wastes huge swaths of the UID space.
+
+- Link the directory number to the directory (i.e., `XX` -> `XX.d`).
+
+This fits quite naturally with the existing system and is easily testable, if
+slightly awkward to implement.
+
+The main downside is the waste of the limited UID space. On average, half of
+the allocation granularity is wasted. In the pathological case, this can
+produce a mailbox in which only 1/128 of UIDs are allocated (by repeatedly
+doing a bulk operation with 2 messages), which would limit such a mailbox to
+around 16 million messages.
+
+In general, it's probably reasonable to expect that most bulk operations will
+entail more than two messages. It's also reasonable to expect that most /small/
+bulk operations will be a direct result of user interaction, and 8 million
+discrete user interactions is quiet a lot. A user doing one bulk operation
+every 10 seconds, 24/7, would require two and a half years to exhaust the UID
+space. A somewhat more reasonable user doing such an operation once per minute
+during business hours would require 64 years for the same task.
+
+So basically, only a very unreasonable automated process would cause a problem
+here.
