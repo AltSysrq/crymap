@@ -485,7 +485,8 @@ mod test {
         );
 
         assert_eq!(uids![6], search!(Keyword("$Important".to_owned())));
-        assert_eq!(uids![], search!(Keyword("$important".to_owned())));
+        assert_eq!(uids![6], search!(Keyword("$important".to_owned())));
+        assert_eq!(uids![], search!(Keyword("plugh".to_owned())));
 
         // There's a message with size 4002, so we're also testing here that
         // equality is excluded
@@ -565,7 +566,11 @@ mod test {
             uids_compl![5, 6],
             search!(Unkeyword("$Important".to_owned()))
         );
-        assert_eq!(uids_compl![5], search!(Unkeyword("$important".to_owned())));
+        assert_eq!(
+            uids_compl![5, 6],
+            search!(Unkeyword("$important".to_owned()))
+        );
+        assert_eq!(uids_compl![5], search!(Unkeyword("plugh".to_owned())));
 
         assert_eq!(uids_compl![4, 5], search!(Unseen));
 

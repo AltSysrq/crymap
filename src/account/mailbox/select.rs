@@ -142,7 +142,7 @@ impl StatefulMailbox {
             s,
             state,
             fetch_loopbreaker: HashSet::new(),
-            client_known_flags: HashSet::new(),
+            client_known_flags: Vec::new(),
             suggest_rollup: 0,
             rollups_since_gc: 0,
             gc_in_progress: Arc::new(AtomicBool::new(false)),
@@ -228,7 +228,9 @@ impl StatefulMailbox {
         let ret: Vec<Flag> =
             self.state.flags().map(|(_, f)| f.to_owned()).collect();
         for flag in &ret {
-            self.client_known_flags.insert(flag.to_owned());
+            if !self.client_known_flags.contains(flag) {
+                self.client_known_flags.push(flag.to_owned());
+            }
         }
         ret
     }

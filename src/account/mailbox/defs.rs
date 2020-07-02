@@ -59,7 +59,7 @@ pub struct StatefulMailbox {
     pub(super) fetch_loopbreaker: HashSet<Uid>,
     /// The flags which have already been sent to the client in `FLAGS`
     /// responses.
-    pub(super) client_known_flags: HashSet<Flag>,
+    pub(super) client_known_flags: Vec<Flag>,
     /// If non-zero, decrement at the end of the poll cycle. If it becomes
     /// zero, generate a new rollup file.
     pub(super) suggest_rollup: u32,

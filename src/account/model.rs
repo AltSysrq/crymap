@@ -586,9 +586,7 @@ impl<T> Default for SeqRange<T> {
 /// understands non-standard casing of the system flags.
 ///
 /// `\Recent` is not represented by this enum since it isn't _really_ a flag.
-#[derive(
-    Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum Flag {
     Answered,
     Deleted,
@@ -629,7 +627,7 @@ impl FromStr for Flag {
             Ok(Flag::Draft)
         } else if s.eq_ignore_ascii_case("\\flagged") {
             Ok(Flag::Flagged)
-        } else if s.eq_ignore_ascii_case("\\recent") {
+        } else if s.eq_ignore_ascii_case("\\seen") {
             Ok(Flag::Seen)
         } else if s.starts_with("\\") {
             Err(Error::NxFlag)
@@ -640,6 +638,28 @@ impl FromStr for Flag {
         }
     }
 }
+
+impl PartialEq for Flag {
+    fn eq(&self, other: &Flag) -> bool {
+        match (self, other) {
+            (&Flag::Answered, &Flag::Answered) => true,
+            (&Flag::Deleted, &Flag::Deleted) => true,
+            (&Flag::Draft, &Flag::Draft) => true,
+            (&Flag::Flagged, &Flag::Flagged) => true,
+            (&Flag::Seen, &Flag::Seen) => true,
+            // Apparently the expectation is that keywords are
+            // case-insensitive, despite RFC 3501 not requiring that. We only
+            // do ASCII case-insensitivity to limit the insanity (there's no
+            // way to get Unicode flags within RFC 3501 anyway).
+            (&Flag::Keyword(ref a), &Flag::Keyword(ref b)) => {
+                a.eq_ignore_ascii_case(b)
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Flag {}
 
 /// All information needed to produce a response to a `SELECT` or `EXAMINE`
 /// command.
