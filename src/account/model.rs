@@ -715,6 +715,19 @@ impl fmt::Debug for MailboxAttribute {
     }
 }
 
+/// The RFC 3501 `CREATE` command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateRequest {
+    /// The name of the new mailbox.
+    ///
+    /// RFC 3501
+    pub name: String,
+    /// If non-empty, imbue the mailbox with the given special use(s).
+    ///
+    /// RFC 6154
+    pub special_use: Vec<String>,
+}
+
 /// Request used for implementing `LIST` and `LSUB`.
 ///
 /// This includes the extended options from RFC 5258, the `LIST-EXTENDED`

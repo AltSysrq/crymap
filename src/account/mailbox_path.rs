@@ -21,7 +21,6 @@
 //!
 //! Information on file layout is found in the `mailbox` module documentation.
 
-use std::borrow::Cow;
 use std::fs;
 use std::io::{self, Read};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
@@ -479,69 +478,6 @@ impl MailboxPath {
 
         self_result
     }
-}
-
-/// The RFC 3501 `LIST` and `LSUB` commands and the non-standard `XLIST`
-/// command.
-///
-/// `LSUB` is achieved by setting `select_subscribed`, `return_subscribed`,
-/// `recursive_match`, and `lsub_style`.
-///
-/// `XLIST` is achieved by setting `return_children` and `return_special_use`.
-///
-/// This handles the special case of `LIST "" ""`.
-pub fn list(
-    root: &Path,
-    request: &ListRequest,
-) -> Result<Vec<ListResponse>, Error> {
-    // RFC 5258 does not describe any behaviour if extended list is used with
-    // multiple patterns and one of them is "". Here, we just handle the ""
-    // special case if there's exactly one pattern, and in other cases the
-    // pattern is interpreted literally, i.e., matching an empty mailbox name.
-    if 1 == request.patterns.len() && "" == &request.patterns[0] {
-        return Ok(vec![ListResponse::default()]);
-    }
-
-    let mut pattern_prefix = request.reference.clone();
-    // Wildcards in the reference have no significance, and we don't allow
-    // creating mailboxes containing them, so if they are requested, we know
-    // nothing at all can match.
-    if pattern_prefix.contains('%') || pattern_prefix.contains('*') {
-        return Ok(vec![]);
-    }
-
-    if !pattern_prefix.is_empty() && !pattern_prefix.ends_with("/") {
-        pattern_prefix.push('/');
-    }
-
-    let patterns = request
-        .patterns
-        .iter()
-        .map(Cow::Borrowed)
-        .map(|p| {
-            if pattern_prefix.is_empty() {
-                p
-            } else {
-                Cow::Owned(pattern_prefix.clone() + &p)
-            }
-        })
-        .collect::<Vec<_>>();
-
-    let matcher = mailbox_path_matcher(patterns.iter().map(|s| s as &str));
-
-    let mut accum = Vec::new();
-    for entry in fs::read_dir(root)? {
-        let entry = entry?;
-
-        if let Ok(name) = entry.file_name().into_string() {
-            if let Ok(mp) = MailboxPath::root(name, root) {
-                mp.list(&mut accum, request, &matcher);
-            }
-        }
-    }
-
-    accum.reverse();
-    Ok(accum)
 }
 
 /// This is used internally by `MailboxPath::list`.

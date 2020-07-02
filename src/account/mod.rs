@@ -19,6 +19,7 @@
 //! This module contains everything to do with a single user's data: their
 //! mailboxes, their settings, their keys.
 
+pub(crate) mod account;
 mod hier_id_scheme;
 pub(crate) mod key_store;
 pub(crate) mod mailbox;

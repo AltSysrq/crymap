@@ -60,6 +60,8 @@ pub enum Error {
     CorruptFileLayout,
     #[error("Requested message section does not exist")]
     NoSuchMessageSection,
+    #[error("Unsupported special-use for CREATE")]
+    UnsupportedSpecialUse,
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]
