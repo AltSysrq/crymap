@@ -211,6 +211,12 @@ impl MailboxPath {
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_secs() as u32;
+        // ... but for some reason, RFC 3501 requires UIDVALIDITY to be
+        // strictly ascending, despite the only sensible operation on the value
+        // being equality. To maximise the time until we risk violating that
+        // constraint, adjust the "zero epoch" to 2020-01-01. This gives until
+        // 2156 before wrapping. We also need to avoid generating 0.
+        let uid_validity = uid_validity.wrapping_sub(1577836800).max(1);
 
         // Stage the new mailbox hierarchy inside tmp, then move the whole
         // thing in when done.
