@@ -43,6 +43,11 @@
 //! - `%subscribe`. Marker file; if present, the mailbox is subscribed.
 //!   Managed by `MailboxPath`.
 //!
+//! Subscriptions are managed (in `mailbox_path`) by a "shadow" hierarchy,
+//! where each shadow mailbox directory contains:
+//!
+//! - `%subscribe`. Marker file; if present, the mailbox is subscribed.
+//!
 //! - Directories containing child mailboxes, each of which is in a
 //!   subdirectory corresponding to its name. Managed by `MailboxPath`.
 //!
@@ -60,25 +65,17 @@
 //!
 //! In general:
 //!
-//! - A mailbox exists (i.e., is visible to IMAP) it is selectable or any of
-//!   its children exist.
+//! - A mailbox exists (i.e., is visible to IMAP) if its directory exists.
 //!
 //! - A mailbox is selectable if the `%` subdirectory exists. It is assumed
 //!   that the contents of that subdirectory will not be partially
 //!   instantiated.
 //!
-//! - A mailbox is subscribed if it has a `%UV/subscribe` file.
+//! - A mailbox is subscribed if it has a `subscribe` file in its shadow
+//!   directory.
 //!
-//! We can get away with this because the only time the distinction between
-//! `\Noselect` and `\NonExistent` matters is during `LIST` and `LSUB`. It does
-//! mean that a `\Noselect` mailbox turns into a `\NonExistent` mailbox once
-//! its last child is deleted, but Mark Crispin does describe that as a
-//! permissible behaviour, and it does mesh with the fact that the only way to
-//! get a `\Noselect` mailbox is to try to delete it while it has children.
-//!
-//! We do end up leaving deleted mailboxes around for their subscription
-//! markers, which is unfortunate, but such is the crazy subscription model of
-//! IMAP.
+//! Subscriptions are in a "shadow" hierarchy since RFC 3501 requires them to
+//! be effectively disconnected from real mailboxes.
 //!
 //! ## Hierarchical Identifier scheme
 //!
@@ -266,7 +263,8 @@ mod test_prelude {
         let key_store = Arc::new(Mutex::new(key_store));
 
         let mbox_path =
-            MailboxPath::root("inbox".to_owned(), root.path()).unwrap();
+            MailboxPath::root("inbox".to_owned(), root.path(), root.path())
+                .unwrap();
         mbox_path.create(root.path(), None).unwrap();
         let stateless = StatelessMailbox::new(
             "mailbox".to_owned(),

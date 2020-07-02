@@ -44,29 +44,40 @@ pub struct MailboxPath {
     pub(super) base_path: PathBuf,
     pub(super) data_path: PathBuf,
     pub(super) metadata_path: PathBuf,
+    pub(super) shadow_path: PathBuf,
     pub(super) sub_path: PathBuf,
 }
 
 impl MailboxPath {
-    fn from_name_and_path(name: String, base_path: PathBuf) -> Self {
+    fn from_name_and_path(
+        name: String,
+        base_path: PathBuf,
+        shadow_path: PathBuf,
+    ) -> Self {
         let data_path = base_path.join("%");
         MailboxPath {
             metadata_path: data_path.join("mailbox.toml"),
-            sub_path: base_path.join("%subscribe"),
+            sub_path: shadow_path.join("%subscribe"),
             name,
             base_path,
             data_path,
+            shadow_path,
         }
     }
 
     /// Instantiate a `MailboxPath` under the root.
-    pub fn root(name: String, root: &Path) -> Result<Self, Error> {
+    pub fn root(
+        name: String,
+        root: &Path,
+        shadow_root: &Path,
+    ) -> Result<Self, Error> {
         if !is_safe_name(&name) {
             return Err(Error::UnsafeName);
         }
 
         let path = root.join(&name);
-        Ok(MailboxPath::from_name_and_path(name, path))
+        let shadow_path = shadow_root.join(&name);
+        Ok(MailboxPath::from_name_and_path(name, path, shadow_path))
     }
 
     /// Instantiate a `MailboxPath` inferior to this one.
@@ -82,6 +93,7 @@ impl MailboxPath {
         Ok(MailboxPath::from_name_and_path(
             format!("{}/{}", self.name, name),
             self.base_path.join(name),
+            self.shadow_path.join(name),
         ))
     }
 
@@ -131,8 +143,9 @@ impl MailboxPath {
         self.data_path.is_dir()
     }
 
-    /// Whether this mailbox exists as a physical entity.
-    pub fn is_traversable(&self) -> bool {
+    /// Whether this mailbox exists as a physical entity, i.e., whether it is a
+    /// real mailbox in the view of IMAP.
+    pub fn exists(&self) -> bool {
         self.base_path.is_dir()
     }
 
@@ -144,7 +157,22 @@ impl MailboxPath {
     /// Return an iterator to the children of this mailbox, regardless of
     /// existence status.
     pub fn children<'a>(&'a self) -> impl Iterator<Item = MailboxPath> + 'a {
-        fs::read_dir(&self.base_path)
+        self.children_impl(&self.base_path)
+    }
+
+    /// Return an iterator to the shadow children of this mailbox (used for
+    /// subscriptions), regardless of existence status.
+    pub fn shadow_children<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = MailboxPath> + 'a {
+        self.children_impl(&self.shadow_path)
+    }
+
+    fn children_impl<'a>(
+        &'a self,
+        path: &Path,
+    ) -> impl Iterator<Item = MailboxPath> + 'a {
+        fs::read_dir(path)
             .ok()
             .map(move |it| {
                 it.filter_map(|r| r.ok())
@@ -189,6 +217,8 @@ impl MailboxPath {
         let stage_mbox = MailboxPath::from_name_and_path(
             String::new(),
             stage.path().to_owned(),
+            // Shadow path doesn't matter
+            stage.path().to_owned(),
         );
         let scoped_path =
             stage_mbox.scoped_data_path_for_uid_validity(uid_validity);
@@ -223,7 +253,7 @@ impl MailboxPath {
 
     /// Create this mailbox if it does not already exist.
     pub fn create_if_nx(&self, tmp: &Path) -> Result<(), Error> {
-        if !self.is_traversable() {
+        if !self.exists() {
             match self.create(tmp, None) {
                 Err(Error::MailboxExists) => Ok(()),
                 r => r,
@@ -322,11 +352,14 @@ impl MailboxPath {
 
     /// Mark this mailbox as subscribed.
     pub fn subscribe(&self) -> Result<(), Error> {
-        if !self.is_traversable() {
+        if !self.exists() {
             Err(Error::NxMailbox)
-        } else if !self.is_selectable() {
-            Err(Error::MailboxUnselectable)
         } else {
+            fs::DirBuilder::new()
+                .mode(0o700)
+                .recursive(true)
+                .create(&self.shadow_path)
+                .ignore_already_exists()?;
             fs::OpenOptions::new()
                 .create(true)
                 .write(true)
@@ -360,7 +393,7 @@ impl MailboxPath {
     ) -> ChildListResult {
         let mut self_result = ChildListResult::default();
         let selectable = self.is_selectable();
-        self_result.exists = selectable;
+        self_result.exists = self.exists();
 
         let self_matches = matcher(&self.name);
 
@@ -378,9 +411,13 @@ impl MailboxPath {
             && (!request.select_special_use || special_use.is_some());
         let mut has_children = false;
 
-        for child in self.children() {
+        let children = self.children_impl(if request.select_subscribed {
+            &self.shadow_path
+        } else {
+            &self.base_path
+        });
+        for child in children {
             let child_result = child.list(dst, request, matcher);
-            self_result.exists |= child_result.exists;
             self_result.unmatched_subscribe |= child_result.unmatched_subscribe;
             self_result.unmatched_special_use |=
                 child_result.unmatched_special_use;

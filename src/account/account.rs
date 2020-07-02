@@ -35,6 +35,7 @@ pub struct Account {
     root: PathBuf,
     key_store: Arc<Mutex<KeyStore>>,
     mailbox_root: PathBuf,
+    shadow_root: PathBuf,
     common_paths: Arc<CommonPaths>,
 }
 
@@ -61,6 +62,7 @@ impl Account {
             common_paths,
             key_store: Arc::new(Mutex::new(key_store)),
             mailbox_root: root.join("mail"),
+            shadow_root: root.join("shadow"),
             root,
         }
     }
@@ -84,7 +86,7 @@ impl Account {
             .ignore_already_exists()?;
         self.key_store.lock().unwrap().init(key_store_config)?;
         // Ensure that, no matter what, we have an INBOX.
-        MailboxPath::root("INBOX".to_owned(), &self.mailbox_root)
+        self.root_mailbox_path("INBOX".to_owned())
             .unwrap()
             .create_if_nx(&self.common_paths.tmp)?;
 
@@ -161,10 +163,7 @@ impl Account {
                 parent.create_if_nx(&self.common_paths.tmp)?;
                 new_mailbox = Some(parent.child(part)?);
             } else {
-                new_mailbox = Some(MailboxPath::root(
-                    part.to_owned(),
-                    &self.mailbox_root,
-                )?);
+                new_mailbox = Some(self.root_mailbox_path(part.to_owned())?);
             }
         }
 
@@ -223,11 +222,15 @@ impl Account {
         let matcher = mailbox_path_matcher(patterns.iter().map(|s| s as &str));
 
         let mut accum = Vec::new();
-        for entry in fs::read_dir(&self.mailbox_root)? {
+        for entry in fs::read_dir(if request.select_subscribed {
+            &self.shadow_root
+        } else {
+            &self.mailbox_root
+        })? {
             let entry = entry?;
 
             if let Ok(name) = entry.file_name().into_string() {
-                if let Ok(mp) = MailboxPath::root(name, &self.mailbox_root) {
+                if let Ok(mp) = self.root_mailbox_path(name) {
                     mp.list(&mut accum, request, &matcher);
                 }
             }
@@ -235,5 +238,9 @@ impl Account {
 
         accum.reverse();
         Ok(accum)
+    }
+
+    fn root_mailbox_path(&self, name: String) -> Result<MailboxPath, Error> {
+        MailboxPath::root(name, &self.mailbox_root, &self.shadow_root)
     }
 }
