@@ -21,7 +21,7 @@
 //!
 //! Information on file layout is found in the `mailbox` module documentation.
 
-use std::fmt;
+use std::borrow::Cow;
 use std::fs;
 use std::io::{self, Read};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
@@ -30,6 +30,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
 
+use crate::account::model::*;
 use crate::support::error::Error;
 use crate::support::file_ops::{self, ErrorTransforms, IgnoreKinds};
 use crate::support::safe_name::is_safe_name;
@@ -44,54 +45,7 @@ pub struct MailboxPath {
     pub(super) base_path: PathBuf,
     pub(super) data_path: PathBuf,
     pub(super) metadata_path: PathBuf,
-    pub(super) unsub_path: PathBuf,
-}
-
-/// Attributes that may be applied to mailboxes.
-///
-/// This includes the RFC 6154 special-use markers.
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub enum MailboxAttribute {
-    // RFC 3501
-    // We never do anything with \Noinferiors, \Marked, or \Unmarked, so they
-    // are not defined here.
-    Noselect,
-    // RFC 3348
-    HasChildren,
-    HasNoChildren,
-    // RFC 6154
-    // \All is not supported
-    Archive,
-    Drafts,
-    Flagged,
-    Junk,
-    Sent,
-    Trash,
-    // RFC 8457
-    Important,
-}
-
-impl fmt::Display for MailboxAttribute {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &MailboxAttribute::Noselect => write!(f, "\\Noselect"),
-            &MailboxAttribute::HasChildren => write!(f, "\\HasChildren"),
-            &MailboxAttribute::HasNoChildren => write!(f, "\\HasNoChildren"),
-            &MailboxAttribute::Archive => write!(f, "\\Archive"),
-            &MailboxAttribute::Drafts => write!(f, "\\Drafts"),
-            &MailboxAttribute::Flagged => write!(f, "\\Flagged"),
-            &MailboxAttribute::Junk => write!(f, "\\Junk"),
-            &MailboxAttribute::Sent => write!(f, "\\Sent"),
-            &MailboxAttribute::Trash => write!(f, "\\Trash"),
-            &MailboxAttribute::Important => write!(f, "\\Important"),
-        }
-    }
-}
-
-impl fmt::Debug for MailboxAttribute {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        <MailboxAttribute as fmt::Display>::fmt(self, f)
-    }
+    pub(super) sub_path: PathBuf,
 }
 
 impl MailboxPath {
@@ -99,7 +53,7 @@ impl MailboxPath {
         let data_path = base_path.join("%");
         MailboxPath {
             metadata_path: data_path.join("mailbox.toml"),
-            unsub_path: data_path.join("unsubscribe"),
+            sub_path: base_path.join("%subscribe"),
             name,
             base_path,
             data_path,
@@ -120,6 +74,10 @@ impl MailboxPath {
     pub fn child(&self, name: &str) -> Result<Self, Error> {
         if !is_safe_name(&name) {
             return Err(Error::UnsafeName);
+        }
+
+        if !self.allows_children() {
+            return Err(Error::BadOperationOnInbox);
         }
 
         Ok(MailboxPath::from_name_and_path(
@@ -160,20 +118,28 @@ impl MailboxPath {
         self.base_path.join(format!("%{:x}", uid_validity))
     }
 
+    /// Whether this mailbox allows children.
+    ///
+    /// INBOX is not allowed to have children due to the crazy special case RFC
+    /// 3501 adds to `RENAME INBOX`.
+    pub fn allows_children(&self) -> bool {
+        "INBOX" != &self.name
+    }
+
     /// Whether this mailbox can be selected (i.e., whether it can contain
     /// messages).
     pub fn is_selectable(&self) -> bool {
         self.data_path.is_dir()
     }
 
-    /// Whether this mailbox exists
-    pub fn exists(&self) -> bool {
+    /// Whether this mailbox exists as a physical entity.
+    pub fn is_traversable(&self) -> bool {
         self.base_path.is_dir()
     }
 
     /// Whether this mailbox is currently subscribed.
     pub fn is_subscribed(&self) -> bool {
-        self.is_selectable() && !self.unsub_path.is_file()
+        self.sub_path.is_file()
     }
 
     /// Return an iterator to the children of this mailbox, regardless of
@@ -258,7 +224,7 @@ impl MailboxPath {
 
     /// Create this mailbox if it does not already exist.
     pub fn create_if_nx(&self, tmp: &Path) -> Result<(), Error> {
-        if !self.exists() {
+        if !self.is_traversable() {
             match self.create(tmp, None) {
                 Err(Error::MailboxExists) => Ok(()),
                 r => r,
@@ -316,22 +282,34 @@ impl MailboxPath {
     /// Rename self to `dst`.
     ///
     /// Does not create parent mailboxes implicitly.
-    pub fn rename(&self, dst: &MailboxPath) -> Result<(), Error> {
+    ///
+    /// `tmp` is used to stage files for the INBOX special case.
+    pub fn rename(&self, dst: &MailboxPath, tmp: &Path) -> Result<(), Error> {
+        fs::rename(&self.base_path, &dst.base_path)
+            .on_not_found(Error::NxMailbox)
+            .on_exists(Error::MailboxExists)?;
+
         // RFC 3501 specifies a crazy special case for INBOX: A RENAME does not
         // rename it, but instead *creates* the destination and then moves all
         // *messages* into the new mailbox, while leaving all child mailboxes
-        // alone. While this could be done, it would momentarily turn INBOX
-        // into a \Noselect mailbox, and thereafter needs to reset the UID
-        // validity. Overall it's a sufficiently icky special case to warrant
-        // violating the standard until/if we come across a client insane
-        // enough to depend on it.
+        // alone.
+        //
+        // Due to the last clause, we forbid INBOX from having any children.
+        //
+        // In our implementation, we just rename INBOX and then recreate it.
+        // This isn't ideal since it is non-atomic and results in a brief
+        // window in which there *is no inbox*, but overall we have a choice
+        // between doing that and having a period where the messages that were
+        // in the inbox are not reachable by any mailbox, which is far worse.
         if &self.name == "INBOX" {
-            return Err(Error::BadOperationOnInbox);
+            match self.create(tmp, None) {
+                Ok(()) => (),
+                Err(Error::MailboxExists) => (),
+                Err(e) => return Err(e),
+            }
         }
 
-        fs::rename(&self.base_path, &dst.base_path)
-            .on_not_found(Error::NxMailbox)
-            .on_exists(Error::MailboxExists)
+        Ok(())
     }
 
     /// Loads and returns the metadata for this mailbox.
@@ -343,135 +321,238 @@ impl MailboxPath {
         Ok(toml::from_slice(&data)?)
     }
 
-    /// The RFC 3501+6154 LIST and XLIST commands.
-    pub fn list(
-        &self,
-        dst: &mut Vec<ListInfo>,
-        matcher: impl Copy + Fn(&str) -> bool,
-    ) {
-        if matcher(&self.name) {
-            let mut self_info = ListInfo {
-                name: self.name.clone(),
-                attributes: vec![],
-            };
-
-            match self.metadata() {
-                Ok(md) => {
-                    if let Some(special_use) = md.imap.special_use {
-                        self_info.attributes.push(special_use);
-                    }
-                }
-                Err(_) => {
-                    self_info.attributes.push(MailboxAttribute::Noselect);
-                }
-            }
-
-            let mut childit = self.children().peekable();
-            if childit.peek().is_some() {
-                self_info.attributes.push(MailboxAttribute::HasChildren);
-            } else {
-                self_info.attributes.push(MailboxAttribute::HasNoChildren);
-            }
-
-            dst.push(self_info);
-
-            for child in childit {
-                child.list(dst, matcher);
-            }
-        } else {
-            for child in self.children() {
-                child.list(dst, matcher);
-            }
-        }
-    }
-
-    /// The RFC 3501 LSUB command.
-    ///
-    /// Returns true if this mailbox or any of its direct or indirect children
-    /// are subscribed but were excluded by the matcher, and no mailboxes which
-    /// did match were found between the two points to be able to communicate
-    /// this (i.e., the `\Noselect` special case described for `LSUB` in RFC
-    /// 3501).
-    pub fn lsub(
-        &self,
-        dst: &mut Vec<ListInfo>,
-        matcher: impl Copy + Fn(&str) -> bool,
-    ) -> bool {
-        let matches = matcher(&self.name);
-        let subscribed = self.is_subscribed();
-
-        if subscribed {
-            if matches {
-                dst.push(ListInfo {
-                    name: self.name.clone(),
-                    attributes: vec![],
-                });
-            }
-
-            for child in self.children() {
-                child.lsub(dst, matcher);
-            }
-
-            // If this mailbox is subscribed but didn't match, it is hidden.
-            // Pass this on to the parent.
-            !matches
-        } else {
-            let self_index = dst.len();
-            let mut has_hidden_child = false;
-
-            for child in self.children() {
-                has_hidden_child = child.lsub(dst, matcher);
-            }
-
-            if has_hidden_child {
-                // Not subscribed, but we have one or more children that are
-                // subscribed and weren't included.
-                if matches {
-                    // We do match, so include insert self into the result,
-                    // marked \Noselect.
-                    dst.insert(
-                        self_index,
-                        ListInfo {
-                            name: self.name.clone(),
-                            attributes: vec![MailboxAttribute::Noselect],
-                        },
-                    );
-
-                    // Nothing hidden now
-                    false
-                } else {
-                    // We don't match either, so pass the hidden status up to
-                    // the parent.
-                    true
-                }
-            } else {
-                // We're not hidden, nor are any children
-                false
-            }
-        }
-    }
-
     /// Mark this mailbox as subscribed.
     pub fn subscribe(&self) -> Result<(), Error> {
-        if !self.exists() {
+        if !self.is_traversable() {
             Err(Error::NxMailbox)
         } else if !self.is_selectable() {
             Err(Error::MailboxUnselectable)
         } else {
-            Ok(fs::remove_file(&self.unsub_path).ignore_not_found()?)
+            fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .mode(0o600)
+                .open(&self.sub_path)
+                .map(|_| ())
+                .on_not_found(Error::MailboxUnselectable)
         }
     }
 
     /// Mark this mailbox as unsubscribed.
     pub fn unsubscribe(&self) -> Result<(), Error> {
-        fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .mode(0o600)
-            .open(&self.unsub_path)
-            .map(|_| ())
-            .on_not_found(Error::MailboxUnselectable)
+        Ok(fs::remove_file(&self.sub_path).ignore_not_found()?)
     }
+
+    /// Underlying implementation for `LIST`, `XLIST`, and `LSUB`.
+    ///
+    /// `matcher` is used to determine  whether the mailbox's name matches.
+    ///
+    /// Results are pushed into `dst` in post-order, so `dst` must be reversed
+    /// once the full result set is in.
+    ///
+    /// On success, returns whether this mailbox exists, and whether there are
+    /// selected but unmatched mailboxes within it (i.e. either itself or any
+    /// direct or indirect children).
+    pub fn list(
+        &self,
+        dst: &mut Vec<ListResponse>,
+        request: &ListRequest,
+        matcher: &impl Fn(&str) -> bool,
+    ) -> ChildListResult {
+        let mut self_result = ChildListResult::default();
+        let selectable = self.is_selectable();
+        self_result.exists = selectable;
+
+        let self_matches = matcher(&self.name);
+
+        let subscribed = (request.select_subscribed
+            || request.return_subscribed)
+            && self.is_subscribed();
+        let special_use =
+            if request.select_special_use || request.return_special_use {
+                self.metadata().ok().and_then(|md| md.imap.special_use)
+            } else {
+                None
+            };
+
+        let mut self_selected = (!request.select_subscribed || subscribed)
+            && (!request.select_special_use || special_use.is_some());
+        let mut has_children = false;
+
+        for child in self.children() {
+            let child_result = child.list(dst, request, matcher);
+            self_result.exists |= child_result.exists;
+            self_result.unmatched_subscribe |= child_result.unmatched_subscribe;
+            self_result.unmatched_special_use |=
+                child_result.unmatched_special_use;
+
+            // RFC 5258 does not specifically define the behaviour of
+            // \HasChildren and \HasNoChildren when acting on subscriptions.
+            // Here, we take the position that they still refer to the *real*
+            // mailboxes and not the shadow hierarchy that subscriptions have.
+            has_children |= child_result.exists;
+        }
+
+        // If we aren't doing subscriptions, we filter to only existing
+        // mailboxes.
+        self_selected &= request.select_subscribed || self_result.exists;
+
+        let unmatched_child_selected = self_result.unmatched_subscribe
+            || self_result.unmatched_special_use;
+
+        // Add an entry for self if matching and selected, or if matching and
+        // unselected but we have a selected but unmatching child and
+        // recursive_match is enabled.
+        if self_matches
+            && (self_selected
+                || (request.recursive_match && unmatched_child_selected))
+        {
+            let mut info = ListResponse {
+                name: self.name.clone(),
+                ..ListResponse::default()
+            };
+
+            if !self_selected {
+                // If not selected but being included anyway due to
+                // recursive_match, tell the client about this. For LSUB,
+                // \Noselect is abused. For extended LIST, \NonExistent is
+                // abused instead.
+                if request.lsub_style {
+                    info.attributes.push(MailboxAttribute::Noselect);
+                } else {
+                    info.attributes.push(MailboxAttribute::NonExistent);
+                }
+            } else if !self_result.exists {
+                // If this mailbox doesn't exist but is a subscription, tell
+                // the client unless we're doing LSUB.
+                if !request.lsub_style {
+                    info.attributes.push(MailboxAttribute::NonExistent);
+                }
+            } else if !selectable {
+                // In all cases, we return \Noselect for non-selectable
+                // mailboxes that do exist.
+                info.attributes.push(MailboxAttribute::Noselect);
+            }
+
+            if !self.allows_children() {
+                info.attributes.push(MailboxAttribute::Noinferiors);
+            }
+
+            if subscribed && request.return_subscribed {
+                info.attributes.push(MailboxAttribute::Subscribed);
+            }
+
+            if request.return_children {
+                if has_children {
+                    info.attributes.push(MailboxAttribute::HasChildren);
+                } else {
+                    info.attributes.push(MailboxAttribute::HasNoChildren);
+                }
+            }
+
+            if request.return_special_use {
+                if let Some(special_use) = special_use {
+                    info.attributes.push(special_use);
+                }
+            }
+
+            if request.recursive_match {
+                if self_result.unmatched_special_use {
+                    info.child_info.push("SPECIAL-USE");
+                    self_result.unmatched_special_use = false;
+                }
+
+                if self_result.unmatched_subscribe {
+                    info.child_info.push("SUBSCRIPTION");
+                    self_result.unmatched_subscribe = false;
+                }
+            }
+
+            dst.push(info);
+        } else {
+            // Not being returned, so propagate unmatched status upward
+            self_result.unmatched_special_use |=
+                request.select_special_use && special_use.is_some();
+            self_result.unmatched_subscribe |=
+                request.select_subscribed && subscribed;
+        }
+
+        self_result
+    }
+}
+
+/// The RFC 3501 `LIST` and `LSUB` commands and the non-standard `XLIST`
+/// command.
+///
+/// `LSUB` is achieved by setting `select_subscribed`, `return_subscribed`,
+/// `recursive_match`, and `lsub_style`.
+///
+/// `XLIST` is achieved by setting `return_children` and `return_special_use`.
+///
+/// This handles the special case of `LIST "" ""`.
+pub fn list(
+    root: &Path,
+    request: &ListRequest,
+) -> Result<Vec<ListResponse>, Error> {
+    // RFC 5258 does not describe any behaviour if extended list is used with
+    // multiple patterns and one of them is "". Here, we just handle the ""
+    // special case if there's exactly one pattern, and in other cases the
+    // pattern is interpreted literally, i.e., matching an empty mailbox name.
+    if 1 == request.patterns.len() && "" == &request.patterns[0] {
+        return Ok(vec![ListResponse::default()]);
+    }
+
+    let mut pattern_prefix = request.reference.clone();
+    // Wildcards in the reference have no significance, and we don't allow
+    // creating mailboxes containing them, so if they are requested, we know
+    // nothing at all can match.
+    if pattern_prefix.contains('%') || pattern_prefix.contains('*') {
+        return Ok(vec![]);
+    }
+
+    if !pattern_prefix.is_empty() && !pattern_prefix.ends_with("/") {
+        pattern_prefix.push('/');
+    }
+
+    let patterns = request
+        .patterns
+        .iter()
+        .map(Cow::Borrowed)
+        .map(|p| {
+            if pattern_prefix.is_empty() {
+                p
+            } else {
+                Cow::Owned(pattern_prefix.clone() + &p)
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let matcher = mailbox_path_matcher(patterns.iter().map(|s| s as &str));
+
+    let mut accum = Vec::new();
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+
+        if let Ok(name) = entry.file_name().into_string() {
+            if let Ok(mp) = MailboxPath::root(name, root) {
+                mp.list(&mut accum, request, &matcher);
+            }
+        }
+    }
+
+    accum.reverse();
+    Ok(accum)
+}
+
+/// This is used internally by `MailboxPath::list`.
+///
+/// Its value is not meaningful outside that function, but must be `pub` here
+/// since it is nonetheless returned.
+#[derive(Clone, Copy, Default)]
+pub struct ChildListResult {
+    unmatched_subscribe: bool,
+    unmatched_special_use: bool,
+    exists: bool,
 }
 
 /// Given a raw mailbox path, emit the parts that comprise the actual path.
@@ -496,9 +577,9 @@ pub fn parse_mailbox_path<'a>(
 }
 
 /// Creates a predicate which identifies which normalised mailbox names match
-/// `pattern`, with pattern matching performed as per RFC 3501.
+/// any element of `patterns`, with pattern matching performed as per RFC 3501.
 ///
-/// `pattern` is first normalised by `parse_mailbox_path`.
+/// Each pattern is first normalised by `parse_mailbox_path`.
 ///
 /// This design means that any `LIST` operation needs to fetch all mailboxes
 /// and then narrow it down, instead of a more ideal recursive filtering.
@@ -507,27 +588,35 @@ pub fn parse_mailbox_path<'a>(
 /// non-exponential) way. Since we _only_ iterate actual mailboxes (and not,
 /// say, all of USENET, or the user's whole home directory as UW-IMAP), this
 /// shouldn't be a problem.
-pub fn mailbox_path_matcher(pattern: &str) -> impl Fn(&str) -> bool {
+pub fn mailbox_path_matcher<'a>(
+    patterns: impl IntoIterator<Item = &'a str>,
+) -> impl Fn(&str) -> bool + 'a {
     let mut rx = "^".to_owned();
-    for part in parse_mailbox_path(pattern) {
-        if rx.len() > 1 {
-            rx.push('/');
+    for (pattern_ix, pattern) in patterns.into_iter().enumerate() {
+        if pattern_ix > 0 {
+            rx.push('|');
         }
 
-        let mut start = 0;
-        for end in part
-            .match_indices(|c| '%' == c || '*' == c)
-            .map(|(ix, _)| ix)
-            .chain(part.len()..=part.len())
-        {
-            let chunk = &part[start..end];
-            start = (end + 1).min(part.len());
+        for (part_ix, part) in parse_mailbox_path(pattern).enumerate() {
+            if part_ix > 0 {
+                rx.push('/');
+            }
 
-            rx.push_str(&regex::escape(chunk));
-            match part.get(end..end + 1) {
-                Some("*") => rx.push_str(".*"),
-                Some("%") => rx.push_str("[^/]*"),
-                _ => (),
+            let mut start = 0;
+            for end in part
+                .match_indices(|c| '%' == c || '*' == c)
+                .map(|(ix, _)| ix)
+                .chain(part.len()..=part.len())
+            {
+                let chunk = &part[start..end];
+                start = (end + 1).min(part.len());
+
+                rx.push_str(&regex::escape(chunk));
+                match part.get(end..end + 1) {
+                    Some("*") => rx.push_str(".*"),
+                    Some("%") => rx.push_str("[^/]*"),
+                    _ => (),
+                }
             }
         }
     }
@@ -535,18 +624,6 @@ pub fn mailbox_path_matcher(pattern: &str) -> impl Fn(&str) -> bool {
 
     let rx = regex::Regex::new(&rx).expect("Built invalid regex?");
     move |s| rx.is_match(s)
-}
-
-/// Information needed to service LIST, XLIST, and LSUB requests.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ListInfo {
-    /// The canonical name of the mailbox
-    pub name: String,
-    /// Any attributes to return.
-    ///
-    /// For `LSUB`, these are not actually the mailbox attributes, but the fake
-    /// attributes that `LSUB` requires in certain situations.
-    pub attributes: Vec<MailboxAttribute>,
 }
 
 /// Immutable metadata about a mailbox.
@@ -586,6 +663,8 @@ pub fn parse_uid_validity(path: impl AsRef<Path>) -> Result<u32, Error> {
 
 #[cfg(test)]
 mod test {
+    use std::iter;
+
     use super::*;
 
     #[test]
@@ -605,7 +684,7 @@ mod test {
     #[test]
     fn test_mailbox_patterns() {
         fn matches(pat: &str, mb: &str) -> bool {
-            mailbox_path_matcher(pat)(mb)
+            mailbox_path_matcher(iter::once(pat))(mb)
         }
 
         assert!(matches("*", "INBOX"));

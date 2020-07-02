@@ -661,6 +661,145 @@ impl PartialEq for Flag {
 
 impl Eq for Flag {}
 
+/// Attributes that may be applied to mailboxes.
+///
+/// This includes the RFC 6154 special-use markers.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum MailboxAttribute {
+    // RFC 3501
+    // We never do anything with \Marked or \Unmarked, so they are not defined
+    // here.
+    Noselect,
+    Noinferiors,
+    // RFC 3348
+    HasChildren,
+    HasNoChildren,
+    // RFC 5258
+    NonExistent,
+    Subscribed,
+    // RFC 6154
+    // \All is not supported
+    Archive,
+    Drafts,
+    Flagged,
+    Junk,
+    Sent,
+    Trash,
+    // RFC 8457
+    Important,
+}
+
+impl fmt::Display for MailboxAttribute {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &MailboxAttribute::Noselect => write!(f, "\\Noselect"),
+            &MailboxAttribute::Noinferiors => write!(f, "\\Noinferiors"),
+            &MailboxAttribute::HasChildren => write!(f, "\\HasChildren"),
+            &MailboxAttribute::HasNoChildren => write!(f, "\\HasNoChildren"),
+            &MailboxAttribute::NonExistent => write!(f, "\\NonExistent"),
+            &MailboxAttribute::Subscribed => write!(f, "\\Subscribed"),
+            &MailboxAttribute::Archive => write!(f, "\\Archive"),
+            &MailboxAttribute::Drafts => write!(f, "\\Drafts"),
+            &MailboxAttribute::Flagged => write!(f, "\\Flagged"),
+            &MailboxAttribute::Junk => write!(f, "\\Junk"),
+            &MailboxAttribute::Sent => write!(f, "\\Sent"),
+            &MailboxAttribute::Trash => write!(f, "\\Trash"),
+            &MailboxAttribute::Important => write!(f, "\\Important"),
+        }
+    }
+}
+
+impl fmt::Debug for MailboxAttribute {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        <MailboxAttribute as fmt::Display>::fmt(self, f)
+    }
+}
+
+/// Request used for implementing `LIST` and `LSUB`.
+///
+/// This includes the extended options from RFC 5258, the `LIST-EXTENDED`
+/// extension. This extension is fairly pointless and adds a large amount of
+/// complexity to the `LIST` command, but IMAP4rev2 is going to bring it into
+/// the baseline, so we might as well implement it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListRequest {
+    /// The "reference" of the list.
+    ///
+    /// If non-empty, a `/` is added to the end (if not there already) and this
+    /// is prepended to every pattern.
+    ///
+    /// RFC 3501
+    pub reference: String,
+    /// Only match mailboxes whose name matches any of these patterns.
+    ///
+    /// RFC 3501, extended by RFC 5258
+    pub patterns: Vec<String>,
+    /// Only match mailboxes which are subscribed, and include mailboxes which
+    /// don't exist.
+    ///
+    /// If set, RFC 5258 requires that `return_subscribed` also be set.
+    ///
+    /// RFC 5258
+    pub select_subscribed: bool,
+    /// Only match mailboxes which have a special-use attribute.
+    ///
+    /// If set, RFC 6154 requires that `return_special_use` also be set.
+    ///
+    /// RFC 6154
+    pub select_special_use: bool,
+    /// If true, and this mailbox does match `patterns` but fails one of the
+    /// selection criteria, and a direct or indirect child does match one of
+    /// the selection criteria, but does not match `patterns`, and no
+    /// intermediate parents satisfy these conditions, include this mailbox in
+    /// the results with the `\NonExistent` attribute.
+    ///
+    /// This also causes the `child_info` field of the output to be populated.
+    ///
+    /// RFC 3501 (`LSUB`), RFC 5258
+    pub recursive_match: bool,
+    /// Determine whether each mailbox is subscribed.
+    ///
+    /// RFC 5258
+    pub return_subscribed: bool,
+    /// Determine whether each mailbox has children.
+    ///
+    /// RFC 5258, XLIST (implicit)
+    pub return_children: bool,
+    /// Return the special use flags for each mailbox.
+    ///
+    /// RFC 6154, XLIST (implicit)
+    pub return_special_use: bool,
+    /// If true, return flags as per `LSUB` --- `\Noselect` instead of
+    /// `\NonExistent` for the special `recursive_match` behaviour, and no flag
+    /// at all for mailboxes that don't exist.
+    ///
+    /// RFC 3501
+    pub lsub_style: bool,
+}
+
+/// A `LIST` or `LSUB` response.
+///
+/// The structure does not include the second term, the hierarchy delimiter,
+/// since it is always `"/"`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ListResponse {
+    /// Any attributes on this mailbox.
+    ///
+    /// RFC 3501
+    pub attributes: Vec<MailboxAttribute>,
+    /// The canonical name of this mailbox.
+    ///
+    /// RFC 3501
+    pub name: String,
+    ///If non-empty, return a `("CHILDINFO" (child_info ...))` extended info
+    /// block with these values.
+    ///
+    /// Not returned for LSUB, but it is still computed for that case anyway.
+    ///
+    /// RFC 5258
+    pub child_info: Vec<&'static str>,
+}
+
 /// All information needed to produce a response to a `SELECT` or `EXAMINE`
 /// command.
 #[derive(Debug, Clone, PartialEq, Eq)]

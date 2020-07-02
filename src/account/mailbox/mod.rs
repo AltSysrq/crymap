@@ -37,11 +37,11 @@
 //! - `%UV/mailbox.toml`. Immutable metadata about this mailbox. Managed by
 //!   `MailboxPath`.
 //!
-//! - `%UV/unsubscribe`. Marker file; if present, the mailbox is not
-//!   subscribed. Managed by `MailboxPath`.
-//!
 //! - `%UV/recent`. Maintains a token for the `\Recent` flag. See
 //!   `recency_token`.
+//!
+//! - `%subscribe`. Marker file; if present, the mailbox is subscribed.
+//!   Managed by `MailboxPath`.
 //!
 //! - Directories containing child mailboxes, each of which is in a
 //!   subdirectory corresponding to its name. Managed by `MailboxPath`.
@@ -58,28 +58,27 @@
 //! operation on a dual-use mailbox with child mailboxes must transmogrify it
 //! into a folder-like mailbox.
 //!
-//! The subscription model is different from what RFC 3501 prescribes. All
-//! selectable mailboxes are subscribed by default, which corresponds to most
-//! people's expectations (evidenced by the fact that real mail clients
-//! scramble to subscribe a mailbox they create as soon as possible). It also
-//! lets us fulfil the letter, though perhaps not the spirit, of the
-//! requirement that deleting a mailbox does not unsubscribe it. Instead,
-//! deleting a mailbox effectively subscribes it should it be recreated.
-//! Ultimately, though, the subtleties of subscriptions likely don't matter too
-//! much here since they are rarely used productively and the exotic use-cases
-//! the standard urges to support (i.e. a shared mailbox that occasionally gets
-//! deleted and later recreated) simply won't happen here.
-//!
 //! In general:
 //!
-//! - A mailbox exists (i.e., is visible to IMAP) if its directory exists.
+//! - A mailbox exists (i.e., is visible to IMAP) it is selectable or any of
+//!   its children exist.
 //!
 //! - A mailbox is selectable if the `%` subdirectory exists. It is assumed
 //!   that the contents of that subdirectory will not be partially
 //!   instantiated.
 //!
-//! - A mailbox is subscribed if it is selectable and does not have a
-//!   `%UV/unsubscribe` file.
+//! - A mailbox is subscribed if it has a `%UV/subscribe` file.
+//!
+//! We can get away with this because the only time the distinction between
+//! `\Noselect` and `\NonExistent` matters is during `LIST` and `LSUB`. It does
+//! mean that a `\Noselect` mailbox turns into a `\NonExistent` mailbox once
+//! its last child is deleted, but Mark Crispin does describe that as a
+//! permissible behaviour, and it does mesh with the fact that the only way to
+//! get a `\Noselect` mailbox is to try to delete it while it has children.
+//!
+//! We do end up leaving deleted mailboxes around for their subscription
+//! markers, which is unfortunate, but such is the crazy subscription model of
+//! IMAP.
 //!
 //! ## Hierarchical Identifier scheme
 //!
