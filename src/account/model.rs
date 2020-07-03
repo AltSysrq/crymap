@@ -664,7 +664,9 @@ impl Eq for Flag {}
 /// Attributes that may be applied to mailboxes.
 ///
 /// This includes the RFC 6154 special-use markers.
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
+)]
 pub enum MailboxAttribute {
     // RFC 3501
     // We never do anything with \Marked or \Unmarked, so they are not defined
@@ -782,7 +784,7 @@ pub struct StatusResponse {
 /// extension. This extension is fairly pointless and adds a large amount of
 /// complexity to the `LIST` command, but IMAP4rev2 is going to bring it into
 /// the baseline, so we might as well implement it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ListRequest {
     /// The "reference" of the list.
     ///
@@ -842,17 +844,20 @@ pub struct ListRequest {
 ///
 /// The structure does not include the second term, the hierarchy delimiter,
 /// since it is always `"/"`.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+///
+/// The fields in this struct are sorted to permit deriving `Ord` and are not
+/// in the order they are sent over the wire.
+#[derive(Debug, Clone, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub struct ListResponse {
-    /// Any attributes on this mailbox.
-    ///
-    /// RFC 3501
-    pub attributes: Vec<MailboxAttribute>,
     /// The canonical name of this mailbox.
     ///
     /// RFC 3501
     pub name: String,
-    ///If non-empty, return a `("CHILDINFO" (child_info ...))` extended info
+    /// Any attributes on this mailbox.
+    ///
+    /// RFC 3501
+    pub attributes: Vec<MailboxAttribute>,
+    /// If non-empty, return a `("CHILDINFO" (child_info ...))` extended info
     /// block with these values.
     ///
     /// Not returned for LSUB, but it is still computed for that case anyway.

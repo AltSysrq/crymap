@@ -352,22 +352,18 @@ impl MailboxPath {
 
     /// Mark this mailbox as subscribed.
     pub fn subscribe(&self) -> Result<(), Error> {
-        if !self.exists() {
-            Err(Error::NxMailbox)
-        } else {
-            fs::DirBuilder::new()
-                .mode(0o700)
-                .recursive(true)
-                .create(&self.shadow_path)
-                .ignore_already_exists()?;
-            fs::OpenOptions::new()
-                .create(true)
-                .write(true)
-                .mode(0o600)
-                .open(&self.sub_path)
-                .map(|_| ())
-                .on_not_found(Error::MailboxUnselectable)
-        }
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .recursive(true)
+            .create(&self.shadow_path)
+            .ignore_already_exists()?;
+        fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .mode(0o600)
+            .open(&self.sub_path)
+            .map(|_| ())
+            .on_not_found(Error::MailboxUnselectable)
     }
 
     /// Mark this mailbox as unsubscribed.
@@ -418,9 +414,11 @@ impl MailboxPath {
         });
         for child in children {
             let child_result = child.list(dst, request, matcher);
-            self_result.unmatched_subscribe |= child_result.unmatched_subscribe;
-            self_result.unmatched_special_use |=
-                child_result.unmatched_special_use;
+            self_result.selected_subscribe |= child_result.selected_subscribe;
+            self_result.selected_special_use |=
+                child_result.selected_special_use;
+            self_result.unmatched_but_selected |=
+                child_result.unmatched_but_selected;
 
             // RFC 5258 does not specifically define the behaviour of
             // \HasChildren and \HasNoChildren when acting on subscriptions.
@@ -433,31 +431,26 @@ impl MailboxPath {
         // mailboxes.
         self_selected &= request.select_subscribed || self_result.exists;
 
-        let unmatched_child_selected = self_result.unmatched_subscribe
-            || self_result.unmatched_special_use;
-
         // Add an entry for self if matching and selected, or if matching and
         // unselected but we have a selected but unmatching child and
         // recursive_match is enabled.
         if self_matches
             && (self_selected
-                || (request.recursive_match && unmatched_child_selected))
+                || (request.recursive_match
+                    && self_result.unmatched_but_selected))
         {
             let mut info = ListResponse {
                 name: self.name.clone(),
                 ..ListResponse::default()
             };
 
-            if !self_selected {
+            if !self_selected && request.lsub_style {
                 // If not selected but being included anyway due to
                 // recursive_match, tell the client about this. For LSUB,
-                // \Noselect is abused. For extended LIST, \NonExistent is
-                // abused instead.
-                if request.lsub_style {
-                    info.attributes.push(MailboxAttribute::Noselect);
-                } else {
-                    info.attributes.push(MailboxAttribute::NonExistent);
-                }
+                // \Noselect is abused. For extended list, it is implied by the
+                // fact that the returned mailbox doesn't have the attribute
+                // being selected.
+                info.attributes.push(MailboxAttribute::Noselect);
             } else if !self_result.exists {
                 // If this mailbox doesn't exist but is a subscription, tell
                 // the client unless we're doing LSUB.
@@ -481,7 +474,12 @@ impl MailboxPath {
             if request.return_children {
                 if has_children {
                     info.attributes.push(MailboxAttribute::HasChildren);
-                } else {
+                } else if self.allows_children() {
+                    // Only HasNoChildren if we allow children, since otherwise
+                    // we have \Noinferiors which already implies
+                    // \HasNoChildren. Sending both is still OK and isn't even
+                    // a "SHOULD NOT", but it's best to conform to the
+                    // examples.
                     info.attributes.push(MailboxAttribute::HasNoChildren);
                 }
             }
@@ -493,24 +491,33 @@ impl MailboxPath {
             }
 
             if request.recursive_match {
-                if self_result.unmatched_special_use {
+                if self_result.selected_special_use {
                     info.child_info.push("SPECIAL-USE");
-                    self_result.unmatched_special_use = false;
                 }
 
-                if self_result.unmatched_subscribe {
-                    info.child_info.push("SUBSCRIPTION");
-                    self_result.unmatched_subscribe = false;
+                if self_result.selected_subscribe {
+                    info.child_info.push("SUBSCRIBED");
                 }
+
+                // We've covered the unmatched child, so this can stop
+                // propagating.
+                self_result.unmatched_but_selected = false;
             }
 
             dst.push(info);
-        } else {
-            // Not being returned, so propagate unmatched status upward
-            self_result.unmatched_special_use |=
-                request.select_special_use && special_use.is_some();
-            self_result.unmatched_subscribe |=
-                request.select_subscribed && subscribed;
+        }
+
+        // CHILDINFO data is passed the whole way up the tree unconditionally.
+        self_result.selected_special_use |=
+            request.select_special_use && special_use.is_some();
+        self_result.selected_subscribe |=
+            request.select_subscribed && subscribed;
+
+        if !self_matches && self_selected {
+            // Notify our parent that we were selected but not matched so that
+            // it can insert a spurious result if it matches but isn't
+            // selected.
+            self_result.unmatched_but_selected = true;
         }
 
         self_result
@@ -523,8 +530,9 @@ impl MailboxPath {
 /// since it is nonetheless returned.
 #[derive(Clone, Copy, Default)]
 pub struct ChildListResult {
-    unmatched_subscribe: bool,
-    unmatched_special_use: bool,
+    selected_subscribe: bool,
+    selected_special_use: bool,
+    unmatched_but_selected: bool,
     exists: bool,
 }
 
@@ -564,7 +572,7 @@ pub fn parse_mailbox_path<'a>(
 pub fn mailbox_path_matcher<'a>(
     patterns: impl IntoIterator<Item = &'a str>,
 ) -> impl Fn(&str) -> bool + 'a {
-    let mut rx = "^".to_owned();
+    let mut rx = "^(".to_owned();
     for (pattern_ix, pattern) in patterns.into_iter().enumerate() {
         if pattern_ix > 0 {
             rx.push('|');
@@ -593,7 +601,7 @@ pub fn mailbox_path_matcher<'a>(
             }
         }
     }
-    rx.push_str("$");
+    rx.push_str(")$");
 
     let rx = regex::Regex::new(&rx).expect("Built invalid regex?");
     move |s| rx.is_match(s)
