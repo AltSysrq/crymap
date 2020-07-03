@@ -246,7 +246,15 @@ impl MailboxPath {
 
         // Ready to go
         fs::rename(stage.into_path(), &self.base_path)
-            .on_exists(Error::MailboxExists)?;
+            .on_exists(Error::MailboxExists)
+            .map_err(|e| match e {
+                Error::Io(e)
+                    if Some(nix::libc::ENOTEMPTY) == e.raw_os_error() =>
+                {
+                    Error::MailboxExists
+                }
+                e => e,
+            })?;
 
         Ok(())
     }
@@ -316,7 +324,15 @@ impl MailboxPath {
     pub fn rename(&self, dst: &MailboxPath, tmp: &Path) -> Result<(), Error> {
         fs::rename(&self.base_path, &dst.base_path)
             .on_not_found(Error::NxMailbox)
-            .on_exists(Error::MailboxExists)?;
+            .on_exists(Error::MailboxExists)
+            .map_err(|e| match e {
+                Error::Io(e)
+                    if Some(nix::libc::ENOTEMPTY) == e.raw_os_error() =>
+                {
+                    Error::MailboxExists
+                }
+                e => e,
+            })?;
 
         // RFC 3501 specifies a crazy special case for INBOX: A RENAME does not
         // rename it, but instead *creates* the destination and then moves all

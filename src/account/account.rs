@@ -183,6 +183,22 @@ impl Account {
 
     /// The RFC 3501 `RENAME` command.
     pub fn rename(&self, request: RenameRequest) -> Result<(), Error> {
+        let src_parts =
+            parse_mailbox_path(&request.existing_name).collect::<Vec<_>>();
+        let dst_parts =
+            parse_mailbox_path(&request.new_name).collect::<Vec<_>>();
+
+        if src_parts == dst_parts {
+            return Err(Error::RenameToSelf);
+        }
+
+        if dst_parts.len() > src_parts.len()
+            && !src_parts.is_empty()
+            && &dst_parts[..src_parts.len()] == &src_parts[..]
+        {
+            return Err(Error::RenameIntoSelf);
+        }
+
         let src = self.mailbox_path(&request.existing_name)?;
         if !src.exists() {
             return Err(Error::NxMailbox);
@@ -276,6 +292,7 @@ impl Account {
         Ok(accum)
     }
 
+    /// The RFC 3501 `STATUS` command.
     pub fn status(
         &self,
         request: &StatusRequest,
@@ -388,6 +405,7 @@ impl Account {
 
 #[cfg(test)]
 mod test {
+    use chrono::prelude::*;
     use tempfile::TempDir;
 
     use super::*;
@@ -979,5 +997,423 @@ mod test {
 
         // Example 5.11 is also inapplicable as it deals with mailboxes that
         // have real children but don't actually exist.
+    }
+
+    #[test]
+    fn list_select_special_use() {
+        let setup = set_up();
+
+        setup
+            .account
+            .create(CreateRequest {
+                name: "stuff/important".to_owned(),
+                special_use: vec!["\\Important".to_owned()],
+            })
+            .unwrap();
+
+        assert_eq!(
+            "'Archive' [\\Archive] []\n\
+             'Drafts' [\\Drafts] []\n\
+             'Sent' [\\Sent] []\n\
+             'Spam' [\\Junk] []\n\
+             'Trash' [\\Trash] []\n\
+             'stuff' [] [\"SPECIAL-USE\"]\n",
+            list_formatted(
+                &setup.account,
+                ListRequest {
+                    patterns: vec!["%".to_owned()],
+                    select_special_use: true,
+                    return_special_use: true,
+                    recursive_match: true,
+                    ..ListRequest::default()
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn create_failure_cases() {
+        let setup = set_up();
+
+        assert_matches!(
+            Err(Error::MailboxExists),
+            setup.account.create(CreateRequest {
+                name: "Archive".to_owned(),
+                special_use: vec![],
+            })
+        );
+        assert_matches!(
+            Err(Error::BadOperationOnInbox),
+            setup.account.create(CreateRequest {
+                name: "INBOX/Foo".to_owned(),
+                special_use: vec![],
+            })
+        );
+        assert_matches!(
+            Err(Error::UnsafeName),
+            setup.account.create(CreateRequest {
+                name: "../Foo".to_owned(),
+                special_use: vec![],
+            })
+        );
+        assert_matches!(
+            Err(Error::UnsafeName),
+            setup.account.create(CreateRequest {
+                name: "".to_owned(),
+                special_use: vec![],
+            })
+        );
+        assert_matches!(
+            Err(Error::UnsupportedSpecialUse),
+            setup.account.create(CreateRequest {
+                name: "Foo".to_owned(),
+                special_use: vec!["\\Stuff".to_owned()],
+            })
+        );
+        assert_matches!(
+            Err(Error::UnsupportedSpecialUse),
+            setup.account.create(CreateRequest {
+                name: "Foo".to_owned(),
+                special_use: vec!["\\Sent".to_owned(), "\\Junk".to_owned()],
+            })
+        );
+    }
+
+    #[test]
+    fn test_delete() {
+        let setup = set_up();
+        setup.create("foo/bar");
+
+        setup.account.delete("foo").unwrap();
+        assert_eq!(
+            "'foo' [\\Noselect] []\n\
+             'foo/bar' [] []\n",
+            list_formatted(
+                &setup.account,
+                ListRequest {
+                    patterns: vec!["f*".to_owned()],
+                    ..ListRequest::default()
+                }
+            )
+        );
+
+        assert_matches!(
+            Err(Error::MailboxUnselectable),
+            setup.account.delete("foo")
+        );
+
+        setup.account.delete("foo/bar").unwrap();
+        assert_eq!(
+            "'foo' [\\Noselect] []\n",
+            list_formatted(
+                &setup.account,
+                ListRequest {
+                    patterns: vec!["f*".to_owned()],
+                    ..ListRequest::default()
+                }
+            )
+        );
+
+        setup.account.delete("foo").unwrap();
+        assert_eq!(
+            "",
+            list_formatted(
+                &setup.account,
+                ListRequest {
+                    patterns: vec!["f*".to_owned()],
+                    ..ListRequest::default()
+                }
+            )
+        );
+
+        assert_matches!(
+            Err(Error::BadOperationOnInbox),
+            setup.account.delete("INBOX")
+        );
+
+        assert_matches!(Err(Error::NxMailbox), setup.account.delete("foo"));
+
+        assert_matches!(Err(Error::UnsafeName), setup.account.delete("../foo"));
+
+        assert_matches!(Err(Error::NxMailbox), setup.account.delete(""));
+    }
+
+    #[test]
+    fn test_rename() {
+        let setup = set_up();
+
+        setup
+            .account
+            .rename(RenameRequest {
+                existing_name: "Archive".to_owned(),
+                new_name: "Stuff/2020".to_owned(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            "'Stuff' [] []\n\
+             'Stuff/2020' [\\Archive] []\n",
+            list_formatted(
+                &setup.account,
+                ListRequest {
+                    patterns: vec!["Stuff*".to_owned()],
+                    return_special_use: true,
+                    ..ListRequest::default()
+                }
+            )
+        );
+
+        setup
+            .account
+            .mailbox("INBOX", false)
+            .unwrap()
+            .append(
+                FixedOffset::east(0).timestamp_millis(0),
+                vec![],
+                &b"this is a test message"[..],
+            )
+            .unwrap();
+        setup
+            .account
+            .rename(RenameRequest {
+                existing_name: "INBOX".to_owned(),
+                new_name: "INBOX Special Case".to_owned(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            "'INBOX' [\\Noinferiors] []\n\
+             'INBOX Special Case' [] []\n",
+            list_formatted(
+                &setup.account,
+                ListRequest {
+                    patterns: vec!["IN*".to_owned()],
+                    ..ListRequest::default()
+                }
+            )
+        );
+
+        {
+            let (_, select) = setup
+                .account
+                .mailbox("INBOX", true)
+                .unwrap()
+                .select()
+                .unwrap();
+            assert_eq!(0, select.exists);
+
+            let (_, select) = setup
+                .account
+                .mailbox("INBOX Special Case", true)
+                .unwrap()
+                .select()
+                .unwrap();
+            assert_eq!(1, select.exists);
+        }
+
+        assert_matches!(
+            Err(Error::RenameToSelf),
+            setup.account.rename(RenameRequest {
+                existing_name: "Sent".to_owned(),
+                new_name: "Sent".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::RenameIntoSelf),
+            setup.account.rename(RenameRequest {
+                existing_name: "Sent".to_owned(),
+                new_name: "Sent/Child".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::BadOperationOnInbox),
+            setup.account.rename(RenameRequest {
+                existing_name: "Sent".to_owned(),
+                new_name: "INBOX/Sent".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::MailboxExists),
+            setup.account.rename(RenameRequest {
+                existing_name: "Sent".to_owned(),
+                new_name: "Spam".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::NxMailbox),
+            setup.account.rename(RenameRequest {
+                existing_name: "Xyzzy".to_owned(),
+                new_name: "Plugh".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::NxMailbox),
+            setup.account.rename(RenameRequest {
+                existing_name: "".to_owned(),
+                new_name: "Plugh".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::NxMailbox),
+            setup.account.rename(RenameRequest {
+                existing_name: "/".to_owned(),
+                new_name: "Plugh".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::UnsafeName),
+            setup.account.rename(RenameRequest {
+                existing_name: "../Foo".to_owned(),
+                new_name: "Plugh".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::UnsafeName),
+            setup.account.rename(RenameRequest {
+                existing_name: "Sent".to_owned(),
+                new_name: "../Plugh".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::UnsafeName),
+            setup.account.rename(RenameRequest {
+                existing_name: "Sent".to_owned(),
+                new_name: "".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_status() {
+        let setup = set_up();
+
+        let (uidvalidity, uidnext) = {
+            let (mut mb, select) = setup
+                .account
+                .mailbox("INBOX", false)
+                .unwrap()
+                .select()
+                .unwrap();
+
+            // Adjust inbox to have 1 recent, 2 unseen, 3 messages.
+            mb.stateless()
+                .append(
+                    FixedOffset::east(0).timestamp_millis(0),
+                    vec![],
+                    &b"this is a test message"[..],
+                )
+                .unwrap();
+            let uid2 = mb
+                .stateless()
+                .append(
+                    FixedOffset::east(0).timestamp_millis(0),
+                    vec![],
+                    &b"this is a test message"[..],
+                )
+                .unwrap();
+            mb.poll().unwrap(); // Remove \Recent from those two
+
+            mb.store(&StoreRequest {
+                ids: &SeqRange::just(uid2),
+                flags: &[Flag::Seen],
+                remove_listed: false,
+                remove_unlisted: false,
+                loud: false,
+                unchanged_since: None,
+            })
+            .unwrap();
+            mb.poll().unwrap();
+
+            let uid3 = mb
+                .stateless()
+                .append(
+                    FixedOffset::east(0).timestamp_millis(0),
+                    vec![],
+                    &b"this is a test message"[..],
+                )
+                .unwrap();
+
+            (select.uidvalidity, uid3.next().unwrap())
+        };
+
+        assert_eq!(
+            StatusResponse {
+                name: "INBOX".to_owned(),
+                messages: Some(3),
+                ..StatusResponse::default()
+            },
+            setup
+                .account
+                .status(&StatusRequest {
+                    name: "inbox".to_owned(),
+                    messages: true,
+                    ..StatusRequest::default()
+                })
+                .unwrap()[0]
+        );
+
+        assert_eq!(
+            StatusResponse {
+                name: "INBOX".to_owned(),
+                recent: Some(1),
+                ..StatusResponse::default()
+            },
+            setup
+                .account
+                .status(&StatusRequest {
+                    name: "inbox".to_owned(),
+                    recent: true,
+                    ..StatusRequest::default()
+                })
+                .unwrap()[0]
+        );
+
+        assert_eq!(
+            StatusResponse {
+                name: "INBOX".to_owned(),
+                uidnext: Some(uidnext),
+                ..StatusResponse::default()
+            },
+            setup
+                .account
+                .status(&StatusRequest {
+                    name: "inbox".to_owned(),
+                    uidnext: true,
+                    ..StatusRequest::default()
+                })
+                .unwrap()[0]
+        );
+
+        assert_eq!(
+            StatusResponse {
+                name: "INBOX".to_owned(),
+                uidvalidity: Some(uidvalidity),
+                ..StatusResponse::default()
+            },
+            setup
+                .account
+                .status(&StatusRequest {
+                    name: "inbox".to_owned(),
+                    uidvalidity: true,
+                    ..StatusRequest::default()
+                })
+                .unwrap()[0]
+        );
+
+        assert_eq!(
+            StatusResponse {
+                name: "INBOX".to_owned(),
+                unseen: Some(2),
+                ..StatusResponse::default()
+            },
+            setup
+                .account
+                .status(&StatusRequest {
+                    name: "inbox".to_owned(),
+                    unseen: true,
+                    ..StatusRequest::default()
+                })
+                .unwrap()[0]
+        );
     }
 }

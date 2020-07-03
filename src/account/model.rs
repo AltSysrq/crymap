@@ -740,7 +740,7 @@ pub struct RenameRequest {
 }
 
 /// The `STATUS` command and its various extensions.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StatusRequest {
     /// The mailbox to query.
     ///

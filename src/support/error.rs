@@ -62,6 +62,10 @@ pub enum Error {
     NoSuchMessageSection,
     #[error("Unsupported special-use for CREATE")]
     UnsupportedSpecialUse,
+    #[error("Rename source and destination are the same")]
+    RenameToSelf,
+    #[error("Rename destination is child of self")]
+    RenameIntoSelf,
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]

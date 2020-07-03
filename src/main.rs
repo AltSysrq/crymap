@@ -18,6 +18,21 @@
 
 #![allow(dead_code)]
 
+#[cfg(test)]
+macro_rules! assert_matches {
+    ($expected:pat, $actual:expr) => {
+        match $actual {
+            $expected => (),
+            unexpected => panic!(
+                "Expected {} matches {}, got {:?}",
+                stringify!($expected),
+                stringify!($actual),
+                unexpected
+            ),
+        }
+    };
+}
+
 mod account;
 mod crypt;
 mod mime;
