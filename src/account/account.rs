@@ -23,6 +23,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::account::key_store::{KeyStore, KeyStoreConfig};
+use crate::account::mailbox::StatelessMailbox;
 use crate::account::mailbox_path::*;
 use crate::account::model::*;
 use crate::crypt::master_key::MasterKey;
@@ -157,20 +158,35 @@ impl Account {
             None
         };
 
-        let mut new_mailbox: Option<MailboxPath> = None;
-        for part in parse_mailbox_path(&request.name) {
-            if let Some(parent) = new_mailbox.take() {
-                parent.create_if_nx(&self.common_paths.tmp)?;
-                new_mailbox = Some(parent.child(part)?);
-            } else {
-                new_mailbox = Some(self.root_mailbox_path(part.to_owned())?);
-            }
+        self.mailbox_path_create_parents(&request.name)?
+            .create(&self.common_paths.tmp, special_use)?;
+        Ok(())
+    }
+
+    /// The RFC 3501 `DELETE` command.
+    pub fn delete(&self, name: &str) -> Result<(), Error> {
+        self.mailbox_path(name)?.delete(&self.common_paths.garbage)
+    }
+
+    /// The RFC 3501 `RENAME` command.
+    pub fn rename(&self, request: RenameRequest) -> Result<(), Error> {
+        let src = self.mailbox_path(&request.existing_name)?;
+        if !src.exists() {
+            return Err(Error::NxMailbox);
         }
 
-        // Treat the empty mailbox name as "unsafe" for simplicity
-        let new_mailbox = new_mailbox.ok_or(Error::UnsafeName)?;
-        new_mailbox.create(&self.common_paths.tmp, special_use)?;
-        Ok(())
+        let dst = self.mailbox_path_create_parents(&request.new_name)?;
+        src.rename(&dst, &self.common_paths.tmp)
+    }
+
+    /// The RFC 3501 `SUBSCRIBE` command.
+    pub fn subscribe(&self, name: &str) -> Result<(), Error> {
+        self.mailbox_path(name)?.subscribe()
+    }
+
+    /// The RFC 3501 `UNSUBSCRIBE` command.
+    pub fn unsubscribe(&self, name: &str) -> Result<(), Error> {
+        self.mailbox_path(name)?.unsubscribe()
     }
 
     /// The RFC 3501 `LIST` and `LSUB` commands and the non-standard `XLIST`
@@ -240,7 +256,112 @@ impl Account {
         Ok(accum)
     }
 
+    pub fn status(
+        &self,
+        request: &StatusRequest,
+    ) -> Result<Vec<StatusResponse>, Error> {
+        let mailbox_path = self.mailbox_path(&request.name)?;
+        Ok(vec![self.status_for(mailbox_path, request)?])
+    }
+
+    fn status_for(
+        &self,
+        mailbox_path: MailboxPath,
+        request: &StatusRequest,
+    ) -> Result<StatusResponse, Error> {
+        let mut response = StatusResponse {
+            name: mailbox_path.name().to_owned(),
+            ..StatusResponse::default()
+        };
+
+        let mailbox = self.open(mailbox_path, true)?;
+        let (mailbox, select) = mailbox.select()?;
+
+        if request.messages {
+            response.messages = Some(select.exists);
+        }
+
+        if request.recent {
+            response.recent = Some(select.recent);
+        }
+
+        if request.uidnext {
+            response.uidnext = Some(select.uidnext);
+        }
+
+        if request.uidvalidity {
+            response.uidvalidity = Some(select.uidvalidity);
+        }
+
+        if request.unseen {
+            if select.unseen.is_some() {
+                response.unseen = Some(mailbox.count_unseen());
+            } else {
+                response.unseen = Some(0);
+            }
+        }
+
+        Ok(response)
+    }
+
+    /// Open a `StatelessMailbox` on the given logical mailbox path.
+    pub fn mailbox(
+        &self,
+        path: &str,
+        read_only: bool,
+    ) -> Result<StatelessMailbox, Error> {
+        let path = self.mailbox_path(path)?;
+        self.open(path, read_only)
+    }
+
+    fn open(
+        &self,
+        path: MailboxPath,
+        read_only: bool,
+    ) -> Result<StatelessMailbox, Error> {
+        StatelessMailbox::new(
+            self.log_prefix.clone(),
+            path,
+            read_only,
+            Arc::clone(&self.key_store),
+            Arc::clone(&self.common_paths),
+        )
+    }
+
+    /// Return the `MailboxPath` corresponding to the given logical mailbox
+    /// path.
+    pub fn mailbox_path(&self, path: &str) -> Result<MailboxPath, Error> {
+        let mut mp: Option<MailboxPath> = None;
+        for part in parse_mailbox_path(path) {
+            if let Some(parent) = mp.take() {
+                mp = Some(parent.child(part)?);
+            } else {
+                mp = Some(self.root_mailbox_path(part.to_owned())?);
+            }
+        }
+
+        mp.ok_or(Error::NxMailbox)
+    }
+
     fn root_mailbox_path(&self, name: String) -> Result<MailboxPath, Error> {
         MailboxPath::root(name, &self.mailbox_root, &self.shadow_root)
+    }
+
+    fn mailbox_path_create_parents(
+        &self,
+        name: &str,
+    ) -> Result<MailboxPath, Error> {
+        let mut mp: Option<MailboxPath> = None;
+        for part in parse_mailbox_path(name) {
+            if let Some(parent) = mp.take() {
+                parent.create_if_nx(&self.common_paths.tmp)?;
+                mp = Some(parent.child(part)?);
+            } else {
+                mp = Some(self.root_mailbox_path(part.to_owned())?);
+            }
+        }
+
+        // Treat the empty mailbox name as "unsafe" for simplicity
+        mp.ok_or(Error::UnsafeName)
     }
 }

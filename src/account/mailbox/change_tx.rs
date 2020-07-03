@@ -83,13 +83,6 @@ impl StatelessMailbox {
 }
 
 impl StatefulMailbox {
-    pub(super) fn count_recent(&self) -> usize {
-        self.state
-            .uids()
-            .filter(|&u| self.state.is_recent(u))
-            .count()
-    }
-
     /// Perform a transactional change against the mailbox's mutable state.
     ///
     /// `f` is called with a transaction and `self` and is expected to modify

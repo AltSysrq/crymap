@@ -234,6 +234,26 @@ impl StatefulMailbox {
 
         Ok(ret)
     }
+
+    pub(super) fn count_recent(&self) -> usize {
+        self.state
+            .uids()
+            .filter(|&u| self.state.is_recent(u))
+            .count()
+    }
+
+    /// Return the count of non-\Seen messages in the mailbox.
+    pub fn count_unseen(&self) -> usize {
+        let seen = match self.state.flag_id(&Flag::Seen) {
+            Some(seen) => seen,
+            None => return 0,
+        };
+
+        self.state
+            .uids()
+            .filter(|&u| !self.state.test_flag(seen, u))
+            .count()
+    }
 }
 
 #[cfg(test)]

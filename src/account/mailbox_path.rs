@@ -295,7 +295,7 @@ impl MailboxPath {
             };
 
             // Regardless of selectability, the %UV directory is gone, so
-            // remove the symlink to
+            // remove the symlink too
             let _ = fs::remove_file(&self.data_path);
 
             if selectable {

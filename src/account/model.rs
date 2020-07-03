@@ -728,6 +728,54 @@ pub struct CreateRequest {
     pub special_use: Vec<String>,
 }
 
+/// The RFC 3501 `RENAME` command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameRequest {
+    /// The mailbox to rename.
+    pub existing_name: String,
+    /// The new name for the mailbox.
+    pub new_name: String,
+}
+
+/// The `STATUS` command and its various extensions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusRequest {
+    /// The mailbox to query.
+    ///
+    /// TODO One of the extensions turns this into a pattern, see if that
+    /// changes things
+    pub name: String,
+
+    // ==================== RFC 3501 ====================
+    /// Return the number of messages.
+    pub messages: bool,
+    /// Return the number of \Recent messages.
+    pub recent: bool,
+    /// Return the next UID value
+    pub uidnext: bool,
+    /// Return the UID validity
+    pub uidvalidity: bool,
+    /// Return the number of not-\Seen messages.
+    pub unseen: bool,
+}
+
+/// The `STATUS` response
+///
+/// Fields are only set if requested in the request. Those fields' meanings
+/// correspond exactly to the fields of the same name in `StatusRequest`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StatusResponse {
+    /// The mailbox being reported
+    pub name: String,
+
+    // ==================== RFC 3501 ====================
+    pub messages: Option<usize>,
+    pub recent: Option<usize>,
+    pub uidnext: Option<Uid>,
+    pub uidvalidity: Option<u32>,
+    pub unseen: Option<usize>,
+}
+
 /// Request used for implementing `LIST` and `LSUB`.
 ///
 /// This includes the extended options from RFC 5258, the `LIST-EXTENDED`
