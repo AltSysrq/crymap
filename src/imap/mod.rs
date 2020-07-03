@@ -16,32 +16,4 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-#![allow(dead_code)]
-
-#[cfg(test)]
-macro_rules! assert_matches {
-    ($expected:pat, $actual:expr) => {
-        match $actual {
-            $expected => (),
-            unexpected => panic!(
-                "Expected {} matches {}, got {:?}",
-                stringify!($expected),
-                stringify!($actual),
-                unexpected
-            ),
-        }
-    };
-}
-
-mod account;
-mod crypt;
-mod imap;
-mod mime;
-mod support;
-
-#[cfg(test)]
-mod test_data;
-
-fn main() {
-    println!("Hello, world!");
-}
+mod lex;
