@@ -87,9 +87,19 @@
 //!    also unclear how one would go about writing an IMAP client that would
 //!    choke on the NUL character --- you'd have to be storing the binary data
 //!    in a C string or something else absurd.)
+//!
+//! One fortunate thing about all this is that we don't need to worry about the
+//! repair strategies when reading stuff from the client, i.e., our parser does
+//! not need to know whether the client is Unicode-aware. The keyword strategy
+//! does need to be handled during parsing, but that is unaffected by Unicode
+//! awareness. Free-form strings passed in by the client always either have an
+//! explicit charset or a standard repair strategy, so we just follow the
+//! standards there.
 
 use std::borrow::Cow;
 use std::io::{self, Read, Write};
+
+use chrono::prelude::*;
 
 use crate::account::model::Flag;
 use crate::mime::utf7;
@@ -119,6 +129,11 @@ impl<W: Write> LexWriter<W> {
         Ok(())
     }
 
+    pub fn verbatim_bytes(&mut self, s: &[u8]) -> io::Result<()> {
+        self.writer.write_all(s)?;
+        Ok(())
+    }
+
     pub fn nil(&mut self) -> io::Result<()> {
         self.verbatim("NIL")
     }
@@ -131,17 +146,23 @@ impl<W: Write> LexWriter<W> {
         self.astring(&self.encode(s))
     }
 
-    pub fn censored_nstring(&mut self, s: Option<&str>) -> io::Result<()> {
-        match s {
+    pub fn censored_nstring(
+        &mut self,
+        s: &Option<impl AsRef<str>>,
+    ) -> io::Result<()> {
+        match s.as_ref() {
             None => self.nil(),
-            Some(s) => self.string(&self.censor(s)),
+            Some(s) => self.string(&self.censor(s.as_ref())),
         }
     }
 
-    pub fn encoded_nstring(&mut self, s: Option<&str>) -> io::Result<()> {
-        match s {
+    pub fn encoded_nstring(
+        &mut self,
+        s: &Option<impl AsRef<str>>,
+    ) -> io::Result<()> {
+        match s.as_ref() {
             None => self.nil(),
-            Some(s) => self.string(&self.encode(s)),
+            Some(s) => self.string(&self.encode(s.as_ref())),
         }
     }
 
@@ -193,6 +214,25 @@ impl<W: Write> LexWriter<W> {
             }
             _ => write!(self.writer, "{}", flag),
         }
+    }
+
+    pub fn date(&mut self, date: &NaiveDate) -> io::Result<()> {
+        write!(self.writer, "\"{}\"", date.format("%-d-%b-%Y"))
+    }
+
+    pub fn datetime(
+        &mut self,
+        datetime: &DateTime<FixedOffset>,
+    ) -> io::Result<()> {
+        write!(
+            self.writer,
+            "\"{}\"",
+            datetime.format("%_d-%b-%Y %H:%M:%S %z")
+        )
+    }
+
+    pub fn num_u32(&mut self, value: &u32) -> io::Result<()> {
+        write!(self.writer, "{}", *value)
     }
 
     fn encoded_keyword(&mut self, kw: &str) -> io::Result<()> {

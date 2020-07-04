@@ -242,6 +242,8 @@ env-bcc         = "(" 1*address ")" / nil
 env-cc          = "(" 1*address ")" / nil
 
 env-date        = nstring
+                   ; ED: The RFC 5233 Date header, not a date or datetime
+                   ; ED: in IMAP format
 
 env-from        = "(" 1*address ")" / nil
 
@@ -260,6 +262,10 @@ env-to          = "(" 1*address ")" / nil
 address         = "(" addr-name SP addr-adl SP addr-mailbox SP
                   addr-host ")"
 
+addr-name       = nstring
+                    ; If non-NIL, holds phrase from [RFC-2822]
+                    ; mailbox after removing [RFC-2822] quoting
+
 addr-adl        = nstring
                     ; Holds route from [RFC-2822] route-addr if
                     ; non-NIL
@@ -274,10 +280,6 @@ addr-mailbox    = nstring
                     ; [RFC-2822] group name.
                     ; Otherwise, holds [RFC-2822] local-part
                     ; after removing [RFC-2822] quoting
-
-addr-name       = nstring
-                    ; If non-NIL, holds phrase from [RFC-2822]
-                    ; mailbox after removing [RFC-2822] quoting
 #+END_SRC
 
 * Body Structure
