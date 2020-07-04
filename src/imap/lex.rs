@@ -314,6 +314,7 @@ impl<W: Write> LexWriter<W> {
 
     fn is_conservative_atom(&self, s: &str) -> bool {
         "nil" != s
+            && !s.is_empty()
             && s.as_bytes().iter().copied().all(|b| match b {
                 b'a'..=b'z'
                 | b'A'..=b'Z'
@@ -330,19 +331,20 @@ impl<W: Write> LexWriter<W> {
     }
 
     fn is_liberal_atom(&self, s: &str) -> bool {
-        s.as_bytes().iter().copied().all(|b| match b {
-            0..=b' '
-            | 127..=255
-            | b'('
-            | b')'
-            | b'{'
-            | b'*'
-            | b'%'
-            | b'\\'
-            | b'"'
-            | b']' => false,
-            _ => true,
-        })
+        !s.is_empty()
+            && s.as_bytes().iter().copied().all(|b| match b {
+                0..=b' '
+                | 127..=255
+                | b'('
+                | b')'
+                | b'{'
+                | b'*'
+                | b'%'
+                | b'\\'
+                | b'"'
+                | b']' => false,
+                _ => true,
+            })
     }
 
     fn is_quotable(&self, s: &str) -> bool {

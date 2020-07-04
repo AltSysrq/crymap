@@ -460,6 +460,7 @@ list-mailbox    = 1*list-char / string
 
 list-char       = ATOM-CHAR / list-wildcards / resp-specials
                   ; ED: Any ASCII but CTL, SP, (){\"
+
 mailbox-list    = "(" [mbx-list-flags] ")" SP
                    (DQUOTE QUOTED-CHAR DQUOTE / nil) SP mailbox
 

@@ -179,6 +179,15 @@ macro_rules! generate_field_form {
     ($_ty:ty, delegate($ty:ty)) => {
         <$ty>::parse
     };
+    ($_ty:ty, tag($tag:expr)) => {
+        map(kw($tag), |_| ())
+    };
+    ($_ty:ty, cond($tag:expr)) => {
+        map(opt(kw($tag)), |v| v.is_some())
+    };
+    ($_ty:ty, phantom) => {
+        |i| Ok((i, PhantomData))
+    };
 }
 
 macro_rules! apply_write_modifiers {
@@ -281,6 +290,18 @@ macro_rules! generate_field_writer {
     };
     (delegate($ty:ty), $lex:expr, $value:expr) => {
         $value.write_to($lex)?;
+    };
+    (tag($tag:expr), $lex:expr, $_value:expr) => {
+        let _value = $_value;
+        $lex.verbatim_bytes($tag)?;
+    };
+    (cond($tag:expr), $lex:expr, $value:expr) => {
+        if *$value {
+            $lex.verbatim_bytes($tag)?;
+        }
+    };
+    (phantom, $_lex:expr, $_value:expr) => {
+        let _value = $_value;
     };
 }
 

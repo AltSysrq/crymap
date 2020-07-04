@@ -93,6 +93,14 @@
 //! - `delegate(Type)`. Invoke `Type::parse` and `Type::write_to` to
 //!   deserialise and serialise the value, with an explicitly given type.
 //!
+//! - `tag(str)`. Map `str` to `()` at read. Ignore value and write `str` on
+//!   write.
+//!
+//! - `cond(str)`. Map `str` to `true` and absence to `false` at read. Write
+//! ` str` on `true` and nothing on `false`.
+//!
+//! - `phantom`. Map between nothingness and `PhantomData`.
+//!
 //! "modifiers" are more diverse. More than one can be chained together. When
 //! there is more than one, they apply left to right. E.g., `suffix(b" ") opt`
 //! will always add/expect a space regardless of whether the value is present,
@@ -116,6 +124,7 @@
 
 use std::borrow::Cow;
 use std::io::{self, Write};
+use std::marker::PhantomData;
 use std::str;
 
 use chrono::prelude::*;
@@ -129,6 +138,7 @@ use nom::{
 use super::lex::LexWriter;
 use crate::account::model::{Flag, Seqnum, Uid};
 use crate::mime::encoded_word::ew_decode;
+use crate::mime::utf7;
 
 include!("syntax-macros.rs");
 
@@ -423,6 +433,201 @@ syntax_rule! {
     }
 }
 
+syntax_rule! {
+    #[prefix(b"LIST ")]
+    struct ListCommand<'a> {
+        #[suffix(b" ")]
+        #[primitive(mailbox, mailbox)]
+        reference: Cow<'a, str>,
+        #[]
+        #[primitive(mailbox, list_mailbox)]
+        pattern: Cow<'a, str>,
+    }
+}
+
+syntax_rule! {
+    #[prefix(b"LSUB ")]
+    struct LsubCommand<'a> {
+        #[suffix(b" ")]
+        #[primitive(mailbox, mailbox)]
+        reference: Cow<'a, str>,
+        #[]
+        #[primitive(mailbox, list_mailbox)]
+        pattern: Cow<'a, str>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct MailboxList<'a> {
+        // Note that we're also encoding the hierarchy delimiter field into
+        // the suffix.
+        #[surrounded(b"(", b") \"/\" ") 0*(b" ")]
+        #[primitive(verbatim, backslash_atom)]
+        flags: Vec<Cow<'a, str>>,
+        #[]
+        #[primitive(mailbox, mailbox)]
+        name: Cow<'a, str>,
+    }
+}
+
+syntax_rule! {
+    #[prefix(b"FETCH ")]
+    struct FetchCommand<'a> {
+        #[suffix(b" ")]
+        #[primitive(verbatim, sequence_set)]
+        sequence_set: Cow<'a, str>,
+        #[]
+        #[delegate]
+        target: FetchCommandTarget<'a>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    enum FetchCommandTarget<'a> {
+        #[]
+        #[tag(b"ALL")]
+        All(()),
+        #[]
+        #[tag(b"FULL")]
+        Full(()),
+        #[]
+        #[tag(b"FAST")]
+        Fast(()),
+        #[]
+        #[delegate]
+        Single(FetchAtt<'a>),
+        #[surrounded(b"(", b")") 1*(b" ")]
+        #[delegate(FetchAtt)]
+        Multi(Vec<FetchAtt<'a>>),
+    }
+}
+
+syntax_rule! {
+    #[]
+    enum FetchAtt<'a> {
+        #[]
+        #[tag(b"ENVELOPE")]
+        Envelope(()),
+        #[]
+        #[tag(b"FLAGS")]
+        Flags(()),
+        #[]
+        #[tag(b"INTERNALDATE")]
+        InternalDate(()),
+        #[prefix(b"RFC822") opt]
+        #[delegate(FetchAttRfc822)]
+        Rfc822(Option<FetchAttRfc822>),
+        // Must come before the body structure stuff to resolve the ambiguity
+        // the correct way.
+        #[prefix(b"BODY")]
+        #[delegate]
+        Body(FetchAttBody<'a>),
+        #[]
+        #[tag(b"BODYSTRUCTURE")]
+        ExtendedBodyStructure(()),
+        #[]
+        #[tag(b"BODY")]
+        ShortBodyStructure(()),
+        #[]
+        #[tag(b"UID")]
+        Uid(()),
+    }
+}
+
+simple_enum! {
+    enum FetchAttRfc822 {
+        Header(".HEADER"),
+        Size(".SIZE"),
+        Text(".TEXT"),
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct FetchAttBody<'a> {
+        #[]
+        #[cond(b".PEEK")]
+        peek: bool,
+        #[surrounded(b"[", b"]") opt]
+        #[delegate(SectionSpec)]
+        section: Option<SectionSpec<'a>>,
+        #[opt]
+        #[delegate(FetchAttBodySlice)]
+        slice: Option<FetchAttBodySlice<'a>>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    enum SectionSpec<'a> {
+        #[]
+        #[delegate]
+        TopLevel(SectionText<'a>),
+        #[]
+        #[delegate]
+        Sub(SubSectionSpec<'a>),
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct SubSectionSpec<'a> {
+        #[1*(b".")]
+        #[primitive(num_u32, number)]
+        subscripts: Vec<u32>,
+        #[opt prefix(b".")]
+        #[delegate(SectionText)]
+        text: Option<SectionText<'a>>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    enum SectionText<'a> {
+        #[prefix(b"HEADER.FIELDS")]
+        #[delegate]
+        HeaderFields(SectionTextHeaderField<'a>),
+        #[]
+        #[tag(b"HEADER")]
+        Header(()),
+        #[]
+        #[tag(b"TEXT")]
+        Text(()),
+        #[]
+        #[tag(b"MIME")]
+        Mime(()),
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct SectionTextHeaderField<'a> {
+        #[suffix(b" ")]
+        #[cond(b".NOT")]
+        negative: bool,
+        #[surrounded(b"(", b")") 1*(b" ")]
+        #[primitive(censored_astring, astring)]
+        headers: Vec<Cow<'a, str>>,
+    }
+}
+
+syntax_rule! {
+    #[surrounded(b"<", b">")]
+    struct FetchAttBodySlice<'a> {
+        #[suffix(b".")]
+        #[primitive(num_u32, number)]
+        start: u32,
+        #[]
+        #[primitive(num_u32, number)]
+        length: u32,
+        #[]
+        #[phantom]
+        _marker: PhantomData<&'a ()>,
+    }
+}
+
 // ==================== PRIMITIVE PARSERS ====================
 
 fn normal_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
@@ -431,6 +636,24 @@ fn normal_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
             0..=b' ' => false,
             127..=255 => false,
             b'(' | b')' | b'{' | b'*' | b'%' | b'\\' | b'"' | b']' => false,
+            _ => true,
+        }),
+        String::from_utf8_lossy,
+    )(i)
+}
+
+// This isn't formally part of the IMAP syntax definition. It makes our lives
+// easier since we can keep the backslash prefix throughout. It does mean the
+// parser will initially accept garbage like "foo\bar", but we eventually
+// reject it when a later stage tries to coerce the value into an enum or safe
+// name. The formal syntax never also requires us to break tokens on backslash,
+// so including it here also won't break any valid syntax.
+fn backslash_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
+    map(
+        bytes::complete::take_while1(|b| match b {
+            0..=b' ' => false,
+            127..=255 => false,
+            b'(' | b')' | b'{' | b'*' | b'%' | b'"' | b']' => false,
             _ => true,
         }),
         String::from_utf8_lossy,
@@ -455,6 +678,18 @@ fn tag_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
             0..=b' ' => false,
             127..=255 => false,
             b'(' | b')' | b'{' | b'*' | b'%' | b'\\' | b'"' | b'+' => false,
+            _ => true,
+        }),
+        String::from_utf8_lossy,
+    )(i)
+}
+
+fn list_mailbox_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
+    map(
+        bytes::complete::take_while1(|b| match b {
+            0..=b' ' => false,
+            127..=255 => false,
+            b'(' | b')' | b'{' | b'\\' | b'"' => false,
             _ => true,
         }),
         String::from_utf8_lossy,
@@ -513,6 +748,23 @@ fn astring(i: &[u8]) -> IResult<&[u8], Cow<str>> {
 
 fn nstring(i: &[u8]) -> IResult<&[u8], Option<Cow<str>>> {
     alt((map(kw("NIL"), |_| None), map(string, Some)))(i)
+}
+
+// Read: "mailbox as used by LIST and LSUB"
+// Because naturally we need different syntax for that than other uses of
+// mailbox names.
+fn list_mailbox(i: &[u8]) -> IResult<&[u8], Cow<str>> {
+    map(alt((list_mailbox_atom, string)), |raw| match raw {
+        Cow::Owned(s) => Cow::Owned(utf7::IMAP.decode(&s).into_owned()),
+        Cow::Borrowed(s) => utf7::IMAP.decode(s),
+    })(i)
+}
+
+fn mailbox(i: &[u8]) -> IResult<&[u8], Cow<str>> {
+    map(astring, |raw| match raw {
+        Cow::Owned(s) => Cow::Owned(utf7::IMAP.decode(&s).into_owned()),
+        Cow::Borrowed(s) => utf7::IMAP.decode(s),
+    })(i)
 }
 
 fn sequence_set(i: &[u8]) -> IResult<&[u8], Cow<str>> {
@@ -666,9 +918,12 @@ mod test {
     use super::*;
 
     macro_rules! assert_reversible {
-        ($ty:ty, $expected_text:expr, $value:expr) => {{
+        ($ty:ty, $expected_text:expr, $value:expr) => {
+            assert_reversible!(true, $ty, $expected_text, $value);
+        };
+        ($unicode:expr, $ty:ty, $expected_text:expr, $value:expr) => {{
             let value = &$value;
-            let mut lex = LexWriter::new(Vec::<u8>::new(), true, false);
+            let mut lex = LexWriter::new(Vec::<u8>::new(), $unicode, false);
             value.write_to(&mut lex).unwrap();
             let text = lex.into_inner();
             let text = str::from_utf8(&text).unwrap();
@@ -1098,6 +1353,462 @@ mod test {
                 }),
                 ext: None,
             })
+        );
+    }
+
+    #[test]
+    fn list_lsub_syntax() {
+        assert_reversible!(
+            ListCommand,
+            r#"LIST "" INBOX"#,
+            ListCommand {
+                reference: s(""),
+                pattern: s("INBOX"),
+            }
+        );
+        assert_reversible!(
+            LsubCommand,
+            r#"LSUB foo bar"#,
+            LsubCommand {
+                reference: s("foo"),
+                pattern: s("bar"),
+            }
+        );
+
+        assert_reversible!(
+            true,
+            ListCommand,
+            r#"LIST "" "föö""#,
+            ListCommand {
+                reference: s(""),
+                pattern: s("föö"),
+            }
+        );
+        assert_reversible!(
+            false,
+            ListCommand,
+            r#"LIST "" "~peter/mail/&U,BTFw-/&ZeVnLIqe-""#,
+            ListCommand {
+                reference: s(""),
+                pattern: s("~peter/mail/台北/日本語"),
+            }
+        );
+
+        assert_reversible!(
+            true,
+            MailboxList,
+            r#"() "/" "~peter/mail/台北/日本語""#,
+            MailboxList {
+                flags: vec![],
+                name: s("~peter/mail/台北/日本語"),
+            }
+        );
+        assert_reversible!(
+            true,
+            MailboxList,
+            r#"(\Noinferiors) "/" "~peter/mail/台北/日本語""#,
+            MailboxList {
+                flags: vec![s("\\Noinferiors")],
+                name: s("~peter/mail/台北/日本語"),
+            }
+        );
+        assert_reversible!(
+            true,
+            MailboxList,
+            r#"(\Noinferiors \Marked) "/" "~peter/mail/台北/日本語""#,
+            MailboxList {
+                flags: vec![s("\\Noinferiors"), s("\\Marked")],
+                name: s("~peter/mail/台北/日本語"),
+            }
+        );
+        assert_reversible!(
+            false,
+            MailboxList,
+            r#"(\Noinferiors \Marked) "/" "~peter/mail/&U,BTFw-/&ZeVnLIqe-""#,
+            MailboxList {
+                flags: vec![s("\\Noinferiors"), s("\\Marked")],
+                name: s("~peter/mail/台北/日本語"),
+            }
+        );
+    }
+
+    #[test]
+    fn fetch_command_syntax() {
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1:2,3:* ALL",
+            FetchCommand {
+                sequence_set: s("1:2,3:*"),
+                target: FetchCommandTarget::All(()),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1:2,3 FULL",
+            FetchCommand {
+                sequence_set: s("1:2,3"),
+                target: FetchCommandTarget::Full(()),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1:2,3 FAST",
+            FetchCommand {
+                sequence_set: s("1:2,3"),
+                target: FetchCommandTarget::Fast(()),
+            }
+        );
+
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 ENVELOPE",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Envelope(())),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 FLAGS",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Flags(())),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 INTERNALDATE",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::InternalDate(())),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BODY",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(
+                    FetchAtt::ShortBodyStructure(())
+                ),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BODYSTRUCTURE",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(
+                    FetchAtt::ExtendedBodyStructure(())
+                ),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 RFC822",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Rfc822(None)),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 RFC822.SIZE",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Rfc822(Some(
+                    FetchAttRfc822::Size
+                ))),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 RFC822.HEADER",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Rfc822(Some(
+                    FetchAttRfc822::Header
+                ))),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 RFC822.TEXT",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Rfc822(Some(
+                    FetchAttRfc822::Text
+                ))),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 UID",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Uid(())),
+            }
+        );
+
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 (FLAGS)",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Multi(vec![FetchAtt::Flags(()),]),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 (FLAGS UID)",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Multi(vec![
+                    FetchAtt::Flags(()),
+                    FetchAtt::Uid(()),
+                ]),
+            }
+        );
+
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BODY[]",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        peek: false,
+                        section: None,
+                        slice: None,
+                    }
+                )),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BODY.PEEK[]",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        peek: true,
+                        section: None,
+                        slice: None,
+                    }
+                )),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BODY[]<42.56>",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        peek: false,
+                        section: None,
+                        slice: Some(FetchAttBodySlice {
+                            start: 42,
+                            length: 56,
+                            _marker: PhantomData,
+                        }),
+                    }
+                )),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BODY[HEADER]",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        peek: false,
+                        section: Some(SectionSpec::TopLevel(
+                            SectionText::Header(())
+                        )),
+                        slice: None,
+                    }
+                )),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BODY[TEXT]",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        peek: false,
+                        section: Some(SectionSpec::TopLevel(
+                            SectionText::Text(())
+                        )),
+                        slice: None,
+                    }
+                )),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BODY[HEADER.FIELDS (Foo)]",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        peek: false,
+                        section: Some(SectionSpec::TopLevel(
+                            SectionText::HeaderFields(SectionTextHeaderField {
+                                negative: false,
+                                headers: vec![s("Foo"),],
+                            })
+                        )),
+                        slice: None,
+                    }
+                )),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BODY[HEADER.FIELDS.NOT (Foo)]",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        peek: false,
+                        section: Some(SectionSpec::TopLevel(
+                            SectionText::HeaderFields(SectionTextHeaderField {
+                                negative: true,
+                                headers: vec![s("Foo"),],
+                            })
+                        )),
+                        slice: None,
+                    }
+                )),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BODY[HEADER.FIELDS (Foo Bar)]",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        peek: false,
+                        section: Some(SectionSpec::TopLevel(
+                            SectionText::HeaderFields(SectionTextHeaderField {
+                                negative: false,
+                                headers: vec![s("Foo"), s("Bar"),],
+                            })
+                        )),
+                        slice: None,
+                    }
+                )),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BODY[HEADER.FIELDS.NOT (Foo Bar)]",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        peek: false,
+                        section: Some(SectionSpec::TopLevel(
+                            SectionText::HeaderFields(SectionTextHeaderField {
+                                negative: true,
+                                headers: vec![s("Foo"), s("Bar"),],
+                            })
+                        )),
+                        slice: None,
+                    }
+                )),
+            }
+        );
+
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BODY[1]",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        peek: false,
+                        section: Some(SectionSpec::Sub(SubSectionSpec {
+                            subscripts: vec![1],
+                            text: None,
+                        })),
+                        slice: None,
+                    }
+                )),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BODY[1.2.3]",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        peek: false,
+                        section: Some(SectionSpec::Sub(SubSectionSpec {
+                            subscripts: vec![1, 2, 3],
+                            text: None,
+                        })),
+                        slice: None,
+                    }
+                )),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BODY[1.MIME]",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        peek: false,
+                        section: Some(SectionSpec::Sub(SubSectionSpec {
+                            subscripts: vec![1],
+                            text: Some(SectionText::Mime(())),
+                        })),
+                        slice: None,
+                    }
+                )),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BODY[1.HEADER]",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        peek: false,
+                        section: Some(SectionSpec::Sub(SubSectionSpec {
+                            subscripts: vec![1],
+                            text: Some(SectionText::Header(())),
+                        })),
+                        slice: None,
+                    }
+                )),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BODY[1.TEXT]",
+            FetchCommand {
+                sequence_set: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        peek: false,
+                        section: Some(SectionSpec::Sub(SubSectionSpec {
+                            subscripts: vec![1],
+                            text: Some(SectionText::Text(())),
+                        })),
+                        slice: None,
+                    }
+                )),
+            }
         );
     }
 }
