@@ -163,8 +163,9 @@ syntax_rule! {
         #[]
         #[delegate]
         Cond(CondResponse<'a>),
-        // Only suitable for Crymap: \Recent is mandatory and must come first.
-        #[surrounded("FLAGS (\\Recent", ")") 0* prefix(" ")]
+        // Note that the formal syntax excludes \Recent from the FLAGS
+        // response, so we don't need any way to encode that here.
+        #[surrounded("FLAGS (", ")") 0*(" ")]
         #[primitive(flag, flag)]
         Flags(Vec<Flag>),
         #[prefix("LIST ")]
@@ -3786,7 +3787,7 @@ mod test {
 
         assert_reversible!(
             ResponseLine,
-            "* FLAGS (\\Recent \\Flagged keyword)",
+            "* FLAGS (\\Flagged keyword)",
             ResponseLine {
                 tag: None,
                 response: Response::Flags(vec![
