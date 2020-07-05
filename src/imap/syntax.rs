@@ -146,11 +146,54 @@ use crate::mime::utf7;
 include!("syntax-macros.rs");
 
 syntax_rule! {
-    #[prefix("CAPABILITY")]
-    struct CapabilityData<'a> {
-        #[1* prefix(" ")]
-        #[primitive(verbatim, normal_atom)]
-        capabilities: Vec<Cow<'a, str>>,
+    #[]
+    struct ResponseLine<'a> {
+        #[suffix(" ") marked_opt("*")]
+        #[primitive(verbatim, tag_atom)]
+        tag: Option<Cow<'a, str>>,
+        #[]
+        #[delegate]
+        response: Response<'a>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    enum Response<'a> {
+        #[]
+        #[delegate]
+        Cond(CondResponse<'a>),
+        // Only suitable for Crymap: \Recent is mandatory and must come first.
+        #[surrounded("FLAGS (\\Recent", ")") 0* prefix(" ")]
+        #[primitive(flag, flag)]
+        Flags(Vec<Flag>),
+        #[prefix("LIST ")]
+        #[delegate]
+        List(MailboxList<'a>),
+        #[prefix("LSUB ")]
+        #[delegate]
+        Lsub(MailboxList<'a>),
+        #[prefix("SEARCH") 0* prefix(" ")]
+        #[primitive(num_u32, number)]
+        Search(Vec<u32>),
+        #[prefix("STATUS ")]
+        #[delegate]
+        Status(StatusResponse<'a>),
+        #[suffix(" EXISTS")]
+        #[primitive(num_u32, number)]
+        Exists(u32),
+        #[suffix(" RECENT")]
+        #[primitive(num_u32, number)]
+        Recent(u32),
+        #[suffix(" EXPUNGE")]
+        #[primitive(num_u32, number)]
+        Expunge(u32),
+        #[]
+        #[delegate]
+        Fetch(FetchResponse<'a>),
+        #[]
+        #[delegate]
+        Capability(CapabilityData<'a>),
     }
 }
 
@@ -164,19 +207,117 @@ simple_enum! {
     }
 }
 
+// This is substantially refactored from the RFC 3501 formal syntax, which is
+// quite awkward due to trying to encode state semantics into the grammar.
 syntax_rule! {
     #[]
     struct CondResponse<'a> {
-        #[marked_opt("*") suffix(" ")]
-        #[primitive(verbatim, tag_atom)]
-        tag: Option<Cow<'a, str>>,
         #[suffix(" ")]
         #[delegate]
         cond: RespCondType,
-        // TODO Response data
-        #[]
+        #[opt surrounded("[", "] ")]
+        #[delegate(RespTextCode)]
+        code: Option<RespTextCode<'a>>,
+        // This value isn't nullable in the formal syntax, there being no
+        // special meaning to the character sequence "NIL". However, we usually
+        // don't have anything useful to put here, so making it optional
+        // simplifies code and gets us an immediately obvious (to a human)
+        // "server has nothing interesting to say here" "message".
+        #[nil]
         #[primitive(verbatim, text)]
-        quip: Cow<'a, str>,
+        quip: Option<Cow<'a, str>>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    enum RespTextCode<'a> {
+        #[]
+        #[tag("ALERT")]
+        Alert(()),
+        #[surrounded("BADCHARSET (", ")") 1*(" ")]
+        #[primitive(censored_astring, astring)]
+        BadCharset(Vec<Cow<'a, str>>),
+        #[]
+        #[delegate]
+        Capability(CapabilityData<'a>),
+        #[]
+        #[tag("PARSE")]
+        Parse(()),
+        // Another case where the parser is only suitable for Crymap: We can't
+        // represent PERMANENTFLAGS without \*, and only allow it in final
+        // position.
+        #[surrounded("PERMANENTFLAGS (", "\\*)") 0* suffix(" ")]
+        #[primitive(flag, flag)]
+        PermanentFlags(Vec<Flag>),
+        #[]
+        #[tag("READ-ONLY")]
+        ReadOnly(()),
+        #[]
+        #[tag("READ-WRITE")]
+        ReadWrite(()),
+        #[]
+        #[tag("TRYCREATE")]
+        TryCreate(()),
+        #[prefix("UIDNEXT ")]
+        #[primitive(num_u32, number)]
+        UidNext(u32),
+        #[prefix("UIDVALIDITY ")]
+        #[primitive(num_u32, number)]
+        UidValidity(u32),
+        #[prefix("UNSEEN ")]
+        #[primitive(num_u32, number)]
+        Unseen(u32),
+        // We don't handle unknown response codes, since the server never needs
+        // to parse this. Unknown response codes just become part of the text.
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct StatusResponse<'a> {
+        #[]
+        #[primitive(mailbox, mailbox)]
+        mailbox: Cow<'a, str>,
+        #[surrounded(" (", ")") 1*(" ")]
+        #[delegate(StatusResponseAtt)]
+        atts: Vec<StatusResponseAtt<'a>>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct StatusResponseAtt<'a> {
+        #[suffix(" ")]
+        #[delegate]
+        att: StatusAtt,
+        #[]
+        #[primitive(num_u32, number)]
+        value: u32,
+        #[]
+        #[phantom]
+        _marker: PhantomData<&'a ()>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct FetchResponse<'a> {
+        #[suffix(" FETCH ")]
+        #[primitive(num_u32, number)]
+        seqnum: u32,
+        #[]
+        #[delegate]
+        atts: MsgAtts<'a>,
+    }
+}
+
+syntax_rule! {
+    #[prefix("CAPABILITY")]
+    struct CapabilityData<'a> {
+        #[1* prefix(" ")]
+        #[primitive(verbatim, normal_atom)]
+        capabilities: Vec<Cow<'a, str>>,
     }
 }
 
@@ -3450,4 +3591,353 @@ mod test {
             }
         );
     }
+
+    #[test]
+    fn response_line_syntax() {
+        assert_reversible!(
+            ResponseLine,
+            "* OK Hello World",
+            ResponseLine {
+                tag: None,
+                response: Response::Cond(CondResponse {
+                    cond: RespCondType::Ok,
+                    code: None,
+                    quip: ns("Hello World"),
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "42 BAD command or file name",
+            ResponseLine {
+                tag: ns("42"),
+                response: Response::Cond(CondResponse {
+                    cond: RespCondType::Bad,
+                    code: None,
+                    quip: ns("command or file name"),
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* BYE BYE",
+            ResponseLine {
+                tag: None,
+                response: Response::Cond(CondResponse {
+                    cond: RespCondType::Bye,
+                    code: None,
+                    quip: ns("BYE"),
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* NO !@$#",
+            ResponseLine {
+                tag: None,
+                response: Response::Cond(CondResponse {
+                    cond: RespCondType::No,
+                    code: None,
+                    quip: ns("!@$#"),
+                }),
+            }
+        );
+
+        assert_reversible!(
+            ResponseLine,
+            "* OK [ALERT] Show message to user",
+            ResponseLine {
+                tag: None,
+                response: Response::Cond(CondResponse {
+                    cond: RespCondType::Ok,
+                    code: Some(RespTextCode::Alert(())),
+                    quip: ns("Show message to user"),
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* NO [BADCHARSET (us-ascii utf-8)] NIL",
+            ResponseLine {
+                tag: None,
+                response: Response::Cond(CondResponse {
+                    cond: RespCondType::No,
+                    code: Some(RespTextCode::BadCharset(vec![
+                        s("us-ascii"),
+                        s("utf-8")
+                    ])),
+                    quip: None,
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* OK [CAPABILITY IMAP4rev1 XYZZY] NIL",
+            ResponseLine {
+                tag: None,
+                response: Response::Cond(CondResponse {
+                    cond: RespCondType::Ok,
+                    code: Some(RespTextCode::Capability(CapabilityData {
+                        capabilities: vec![s("IMAP4rev1"), s("XYZZY")],
+                    })),
+                    quip: None,
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* BAD [PARSE] NIL",
+            ResponseLine {
+                tag: None,
+                response: Response::Cond(CondResponse {
+                    cond: RespCondType::Bad,
+                    code: Some(RespTextCode::Parse(())),
+                    quip: None,
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* OK [PERMANENTFLAGS (\\Flagged keyword \\*)] NIL",
+            ResponseLine {
+                tag: None,
+                response: Response::Cond(CondResponse {
+                    cond: RespCondType::Ok,
+                    code: Some(RespTextCode::PermanentFlags(vec![
+                        Flag::Flagged,
+                        Flag::Keyword("keyword".to_owned())
+                    ])),
+                    quip: None,
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* OK [READ-ONLY] NIL",
+            ResponseLine {
+                tag: None,
+                response: Response::Cond(CondResponse {
+                    cond: RespCondType::Ok,
+                    code: Some(RespTextCode::ReadOnly(())),
+                    quip: None,
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* OK [READ-WRITE] NIL",
+            ResponseLine {
+                tag: None,
+                response: Response::Cond(CondResponse {
+                    cond: RespCondType::Ok,
+                    code: Some(RespTextCode::ReadWrite(())),
+                    quip: None,
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* NO [TRYCREATE] NIL",
+            ResponseLine {
+                tag: None,
+                response: Response::Cond(CondResponse {
+                    cond: RespCondType::No,
+                    code: Some(RespTextCode::TryCreate(())),
+                    quip: None,
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* OK [UIDNEXT 1234] NIL",
+            ResponseLine {
+                tag: None,
+                response: Response::Cond(CondResponse {
+                    cond: RespCondType::Ok,
+                    code: Some(RespTextCode::UidNext(1234)),
+                    quip: None,
+                })
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* OK [UIDVALIDITY 1234] NIL",
+            ResponseLine {
+                tag: None,
+                response: Response::Cond(CondResponse {
+                    cond: RespCondType::Ok,
+                    code: Some(RespTextCode::UidValidity(1234)),
+                    quip: None,
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* OK [UNSEEN 42] NIL",
+            ResponseLine {
+                tag: None,
+                response: Response::Cond(CondResponse {
+                    cond: RespCondType::Ok,
+                    code: Some(RespTextCode::Unseen(42)),
+                    quip: None,
+                }),
+            }
+        );
+
+        assert_reversible!(
+            ResponseLine,
+            "* FLAGS (\\Recent \\Flagged keyword)",
+            ResponseLine {
+                tag: None,
+                response: Response::Flags(vec![
+                    Flag::Flagged,
+                    Flag::Keyword("keyword".to_owned())
+                ]),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* LIST () \"/\" INBOX",
+            ResponseLine {
+                tag: None,
+                response: Response::List(MailboxList {
+                    flags: vec![],
+                    name: s("INBOX"),
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* LIST (\\Marked \\Subscribed) \"/\" INBOX",
+            ResponseLine {
+                tag: None,
+                response: Response::List(MailboxList {
+                    flags: vec![s("\\Marked"), s("\\Subscribed")],
+                    name: s("INBOX"),
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* LSUB (\\Noselect) \"/\" \"foo bar\"",
+            ResponseLine {
+                tag: None,
+                response: Response::Lsub(MailboxList {
+                    flags: vec![s("\\Noselect")],
+                    name: s("foo bar"),
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* SEARCH",
+            ResponseLine {
+                tag: None,
+                response: Response::Search(vec![]),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* SEARCH 42",
+            ResponseLine {
+                tag: None,
+                response: Response::Search(vec![42]),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* SEARCH 42 56",
+            ResponseLine {
+                tag: None,
+                response: Response::Search(vec![42, 56]),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* 42 EXISTS",
+            ResponseLine {
+                tag: None,
+                response: Response::Exists(42),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* 42 RECENT",
+            ResponseLine {
+                tag: None,
+                response: Response::Recent(42),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* 42 EXPUNGE",
+            ResponseLine {
+                tag: None,
+                response: Response::Expunge(42),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* 4 FETCH (UID 1)",
+            ResponseLine {
+                tag: None,
+                response: Response::Fetch(FetchResponse {
+                    seqnum: 4,
+                    atts: MsgAtts {
+                        atts: vec![MsgAtt::Uid(1)],
+                    },
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* STATUS foo (RECENT 1)",
+            ResponseLine {
+                tag: None,
+                response: Response::Status(StatusResponse {
+                    mailbox: s("foo"),
+                    atts: vec![StatusResponseAtt {
+                        att: StatusAtt::Recent,
+                        value: 1,
+                        _marker: PhantomData,
+                    }],
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* STATUS foo (RECENT 1 UNSEEN 2)",
+            ResponseLine {
+                tag: None,
+                response: Response::Status(StatusResponse {
+                    mailbox: s("foo"),
+                    atts: vec![
+                        StatusResponseAtt {
+                            att: StatusAtt::Recent,
+                            value: 1,
+                            _marker: PhantomData,
+                        },
+                        StatusResponseAtt {
+                            att: StatusAtt::Unseen,
+                            value: 2,
+                            _marker: PhantomData,
+                        }
+                    ],
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* CAPABILITY IMAP4rev1 XYZZY",
+            ResponseLine {
+                tag: None,
+                response: Response::Capability(CapabilityData {
+                    capabilities: vec![s("IMAP4rev1"), s("XYZZY")],
+                }),
+            }
+        );
+    }
+
+    // TODO: Test for equivalencies like string escaping and date
+    // representations.
 }
