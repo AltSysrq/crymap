@@ -18,6 +18,52 @@
 
 // This file is include!()d into `syntax.rs`.
 
+macro_rules! big_alt {
+    ($a:expr,) => {
+        $a
+    };
+    ($a:expr, $b:expr,) => {
+        alt(($a, $b))
+    };
+    ($a:expr, $b:expr, $c:expr,) => {
+        alt(($a, $b, $c))
+    };
+    ($a:expr, $b:expr, $c:expr, $d:expr,) => {
+        alt(($a, $b, $c, $d))
+    };
+    ($a:expr, $b:expr, $c:expr, $d:expr, $e:expr,) => {
+        alt(($a, $b, $c, $d, $e))
+    };
+    ($a:expr, $b:expr, $c:expr, $d:expr, $e:expr,
+     $f:expr,) => {
+        alt(($a, $b, $c, $d, $e, $f))
+    };
+    ($a:expr, $b:expr, $c:expr, $d:expr, $e:expr,
+     $f:expr, $g:expr,) => {
+        alt(($a, $b, $c, $d, $e, $f, $g))
+    };
+    ($a:expr, $b:expr, $c:expr, $d:expr, $e:expr,
+     $f:expr, $g:expr, $h:expr,) => {
+        alt(($a, $b, $c, $d, $e, $f, $g, $h))
+    };
+    ($a:expr, $b:expr, $c:expr, $d:expr, $e:expr,
+     $f:expr, $g:expr, $h:expr, $i:expr,) => {
+        alt(($a, $b, $c, $d, $e, $f, $g, $h, $i))
+    };
+    ($a:expr, $b:expr, $c:expr, $d:expr, $e:expr,
+     $f:expr, $g:expr, $h:expr, $i:expr, $j:expr,) => {
+        alt(($a, $b, $c, $d, $e, $f, $g, $h, $i, $j))
+    };
+    ($a:expr, $b:expr, $c:expr, $d:expr, $e:expr,
+     $f:expr, $g:expr, $h:expr, $i:expr, $j:expr,
+     $($rest:expr,)+) => {
+        alt((
+            alt(($a, $b, $c, $d, $e, $f, $g, $h, $i, $j)),
+            big_alt!($($rest,)+),
+        ))
+    };
+}
+
 macro_rules! syntax_rule {
     (#[$($whole_struct_mod:tt)*]
      struct $struct_name:ident<$lt:lifetime> {
@@ -76,14 +122,14 @@ macro_rules! syntax_rule {
             pub fn parse(i: &'a [u8]) -> IResult<&'a [u8], $enum_name<'a>> {
                 apply_nom_modifiers!(
                     [$($whole_enum_mod)*],
-                    alt((
+                    big_alt!(
                         $(map(
                             apply_nom_modifiers!(
                                 [$($case_mod)*],
                                 generate_field_form!(
                                     $case_type, $($case_form)*)),
                             $enum_name::$case_name),)+
-                    )))(i)
+                    ))(i)
             }
 
             pub fn write_to(&mut self, lex: &mut LexWriter<impl Write>)

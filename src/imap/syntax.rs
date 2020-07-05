@@ -479,7 +479,7 @@ syntax_rule! {
     struct FetchCommand<'a> {
         #[suffix(" ")]
         #[primitive(verbatim, sequence_set)]
-        sequence_set: Cow<'a, str>,
+        messages: Cow<'a, str>,
         #[]
         #[delegate]
         target: FetchCommandTarget<'a>,
@@ -1032,6 +1032,109 @@ syntax_rule! {
         #[]
         #[primitive(unicode_astring, astring)]
         password: Cow<'a, str>,
+    }
+}
+
+syntax_rule! {
+    #[prefix("UID ")]
+    enum UidCommand<'a> {
+        #[]
+        #[delegate]
+        Copy(CopyCommand<'a>),
+        #[]
+        #[delegate]
+        Fetch(FetchCommand<'a>),
+        #[]
+        #[delegate]
+        Search(SearchCommand<'a>),
+        #[]
+        #[delegate]
+        Store(StoreCommand<'a>),
+    }
+}
+
+simple_enum! {
+    enum SimpleCommand {
+        Capability("CAPABILITY"),
+        Check("CHECK"),
+        Close("CLOSE"),
+        Expunge("EXPUNGE"),
+        LogOut("LOGOUT"),
+        Noop("NOOP"),
+        StartTls("STARTTLS"),
+        Xyzzy("XYZZY"),
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct CommandLine<'a> {
+        #[suffix(" ")]
+        #[primitive(verbatim, tag_atom)]
+        tag: Cow<'a, str>,
+        #[]
+        #[delegate]
+        cmd: Command<'a>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    enum Command<'a> {
+        #[]
+        #[delegate]
+        Simple(SimpleCommand),
+        #[]
+        #[delegate]
+        Create(CreateCommand<'a>),
+        #[]
+        #[delegate]
+        Delete(DeleteCommand<'a>),
+        #[]
+        #[delegate]
+        Examine(ExamineCommand<'a>),
+        #[]
+        #[delegate]
+        List(ListCommand<'a>),
+        #[]
+        #[delegate]
+        Lsub(LsubCommand<'a>),
+        #[]
+        #[delegate]
+        Rename(RenameCommand<'a>),
+        #[]
+        #[delegate]
+        Select(SelectCommand<'a>),
+        #[]
+        #[delegate]
+        Status(StatusCommand<'a>),
+        #[]
+        #[delegate]
+        Subscribe(SubscribeCommand<'a>),
+        #[]
+        #[delegate]
+        Unsubscribe(UnsubscribeCommand<'a>),
+        #[]
+        #[delegate]
+        LogIn(LogInCommand<'a>),
+        #[]
+        #[delegate]
+        Authenticate(AuthenticateCommandStart<'a>),
+        #[]
+        #[delegate]
+        Copy(CopyCommand<'a>),
+        #[]
+        #[delegate]
+        Fetch(FetchCommand<'a>),
+        #[]
+        #[delegate]
+        Store(StoreCommand<'a>),
+        #[]
+        #[delegate]
+        Uid(UidCommand<'a>),
+        #[]
+        #[delegate]
+        Search(SearchCommand<'a>),
     }
 }
 
@@ -1958,7 +2061,7 @@ mod test {
             FetchCommand,
             "FETCH 1:2,3:* ALL",
             FetchCommand {
-                sequence_set: s("1:2,3:*"),
+                messages: s("1:2,3:*"),
                 target: FetchCommandTarget::All(()),
             }
         );
@@ -1966,7 +2069,7 @@ mod test {
             FetchCommand,
             "FETCH 1:2,3 FULL",
             FetchCommand {
-                sequence_set: s("1:2,3"),
+                messages: s("1:2,3"),
                 target: FetchCommandTarget::Full(()),
             }
         );
@@ -1974,7 +2077,7 @@ mod test {
             FetchCommand,
             "FETCH 1:2,3 FAST",
             FetchCommand {
-                sequence_set: s("1:2,3"),
+                messages: s("1:2,3"),
                 target: FetchCommandTarget::Fast(()),
             }
         );
@@ -1983,7 +2086,7 @@ mod test {
             FetchCommand,
             "FETCH 1 ENVELOPE",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Envelope(())),
             }
         );
@@ -1991,7 +2094,7 @@ mod test {
             FetchCommand,
             "FETCH 1 FLAGS",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Flags(())),
             }
         );
@@ -1999,7 +2102,7 @@ mod test {
             FetchCommand,
             "FETCH 1 INTERNALDATE",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::InternalDate(())),
             }
         );
@@ -2007,7 +2110,7 @@ mod test {
             FetchCommand,
             "FETCH 1 BODY",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(
                     FetchAtt::ShortBodyStructure(())
                 ),
@@ -2017,7 +2120,7 @@ mod test {
             FetchCommand,
             "FETCH 1 BODYSTRUCTURE",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(
                     FetchAtt::ExtendedBodyStructure(())
                 ),
@@ -2027,7 +2130,7 @@ mod test {
             FetchCommand,
             "FETCH 1 RFC822",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Rfc822(None)),
             }
         );
@@ -2035,7 +2138,7 @@ mod test {
             FetchCommand,
             "FETCH 1 RFC822.SIZE",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Rfc822(Some(
                     FetchAttRfc822::Size
                 ))),
@@ -2045,7 +2148,7 @@ mod test {
             FetchCommand,
             "FETCH 1 RFC822.HEADER",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Rfc822(Some(
                     FetchAttRfc822::Header
                 ))),
@@ -2055,7 +2158,7 @@ mod test {
             FetchCommand,
             "FETCH 1 RFC822.TEXT",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Rfc822(Some(
                     FetchAttRfc822::Text
                 ))),
@@ -2065,7 +2168,7 @@ mod test {
             FetchCommand,
             "FETCH 1 UID",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Uid(())),
             }
         );
@@ -2074,7 +2177,7 @@ mod test {
             FetchCommand,
             "FETCH 1 (FLAGS)",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Multi(vec![FetchAtt::Flags(())]),
             }
         );
@@ -2082,7 +2185,7 @@ mod test {
             FetchCommand,
             "FETCH 1 (FLAGS UID)",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Multi(vec![
                     FetchAtt::Flags(()),
                     FetchAtt::Uid(()),
@@ -2094,7 +2197,7 @@ mod test {
             FetchCommand,
             "FETCH 1 BODY[]",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
                         peek: false,
@@ -2108,7 +2211,7 @@ mod test {
             FetchCommand,
             "FETCH 1 BODY.PEEK[]",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
                         peek: true,
@@ -2122,7 +2225,7 @@ mod test {
             FetchCommand,
             "FETCH 1 BODY[]<42.56>",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
                         peek: false,
@@ -2140,7 +2243,7 @@ mod test {
             FetchCommand,
             "FETCH 1 BODY[HEADER]",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
                         peek: false,
@@ -2156,7 +2259,7 @@ mod test {
             FetchCommand,
             "FETCH 1 BODY[TEXT]",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
                         peek: false,
@@ -2172,7 +2275,7 @@ mod test {
             FetchCommand,
             "FETCH 1 BODY[HEADER.FIELDS (Foo)]",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
                         peek: false,
@@ -2191,7 +2294,7 @@ mod test {
             FetchCommand,
             "FETCH 1 BODY[HEADER.FIELDS.NOT (Foo)]",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
                         peek: false,
@@ -2210,7 +2313,7 @@ mod test {
             FetchCommand,
             "FETCH 1 BODY[HEADER.FIELDS (Foo Bar)]",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
                         peek: false,
@@ -2229,7 +2332,7 @@ mod test {
             FetchCommand,
             "FETCH 1 BODY[HEADER.FIELDS.NOT (Foo Bar)]",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
                         peek: false,
@@ -2249,7 +2352,7 @@ mod test {
             FetchCommand,
             "FETCH 1 BODY[1]",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
                         peek: false,
@@ -2266,7 +2369,7 @@ mod test {
             FetchCommand,
             "FETCH 1 BODY[1.2.3]",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
                         peek: false,
@@ -2283,7 +2386,7 @@ mod test {
             FetchCommand,
             "FETCH 1 BODY[1.MIME]",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
                         peek: false,
@@ -2300,7 +2403,7 @@ mod test {
             FetchCommand,
             "FETCH 1 BODY[1.HEADER]",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
                         peek: false,
@@ -2317,7 +2420,7 @@ mod test {
             FetchCommand,
             "FETCH 1 BODY[1.TEXT]",
             FetchCommand {
-                sequence_set: s("1"),
+                messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
                         peek: false,
@@ -3128,6 +3231,222 @@ mod test {
             LogInCommand {
                 userid: s("User with Spaces"),
                 password: s(r#"ComplexPassword\""#),
+            }
+        );
+    }
+
+    #[test]
+    fn command_syntax() {
+        assert_reversible!(
+            Command,
+            "CAPABILITY",
+            Command::Simple(SimpleCommand::Capability)
+        );
+        assert_reversible!(
+            Command,
+            "LOGOUT",
+            Command::Simple(SimpleCommand::LogOut)
+        );
+        assert_reversible!(
+            Command,
+            "NOOP",
+            Command::Simple(SimpleCommand::Noop)
+        );
+        assert_reversible!(
+            Command,
+            "STARTTLS",
+            Command::Simple(SimpleCommand::StartTls)
+        );
+        assert_reversible!(
+            Command,
+            "CHECK",
+            Command::Simple(SimpleCommand::Check)
+        );
+        assert_reversible!(
+            Command,
+            "CLOSE",
+            Command::Simple(SimpleCommand::Close)
+        );
+        assert_reversible!(
+            Command,
+            "EXPUNGE",
+            Command::Simple(SimpleCommand::Expunge)
+        );
+        assert_reversible!(
+            Command,
+            "XYZZY",
+            Command::Simple(SimpleCommand::Xyzzy)
+        );
+
+        assert_reversible!(
+            Command,
+            "CREATE foo",
+            Command::Create(CreateCommand { mailbox: s("foo") })
+        );
+        assert_reversible!(
+            Command,
+            "DELETE foo",
+            Command::Delete(DeleteCommand { mailbox: s("foo") })
+        );
+        assert_reversible!(
+            Command,
+            "EXAMINE foo",
+            Command::Examine(ExamineCommand { mailbox: s("foo") })
+        );
+        assert_reversible!(
+            Command,
+            "LIST \"\" foo",
+            Command::List(ListCommand {
+                reference: s(""),
+                pattern: s("foo"),
+            })
+        );
+        assert_reversible!(
+            Command,
+            "LSUB \"\" foo",
+            Command::Lsub(LsubCommand {
+                reference: s(""),
+                pattern: s("foo"),
+            })
+        );
+        assert_reversible!(
+            Command,
+            "RENAME foo bar",
+            Command::Rename(RenameCommand {
+                src: s("foo"),
+                dst: s("bar"),
+            })
+        );
+        assert_reversible!(
+            Command,
+            "SELECT foo",
+            Command::Select(SelectCommand { mailbox: s("foo") })
+        );
+        assert_reversible!(
+            Command,
+            "STATUS foo (RECENT)",
+            Command::Status(StatusCommand {
+                mailbox: s("foo"),
+                atts: vec![StatusAtt::Recent],
+            })
+        );
+        assert_reversible!(
+            Command,
+            "SUBSCRIBE foo",
+            Command::Subscribe(SubscribeCommand { mailbox: s("foo") })
+        );
+        assert_reversible!(
+            Command,
+            "UNSUBSCRIBE foo",
+            Command::Unsubscribe(UnsubscribeCommand { mailbox: s("foo") })
+        );
+        assert_reversible!(
+            Command,
+            "LOGIN AzureDiamond hunter2",
+            Command::LogIn(LogInCommand {
+                userid: s("AzureDiamond"),
+                password: s("hunter2"),
+            })
+        );
+        assert_reversible!(
+            Command,
+            "AUTHENTICATE plain",
+            Command::Authenticate(AuthenticateCommandStart {
+                auth_type: s("plain"),
+            })
+        );
+        assert_reversible!(
+            Command,
+            "COPY 1 dst",
+            Command::Copy(CopyCommand {
+                messages: s("1"),
+                dst: s("dst"),
+            })
+        );
+        assert_reversible!(
+            Command,
+            "FETCH 1 FULL",
+            Command::Fetch(FetchCommand {
+                messages: s("1"),
+                target: FetchCommandTarget::Full(()),
+            })
+        );
+        assert_reversible!(
+            Command,
+            "STORE 1 FLAGS ()",
+            Command::Store(StoreCommand {
+                messages: s("1"),
+                typ: StoreCommandType::Eq,
+                silent: false,
+                flags: vec![],
+                _marker: PhantomData,
+            })
+        );
+        assert_reversible!(
+            Command,
+            "SEARCH UNSEEN",
+            Command::Search(SearchCommand {
+                charset: None,
+                keys: vec![SearchKey::Simple(SimpleSearchKey::Unseen)],
+            })
+        );
+
+        assert_reversible!(
+            Command,
+            "UID COPY 1 dst",
+            Command::Uid(UidCommand::Copy(CopyCommand {
+                messages: s("1"),
+                dst: s("dst"),
+            }))
+        );
+        assert_reversible!(
+            Command,
+            "UID FETCH 1 FULL",
+            Command::Uid(UidCommand::Fetch(FetchCommand {
+                messages: s("1"),
+                target: FetchCommandTarget::Full(()),
+            }))
+        );
+        assert_reversible!(
+            Command,
+            "UID SEARCH UNSEEN",
+            Command::Uid(UidCommand::Search(SearchCommand {
+                charset: None,
+                keys: vec![SearchKey::Simple(SimpleSearchKey::Unseen)],
+            }))
+        );
+        assert_reversible!(
+            Command,
+            "UID STORE 1 FLAGS ()",
+            Command::Uid(UidCommand::Store(StoreCommand {
+                messages: s("1"),
+                typ: StoreCommandType::Eq,
+                silent: false,
+                flags: vec![],
+                _marker: PhantomData,
+            }))
+        );
+    }
+
+    #[test]
+    fn command_line_syntax() {
+        assert_reversible!(
+            CommandLine,
+            "A0001 NOOP",
+            CommandLine {
+                tag: s("A0001"),
+                cmd: Command::Simple(SimpleCommand::Noop),
+            }
+        );
+        assert_reversible!(
+            CommandLine,
+            "UID COPY 1 dst",
+            CommandLine {
+                tag: s("UID"),
+                cmd: Command::Copy(CopyCommand {
+                    messages: s("1"),
+                    dst: s("dst"),
+                }),
             }
         );
     }
