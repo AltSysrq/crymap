@@ -1014,6 +1014,27 @@ simple_enum! {
     }
 }
 
+syntax_rule! {
+    #[prefix("AUTHENTICATE ")]
+    struct AuthenticateCommandStart<'a> {
+        #[]
+        #[primitive(verbatim, normal_atom)]
+        auth_type: Cow<'a, str>,
+    }
+}
+
+syntax_rule! {
+    #[prefix("LOGIN ")]
+    struct LogInCommand<'a> {
+        #[suffix(" ")]
+        #[primitive(unicode_astring, astring)]
+        userid: Cow<'a, str>,
+        #[]
+        #[primitive(unicode_astring, astring)]
+        password: Cow<'a, str>,
+    }
+}
+
 // ==================== PRIMITIVE PARSERS =================´===
 
 fn normal_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
@@ -3080,6 +3101,34 @@ mod test {
             StoreCommand,
             "STORE 1 FLAGS (\\Flagged keyword)",
             "STORE 1 FLAGS \\flagged keyword"
+        );
+    }
+
+    #[test]
+    fn authentication_command_syntax() {
+        assert_reversible!(
+            AuthenticateCommandStart,
+            "AUTHENTICATE plain",
+            AuthenticateCommandStart {
+                auth_type: s("plain"),
+            }
+        );
+
+        assert_reversible!(
+            LogInCommand,
+            "LOGIN AzureDiamond hunter2",
+            LogInCommand {
+                userid: s("AzureDiamond"),
+                password: s("hunter2"),
+            }
+        );
+        assert_reversible!(
+            LogInCommand,
+            "LOGIN \"User with Spaces\" {17}\r\nComplexPassword\\\"",
+            LogInCommand {
+                userid: s("User with Spaces"),
+                password: s(r#"ComplexPassword\""#),
+            }
         );
     }
 }
