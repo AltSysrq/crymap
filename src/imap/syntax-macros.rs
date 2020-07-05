@@ -194,25 +194,25 @@ macro_rules! apply_write_modifiers {
     ([], $lex:expr, $var:ident, $inner:expr) => { $inner };
     ([prefix($prefix:expr) $($rest:tt)*], $lex:expr,
      $var:ident, $inner:expr) => {
-        $lex.verbatim_bytes($prefix)?;
+        $lex.verbatim($prefix)?;
         apply_write_modifiers!([$($rest)*], $lex, $var, $inner);
     };
     ([suffix($suffix:expr) $($rest:tt)*], $lex:expr,
      $var:ident, $inner:expr) => {
         apply_write_modifiers!([$($rest)*], $lex, $var, $inner);
-        $lex.verbatim_bytes($suffix)?;
+        $lex.verbatim($suffix)?;
     };
     ([surrounded($prefix:expr, $suffix:expr) $($rest:tt)*], $lex:expr,
      $var:ident, $inner:expr) => {
-        $lex.verbatim_bytes($prefix)?;
+        $lex.verbatim($prefix)?;
         apply_write_modifiers!([$($rest)*], $lex, $var, $inner);
-        $lex.verbatim_bytes($suffix)?;
+        $lex.verbatim($suffix)?;
     };
     ([0*($sep:expr) $($rest:tt)*], $lex:expr, $var:ident, $inner:expr) => {
         let mut first = true;
         for $var in $var {
             if !first {
-                $lex.verbatim_bytes($sep)?;
+                $lex.verbatim($sep)?;
             }
             first = false;
             apply_write_modifiers!([$($rest)*], $lex, $var, $inner);
@@ -227,7 +227,7 @@ macro_rules! apply_write_modifiers {
         let mut first = true;
         for $var in $var {
             if !first {
-                $lex.verbatim_bytes($sep)?;
+                $lex.verbatim($sep)?;
             }
             first = false;
             apply_write_modifiers!([$($rest)*], $lex, $var, $inner);
@@ -241,7 +241,7 @@ macro_rules! apply_write_modifiers {
     ([marked_opt($marker:expr) $($rest:tt)*],
      $lex:expr, $var:ident, $inner:expr) => {
         match $var {
-            &mut None => $lex.verbatim_bytes($marker)?,
+            &mut None => $lex.verbatim($marker)?,
             &mut Some(ref mut $var) => {
                 apply_write_modifiers!([$($rest)*], $lex, $var, $inner);
             }
@@ -293,11 +293,11 @@ macro_rules! generate_field_writer {
     };
     (tag($tag:expr), $lex:expr, $_value:expr) => {
         let _value = $_value;
-        $lex.verbatim_bytes($tag)?;
+        $lex.verbatim($tag)?;
     };
     (cond($tag:expr), $lex:expr, $value:expr) => {
         if *$value {
-            $lex.verbatim_bytes($tag)?;
+            $lex.verbatim($tag)?;
         }
     };
     (phantom, $_lex:expr, $_value:expr) => {

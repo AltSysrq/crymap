@@ -147,6 +147,10 @@ impl<W: Write> LexWriter<W> {
         self.astring(&self.encode(s))
     }
 
+    pub fn unicode_astring(&mut self, s: &str) -> io::Result<()> {
+        self.astring(s)
+    }
+
     pub fn censored_nstring(
         &mut self,
         s: &Option<impl AsRef<str>>,

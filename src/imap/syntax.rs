@@ -102,9 +102,9 @@
 //! - `phantom`. Map between nothingness and `PhantomData`.
 //!
 //! "modifiers" are more diverse. More than one can be chained together. When
-//! there is more than one, they apply left to right. E.g., `suffix(b" ") opt`
+//! there is more than one, they apply left to right. E.g., `suffix(" ") opt`
 //! will always add/expect a space regardless of whether the value is present,
-//! while `opt suffix(b" ")` will only add/expect the suffix as part of the
+//! while `opt suffix(" ")` will only add/expect the suffix as part of the
 //! inner value. The modifiers are:
 //!
 //! - `prefix(s)`: Add/expect the given prefix
@@ -144,9 +144,9 @@ use crate::mime::utf7;
 include!("syntax-macros.rs");
 
 syntax_rule! {
-    #[prefix(b"CAPABILITY")]
+    #[prefix("CAPABILITY")]
     struct CapabilityData<'a> {
-        #[1* prefix(b" ")]
+        #[1* prefix(" ")]
         #[primitive(verbatim, normal_atom)]
         capabilities: Vec<Cow<'a, str>>,
     }
@@ -165,10 +165,10 @@ simple_enum! {
 syntax_rule! {
     #[]
     struct CondResponse<'a> {
-        #[marked_opt(b"*") suffix(b" ")]
+        #[marked_opt("*") suffix(" ")]
         #[primitive(verbatim, tag_atom)]
         tag: Option<Cow<'a, str>>,
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[delegate]
         cond: RespCondType,
         // TODO Response data
@@ -179,33 +179,33 @@ syntax_rule! {
 }
 
 syntax_rule! {
-    #[surrounded(b"(", b")")]
+    #[surrounded("(", ")")]
     struct Envelope<'a> {
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(censored_nstring, nstring)]
         date: Option<Cow<'a, str>>,
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(encoded_nstring, nstring)]
         subject: Option<Cow<'a, str>>,
-        #[suffix(b" ") nil_if_empty surrounded(b"(", b")") 1*]
+        #[suffix(" ") nil_if_empty surrounded("(", ")") 1*]
         #[delegate(Address)]
         from: Vec<Address<'a>>,
-        #[suffix(b" ") nil_if_empty surrounded(b"(", b")") 1*]
+        #[suffix(" ") nil_if_empty surrounded("(", ")") 1*]
         #[delegate(Address)]
         sender: Vec<Address<'a>>,
-        #[suffix(b" ") nil_if_empty surrounded(b"(", b")") 1*]
+        #[suffix(" ") nil_if_empty surrounded("(", ")") 1*]
         #[delegate(Address)]
         reply_to: Vec<Address<'a>>,
-        #[suffix(b" ") nil_if_empty surrounded(b"(", b")") 1*]
+        #[suffix(" ") nil_if_empty surrounded("(", ")") 1*]
         #[delegate(Address)]
         to: Vec<Address<'a>>,
-        #[suffix(b" ") nil_if_empty surrounded(b"(", b")") 1*]
+        #[suffix(" ") nil_if_empty surrounded("(", ")") 1*]
         #[delegate(Address)]
         cc: Vec<Address<'a>>,
-        #[suffix(b" ") nil_if_empty surrounded(b"(", b")") 1*]
+        #[suffix(" ") nil_if_empty surrounded("(", ")") 1*]
         #[delegate(Address)]
         bcc: Vec<Address<'a>>,
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(censored_nstring, nstring)]
         in_reply_to: Option<Cow<'a, str>>,
         #[]
@@ -219,13 +219,13 @@ syntax_rule! {
 // the delimiter, we need different cases since the group names can contain
 // encoded words but a real local part can't.
 syntax_rule! {
-    #[surrounded(b"(", b")")]
+    #[surrounded("(", ")")]
     enum Address<'a> {
         #[]
         #[delegate]
         Real(RealAddress<'a>),
         // Groups never have a display name, routing, or domain
-        #[surrounded(b"NIL NIL ", b" NIL")]
+        #[surrounded("NIL NIL ", " NIL")]
         #[primitive(encoded_nstring, nstring)]
         GroupDelim(Option<Cow<'a, str>>),
     }
@@ -234,15 +234,15 @@ syntax_rule! {
 syntax_rule! {
     #[]
     struct RealAddress<'a> {
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(encoded_nstring, nstring)]
         display_name: Option<Cow<'a, str>>,
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(censored_nstring, nstring)]
         routing: Option<Cow<'a, str>>,
         // These are nstrings in the RFC 3501 syntax, but we handle that with
         // the separate GroupDelim case.
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(censored_string, string)]
         local_part: Cow<'a, str>,
         #[]
@@ -252,7 +252,7 @@ syntax_rule! {
 }
 
 syntax_rule! {
-    #[surrounded(b"(", b")")]
+    #[surrounded("(", ")")]
     enum Body<'a> {
         #[]
         #[delegate]
@@ -270,13 +270,13 @@ syntax_rule! {
         // of a multipart with no parts. We simply change the grammar to 0* to
         // represent this (which means that it is notated effectively by a
         // leading space, which is gross, but such is IMAP syntax).
-        #[suffix(b" ") 0*]
+        #[suffix(" ") 0*]
         #[delegate(Body)]
         bodies: Vec<Body<'a>>,
         #[]
         #[primitive(censored_string, string)]
         media_subtype: Cow<'a, str>,
-        #[opt prefix(b" ")]
+        #[opt prefix(" ")]
         #[delegate(BodyExtMPart)]
         ext: Option<BodyExtMPart<'a>>,
     }
@@ -288,13 +288,13 @@ syntax_rule! {
         // This is suitable only for Crymap's own use; it doesn't handle extra
         // extension fields on the end, and requires all of the defined ones to
         // be present.
-        #[suffix(b" ") nil_if_empty surrounded(b"(", b")") 1*(b" ")]
+        #[suffix(" ") nil_if_empty surrounded("(", ")") 1*(" ")]
         #[primitive(censored_string, string)]
         content_type_parms: Vec<Cow<'a, str>>,
-        #[suffix(b" ") nil]
+        #[suffix(" ") nil]
         #[delegate(ContentDisposition)]
         content_disposition: Option<ContentDisposition<'a>>,
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(censored_nstring, nstring)]
         content_language: Option<Cow<'a, str>>,
         #[]
@@ -309,7 +309,7 @@ syntax_rule! {
         #[]
         #[delegate]
         core: ClassifiedBodyType1Part<'a>,
-        #[opt prefix(b" ")]
+        #[opt prefix(" ")]
         #[delegate(BodyExt1Part)]
         ext: Option<BodyExt1Part<'a>>,
     }
@@ -335,10 +335,10 @@ syntax_rule! {
 syntax_rule! {
     #[]
     struct BodyTypeBasic<'a> {
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(censored_string, string)]
         media_type: Cow<'a, str>,
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(censored_string, string)]
         media_subtype: Cow<'a, str>,
         #[]
@@ -348,15 +348,15 @@ syntax_rule! {
 }
 
 syntax_rule! {
-    #[prefix(b"\"MESSAGE\" \"RFC822\" ")]
+    #[prefix("\"MESSAGE\" \"RFC822\" ")]
     struct BodyTypeMsg<'a> {
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[delegate]
         body_fields: BodyFields<'a>,
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[delegate]
         envelope: Envelope<'a>,
-        #[suffix(b" ") box]
+        #[suffix(" ") box]
         #[delegate(Body)]
         body: Box<Body<'a>>,
         #[]
@@ -366,12 +366,12 @@ syntax_rule! {
 }
 
 syntax_rule! {
-    #[prefix(b"\"TEXT\" ")]
+    #[prefix("\"TEXT\" ")]
     struct BodyTypeText<'a> {
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(censored_string, string)]
         media_subtype: Cow<'a, str>,
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[delegate]
         body_fields: BodyFields<'a>,
         #[]
@@ -383,16 +383,16 @@ syntax_rule! {
 syntax_rule! {
     #[]
     struct BodyFields<'a> {
-        #[suffix(b" ") nil_if_empty surrounded(b"(", b")") 1*(b" ")]
+        #[suffix(" ") nil_if_empty surrounded("(", ")") 1*(" ")]
         #[primitive(censored_string, string)]
         content_type_parms: Vec<Cow<'a, str>>,
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(censored_nstring, nstring)]
         content_id: Option<Cow<'a, str>>,
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(encoded_nstring, nstring)]
         content_description: Option<Cow<'a, str>>,
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(censored_string, string)]
         content_transfer_encoding: Cow<'a, str>,
         #[]
@@ -407,13 +407,13 @@ syntax_rule! {
         // This is suitable only for Crymap's own use; it doesn't handle extra
         // extension fields on the end, and requires all of the defined ones to
         // be present.
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(censored_nstring, nstring)]
         md5: Option<Cow<'a, str>>,
-        #[suffix(b" ") nil]
+        #[suffix(" ") nil]
         #[delegate(ContentDisposition)]
         content_disposition: Option<ContentDisposition<'a>>,
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(censored_nstring, nstring)]
         content_language: Option<Cow<'a, str>>,
         #[]
@@ -423,21 +423,21 @@ syntax_rule! {
 }
 
 syntax_rule! {
-    #[surrounded(b"(", b")")]
+    #[surrounded("(", ")")]
     struct ContentDisposition<'a> {
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(censored_string, string)]
         disposition: Cow<'a, str>,
-        #[nil_if_empty surrounded(b"(", b")") 1*(b" ")]
+        #[nil_if_empty surrounded("(", ")") 1*(" ")]
         #[primitive(censored_string, string)]
         parms: Vec<Cow<'a, str>>,
     }
 }
 
 syntax_rule! {
-    #[prefix(b"LIST ")]
+    #[prefix("LIST ")]
     struct ListCommand<'a> {
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(mailbox, mailbox)]
         reference: Cow<'a, str>,
         #[]
@@ -447,9 +447,9 @@ syntax_rule! {
 }
 
 syntax_rule! {
-    #[prefix(b"LSUB ")]
+    #[prefix("LSUB ")]
     struct LsubCommand<'a> {
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(mailbox, mailbox)]
         reference: Cow<'a, str>,
         #[]
@@ -463,7 +463,7 @@ syntax_rule! {
     struct MailboxList<'a> {
         // Note that we're also encoding the hierarchy delimiter field into
         // the suffix.
-        #[surrounded(b"(", b") \"/\" ") 0*(b" ")]
+        #[surrounded("(", ") \"/\" ") 0*(" ")]
         #[primitive(verbatim, backslash_atom)]
         flags: Vec<Cow<'a, str>>,
         #[]
@@ -473,9 +473,9 @@ syntax_rule! {
 }
 
 syntax_rule! {
-    #[prefix(b"FETCH ")]
+    #[prefix("FETCH ")]
     struct FetchCommand<'a> {
-        #[suffix(b" ")]
+        #[suffix(" ")]
         #[primitive(verbatim, sequence_set)]
         sequence_set: Cow<'a, str>,
         #[]
@@ -488,18 +488,18 @@ syntax_rule! {
     #[]
     enum FetchCommandTarget<'a> {
         #[]
-        #[tag(b"ALL")]
+        #[tag("ALL")]
         All(()),
         #[]
-        #[tag(b"FULL")]
+        #[tag("FULL")]
         Full(()),
         #[]
-        #[tag(b"FAST")]
+        #[tag("FAST")]
         Fast(()),
         #[]
         #[delegate]
         Single(FetchAtt<'a>),
-        #[surrounded(b"(", b")") 1*(b" ")]
+        #[surrounded("(", ")") 1*(" ")]
         #[delegate(FetchAtt)]
         Multi(Vec<FetchAtt<'a>>),
     }
@@ -509,30 +509,30 @@ syntax_rule! {
     #[]
     enum FetchAtt<'a> {
         #[]
-        #[tag(b"ENVELOPE")]
+        #[tag("ENVELOPE")]
         Envelope(()),
         #[]
-        #[tag(b"FLAGS")]
+        #[tag("FLAGS")]
         Flags(()),
         #[]
-        #[tag(b"INTERNALDATE")]
+        #[tag("INTERNALDATE")]
         InternalDate(()),
-        #[prefix(b"RFC822") opt]
+        #[prefix("RFC822") opt]
         #[delegate(FetchAttRfc822)]
         Rfc822(Option<FetchAttRfc822>),
         // Must come before the body structure stuff to resolve the ambiguity
         // the correct way.
-        #[prefix(b"BODY")]
+        #[prefix("BODY")]
         #[delegate]
         Body(FetchAttBody<'a>),
         #[]
-        #[tag(b"BODYSTRUCTURE")]
+        #[tag("BODYSTRUCTURE")]
         ExtendedBodyStructure(()),
         #[]
-        #[tag(b"BODY")]
+        #[tag("BODY")]
         ShortBodyStructure(()),
         #[]
-        #[tag(b"UID")]
+        #[tag("UID")]
         Uid(()),
     }
 }
@@ -549,9 +549,9 @@ syntax_rule! {
     #[]
     struct FetchAttBody<'a> {
         #[]
-        #[cond(b".PEEK")]
+        #[cond(".PEEK")]
         peek: bool,
-        #[surrounded(b"[", b"]") opt]
+        #[surrounded("[", "]") opt]
         #[delegate(SectionSpec)]
         section: Option<SectionSpec<'a>>,
         #[opt]
@@ -575,10 +575,10 @@ syntax_rule! {
 syntax_rule! {
     #[]
     struct SubSectionSpec<'a> {
-        #[1*(b".")]
+        #[1*(".")]
         #[primitive(num_u32, number)]
         subscripts: Vec<u32>,
-        #[opt prefix(b".")]
+        #[opt prefix(".")]
         #[delegate(SectionText)]
         text: Option<SectionText<'a>>,
     }
@@ -587,17 +587,17 @@ syntax_rule! {
 syntax_rule! {
     #[]
     enum SectionText<'a> {
-        #[prefix(b"HEADER.FIELDS")]
+        #[prefix("HEADER.FIELDS")]
         #[delegate]
         HeaderFields(SectionTextHeaderField<'a>),
         #[]
-        #[tag(b"HEADER")]
+        #[tag("HEADER")]
         Header(()),
         #[]
-        #[tag(b"TEXT")]
+        #[tag("TEXT")]
         Text(()),
         #[]
-        #[tag(b"MIME")]
+        #[tag("MIME")]
         Mime(()),
     }
 }
@@ -605,19 +605,19 @@ syntax_rule! {
 syntax_rule! {
     #[]
     struct SectionTextHeaderField<'a> {
-        #[suffix(b" ")]
-        #[cond(b".NOT")]
+        #[suffix(" ")]
+        #[cond(".NOT")]
         negative: bool,
-        #[surrounded(b"(", b")") 1*(b" ")]
+        #[surrounded("(", ")") 1*(" ")]
         #[primitive(censored_astring, astring)]
         headers: Vec<Cow<'a, str>>,
     }
 }
 
 syntax_rule! {
-    #[surrounded(b"<", b">")]
+    #[surrounded("<", ">")]
     struct FetchAttBodySlice<'a> {
-        #[suffix(b".")]
+        #[suffix(".")]
         #[primitive(num_u32, number)]
         start: u32,
         #[]
@@ -639,9 +639,9 @@ syntax_rule! {
 // grammatically. `msg_att` is renamed to `msg_atts` because it is not one
 // attribute.
 syntax_rule! {
-    #[surrounded(b"(", b")")]
+    #[surrounded("(", ")")]
     struct MsgAtts<'a> {
-        #[1*(b" ")]
+        #[1*(" ")]
         #[delegate(MsgAtt)]
         atts: Vec<MsgAtt<'a>>,
     }
@@ -650,41 +650,41 @@ syntax_rule! {
 syntax_rule! {
     #[]
     enum MsgAtt<'a> {
-        #[prefix(b"ENVELOPE ")]
+        #[prefix("ENVELOPE ")]
         #[delegate]
         Envelope(Envelope<'a>),
-        #[prefix(b"INTERNALDATE ")]
+        #[prefix("INTERNALDATE ")]
         #[primitive(datetime, datetime)]
         InternalDate(DateTime<FixedOffset>),
         // The formal grammar permits NIL for all these literals, but the
         // recommendation on the mailing list generally seems to be to never do
         // that and return empty strings instead, so we don't consider the NIL
         // case here.
-        #[prefix(b"RFC822 ")]
+        #[prefix("RFC822 ")]
         #[primitive(literal_source, literal_source)]
         Rfc822Full(LiteralSource),
-        #[prefix(b"RFC822.HEADER ")]
+        #[prefix("RFC822.HEADER ")]
         #[primitive(literal_source, literal_source)]
         Rfc822Header(LiteralSource),
-        #[prefix(b"RFC822.TEXT ")]
+        #[prefix("RFC822.TEXT ")]
         #[primitive(literal_source, literal_source)]
         Rfc822Text(LiteralSource),
-        #[prefix(b"RFC822.SIZE ")]
+        #[prefix("RFC822.SIZE ")]
         #[primitive(num_u32, number)]
         Rfc822Size(u32),
-        #[prefix(b"BODY ")]
+        #[prefix("BODY ")]
         #[delegate]
         ShortBodyStructure(Body<'a>),
-        #[prefix(b"BODYSTRUCTURE ")]
+        #[prefix("BODYSTRUCTURE ")]
         #[delegate]
         ExtendedBodyStructure(Body<'a>),
-        #[prefix(b"BODY")]
+        #[prefix("BODY")]
         #[delegate]
         Body(MsgAttBody<'a>),
-        #[prefix(b"UID ")]
+        #[prefix("UID ")]
         #[primitive(num_u32, number)]
         Uid(u32),
-        #[surrounded(b"FLAGS (", b")")]
+        #[surrounded("FLAGS (", ")")]
         #[delegate(FlagsFetch)]
         Flags(FlagsFetch<'a>),
     }
@@ -693,13 +693,13 @@ syntax_rule! {
 syntax_rule! {
     #[]
     struct MsgAttBody<'a> {
-        #[surrounded(b"[", b"]") opt]
+        #[surrounded("[", "]") opt]
         #[delegate(SectionSpec)]
         section: Option<SectionSpec<'a>>,
-        #[opt surrounded(b"<", b">")]
+        #[opt surrounded("<", ">")]
         #[primitive(num_u32, number)]
         slice_origin: Option<u32>,
-        #[prefix(b" ")]
+        #[prefix(" ")]
         #[primitive(literal_source, literal_source)]
         data: LiteralSource,
     }
@@ -717,17 +717,169 @@ syntax_rule! {
     // first item.
     #[]
     enum FlagsFetch<'a> {
-        #[prefix(b"\\Recent") 0* prefix(b" ")]
+        #[prefix("\\Recent") 0* prefix(" ")]
         #[primitive(flag, flag)]
         Recent(Vec<Flag>),
-        #[0*(b" ")]
+        #[0*(" ")]
         #[primitive(flag, flag)]
         NotRecent(Vec<Flag>),
         // We never actually parse FlagsFetch in the server so this marker case
         // is moot.
-        #[prefix(b"\x00")]
+        #[prefix("\x00")]
         #[phantom]
         _Marker(PhantomData<&'a ()>),
+    }
+}
+
+// SearchKey is broken into several smaller parts to prevent alt() expansions
+// from getting too large.
+simple_enum! {
+    enum SimpleSearchKey {
+        All("ALL"),
+        Answered("ANSWERED"),
+        Deleted("DELETED"),
+        Flagged("FLAGGED"),
+        New("NEW"),
+        Old("OLD"),
+        Recent("RECENT"),
+        Seen("SEEN"),
+        Unanswered("UNANSWERED"),
+        Undeleted("UNDELETED"),
+        Unflagged("UNFLAGGED"),
+        Unseen("UNSEEN"),
+        Draft("DRAFT"),
+        Undraft("UNDRAFT"),
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct TextSearchKey<'a> {
+        #[suffix(" ")]
+        #[delegate]
+        typ: TextSearchKeyType,
+        #[]
+        #[primitive(unicode_astring, astring)]
+        value: Cow<'a, str>,
+    }
+}
+
+simple_enum! {
+    enum TextSearchKeyType {
+        Bcc("BCC"),
+        Body("BODY"),
+        Cc("CC"),
+        From("FROM"),
+        Subject("SUBJECT"),
+        Text("TEXT"),
+        To("TO"),
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct DateSearchKey<'a> {
+        #[suffix(" ")]
+        #[delegate]
+        typ: DateSearchKeyType,
+        #[]
+        #[primitive(date, date)]
+        date: NaiveDate,
+        #[]
+        #[phantom]
+        _marker: PhantomData<&'a ()>,
+    }
+}
+
+simple_enum! {
+    enum DateSearchKeyType {
+        Before("BEFORE"),
+        On("ON"),
+        Since("SINCE"),
+        SentBefore("SENTBEFORE"),
+        SentOn("SENTON"),
+        SentSince("SENTSINCE"),
+    }
+}
+
+syntax_rule! {
+    #[prefix("SEARCH ")]
+    struct SearchCommand<'a> {
+        #[opt surrounded("CHARSET ", " ")]
+        #[primitive(censored_astring, astring)]
+        charset: Option<Cow<'a, str>>,
+        #[1*(" ")]
+        #[delegate(SearchKey)]
+        keys: Vec<SearchKey<'a>>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    enum SearchKey<'a> {
+        #[]
+        #[delegate]
+        Simple(SimpleSearchKey),
+        #[]
+        #[delegate]
+        Text(TextSearchKey<'a>),
+        #[]
+        #[delegate]
+        Date(DateSearchKey<'a>),
+        #[prefix("KEYWORD ")]
+        #[primitive(flag, keyword)]
+        Keyword(Flag),
+        #[prefix("UNKEYWORD ")]
+        #[primitive(flag, keyword)]
+        Unkeyword(Flag),
+        #[prefix("HEADER ")]
+        #[delegate]
+        Header(SearchKeyHeader<'a>),
+        #[prefix("LARGER ")]
+        #[primitive(num_u32, number)]
+        Larger(u32),
+        #[prefix("NOT ") box]
+        #[delegate(SearchKey)]
+        Not(Box<SearchKey<'a>>),
+        #[prefix("OR ")]
+        #[delegate]
+        Or(SearchKeyOr<'a>),
+        #[prefix("SMALLER ")]
+        #[primitive(num_u32, number)]
+        Smaller(u32),
+        #[prefix("UID ")]
+        #[primitive(verbatim, sequence_set)]
+        Uid(Cow<'a, str>),
+        #[]
+        #[primitive(verbatim, sequence_set)]
+        Seqnum(Cow<'a, str>),
+        #[surrounded("(", ")") 1*(" ")]
+        #[delegate(SearchKey)]
+        And(Vec<SearchKey<'a>>),
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct SearchKeyHeader<'a> {
+        #[suffix(" ")]
+        #[primitive(censored_astring, astring)]
+        header: Cow<'a, str>,
+        #[]
+        #[primitive(unicode_astring, astring)]
+        value: Cow<'a, str>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct SearchKeyOr<'a> {
+        #[suffix(" ") box]
+        #[delegate(SearchKey)]
+        a: Box<SearchKey<'a>>,
+        #[box]
+        #[delegate(SearchKey)]
+        b: Box<SearchKey<'a>>,
     }
 }
 
@@ -807,9 +959,9 @@ fn number(i: &[u8]) -> IResult<&[u8], u32> {
 
 fn literal(i: &[u8]) -> IResult<&[u8], &[u8]> {
     let (i, len) = sequence::delimited(
-        alt((tag(b"~{"), tag(b"{"))),
+        alt((tag("~{"), tag("{"))),
         number,
-        alt((tag(b"+}\r\n"), tag(b"}\r\n"))),
+        alt((tag("+}\r\n"), tag("}\r\n"))),
     )(i)?;
     bytes::complete::take(len)(i)
 }
@@ -828,10 +980,10 @@ fn literal_source(i: &[u8]) -> IResult<&[u8], LiteralSource> {
 }
 
 fn literal_literal_source(i: &[u8]) -> IResult<&[u8], LiteralSource> {
-    let (i, prefix) = alt((tag(b"~{"), tag(b"{")))(i)?;
+    let (i, prefix) = alt((tag("~{"), tag("{")))(i)?;
     let binary = prefix.starts_with(b"~");
     let (i, len) =
-        sequence::terminated(number, alt((tag(b"+}\r\n"), tag(b"}\r\n"))))(i)?;
+        sequence::terminated(number, alt((tag("+}\r\n"), tag("}\r\n"))))(i)?;
     let (i, data) = bytes::complete::take(len)(i)?;
 
     Ok((
@@ -845,7 +997,7 @@ fn literal_literal_source(i: &[u8]) -> IResult<&[u8], LiteralSource> {
 }
 
 fn quoted_char(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    sequence::preceded(tag(b"\\"), alt((tag(b"\\"), tag(b"\""))))(i)
+    sequence::preceded(tag("\\"), alt((tag("\\"), tag("\""))))(i)
 }
 
 fn quoted_string_content(i: &[u8]) -> IResult<&[u8], &[u8]> {
@@ -854,7 +1006,7 @@ fn quoted_string_content(i: &[u8]) -> IResult<&[u8], &[u8]> {
 
 fn quoted(i: &[u8]) -> IResult<&[u8], Cow<str>> {
     sequence::delimited(
-        tag(b"\""),
+        tag("\""),
         multi::fold_many0(
             map(quoted_string_content, String::from_utf8_lossy),
             Cow::Owned(String::new()),
@@ -867,7 +1019,7 @@ fn quoted(i: &[u8]) -> IResult<&[u8], Cow<str>> {
                 }
             },
         ),
-        tag(b"\""),
+        tag("\""),
     )(i)
 }
 
@@ -908,14 +1060,18 @@ fn text(i: &[u8]) -> IResult<&[u8], Cow<str>> {
     map(is_not("\r\n"), String::from_utf8_lossy)(i)
 }
 
+fn keyword(i: &[u8]) -> IResult<&[u8], Flag> {
+    map_opt(normal_atom, |a| {
+        ew_decode(&a)
+            .map(Cow::Owned)
+            .unwrap_or(a)
+            .parse::<Flag>()
+            .ok()
+    })(i)
+}
+
 fn flag(i: &[u8]) -> IResult<&[u8], Flag> {
-    map_opt(
-        alt((
-            map(normal_atom, |a| ew_decode(&a).map(Cow::Owned).unwrap_or(a)),
-            backslash_atom,
-        )),
-        |s| s.parse::<Flag>().ok(),
-    )(i)
+    alt((keyword, map_opt(backslash_atom, |s| s.parse::<Flag>().ok())))(i)
 }
 
 fn parse_u32_infallible(i: &[u8]) -> u32 {
@@ -946,15 +1102,15 @@ fn four_digit(i: &[u8]) -> IResult<&[u8], u32> {
 fn time_of_day(i: &[u8]) -> IResult<&[u8], (u32, u32, u32)> {
     sequence::tuple((
         two_digit,
-        sequence::preceded(tag(b":"), two_digit),
-        sequence::preceded(tag(b":"), two_digit),
+        sequence::preceded(tag(":"), two_digit),
+        sequence::preceded(tag(":"), two_digit),
     ))(i)
 }
 
 fn numeric_zone(i: &[u8]) -> IResult<&[u8], i32> {
     map(
         sequence::pair(
-            alt((tag(b"+"), tag(b"-"))),
+            alt((tag("+"), tag("-"))),
             sequence::pair(two_digit, two_digit),
         ),
         |(sign, (h, m))| {
@@ -969,8 +1125,8 @@ fn numeric_zone(i: &[u8]) -> IResult<&[u8], i32> {
 }
 
 static MONTH_NAMES: [&str; 12] = [
-    "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct",
-    "nov", "dec",
+    "jan", "fe", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov",
+    "dec",
 ];
 fn month(i: &[u8]) -> IResult<&[u8], u32> {
     map_opt(bytes::complete::take(3usize), |name| {
@@ -988,8 +1144,8 @@ fn month(i: &[u8]) -> IResult<&[u8], u32> {
 fn date_text(i: &[u8]) -> IResult<&[u8], NaiveDate> {
     map_opt(
         sequence::tuple((
-            sequence::terminated(alt((two_digit, one_digit)), tag(b"-")),
-            sequence::terminated(month, tag(b"-")),
+            sequence::terminated(alt((two_digit, one_digit)), tag("-")),
+            sequence::terminated(month, tag("-")),
             four_digit,
         )),
         |(d, m, y)| NaiveDate::from_ymd_opt(y as i32, m, d),
@@ -999,7 +1155,7 @@ fn date_text(i: &[u8]) -> IResult<&[u8], NaiveDate> {
 fn date(i: &[u8]) -> IResult<&[u8], NaiveDate> {
     alt((
         date_text,
-        sequence::delimited(tag(b"\""), date_text, tag(b"\"")),
+        sequence::delimited(tag("\""), date_text, tag("\"")),
     ))(i)
 }
 
@@ -1007,10 +1163,10 @@ fn datetime_date(i: &[u8]) -> IResult<&[u8], NaiveDate> {
     map_opt(
         sequence::tuple((
             sequence::terminated(
-                alt((two_digit, sequence::preceded(tag(b" "), one_digit))),
-                tag(b"-"),
+                alt((two_digit, sequence::preceded(tag(" "), one_digit))),
+                tag("-"),
             ),
-            sequence::terminated(month, tag(b"-")),
+            sequence::terminated(month, tag("-")),
             four_digit,
         )),
         |(d, m, y)| NaiveDate::from_ymd_opt(y as i32, m, d),
@@ -1020,13 +1176,13 @@ fn datetime_date(i: &[u8]) -> IResult<&[u8], NaiveDate> {
 fn datetime(i: &[u8]) -> IResult<&[u8], DateTime<FixedOffset>> {
     map_opt(
         sequence::delimited(
-            tag(b"\""),
+            tag("\""),
             sequence::tuple((
-                sequence::terminated(datetime_date, tag(b" ")),
-                sequence::terminated(time_of_day, tag(b" ")),
+                sequence::terminated(datetime_date, tag(" ")),
+                sequence::terminated(time_of_day, tag(" ")),
                 numeric_zone,
             )),
-            tag(b"\""),
+            tag("\""),
         ),
         |(date, (h, m, s), zone)| {
             FixedOffset::east_opt(zone * 60).and_then(|offset| {
@@ -2168,6 +2324,272 @@ mod test {
                     MsgAtt::Uid(42),
                     MsgAtt::Flags(FlagsFetch::NotRecent(vec![]))
                 ],
+            }
+        );
+    }
+
+    #[test]
+    fn search_key_syntax() {
+        assert_reversible!(
+            SearchKey,
+            "ALL",
+            SearchKey::Simple(SimpleSearchKey::All)
+        );
+        assert_reversible!(
+            SearchKey,
+            "ANSWERED",
+            SearchKey::Simple(SimpleSearchKey::Answered)
+        );
+        assert_reversible!(
+            SearchKey,
+            "BCC \"foo@bar.com\"",
+            SearchKey::Text(TextSearchKey {
+                typ: TextSearchKeyType::Bcc,
+                value: s("foo@bar.com"),
+            })
+        );
+        assert_reversible!(
+            SearchKey,
+            "BEFORE \"4-Jul-2020\"",
+            SearchKey::Date(DateSearchKey {
+                typ: DateSearchKeyType::Before,
+                date: NaiveDate::from_ymd(2020, 7, 4),
+                _marker: PhantomData,
+            })
+        );
+        assert_reversible!(
+            SearchKey,
+            "BODY needle",
+            SearchKey::Text(TextSearchKey {
+                typ: TextSearchKeyType::Body,
+                value: s("needle"),
+            })
+        );
+        assert_reversible!(
+            SearchKey,
+            "CC \"foo@bar.com\"",
+            SearchKey::Text(TextSearchKey {
+                typ: TextSearchKeyType::Cc,
+                value: s("foo@bar.com"),
+            })
+        );
+        assert_reversible!(
+            SearchKey,
+            "DELETED",
+            SearchKey::Simple(SimpleSearchKey::Deleted)
+        );
+        assert_reversible!(
+            SearchKey,
+            "FLAGGED",
+            SearchKey::Simple(SimpleSearchKey::Flagged)
+        );
+        assert_reversible!(
+            SearchKey,
+            "FROM \"foo@bar.com\"",
+            SearchKey::Text(TextSearchKey {
+                typ: TextSearchKeyType::From,
+                value: s("foo@bar.com"),
+            })
+        );
+        assert_reversible!(
+            SearchKey,
+            "KEYWORD foo",
+            SearchKey::Keyword(Flag::Keyword("foo".to_owned()))
+        );
+        assert_reversible!(
+            SearchKey,
+            "NEW",
+            SearchKey::Simple(SimpleSearchKey::New)
+        );
+        assert_reversible!(
+            SearchKey,
+            "OLD",
+            SearchKey::Simple(SimpleSearchKey::Old)
+        );
+        assert_reversible!(
+            SearchKey,
+            "ON \"4-Jul-2020\"",
+            SearchKey::Date(DateSearchKey {
+                typ: DateSearchKeyType::On,
+                date: NaiveDate::from_ymd(2020, 7, 4),
+                _marker: PhantomData,
+            })
+        );
+        assert_reversible!(
+            SearchKey,
+            "RECENT",
+            SearchKey::Simple(SimpleSearchKey::Recent)
+        );
+        assert_reversible!(
+            SearchKey,
+            "SEEN",
+            SearchKey::Simple(SimpleSearchKey::Seen)
+        );
+        assert_reversible!(
+            SearchKey,
+            "SINCE \"4-Jul-2020\"",
+            SearchKey::Date(DateSearchKey {
+                typ: DateSearchKeyType::Since,
+                date: NaiveDate::from_ymd(2020, 7, 4),
+                _marker: PhantomData,
+            })
+        );
+        assert_reversible!(
+            SearchKey,
+            "SUBJECT needle",
+            SearchKey::Text(TextSearchKey {
+                typ: TextSearchKeyType::Subject,
+                value: s("needle"),
+            })
+        );
+        assert_reversible!(
+            SearchKey,
+            "TEXT needle",
+            SearchKey::Text(TextSearchKey {
+                typ: TextSearchKeyType::Text,
+                value: s("needle"),
+            })
+        );
+        assert_reversible!(
+            SearchKey,
+            "TO \"foo@bar.com\"",
+            SearchKey::Text(TextSearchKey {
+                typ: TextSearchKeyType::To,
+                value: s("foo@bar.com"),
+            })
+        );
+        assert_reversible!(
+            SearchKey,
+            "UNANSWERED",
+            SearchKey::Simple(SimpleSearchKey::Unanswered)
+        );
+        assert_reversible!(
+            SearchKey,
+            "UNDELETED",
+            SearchKey::Simple(SimpleSearchKey::Undeleted)
+        );
+        assert_reversible!(
+            SearchKey,
+            "UNFLAGGED",
+            SearchKey::Simple(SimpleSearchKey::Unflagged)
+        );
+        assert_reversible!(
+            SearchKey,
+            "UNKEYWORD foo",
+            SearchKey::Unkeyword(Flag::Keyword("foo".to_owned()))
+        );
+        assert_reversible!(
+            SearchKey,
+            "UNSEEN",
+            SearchKey::Simple(SimpleSearchKey::Unseen)
+        );
+
+        assert_reversible!(
+            SearchKey,
+            "DRAFT",
+            SearchKey::Simple(SimpleSearchKey::Draft)
+        );
+        assert_reversible!(
+            SearchKey,
+            "HEADER Foo Bar",
+            SearchKey::Header(SearchKeyHeader {
+                header: s("Foo"),
+                value: s("Bar"),
+            })
+        );
+        assert_reversible!(SearchKey, "LARGER 42", SearchKey::Larger(42));
+        assert_reversible!(
+            SearchKey,
+            "NOT LARGER 42",
+            SearchKey::Not(Box::new(SearchKey::Larger(42)))
+        );
+        assert_reversible!(
+            SearchKey,
+            "OR LARGER 42 DRAFT",
+            SearchKey::Or(SearchKeyOr {
+                a: Box::new(SearchKey::Larger(42)),
+                b: Box::new(SearchKey::Simple(SimpleSearchKey::Draft)),
+            })
+        );
+        assert_reversible!(
+            SearchKey,
+            "SENTBEFORE \"4-Jul-2020\"",
+            SearchKey::Date(DateSearchKey {
+                typ: DateSearchKeyType::SentBefore,
+                date: NaiveDate::from_ymd(2020, 7, 4),
+                _marker: PhantomData,
+            })
+        );
+        assert_reversible!(
+            SearchKey,
+            "SENTON \"4-Jul-2020\"",
+            SearchKey::Date(DateSearchKey {
+                typ: DateSearchKeyType::SentOn,
+                date: NaiveDate::from_ymd(2020, 7, 4),
+                _marker: PhantomData,
+            })
+        );
+        assert_reversible!(
+            SearchKey,
+            "SENTSINCE \"4-Jul-2020\"",
+            SearchKey::Date(DateSearchKey {
+                typ: DateSearchKeyType::SentSince,
+                date: NaiveDate::from_ymd(2020, 7, 4),
+                _marker: PhantomData,
+            })
+        );
+        assert_reversible!(SearchKey, "SMALLER 42", SearchKey::Smaller(42));
+        assert_reversible!(
+            SearchKey,
+            "UID 1:2,3:*",
+            SearchKey::Uid(s("1:2,3:*"))
+        );
+        assert_reversible!(
+            SearchKey,
+            "UNDRAFT",
+            SearchKey::Simple(SimpleSearchKey::Undraft)
+        );
+        assert_reversible!(
+            SearchKey,
+            "1:2,3:*",
+            SearchKey::Seqnum(s("1:2,3:*"))
+        );
+        assert_reversible!(
+            SearchKey,
+            "(LARGER 42)",
+            SearchKey::And(vec![SearchKey::Larger(42)])
+        );
+        assert_reversible!(
+            SearchKey,
+            "(LARGER 42 SMALLER 56)",
+            SearchKey::And(vec![SearchKey::Larger(42), SearchKey::Smaller(56)])
+        );
+    }
+
+    #[test]
+    fn search_command_syntax() {
+        assert_reversible!(
+            SearchCommand,
+            "SEARCH LARGER 42",
+            SearchCommand {
+                charset: None,
+                keys: vec![SearchKey::Larger(42)],
+            }
+        );
+        assert_reversible!(
+            SearchCommand,
+            "SEARCH LARGER 42 SMALLER 56",
+            SearchCommand {
+                charset: None,
+                keys: vec![SearchKey::Larger(42), SearchKey::Smaller(56)],
+            }
+        );
+        assert_reversible!(
+            SearchCommand,
+            "SEARCH CHARSET utf-8 LARGER 42",
+            SearchCommand {
+                charset: ns("utf-8"),
+                keys: vec![SearchKey::Larger(42)],
             }
         );
     }
