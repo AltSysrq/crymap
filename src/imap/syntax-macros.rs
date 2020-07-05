@@ -44,11 +44,11 @@ macro_rules! syntax_rule {
                     }))(i)
             }
 
-            pub fn write_to(&self, lex: &mut LexWriter<impl Write>)
+            pub fn write_to(&mut self, lex: &mut LexWriter<impl Write>)
                             -> io::Result<()> {
                 let this = self;
                 apply_write_modifiers!([$($whole_struct_mod)*], lex, this, {
-                    $(let $field_name = &this.$field_name;
+                    $(let $field_name = &mut this.$field_name;
                       apply_write_modifiers!(
                           [$($field_mod)*], lex, $field_name, {
                               generate_field_writer!(
@@ -86,12 +86,12 @@ macro_rules! syntax_rule {
                     )))(i)
             }
 
-            pub fn write_to(&self, lex: &mut LexWriter<impl Write>)
+            pub fn write_to(&mut self, lex: &mut LexWriter<impl Write>)
                             -> io::Result<()> {
                 let this = self;
                 apply_write_modifiers!([$($whole_enum_mod)*], lex, this, {
                     match this {
-                        $(&$enum_name::$case_name(ref inner) => {
+                        $(&mut $enum_name::$case_name(ref mut inner) => {
                             apply_write_modifiers!(
                                 [$($case_mod)*], lex, inner, {
                                     generate_field_writer!(
@@ -241,8 +241,8 @@ macro_rules! apply_write_modifiers {
     ([marked_opt($marker:expr) $($rest:tt)*],
      $lex:expr, $var:ident, $inner:expr) => {
         match $var {
-            &None => $lex.verbatim_bytes($marker)?,
-            &Some(ref $var) => {
+            &mut None => $lex.verbatim_bytes($marker)?,
+            &mut Some(ref mut $var) => {
                 apply_write_modifiers!([$($rest)*], $lex, $var, $inner);
             }
         }
@@ -250,8 +250,8 @@ macro_rules! apply_write_modifiers {
     ([nil $($rest:tt)*],
      $lex:expr, $var:ident, $inner:expr) => {
         match $var {
-            &None => $lex.nil()?,
-            &Some(ref $var) => {
+            &mut None => $lex.nil()?,
+            &mut Some(ref mut $var) => {
                 apply_write_modifiers!([$($rest)*], $lex, $var, $inner);
             }
         }
@@ -267,15 +267,15 @@ macro_rules! apply_write_modifiers {
     ([opt $($rest:tt)*],
      $lex:expr, $var:ident, $inner:expr) => {
         match $var {
-            &None => (),
-            &Some(ref $var) => {
+            &mut None => (),
+            &mut Some(ref mut $var) => {
                 apply_write_modifiers!([$($rest)*], $lex, $var, $inner);
             }
         }
     };
     ([box $($rest:tt)*],
      $lex:expr, $var:ident, $inner:expr) => {
-        let $var = &**$var;
+        let $var = &mut **$var;
         apply_write_modifiers!([$($rest)*], $lex, $var, $inner);
     }
 }

@@ -32,7 +32,6 @@ use serde::{Deserialize, Serialize};
 use crate::account::mailbox::BufferedMessage;
 use crate::mime::fetch;
 use crate::support::error::Error;
-use crate::support::safe_name::is_safe_name;
 
 /// A change identifier.
 ///
@@ -631,10 +630,8 @@ impl FromStr for Flag {
             Ok(Flag::Seen)
         } else if s.starts_with("\\") {
             Err(Error::NxFlag)
-        } else if is_safe_name(s) {
-            Ok(Flag::Keyword(s.to_owned()))
         } else {
-            Err(Error::UnsafeName)
+            Ok(Flag::Keyword(s.to_owned()))
         }
     }
 }

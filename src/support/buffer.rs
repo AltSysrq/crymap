@@ -117,6 +117,18 @@ impl Write for BufferWriter {
 }
 
 impl BufferReader {
+    /// Directly create a `BufferReader` from the given data.
+    ///
+    /// Mainly used for testing.
+    pub fn new(data: Vec<u8>) -> Self {
+        BufferReader {
+            len: data.len() as u64,
+            buf: data,
+            off: 0,
+            on_disk: None,
+        }
+    }
+
     /// Returns the length, in bytes, of the buffer.
     pub fn len(&self) -> u64 {
         self.len

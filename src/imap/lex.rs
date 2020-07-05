@@ -101,6 +101,7 @@ use std::io::{self, Read, Write};
 
 use chrono::prelude::*;
 
+use super::literal_source::LiteralSource;
 use crate::account::model::Flag;
 use crate::mime::utf7;
 
@@ -190,7 +191,7 @@ impl<W: Write> LexWriter<W> {
         &mut self,
         use_binary_syntax: bool,
         mut data: impl Read,
-        len: usize,
+        len: u64,
     ) -> io::Result<()> {
         write!(
             self.writer,
@@ -205,6 +206,10 @@ impl<W: Write> LexWriter<W> {
         )?;
         io::copy(&mut data, &mut self.writer)?;
         Ok(())
+    }
+
+    pub fn literal_source(&mut self, ls: &mut LiteralSource) -> io::Result<()> {
+        self.literal(ls.binary, &mut ls.data, ls.len)
     }
 
     pub fn flag(&mut self, flag: &Flag) -> io::Result<()> {
@@ -240,7 +245,11 @@ impl<W: Write> LexWriter<W> {
         for &ch in kw.as_bytes() {
             match ch {
                 b' ' => self.writer.write_all(b"_")?,
-                33..=126 if b'=' != ch && b'?' != ch => {
+                33..=126
+                    if b'=' != ch
+                        && b'?' != ch
+                        && self.is_liberal_atom_char(ch) =>
+                {
                     self.writer.write_all(&[ch])?
                 }
                 c => write!(self.writer, "={:02X}", c)?,
@@ -265,7 +274,7 @@ impl<W: Write> LexWriter<W> {
         if self.is_quotable(s) {
             write!(self.writer, "\"{}\"", s)?;
         } else {
-            self.literal(false, s.as_bytes(), s.len())?;
+            self.literal(false, s.as_bytes(), s.len() as u64)?;
         }
 
         Ok(())
@@ -332,19 +341,26 @@ impl<W: Write> LexWriter<W> {
 
     fn is_liberal_atom(&self, s: &str) -> bool {
         !s.is_empty()
-            && s.as_bytes().iter().copied().all(|b| match b {
-                0..=b' '
-                | 127..=255
-                | b'('
-                | b')'
-                | b'{'
-                | b'*'
-                | b'%'
-                | b'\\'
-                | b'"'
-                | b']' => false,
-                _ => true,
-            })
+            && s.as_bytes()
+                .iter()
+                .copied()
+                .all(|b| self.is_liberal_atom_char(b))
+    }
+
+    fn is_liberal_atom_char(&self, b: u8) -> bool {
+        match b {
+            0..=b' '
+            | 127..=255
+            | b'('
+            | b')'
+            | b'{'
+            | b'*'
+            | b'%'
+            | b'\\'
+            | b'"'
+            | b']' => false,
+            _ => true,
+        }
     }
 
     fn is_quotable(&self, s: &str) -> bool {

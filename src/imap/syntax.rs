@@ -136,7 +136,8 @@ use nom::{
 };
 
 use super::lex::LexWriter;
-use crate::account::model::{Flag, Seqnum, Uid};
+use super::literal_source::LiteralSource;
+use crate::account::model::Flag;
 use crate::mime::encoded_word::ew_decode;
 use crate::mime::utf7;
 
@@ -628,6 +629,108 @@ syntax_rule! {
     }
 }
 
+// The RFC 3501 formal syntax is very awkward here since it lumps FETCH and
+// EXPUNGE together because they both start with an nznumber. We follow suit
+// in this case because it is more likely that extensions will want to patch
+// these themselves.
+//
+// However, we don't do RFC 3501's very awkward split between `msg-att-dynamic`
+// and `msg-att-static` because there is no reason to distinguish them
+// grammatically. `msg_att` is renamed to `msg_atts` because it is not one
+// attribute.
+syntax_rule! {
+    #[surrounded(b"(", b")")]
+    struct MsgAtts<'a> {
+        #[1*(b" ")]
+        #[delegate(MsgAtt)]
+        atts: Vec<MsgAtt<'a>>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    enum MsgAtt<'a> {
+        #[prefix(b"ENVELOPE ")]
+        #[delegate]
+        Envelope(Envelope<'a>),
+        #[prefix(b"INTERNALDATE ")]
+        #[primitive(datetime, datetime)]
+        InternalDate(DateTime<FixedOffset>),
+        // The formal grammar permits NIL for all these literals, but the
+        // recommendation on the mailing list generally seems to be to never do
+        // that and return empty strings instead, so we don't consider the NIL
+        // case here.
+        #[prefix(b"RFC822 ")]
+        #[primitive(literal_source, literal_source)]
+        Rfc822Full(LiteralSource),
+        #[prefix(b"RFC822.HEADER ")]
+        #[primitive(literal_source, literal_source)]
+        Rfc822Header(LiteralSource),
+        #[prefix(b"RFC822.TEXT ")]
+        #[primitive(literal_source, literal_source)]
+        Rfc822Text(LiteralSource),
+        #[prefix(b"RFC822.SIZE ")]
+        #[primitive(num_u32, number)]
+        Rfc822Size(u32),
+        #[prefix(b"BODY ")]
+        #[delegate]
+        ShortBodyStructure(Body<'a>),
+        #[prefix(b"BODYSTRUCTURE ")]
+        #[delegate]
+        ExtendedBodyStructure(Body<'a>),
+        #[prefix(b"BODY")]
+        #[delegate]
+        Body(MsgAttBody<'a>),
+        #[prefix(b"UID ")]
+        #[primitive(num_u32, number)]
+        Uid(u32),
+        #[surrounded(b"FLAGS (", b")")]
+        #[delegate(FlagsFetch)]
+        Flags(FlagsFetch<'a>),
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct MsgAttBody<'a> {
+        #[surrounded(b"[", b"]") opt]
+        #[delegate(SectionSpec)]
+        section: Option<SectionSpec<'a>>,
+        #[opt surrounded(b"<", b">")]
+        #[primitive(num_u32, number)]
+        slice_origin: Option<u32>,
+        #[prefix(b" ")]
+        #[primitive(literal_source, literal_source)]
+        data: LiteralSource,
+    }
+}
+
+syntax_rule! {
+    // This somewhat awkward struct accounts for the fact that we don't treat
+    // \Recent as a flag. The FLAGS part of the FETCH response is the only
+    // place where \Recent can occur conditionally, so instead of adding
+    // another layer to represent \Recent, we just have this contortion that
+    // ensures that the correct number of spaces occur.
+    //
+    // This is another case where the definitions here are unsuitable for a
+    // non-Crymap client, since it can only parse the list if \Recent is the
+    // first item.
+    #[]
+    enum FlagsFetch<'a> {
+        #[prefix(b"\\Recent") 0* prefix(b" ")]
+        #[primitive(flag, flag)]
+        Recent(Vec<Flag>),
+        #[0*(b" ")]
+        #[primitive(flag, flag)]
+        NotRecent(Vec<Flag>),
+        // We never actually parse FlagsFetch in the server so this marker case
+        // is moot.
+        #[prefix(b"\x00")]
+        #[phantom]
+        _Marker(PhantomData<&'a ()>),
+    }
+}
+
 // ==================== PRIMITIVE PARSERS ====================
 
 fn normal_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
@@ -706,9 +809,39 @@ fn literal(i: &[u8]) -> IResult<&[u8], &[u8]> {
     let (i, len) = sequence::delimited(
         alt((tag(b"~{"), tag(b"{"))),
         number,
-        alt((tag(b"+}"), tag(b"}"))),
+        alt((tag(b"+}\r\n"), tag(b"}\r\n"))),
     )(i)?;
     bytes::complete::take(len)(i)
+}
+
+// Only used to re-read fetch responses.
+fn literal_source(i: &[u8]) -> IResult<&[u8], LiteralSource> {
+    alt((
+        literal_literal_source,
+        map(quoted, |s| {
+            let len = s.len();
+            let data: Vec<u8> = s.into_owned().into();
+
+            LiteralSource::of_reader(io::Cursor::new(data), len as u64, false)
+        }),
+    ))(i)
+}
+
+fn literal_literal_source(i: &[u8]) -> IResult<&[u8], LiteralSource> {
+    let (i, prefix) = alt((tag(b"~{"), tag(b"{")))(i)?;
+    let binary = prefix.starts_with(b"~");
+    let (i, len) =
+        sequence::terminated(number, alt((tag(b"+}\r\n"), tag(b"}\r\n"))))(i)?;
+    let (i, data) = bytes::complete::take(len)(i)?;
+
+    Ok((
+        i,
+        LiteralSource::of_reader(
+            io::Cursor::new(data.to_owned()),
+            len as u64,
+            binary,
+        ),
+    ))
 }
 
 fn quoted_char(i: &[u8]) -> IResult<&[u8], &[u8]> {
@@ -771,14 +904,6 @@ fn sequence_set(i: &[u8]) -> IResult<&[u8], Cow<str>> {
     map(is_a("0123456789:*,"), String::from_utf8_lossy)(i)
 }
 
-fn seqnum(i: &[u8]) -> IResult<&[u8], Seqnum> {
-    map_opt(number, Seqnum::of)(i)
-}
-
-fn uid(i: &[u8]) -> IResult<&[u8], Uid> {
-    map_opt(number, Uid::of)(i)
-}
-
 fn text(i: &[u8]) -> IResult<&[u8], Cow<str>> {
     map(is_not("\r\n"), String::from_utf8_lossy)(i)
 }
@@ -786,8 +911,8 @@ fn text(i: &[u8]) -> IResult<&[u8], Cow<str>> {
 fn flag(i: &[u8]) -> IResult<&[u8], Flag> {
     map_opt(
         alt((
-            sequence::preceded(tag(b"\\"), normal_atom),
             map(normal_atom, |a| ew_decode(&a).map(Cow::Owned).unwrap_or(a)),
+            backslash_atom,
         )),
         |s| s.parse::<Flag>().ok(),
     )(i)
@@ -922,7 +1047,7 @@ mod test {
             assert_reversible!(true, $ty, $expected_text, $value);
         };
         ($unicode:expr, $ty:ty, $expected_text:expr, $value:expr) => {{
-            let value = &$value;
+            let value = &mut $value;
             let mut lex = LexWriter::new(Vec::<u8>::new(), $unicode, false);
             value.write_to(&mut lex).unwrap();
             let text = lex.into_inner();
@@ -957,7 +1082,7 @@ mod test {
 
     macro_rules! assert_non_unicode_as {
         ($expected_text:expr, $value: expr) => {{
-            let value = $value;
+            let value = &mut $value;
             let mut lex = LexWriter::new(Vec::<u8>::new(), false, false);
             value.write_to(&mut lex).unwrap();
             let text = lex.into_inner();
@@ -1061,7 +1186,7 @@ mod test {
             }
         );
 
-        let with_unicode_and_groups = Envelope {
+        let mut with_unicode_and_groups = Envelope {
             date: None,
             subject: ns("föö"),
             from: vec![
@@ -1090,7 +1215,7 @@ mod test {
              (\"Zoë\" NIL \"zoë\" \"zoë.com\")\
              (NIL NIL NIL NIL)) \
              NIL NIL NIL NIL NIL NIL NIL)",
-            with_unicode_and_groups
+            with_unicode_and_groups.clone()
         );
 
         assert_non_unicode_as!(
@@ -1113,7 +1238,7 @@ mod test {
                 core: ClassifiedBodyType1Part::Text(BodyTypeText {
                     media_subtype: s("PLAIN"),
                     body_fields: BodyFields {
-                        content_type_parms: vec![s("CHARSET"), s("US-ASCII"),],
+                        content_type_parms: vec![s("CHARSET"), s("US-ASCII")],
                         content_id: None,
                         content_description: None,
                         content_transfer_encoding: s("7BIT"),
@@ -1135,7 +1260,7 @@ mod test {
                 core: ClassifiedBodyType1Part::Text(BodyTypeText {
                     media_subtype: s("PLAIN"),
                     body_fields: BodyFields {
-                        content_type_parms: vec![s("CHARSET"), s("iso-8859-1"),],
+                        content_type_parms: vec![s("CHARSET"), s("iso-8859-1")],
                         content_id: None,
                         content_description: None,
                         content_transfer_encoding: s("QUOTED-PRINTABLE"),
@@ -1213,7 +1338,7 @@ mod test {
                 ],
                 media_subtype: s("ALTERNATIVE"),
                 ext: Some(BodyExtMPart {
-                    content_type_parms: vec![s("BOUNDARY"), s("d3438gr7324"),],
+                    content_type_parms: vec![s("BOUNDARY"), s("d3438gr7324")],
                     content_disposition: None,
                     content_language: None,
                     content_location: None,
@@ -1279,7 +1404,7 @@ mod test {
                             md5: None,
                             content_disposition: Some(ContentDisposition {
                                 disposition: s("INLINE"),
-                                parms: vec![s("FILENAME"), s("4356415.jpg"),],
+                                parms: vec![s("FILENAME"), s("4356415.jpg")],
                             }),
                             content_language: None,
                             content_location: None,
@@ -1288,7 +1413,7 @@ mod test {
                 ],
                 media_subtype: s("RELATED"),
                 ext: Some(BodyExtMPart {
-                    content_type_parms: vec![s("BOUNDARY"), s("0__=5tgd3d"),],
+                    content_type_parms: vec![s("BOUNDARY"), s("0__=5tgd3d")],
                     content_disposition: Some(ContentDisposition {
                         disposition: s("INLINE"),
                         parms: vec![],
@@ -1314,7 +1439,7 @@ mod test {
             Body::SinglePart(BodyType1Part {
                 core: ClassifiedBodyType1Part::Message(BodyTypeMsg {
                     body_fields: BodyFields {
-                        content_type_parms: vec![s("parm"), s("foo"),],
+                        content_type_parms: vec![s("parm"), s("foo")],
                         content_id: ns("<ContentID>"),
                         content_description: ns("Content Description"),
                         content_transfer_encoding: s("8bit"),
@@ -1555,7 +1680,7 @@ mod test {
             "FETCH 1 (FLAGS)",
             FetchCommand {
                 sequence_set: s("1"),
-                target: FetchCommandTarget::Multi(vec![FetchAtt::Flags(()),]),
+                target: FetchCommandTarget::Multi(vec![FetchAtt::Flags(())]),
             }
         );
         assert_reversible!(
@@ -1659,7 +1784,7 @@ mod test {
                         section: Some(SectionSpec::TopLevel(
                             SectionText::HeaderFields(SectionTextHeaderField {
                                 negative: false,
-                                headers: vec![s("Foo"),],
+                                headers: vec![s("Foo")],
                             })
                         )),
                         slice: None,
@@ -1678,7 +1803,7 @@ mod test {
                         section: Some(SectionSpec::TopLevel(
                             SectionText::HeaderFields(SectionTextHeaderField {
                                 negative: true,
-                                headers: vec![s("Foo"),],
+                                headers: vec![s("Foo")],
                             })
                         )),
                         slice: None,
@@ -1697,7 +1822,7 @@ mod test {
                         section: Some(SectionSpec::TopLevel(
                             SectionText::HeaderFields(SectionTextHeaderField {
                                 negative: false,
-                                headers: vec![s("Foo"), s("Bar"),],
+                                headers: vec![s("Foo"), s("Bar")],
                             })
                         )),
                         slice: None,
@@ -1716,7 +1841,7 @@ mod test {
                         section: Some(SectionSpec::TopLevel(
                             SectionText::HeaderFields(SectionTextHeaderField {
                                 negative: true,
-                                headers: vec![s("Foo"), s("Bar"),],
+                                headers: vec![s("Foo"), s("Bar")],
                             })
                         )),
                         slice: None,
@@ -1808,6 +1933,241 @@ mod test {
                         slice: None,
                     }
                 )),
+            }
+        );
+    }
+
+    #[test]
+    fn msg_att_syntax() {
+        assert_reversible!(
+            MsgAtt,
+            "ENVELOPE (\"04 Jul 2020 16:31:00 +0000\" \
+             \"Subject\" NIL NIL NIL NIL NIL NIL NIL \"<MessageID>\")",
+            MsgAtt::Envelope(Envelope {
+                date: ns("04 Jul 2020 16:31:00 +0000"),
+                subject: ns("Subject"),
+                from: vec![],
+                sender: vec![],
+                reply_to: vec![],
+                to: vec![],
+                cc: vec![],
+                bcc: vec![],
+                in_reply_to: None,
+                message_id: ns("<MessageID>"),
+            })
+        );
+
+        assert_reversible!(
+            MsgAtt,
+            "INTERNALDATE \" 4-Jul-2020 16:31:00 +0100\"",
+            MsgAtt::InternalDate(
+                FixedOffset::east(3600).ymd(2020, 7, 4).and_hms(16, 31, 0)
+            )
+        );
+
+        assert_reversible!(
+            MsgAtt,
+            "RFC822 {3}\r\nfoo",
+            MsgAtt::Rfc822Full(LiteralSource::of_data(b"foo", false))
+        );
+        assert_reversible!(
+            MsgAtt,
+            "RFC822.HEADER {3}\r\nfoo",
+            MsgAtt::Rfc822Header(LiteralSource::of_data(b"foo", false))
+        );
+        assert_reversible!(
+            MsgAtt,
+            "RFC822.TEXT {3}\r\nfoo",
+            MsgAtt::Rfc822Text(LiteralSource::of_data(b"foo", false))
+        );
+        assert_reversible!(
+            MsgAtt,
+            "RFC822.SIZE 1234",
+            MsgAtt::Rfc822Size(1234)
+        );
+
+        assert_reversible!(
+            MsgAtt,
+            "BODY (\"TEXT\" \"PLAIN\" (\"CHARSET\" \"iso-8859-1\") \
+             NIL NIL \"QUOTED-PRINTABLE\" 1315 42)",
+            MsgAtt::ShortBodyStructure(Body::SinglePart(BodyType1Part {
+                core: ClassifiedBodyType1Part::Text(BodyTypeText {
+                    media_subtype: s("PLAIN"),
+                    body_fields: BodyFields {
+                        content_type_parms: vec![s("CHARSET"), s("iso-8859-1")],
+                        content_id: None,
+                        content_description: None,
+                        content_transfer_encoding: s("QUOTED-PRINTABLE"),
+                        size_octets: 1315,
+                    },
+                    size_lines: 42,
+                }),
+                ext: None,
+            }))
+        );
+        assert_reversible!(
+            MsgAtt,
+            "BODYSTRUCTURE (\"TEXT\" \"PLAIN\" (\"CHARSET\" \"iso-8859-1\") \
+             NIL NIL \"QUOTED-PRINTABLE\" 1315 42 NIL NIL NIL NIL)",
+            MsgAtt::ExtendedBodyStructure(Body::SinglePart(BodyType1Part {
+                core: ClassifiedBodyType1Part::Text(BodyTypeText {
+                    media_subtype: s("PLAIN"),
+                    body_fields: BodyFields {
+                        content_type_parms: vec![s("CHARSET"), s("iso-8859-1")],
+                        content_id: None,
+                        content_description: None,
+                        content_transfer_encoding: s("QUOTED-PRINTABLE"),
+                        size_octets: 1315,
+                    },
+                    size_lines: 42,
+                }),
+                ext: Some(BodyExt1Part {
+                    md5: None,
+                    content_disposition: None,
+                    content_language: None,
+                    content_location: None,
+                }),
+            }))
+        );
+
+        assert_reversible!(
+            MsgAtt,
+            "BODY[] {3}\r\nfoo",
+            MsgAtt::Body(MsgAttBody {
+                section: None,
+                slice_origin: None,
+                data: LiteralSource::of_data(b"foo", false),
+            })
+        );
+        assert_reversible!(
+            MsgAtt,
+            "BODY[HEADER] {3}\r\nfoo",
+            MsgAtt::Body(MsgAttBody {
+                section: Some(SectionSpec::TopLevel(SectionText::Header(()))),
+                slice_origin: None,
+                data: LiteralSource::of_data(b"foo", false),
+            })
+        );
+        assert_reversible!(
+            MsgAtt,
+            "BODY[HEADER.FIELDS (Foo)] {3}\r\nfoo",
+            MsgAtt::Body(MsgAttBody {
+                section: Some(SectionSpec::TopLevel(
+                    SectionText::HeaderFields(SectionTextHeaderField {
+                        negative: false,
+                        headers: vec![s("Foo")],
+                    })
+                )),
+                slice_origin: None,
+                data: LiteralSource::of_data(b"foo", false),
+            })
+        );
+        assert_reversible!(
+            MsgAtt,
+            "BODY[TEXT] {3}\r\nfoo",
+            MsgAtt::Body(MsgAttBody {
+                section: Some(SectionSpec::TopLevel(SectionText::Text(()))),
+                slice_origin: None,
+                data: LiteralSource::of_data(b"foo", false),
+            })
+        );
+        assert_reversible!(
+            MsgAtt,
+            "BODY[1.2.MIME] {3}\r\nfoo",
+            MsgAtt::Body(MsgAttBody {
+                section: Some(SectionSpec::Sub(SubSectionSpec {
+                    subscripts: vec![1, 2],
+                    text: Some(SectionText::Mime(())),
+                })),
+                slice_origin: None,
+                data: LiteralSource::of_data(b"foo", false),
+            })
+        );
+        assert_reversible!(
+            MsgAtt,
+            "BODY[]<42> {3}\r\nfoo",
+            MsgAtt::Body(MsgAttBody {
+                section: None,
+                slice_origin: Some(42),
+                data: LiteralSource::of_data(b"foo", false),
+            })
+        );
+
+        assert_reversible!(MsgAtt, "UID 42", MsgAtt::Uid(42));
+
+        assert_reversible!(
+            MsgAtt,
+            "FLAGS ()",
+            MsgAtt::Flags(FlagsFetch::NotRecent(vec![]))
+        );
+        assert_reversible!(
+            MsgAtt,
+            "FLAGS (\\Recent)",
+            MsgAtt::Flags(FlagsFetch::Recent(vec![]))
+        );
+        assert_reversible!(
+            MsgAtt,
+            "FLAGS (\\Flagged)",
+            MsgAtt::Flags(FlagsFetch::NotRecent(vec![Flag::Flagged]))
+        );
+        assert_reversible!(
+            MsgAtt,
+            "FLAGS (\\Recent \\Flagged)",
+            MsgAtt::Flags(FlagsFetch::Recent(vec![Flag::Flagged]))
+        );
+        assert_reversible!(
+            MsgAtt,
+            "FLAGS (\\Flagged \\Seen)",
+            MsgAtt::Flags(FlagsFetch::NotRecent(vec![
+                Flag::Flagged,
+                Flag::Seen
+            ]))
+        );
+        assert_reversible!(
+            MsgAtt,
+            "FLAGS (\\Recent \\Flagged \\Seen)",
+            MsgAtt::Flags(FlagsFetch::Recent(vec![Flag::Flagged, Flag::Seen]))
+        );
+        assert_reversible!(
+            MsgAtt,
+            "FLAGS (keyword)",
+            MsgAtt::Flags(FlagsFetch::NotRecent(vec![Flag::Keyword(
+                "keyword".to_owned()
+            )]))
+        );
+        assert_reversible!(
+            MsgAtt,
+            "FLAGS (=?utf-8?q?With_Space?=)",
+            MsgAtt::Flags(FlagsFetch::NotRecent(vec![Flag::Keyword(
+                "With Space".to_owned()
+            )]))
+        );
+        assert_reversible!(
+            MsgAtt,
+            "FLAGS (=?utf-8?q?With=2AStar?=)",
+            MsgAtt::Flags(FlagsFetch::NotRecent(vec![Flag::Keyword(
+                "With*Star".to_owned()
+            )]))
+        );
+    }
+
+    #[test]
+    fn msg_atts_syntax() {
+        assert_reversible!(
+            MsgAtts,
+            "(UID 42)",
+            MsgAtts {
+                atts: vec![MsgAtt::Uid(42)],
+            }
+        );
+        assert_reversible!(
+            MsgAtts,
+            "(UID 42 FLAGS ())",
+            MsgAtts {
+                atts: vec![
+                    MsgAtt::Uid(42),
+                    MsgAtt::Flags(FlagsFetch::NotRecent(vec![]))
+                ],
             }
         );
     }

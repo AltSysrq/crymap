@@ -17,4 +17,5 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 mod lex;
+mod literal_source;
 mod syntax;
