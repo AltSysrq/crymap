@@ -883,6 +883,94 @@ syntax_rule! {
     }
 }
 
+syntax_rule! {
+    #[prefix("CREATE ")]
+    struct CreateCommand<'a> {
+        #[]
+        #[primitive(mailbox, mailbox)]
+        mailbox: Cow<'a, str>,
+    }
+}
+
+syntax_rule! {
+    #[prefix("DELETE ")]
+    struct DeleteCommand<'a> {
+        #[]
+        #[primitive(mailbox, mailbox)]
+        mailbox: Cow<'a, str>,
+    }
+}
+
+syntax_rule! {
+    #[prefix("EXAMINE ")]
+    struct ExamineCommand<'a> {
+        #[]
+        #[primitive(mailbox, mailbox)]
+        mailbox: Cow<'a, str>,
+    }
+}
+
+syntax_rule! {
+    #[prefix("RENAME ")]
+    struct RenameCommand<'a> {
+        #[suffix(" ")]
+        #[primitive(mailbox, mailbox)]
+        src: Cow<'a, str>,
+        #[]
+        #[primitive(mailbox, mailbox)]
+        dst: Cow<'a, str>,
+    }
+}
+
+syntax_rule! {
+    #[prefix("SELECT ")]
+    struct SelectCommand<'a> {
+        #[]
+        #[primitive(mailbox, mailbox)]
+        mailbox: Cow<'a, str>,
+    }
+}
+
+syntax_rule! {
+    #[prefix("STATUS ")]
+    struct StatusCommand<'a> {
+        #[suffix(" ")]
+        #[primitive(mailbox, mailbox)]
+        mailbox: Cow<'a, str>,
+        #[surrounded("(", ")") 1*(" ")]
+        #[delegate(StatusAtt)]
+        atts: Vec<StatusAtt>,
+    }
+}
+
+simple_enum! {
+    enum StatusAtt {
+        Messages("MESSAGES"),
+        Recent("RECENT"),
+        UidNext("UIDNEXT"),
+        UidValidity("UIDVALIDITY"),
+        Unseen("UNSEEN"),
+    }
+}
+
+syntax_rule! {
+    #[prefix("SUBSCRIBE ")]
+    struct SubscribeCommand<'a> {
+        #[]
+        #[primitive(mailbox, mailbox)]
+        mailbox: Cow<'a, str>,
+    }
+}
+
+syntax_rule! {
+    #[prefix("UNSUBSCRIBE ")]
+    struct UnsubscribeCommand<'a> {
+        #[]
+        #[primitive(mailbox, mailbox)]
+        mailbox: Cow<'a, str>,
+    }
+}
+
 // ==================== PRIMITIVE PARSERS ====================
 
 fn normal_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
@@ -1045,6 +1133,53 @@ fn list_mailbox(i: &[u8]) -> IResult<&[u8], Cow<str>> {
     })(i)
 }
 
+// TODO We should make this more sophisticated so that we don't butcher mailbox
+// names that happen to contain `&` but were submitted by Unicode-aware
+// clients. That probably means making a `MailboxName` struct that contains
+// both the raw and decoded form so that the higher level can decide which to
+// use.
+//
+// RFC 6855 is actually horribly vague on this point:
+//
+//   All IMAP servers that support "UTF8=ACCEPT" SHOULD accept UTF-8 in
+//   mailbox names, and those that also support the Mailbox International
+//   Naming Convention described in RFC 3501, Section 5.1.3, MUST accept
+//   UTF8-quoted mailbox names and convert them to the appropriate
+//   internal format.  Mailbox names MUST comply with the Net-Unicode
+//   Definition ([RFC5198], Section 2) with the specific exception that
+//   they MUST NOT contain control characters (U+0000-U+001F and U+0080-U+
+//   009F), a delete character (U+007F), a line separator (U+2028), or a
+//   paragraph separator (U+2029).
+//
+// We MUST support UTF-8 mailbox names, as expected, it doesn't say whether we
+// are expected to stop MUTF7 or keep doing it.
+//
+// The IMAP4rev2 draft doesn't provide guidance here either:
+//
+//   Support for the Mailbox International Naming Convention described in
+//   this section is not required for IMAP4rev2-only clients and servers.
+//
+//   By convention, international mailbox names in IMAP4rev1 are specified
+//   using a modified version of the UTF-7 encoding described in [UTF-7].
+//   Modified UTF-7 may also be usable in servers that implement an
+//   earlier version of this protocol.
+//
+// All that follows is a description of how MUTF7 works.
+//
+// Maybe the best solution is to just make MUTF7 handling much stricter
+// (require terminating '-', don't deal with bad base64) to minimise the
+// chances of a user accidentally typing in a mailbox name that gets handled as
+// MUTF7 into a UTF-8-only client that doesn't add its own layer of MUTF7.
+// Overall, this is a pretty bad situation, since clients have a choice of
+// turning `&` into `&-` and risking creating a different mailbox than the user
+// typed in, or leaving `&` alone and risking MUTF7.
+//
+// TODO The current approach of not encoding anything out the door for
+// Unicode-aware clients also has its problems, since we could, for example,
+// return an unencoded name that looks like an encoded name, and then when the
+// client tries to use that unencoded name, we "decode" it and try to access a
+// different mailbox. In other words, the resolution here is pretty clearly "no
+// MUTF7 at all for Unicode clients".
 fn mailbox(i: &[u8]) -> IResult<&[u8], Cow<str>> {
     map(astring, |raw| match raw {
         Cow::Owned(s) => Cow::Owned(utf7::IMAP.decode(&s).into_owned()),
@@ -2590,6 +2725,196 @@ mod test {
             SearchCommand {
                 charset: ns("utf-8"),
                 keys: vec![SearchKey::Larger(42)],
+            }
+        );
+    }
+
+    #[test]
+    fn mailbox_management_commands() {
+        assert_reversible!(
+            CreateCommand,
+            "CREATE mailbox",
+            CreateCommand {
+                mailbox: s("mailbox"),
+            }
+        );
+        assert_reversible!(
+            true,
+            CreateCommand,
+            "CREATE \"föö\"",
+            CreateCommand {
+                mailbox: s("föö")
+            }
+        );
+        assert_reversible!(
+            false,
+            CreateCommand,
+            "CREATE \"f&APYA9g-\"",
+            CreateCommand {
+                mailbox: s("föö")
+            }
+        );
+        assert_reversible!(
+            DeleteCommand,
+            "DELETE mailbox",
+            DeleteCommand {
+                mailbox: s("mailbox"),
+            }
+        );
+        assert_reversible!(
+            true,
+            DeleteCommand,
+            "DELETE \"föö\"",
+            DeleteCommand {
+                mailbox: s("föö")
+            }
+        );
+        assert_reversible!(
+            false,
+            DeleteCommand,
+            "DELETE \"f&APYA9g-\"",
+            DeleteCommand {
+                mailbox: s("föö")
+            }
+        );
+        assert_reversible!(
+            ExamineCommand,
+            "EXAMINE mailbox",
+            ExamineCommand {
+                mailbox: s("mailbox"),
+            }
+        );
+        assert_reversible!(
+            true,
+            ExamineCommand,
+            "EXAMINE \"föö\"",
+            ExamineCommand {
+                mailbox: s("föö")
+            }
+        );
+        assert_reversible!(
+            false,
+            ExamineCommand,
+            "EXAMINE \"f&APYA9g-\"",
+            ExamineCommand {
+                mailbox: s("föö")
+            }
+        );
+        assert_reversible!(
+            RenameCommand,
+            "RENAME mailbox dst",
+            RenameCommand {
+                src: s("mailbox"),
+                dst: s("dst"),
+            }
+        );
+        assert_reversible!(
+            true,
+            RenameCommand,
+            "RENAME \"föö\" dst",
+            RenameCommand {
+                src: s("föö"),
+                dst: s("dst"),
+            }
+        );
+        assert_reversible!(
+            false,
+            RenameCommand,
+            "RENAME \"f&APYA9g-\" dst",
+            RenameCommand {
+                src: s("föö"),
+                dst: s("dst"),
+            }
+        );
+        assert_reversible!(
+            SelectCommand,
+            "SELECT mailbox",
+            SelectCommand {
+                mailbox: s("mailbox"),
+            }
+        );
+        assert_reversible!(
+            true,
+            SelectCommand,
+            "SELECT \"föö\"",
+            SelectCommand {
+                mailbox: s("föö")
+            }
+        );
+        assert_reversible!(
+            false,
+            SelectCommand,
+            "SELECT \"f&APYA9g-\"",
+            SelectCommand {
+                mailbox: s("föö")
+            }
+        );
+        assert_reversible!(
+            StatusCommand,
+            "STATUS foo (MESSAGES)",
+            StatusCommand {
+                mailbox: s("foo"),
+                atts: vec![StatusAtt::Messages],
+            }
+        );
+        assert_reversible!(
+            StatusCommand,
+            "STATUS foo (MESSAGES RECENT UIDNEXT UIDVALIDITY UNSEEN)",
+            StatusCommand {
+                mailbox: s("foo"),
+                atts: vec![
+                    StatusAtt::Messages,
+                    StatusAtt::Recent,
+                    StatusAtt::UidNext,
+                    StatusAtt::UidValidity,
+                    StatusAtt::Unseen
+                ],
+            }
+        );
+        assert_reversible!(
+            SubscribeCommand,
+            "SUBSCRIBE mailbox",
+            SubscribeCommand {
+                mailbox: s("mailbox"),
+            }
+        );
+        assert_reversible!(
+            true,
+            SubscribeCommand,
+            "SUBSCRIBE \"föö\"",
+            SubscribeCommand {
+                mailbox: s("föö")
+            }
+        );
+        assert_reversible!(
+            false,
+            SubscribeCommand,
+            "SUBSCRIBE \"f&APYA9g-\"",
+            SubscribeCommand {
+                mailbox: s("föö")
+            }
+        );
+        assert_reversible!(
+            UnsubscribeCommand,
+            "UNSUBSCRIBE mailbox",
+            UnsubscribeCommand {
+                mailbox: s("mailbox"),
+            }
+        );
+        assert_reversible!(
+            true,
+            UnsubscribeCommand,
+            "UNSUBSCRIBE \"föö\"",
+            UnsubscribeCommand {
+                mailbox: s("föö")
+            }
+        );
+        assert_reversible!(
+            false,
+            UnsubscribeCommand,
+            "UNSUBSCRIBE \"f&APYA9g-\"",
+            UnsubscribeCommand {
+                mailbox: s("föö")
             }
         );
     }
