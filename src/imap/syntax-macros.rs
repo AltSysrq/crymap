@@ -124,6 +124,16 @@ macro_rules! apply_nom_modifiers {
             apply_nom_modifiers!([$($rest)*], $inner),
             kw($suffix))
     };
+    ([maybe_surrounded($prefix:expr, $suffix:expr) $($rest:tt)*],
+     $inner:expr) => {
+        alt((
+            sequence::delimited(
+                kw($prefix),
+                apply_nom_modifiers!([$($rest)*], $inner),
+                kw($suffix)),
+            apply_nom_modifiers!([$($rest)*], $inner),
+        ))
+    };
     ([0*($sep:expr) $($rest:tt)*], $inner:expr) => {
         multi::separated_list(
             kw($sep),
@@ -203,6 +213,12 @@ macro_rules! apply_write_modifiers {
         $lex.verbatim($suffix)?;
     };
     ([surrounded($prefix:expr, $suffix:expr) $($rest:tt)*], $lex:expr,
+     $var:ident, $inner:expr) => {
+        $lex.verbatim($prefix)?;
+        apply_write_modifiers!([$($rest)*], $lex, $var, $inner);
+        $lex.verbatim($suffix)?;
+    };
+    ([maybe_surrounded($prefix:expr, $suffix:expr) $($rest:tt)*], $lex:expr,
      $var:ident, $inner:expr) => {
         $lex.verbatim($prefix)?;
         apply_write_modifiers!([$($rest)*], $lex, $var, $inner);

@@ -110,6 +110,8 @@
 //! - `prefix(s)`: Add/expect the given prefix
 //! - `suffix(s)`: Add/expect the given suffix
 //! - `surrounded(a,b)`: Add/expect the given prefix and suffix
+//! - `maybe_surrounded(a,b)`: Like `surrounded`, but the prefix and suffix are
+//!   optional on parse.
 //! - `nil`: Map between `NIL` and `None`, other values to `Some`
 //! - `nil_if_empty`: Map `.is_empty()` to `NIL` and `NIL` to `default()`
 //! - `opt`: Map `None` to nothing and absence to `None`
@@ -971,7 +973,48 @@ syntax_rule! {
     }
 }
 
-// ==================== PRIMITIVE PARSERS ====================
+syntax_rule! {
+    #[prefix("COPY ")]
+    struct CopyCommand<'a> {
+        #[suffix(" ")]
+        #[primitive(verbatim, sequence_set)]
+        messages: Cow<'a, str>,
+        #[]
+        #[primitive(mailbox, mailbox)]
+        dst: Cow<'a, str>,
+    }
+}
+
+syntax_rule! {
+    #[prefix("STORE ")]
+    struct StoreCommand<'a> {
+        #[suffix(" ")]
+        #[primitive(verbatim, sequence_set)]
+        messages: Cow<'a, str>,
+        #[]
+        #[delegate]
+        typ: StoreCommandType,
+        #[suffix(" ")]
+        #[cond(".SILENT")]
+        silent: bool,
+        #[maybe_surrounded("(", ")") 0*(" ")]
+        #[primitive(flag, flag)]
+        flags: Vec<Flag>,
+        #[]
+        #[phantom]
+        _marker: PhantomData<&'a ()>,
+    }
+}
+
+simple_enum! {
+    enum StoreCommandType {
+        Plus("+FLAGS"),
+        Minus("-FLAGS"),
+        Eq("FLAGS"),
+    }
+}
+
+// ==================== PRIMITIVE PARSERS =================´===
 
 fn normal_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
     map(
@@ -1390,6 +1433,46 @@ mod test {
                 );
             }
         }};
+    }
+
+    macro_rules! assert_equivalent {
+        ($unicode:expr, $ty:ty, $expected:expr, $($examples:expr),+) => {
+            for &example in &[$($examples),+] {
+                let (trailing, mut read) =
+                    match <$ty>::parse(example.as_bytes()) {
+                        Ok(read) => read,
+                        Err(e) => panic!("Failed to parse `{}`: {}`",
+                                         example, e),
+                    };
+
+                if !trailing.is_empty() {
+                    panic!(
+                        "Didn't parse all of `{}`, `{}` remained",
+                        example,
+                        String::from_utf8_lossy(trailing)
+                    );
+                }
+
+                let mut lex = LexWriter::new(Vec::<u8>::new(), $unicode,
+                                             false);
+                read.write_to(&mut lex).unwrap();
+                let text = lex.into_inner();
+                let text = str::from_utf8(&text).unwrap();
+                if $expected != text {
+                    panic!(
+                        "Didn't generate correct string\n\
+                         Input:    {}\n\
+                         Expected: {}\n\
+                         Actual:   {}\n\
+                         Diff:     {}\n",
+                        example,
+                        $expected,
+                        text,
+                        diff($expected, text)
+                    );
+                }
+            }
+        }
     }
 
     fn diff(a: &str, b: &str) -> String {
@@ -2916,6 +2999,87 @@ mod test {
             UnsubscribeCommand {
                 mailbox: s("föö")
             }
+        );
+    }
+
+    #[test]
+    fn message_management_commands() {
+        assert_reversible!(
+            CopyCommand,
+            "COPY 1:2,3:* foo",
+            CopyCommand {
+                messages: s("1:2,3:*"),
+                dst: s("foo"),
+            }
+        );
+
+        assert_reversible!(
+            StoreCommand,
+            "STORE 1:2,3:* FLAGS (\\Seen)",
+            StoreCommand {
+                messages: s("1:2,3:*"),
+                typ: StoreCommandType::Eq,
+                silent: false,
+                flags: vec![Flag::Seen],
+                _marker: PhantomData,
+            }
+        );
+        assert_reversible!(
+            StoreCommand,
+            "STORE 1 +FLAGS (keyword)",
+            StoreCommand {
+                messages: s("1"),
+                typ: StoreCommandType::Plus,
+                silent: false,
+                flags: vec![Flag::Keyword("keyword".to_owned())],
+                _marker: PhantomData,
+            }
+        );
+        assert_reversible!(
+            StoreCommand,
+            "STORE 1 -FLAGS (\\Flagged \\Deleted)",
+            StoreCommand {
+                messages: s("1"),
+                typ: StoreCommandType::Minus,
+                silent: false,
+                flags: vec![Flag::Flagged, Flag::Deleted],
+                _marker: PhantomData,
+            }
+        );
+        assert_reversible!(
+            StoreCommand,
+            "STORE 1 FLAGS.SILENT (\\Flagged)",
+            StoreCommand {
+                messages: s("1"),
+                typ: StoreCommandType::Eq,
+                silent: true,
+                flags: vec![Flag::Flagged],
+                _marker: PhantomData,
+            }
+        );
+        assert_reversible!(
+            StoreCommand,
+            "STORE 1 FLAGS ()",
+            StoreCommand {
+                messages: s("1"),
+                typ: StoreCommandType::Eq,
+                silent: false,
+                flags: vec![],
+                _marker: PhantomData,
+            }
+        );
+
+        assert_equivalent!(
+            true,
+            StoreCommand,
+            "STORE 1 FLAGS.SILENT (\\Flagged)",
+            "store 1 flags.silent \\flagged"
+        );
+        assert_equivalent!(
+            true,
+            StoreCommand,
+            "STORE 1 FLAGS (\\Flagged keyword)",
+            "STORE 1 FLAGS \\flagged keyword"
         );
     }
 }
