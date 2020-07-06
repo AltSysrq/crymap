@@ -3939,6 +3939,34 @@ mod test {
         );
     }
 
-    // TODO: Test for equivalencies like string escaping and date
-    // representations.
+    #[test]
+    fn misc_equivalencies() {
+        // Strings -- backslash escapes are handled properly, empty literals
+        // are understood, LITERAL+ syntax is understood.
+        assert_equivalent!(
+            true,
+            LsubCommand,
+            "LSUB \"\" {8}\r\nfoo\"\\bar",
+            "lsub {0}\r\n \"foo\\\"\\\\bar\"",
+            "lsub \"\" {8+}\r\nfoo\"\\bar"
+        );
+        // Dates --- months are case-insensitive, string and atom syntax
+        // understood, 0-padding allowed.
+        assert_equivalent!(
+            true,
+            DateSearchKey,
+            "ON \"9-Jul-2020\"",
+            "on 9-jul-2020",
+            "on 09-jUl-2020",
+            "on \"09-Jul-2020\""
+        );
+        // Datetimes --- months are case-insensitive, 0 padding allowed instead
+        // of space padding.
+        assert_equivalent!(
+            true,
+            MsgAtt,
+            "INTERNALDATE \" 9-Jul-2020 01:09:00 +0100\"",
+            "internaldate \"09-jUL-2020 01:09:00 +0100\""
+        );
+    }
 }
