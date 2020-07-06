@@ -1280,6 +1280,48 @@ syntax_rule! {
     }
 }
 
+// Command fragment for the start of an APPEND command.
+//
+// This will parse out all of the APPEND command up to but not including the
+// literal. Every time the connection parser encounters a literal, it should
+// invoke this on the portion of the line buffered so far (not including the
+// literal itself) to see if it is an APPEND.
+syntax_rule! {
+    #[]
+    struct AppendCommandStart<'a> {
+        #[suffix(" ")]
+        #[primitive(verbatim, tag_atom)]
+        tag: Cow<'a, str>,
+        #[prefix("APPEND ")]
+        #[primitive(mailbox, mailbox)]
+        mailbox: Cow<'a, str>,
+        #[]
+        #[delegate]
+        first_fragment: AppendFragment<'a>,
+    }
+}
+
+// Command fragment for additional messages being fed into APPEND (i.e.,
+// MULTIAPPEND). After the first APPEND line has been processed, this is used
+// to process additional command lines until the final blank line is reached.
+//
+// Like `AppendCommandStart`, this must be called with the fragment of the line
+// before the literal itself.
+syntax_rule! {
+    #[prefix(" ")]
+    struct AppendFragment<'a> {
+        #[opt surrounded("(", ") ") 0*(" ")]
+        #[primitive(flag, flag)]
+        flags: Option<Vec<Flag>>,
+        #[opt suffix(" ")]
+        #[primitive(datetime, datetime)]
+        internal_date: Option<DateTime<FixedOffset>>,
+        #[]
+        #[phantom]
+        _marker: PhantomData<&'a ()>,
+    }
+}
+
 // ==================== PRIMITIVE PARSERS =================´===
 
 fn normal_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
@@ -3935,6 +3977,99 @@ mod test {
                 response: Response::Capability(CapabilityData {
                     capabilities: vec![s("IMAP4rev1"), s("XYZZY")],
                 }),
+            }
+        );
+    }
+
+    #[test]
+    fn append_fragment_syntax() {
+        assert_reversible!(
+            AppendCommandStart,
+            "1 APPEND dst ",
+            AppendCommandStart {
+                tag: s("1"),
+                mailbox: s("dst"),
+                first_fragment: AppendFragment {
+                    flags: None,
+                    internal_date: None,
+                    _marker: PhantomData,
+                },
+            }
+        );
+        assert_reversible!(
+            AppendCommandStart,
+            "1 APPEND \"foo bar\" () ",
+            AppendCommandStart {
+                tag: s("1"),
+                mailbox: s("foo bar"),
+                first_fragment: AppendFragment {
+                    flags: Some(vec![]),
+                    internal_date: None,
+                    _marker: PhantomData,
+                },
+            }
+        );
+        assert_reversible!(
+            AppendCommandStart,
+            "1 APPEND dst (\\Deleted) ",
+            AppendCommandStart {
+                tag: s("1"),
+                mailbox: s("dst"),
+                first_fragment: AppendFragment {
+                    flags: Some(vec![Flag::Deleted]),
+                    internal_date: None,
+                    _marker: PhantomData,
+                },
+            }
+        );
+        assert_reversible!(
+            AppendCommandStart,
+            "1 APPEND dst (\\Deleted keyword) ",
+            AppendCommandStart {
+                tag: s("1"),
+                mailbox: s("dst"),
+                first_fragment: AppendFragment {
+                    flags: Some(vec![
+                        Flag::Deleted,
+                        Flag::Keyword("keyword".to_owned())
+                    ]),
+                    internal_date: None,
+                    _marker: PhantomData,
+                },
+            }
+        );
+        assert_reversible!(
+            AppendCommandStart,
+            "1 APPEND dst \" 4-Jul-2020 16:31:00 +0100\" ",
+            AppendCommandStart {
+                tag: s("1"),
+                mailbox: s("dst"),
+                first_fragment: AppendFragment {
+                    flags: None,
+                    internal_date: Some(
+                        FixedOffset::east(3600)
+                            .ymd(2020, 7, 4)
+                            .and_hms(16, 31, 0)
+                    ),
+                    _marker: PhantomData,
+                }
+            }
+        );
+        assert_reversible!(
+            AppendCommandStart,
+            "1 APPEND dst (\\Deleted) \" 4-Jul-2020 16:31:00 +0100\" ",
+            AppendCommandStart {
+                tag: s("1"),
+                mailbox: s("dst"),
+                first_fragment: AppendFragment {
+                    flags: Some(vec![Flag::Deleted]),
+                    internal_date: Some(
+                        FixedOffset::east(3600)
+                            .ymd(2020, 7, 4)
+                            .and_hms(16, 31, 0)
+                    ),
+                    _marker: PhantomData,
+                }
             }
         );
     }
