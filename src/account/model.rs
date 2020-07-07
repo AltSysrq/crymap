@@ -688,23 +688,29 @@ pub enum MailboxAttribute {
     Important,
 }
 
+impl MailboxAttribute {
+    pub fn name(&self) -> &'static str {
+        match self {
+            &MailboxAttribute::Noselect => "\\Noselect",
+            &MailboxAttribute::Noinferiors => "\\Noinferiors",
+            &MailboxAttribute::HasChildren => "\\HasChildren",
+            &MailboxAttribute::HasNoChildren => "\\HasNoChildren",
+            &MailboxAttribute::NonExistent => "\\NonExistent",
+            &MailboxAttribute::Subscribed => "\\Subscribed",
+            &MailboxAttribute::Archive => "\\Archive",
+            &MailboxAttribute::Drafts => "\\Drafts",
+            &MailboxAttribute::Flagged => "\\Flagged",
+            &MailboxAttribute::Junk => "\\Junk",
+            &MailboxAttribute::Sent => "\\Sent",
+            &MailboxAttribute::Trash => "\\Trash",
+            &MailboxAttribute::Important => "\\Important",
+        }
+    }
+}
+
 impl fmt::Display for MailboxAttribute {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &MailboxAttribute::Noselect => write!(f, "\\Noselect"),
-            &MailboxAttribute::Noinferiors => write!(f, "\\Noinferiors"),
-            &MailboxAttribute::HasChildren => write!(f, "\\HasChildren"),
-            &MailboxAttribute::HasNoChildren => write!(f, "\\HasNoChildren"),
-            &MailboxAttribute::NonExistent => write!(f, "\\NonExistent"),
-            &MailboxAttribute::Subscribed => write!(f, "\\Subscribed"),
-            &MailboxAttribute::Archive => write!(f, "\\Archive"),
-            &MailboxAttribute::Drafts => write!(f, "\\Drafts"),
-            &MailboxAttribute::Flagged => write!(f, "\\Flagged"),
-            &MailboxAttribute::Junk => write!(f, "\\Junk"),
-            &MailboxAttribute::Sent => write!(f, "\\Sent"),
-            &MailboxAttribute::Trash => write!(f, "\\Trash"),
-            &MailboxAttribute::Important => write!(f, "\\Important"),
-        }
+        write!(f, "{}", self.name())
     }
 }
 

@@ -122,6 +122,16 @@ impl StatelessMailbox {
         self.root.is_dir()
     }
 
+    /// Return the log prefix used for messages regarding this mailbox.
+    pub fn log_prefix(&self) -> &str {
+        &self.log_prefix
+    }
+
+    /// Return whether this mailbox is opened read-only
+    pub fn read_only(&self) -> bool {
+        self.read_only
+    }
+
     pub(super) fn message_scheme(&self) -> HierIdScheme<'_> {
         HierIdScheme {
             root: &self.root,

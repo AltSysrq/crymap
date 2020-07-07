@@ -1261,9 +1261,6 @@ syntax_rule! {
         LogIn(LogInCommand<'a>),
         #[]
         #[delegate]
-        Authenticate(AuthenticateCommandStart<'a>),
-        #[]
-        #[delegate]
         Copy(CopyCommand<'a>),
         #[]
         #[delegate]
@@ -3530,13 +3527,6 @@ mod test {
             Command::LogIn(LogInCommand {
                 userid: s("AzureDiamond"),
                 password: s("hunter2"),
-            })
-        );
-        assert_reversible!(
-            Command,
-            "AUTHENTICATE plain",
-            Command::Authenticate(AuthenticateCommandStart {
-                auth_type: s("plain"),
             })
         );
         assert_reversible!(
