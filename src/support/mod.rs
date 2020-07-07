@@ -22,5 +22,6 @@ pub(crate) mod error;
 pub(crate) mod file_ops;
 pub(crate) mod safe_name;
 pub(crate) mod small_bitset;
+pub(crate) mod system_config;
 pub(crate) mod un64;
 pub(crate) mod user_config;
