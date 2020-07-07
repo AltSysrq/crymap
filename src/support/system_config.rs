@@ -53,8 +53,9 @@ pub struct SecurityConfig {
     /// keys.
     #[serde(default)]
     pub chroot_system: bool,
-    /// If non-zero, set the process UID to this value after initialisation but
-    /// before doing any communication with the client.
+    /// If non-empty, set the process UID to this value after initialisation
+    /// but before doing any communication with the client. The name must refer
+    /// to a non-root user.
     ///
     /// This should be set for "black box" style setups where mail users are
     /// not mapped to UNIX users, but Crymap must be started as root for some
@@ -68,7 +69,7 @@ pub struct SecurityConfig {
     /// privileges to those of the user that owns the user directory. If it is
     /// still running as root at that point, it will refuse further operation.
     #[serde(default)]
-    pub system_user: uid_t,
+    pub system_user: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
