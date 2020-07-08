@@ -18,6 +18,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::account::key_store::KeyStoreConfig;
 use crate::crypt::master_key::MasterKeyConfig;
 
 pub mod b64 {
@@ -50,4 +51,5 @@ pub mod b64 {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct UserConfig {
     pub master_key: MasterKeyConfig,
+    pub key_store: KeyStoreConfig,
 }

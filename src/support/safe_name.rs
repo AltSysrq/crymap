@@ -72,5 +72,6 @@ mod test {
         assert!(!is_safe_name("fo\x7Fo"));
         assert!(!is_safe_name("foo*bar"));
         assert!(!is_safe_name("foo%bar"));
+        assert!(!is_safe_name(""));
     }
 }

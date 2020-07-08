@@ -21,33 +21,72 @@
 
 use std::borrow::Cow;
 use std::convert::TryInto;
+use std::fs;
+use std::io::Read;
+use std::marker::PhantomData;
+use std::os::unix::fs::MetadataExt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use log::{error, warn};
+use log::{error, info, warn};
 
 use crate::account::{
-    account::Account,
+    account::{account_config_file, Account},
     mailbox::{StatefulMailbox, StatelessMailbox},
     model::*,
 };
+use crate::crypt::master_key::MasterKey;
 use crate::imap::syntax as s;
-use crate::support::{error::Error, system_config::SystemConfig};
+use crate::support::{
+    error::Error, safe_name::is_safe_name, system_config::SystemConfig,
+    user_config::UserConfig,
+};
 
 macro_rules! map_error {
-    ($this:expr) => {
-        |e| $this.catch_all_error_handling(e)
-    };
+    ($this:expr) => {{
+        let log_prefix = &$this.log_prefix;
+        move |e| catch_all_error_handling(log_prefix, e)
+    }};
 
-    ($this:expr, $($($kind:ident)|+ => ($cond:ident, $code:expr),)+) => {
-        |e| match e {
+    ($this:expr, $($($kind:ident)|+ => ($cond:ident, $code:expr),)+) => {{
+        let log_prefix = &$this.log_prefix;
+        move |e| match e {
             $($(Error::$kind)|* => s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::$cond,
                 code: $code,
                 quip: Some(Cow::Owned(e.to_string())),
             }),)*
-            e => $this.catch_all_error_handling(e),
+            e => catch_all_error_handling(log_prefix, e),
         }
+    }};
+}
+
+// account! and selected! are macros instead of methods on CommandProcessor
+// since there is no way to express that they borrow only one field --- as a
+// method, the returned value is considered to borrow the whole
+// `CommandProcessor`.
+macro_rules! account {
+    ($this:expr) => {
+        $this.account.as_mut().ok_or_else(|| {
+            s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Bad,
+                code: None,
+                quip: Some(Cow::Borrowed("Not logged in")),
+            })
+        })
+    };
+}
+
+macro_rules! selected {
+    ($this:expr) => {
+        $this.selected.as_mut().ok_or_else(|| {
+            s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Bad,
+                code: None,
+                quip: Some(Cow::Borrowed("No mailbox selected")),
+            })
+        })
     };
 }
 
@@ -75,6 +114,8 @@ static TAGLINE: &str = concat!(
 pub struct CommandProcessor {
     log_prefix: String,
     system_config: Arc<SystemConfig>,
+    data_root: PathBuf,
+
     account: Option<Account>,
     selected: Option<StatefulMailbox>,
 
@@ -101,10 +142,16 @@ type PartialResult<T> = Result<T, s::Response<'static>>;
 type SendResponse<'a> = &'a (dyn Send + Sync + Fn(s::Response<'_>));
 
 impl CommandProcessor {
-    pub fn new(log_prefix: String, system_config: Arc<SystemConfig>) -> Self {
+    pub fn new(
+        log_prefix: String,
+        system_config: Arc<SystemConfig>,
+        data_root: PathBuf,
+    ) -> Self {
         CommandProcessor {
             log_prefix,
             system_config,
+            data_root,
+
             account: None,
             selected: None,
 
@@ -254,9 +301,9 @@ impl CommandProcessor {
     fn cmd_expunge(&mut self, _sender: SendResponse<'_>) -> CmdResult {
         // As with NOOP, the unsolicited responses that go with this are part
         // of the natural poll cycle.
-        self.selected()?
+        selected!(self)?
             .expunge_all_deleted()
-            .map_err(|e| self.catch_all_error_handling(e))?;
+            .map_err(|e| catch_all_error_handling(&self.log_prefix, e))?;
         success()
     }
 
@@ -281,7 +328,7 @@ impl CommandProcessor {
         cmd: s::CreateCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        let account = self.account()?;
+        let account = account!(self)?;
         let request = CreateRequest {
             name: cmd.mailbox.into_owned(),
             special_use: vec![],
@@ -300,7 +347,7 @@ impl CommandProcessor {
         cmd: s::DeleteCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        let account = self.account()?;
+        let account = account!(self)?;
         account.delete(&cmd.mailbox).map_err(map_error! {
             self,
             NxMailbox | UnsafeName | BadOperationOnInbox |
@@ -335,7 +382,7 @@ impl CommandProcessor {
         };
 
         let responses =
-            self.account()?.list(&request).map_err(map_error!(self))?;
+            account!(self)?.list(&request).map_err(map_error!(self))?;
         for response in responses {
             sender(s::Response::List(s::MailboxList {
                 flags: response
@@ -368,7 +415,7 @@ impl CommandProcessor {
         };
 
         let responses =
-            self.account()?.list(&request).map_err(map_error!(self))?;
+            account!(self)?.list(&request).map_err(map_error!(self))?;
         for response in responses {
             sender(s::Response::Lsub(s::MailboxList {
                 flags: response
@@ -388,7 +435,7 @@ impl CommandProcessor {
         cmd: s::RenameCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        let account = self.account()?;
+        let account = account!(self)?;
         let request = RenameRequest {
             existing_name: cmd.src.into_owned(),
             new_name: cmd.dst.into_owned(),
@@ -416,7 +463,67 @@ impl CommandProcessor {
         cmd: s::StatusCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        unimplemented!()
+        let account = account!(self)?;
+        let request = StatusRequest {
+            name: cmd.mailbox.into_owned(),
+            messages: cmd.atts.contains(&s::StatusAtt::Messages),
+            recent: cmd.atts.contains(&s::StatusAtt::Recent),
+            uidnext: cmd.atts.contains(&s::StatusAtt::UidNext),
+            uidvalidity: cmd.atts.contains(&s::StatusAtt::UidValidity),
+            unseen: cmd.atts.contains(&s::StatusAtt::Unseen),
+        };
+
+        let responses = account.status(&request).map_err(map_error! {
+            self,
+            UnsafeName | NxMailbox | MailboxUnselectable => (No, None),
+        })?;
+
+        for response in responses {
+            let mut atts: Vec<s::StatusResponseAtt<'static>> =
+                Vec::with_capacity(10);
+            if let Some(messages) = response.messages {
+                atts.push(s::StatusResponseAtt {
+                    att: s::StatusAtt::Messages,
+                    value: messages.try_into().unwrap_or(u32::MAX),
+                    _marker: PhantomData,
+                });
+            }
+            if let Some(recent) = response.recent {
+                atts.push(s::StatusResponseAtt {
+                    att: s::StatusAtt::Recent,
+                    value: recent.try_into().unwrap_or(u32::MAX),
+                    _marker: PhantomData,
+                });
+            }
+            if let Some(uid) = response.uidnext {
+                atts.push(s::StatusResponseAtt {
+                    att: s::StatusAtt::UidNext,
+                    value: uid.0.get(),
+                    _marker: PhantomData,
+                });
+            }
+            if let Some(uidvalidity) = response.uidvalidity {
+                atts.push(s::StatusResponseAtt {
+                    att: s::StatusAtt::UidValidity,
+                    value: uidvalidity,
+                    _marker: PhantomData,
+                });
+            }
+            if let Some(unseen) = response.unseen {
+                atts.push(s::StatusResponseAtt {
+                    att: s::StatusAtt::Unseen,
+                    value: unseen.try_into().unwrap_or(u32::MAX),
+                    _marker: PhantomData,
+                });
+            }
+
+            sender(s::Response::Status(s::StatusResponse {
+                mailbox: Cow::Owned(response.name),
+                atts,
+            }));
+        }
+
+        success()
     }
 
     fn cmd_subscribe(
@@ -424,7 +531,13 @@ impl CommandProcessor {
         cmd: s::SubscribeCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        unimplemented!()
+        account!(self)?
+            .subscribe(&cmd.mailbox)
+            .map_err(map_error! {
+                self,
+                NxMailbox | UnsafeName => (No, None),
+            })?;
+        success()
     }
 
     fn cmd_unsubscribe(
@@ -432,7 +545,13 @@ impl CommandProcessor {
         cmd: s::UnsubscribeCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        unimplemented!()
+        account!(self)?
+            .unsubscribe(&cmd.mailbox)
+            .map_err(map_error! {
+                self,
+                NxMailbox | UnsafeName => (No, None),
+            })?;
+        success()
     }
 
     fn cmd_log_in(
@@ -440,7 +559,69 @@ impl CommandProcessor {
         cmd: s::LogInCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        unimplemented!()
+        if self.account.is_some() {
+            return Err(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Bad,
+                code: None,
+                quip: Some(Cow::Borrowed("Already logged in")),
+            }));
+        }
+
+        if !is_safe_name(&cmd.userid) {
+            return Err(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::No,
+                code: None,
+                quip: Some(Cow::Borrowed("Illegal user id")),
+            }));
+        }
+
+        let mut user_dir = self.data_root.join(&*cmd.userid);
+        let user_data_file = account_config_file(&user_dir);
+        let (user_config, master_key) = fs::File::open(&user_data_file)
+            .ok()
+            .and_then(|f| {
+                let mut buf = Vec::<u8>::new();
+                f.take(65536).read_to_end(&mut buf).ok()?;
+                toml::from_slice::<UserConfig>(&buf).ok()
+            })
+            .and_then(|config| {
+                let master_key = MasterKey::from_config(
+                    &config.master_key,
+                    cmd.password.as_bytes(),
+                )?;
+                Some((config, master_key))
+            })
+            .ok_or_else(|| {
+                s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::No,
+                    code: None,
+                    quip: Some(Cow::Borrowed("Bad user id or password")),
+                })
+            })?;
+
+        // Login successful (at least barring further operational issues)
+
+        self.log_prefix.push_str(":~");
+        self.log_prefix.push_str(&cmd.userid);
+        info!("{} Login successful", self.log_prefix);
+
+        self.drop_privelages(&mut user_dir)?;
+
+        let account = Account::new(
+            self.log_prefix.clone(),
+            user_dir,
+            Some(Arc::new(master_key)),
+        );
+        account
+            .init(&user_config.key_store)
+            .map_err(map_error!(self))?;
+
+        self.account = Some(account);
+        Ok(s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Ok,
+            code: None,
+            quip: Some(Cow::Borrowed("User login successful")),
+        }))
     }
 
     fn cmd_copy(
@@ -448,7 +629,21 @@ impl CommandProcessor {
         cmd: s::CopyCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        unimplemented!()
+        let messages = self.parse_seqnum_range(&cmd.messages)?;
+        let account = account!(self)?;
+        let selected = selected!(self)?;
+        let dst = account.mailbox(&cmd.dst, false).map_err(map_error! {
+            self,
+            NxMailbox => (No, Some(s::RespTextCode::TryCreate(()))),
+            UnsafeName | MailboxUnselectable => (No, None),
+        })?;
+        let request = CopyRequest { ids: messages };
+        selected.seqnum_copy(&request, &dst).map_err(map_error! {
+           self,
+            MailboxFull | NxMessage | ExpungedMessage | GaveUpInsertion =>
+                (No, None),
+        })?;
+        success()
     }
 
     fn cmd_fetch(
@@ -507,37 +702,6 @@ impl CommandProcessor {
         unimplemented!()
     }
 
-    fn account(&mut self) -> PartialResult<&mut Account> {
-        self.account.as_mut().ok_or_else(|| {
-            s::Response::Cond(s::CondResponse {
-                cond: s::RespCondType::Bad,
-                code: None,
-                quip: Some(Cow::Borrowed("Not logged in")),
-            })
-        })
-    }
-
-    fn selected(&mut self) -> PartialResult<&mut StatefulMailbox> {
-        self.selected.as_mut().ok_or_else(|| {
-            s::Response::Cond(s::CondResponse {
-                cond: s::RespCondType::Bad,
-                code: None,
-                quip: Some(Cow::Borrowed("No mailbox selected")),
-            })
-        })
-    }
-
-    fn catch_all_error_handling(&self, e: Error) -> s::Response<'static> {
-        error!("{} Unhandled internal error: {}", self.log_prefix, e);
-        s::Response::Cond(s::CondResponse {
-            cond: s::RespCondType::No,
-            code: None,
-            quip: Some(Cow::Borrowed(
-                "Unexpected error; check server logs for details",
-            )),
-        })
-    }
-
     fn select(
         &mut self,
         mailbox: &str,
@@ -548,7 +712,7 @@ impl CommandProcessor {
         // whether they succeed.
         self.unselect();
 
-        let stateless = self.account()?.mailbox(mailbox, read_only).map_err(
+        let stateless = account!(self)?.mailbox(mailbox, read_only).map_err(
             map_error! {
                 self,
                 NxMailbox | UnsafeName | MailboxUnselectable => (No, None),
@@ -603,6 +767,162 @@ impl CommandProcessor {
     fn unselect(&mut self) {
         self.selected = None;
     }
+
+    fn drop_privelages(&mut self, user_dir: &mut PathBuf) -> PartialResult<()> {
+        // Nothing to do if we aren't root
+        if nix::unistd::ROOT != nix::unistd::getuid() {
+            return Ok(());
+        }
+
+        // Before we can chroot, we need to figure out what our groups will be
+        // once we drop down to the user, because we won't have access to
+        // /etc/group after the chroot
+        let md = match user_dir.metadata() {
+            Ok(md) => md,
+            Err(e) => {
+                error!(
+                    "{} Failed to stat '{}': {}",
+                    self.log_prefix,
+                    user_dir.display(),
+                    e
+                );
+                return auth_misconfiguration();
+            }
+        };
+        let target_uid =
+            nix::unistd::Uid::from_raw(md.uid() as nix::libc::uid_t);
+        let (has_user_groups, target_gid) = match nix::unistd::User::from_uid(
+            target_uid,
+        ) {
+            Ok(Some(user)) => {
+                match nix::unistd::initgroups(
+                    &std::ffi::CString::new(user.name.to_owned())
+                        .expect("Got UNIX user name with NUL?"),
+                    user.gid,
+                ) {
+                    Ok(()) => (true, user.gid),
+                    Err(e) => {
+                        warn!(
+                            "{} Failed to init groups for user: {}",
+                            self.log_prefix, e
+                        );
+                        (false, user.gid)
+                    }
+                }
+            }
+            Ok(None) => {
+                // Failure to access /etc/group is expected if we chroot'ed
+                // into the system data directory already
+                if !self.system_config.security.chroot_system {
+                    warn!(
+                        "{} No passwd entry for UID {}, assuming GID {}",
+                        self.log_prefix,
+                        target_uid,
+                        md.gid()
+                    );
+                }
+                (
+                    false,
+                    nix::unistd::Gid::from_raw(md.gid() as nix::libc::gid_t),
+                )
+            }
+            Err(e) => {
+                // Failure to access /etc/group is expected if we chroot'ed
+                // into the system data directory already
+                if !self.system_config.security.chroot_system {
+                    warn!(
+                        "{} Failed to look up passwd entry for UID {}, \
+                         assuming GID {}: {}",
+                        self.log_prefix,
+                        target_uid,
+                        md.gid(),
+                        e
+                    );
+                }
+                (
+                    false,
+                    nix::unistd::Gid::from_raw(md.gid() as nix::libc::gid_t),
+                )
+            }
+        };
+
+        if let Err(e) = nix::unistd::chdir(user_dir)
+            .and_then(|()| nix::unistd::chroot(user_dir))
+        {
+            error!(
+                "{} Chroot (forced because Crymap is running as root) \
+                    into '{}' failed: {}",
+                self.log_prefix,
+                user_dir.display(),
+                e
+            );
+            return auth_misconfiguration();
+        }
+
+        // Chroot successful, adjust the log prefix and path to reflect that
+        self.log_prefix
+            .push_str(&format!(":[chroot {}]", user_dir.display()));
+        user_dir.push("/"); // Clears everything but '/'
+
+        // Now we can finish dropping privileges
+        if let Err(e) = if has_user_groups {
+            Ok(())
+        } else {
+            nix::unistd::setgroups(&[target_gid])
+        }
+        .and_then(|()| nix::unistd::setgid(target_gid))
+        .and_then(|()| nix::unistd::setuid(target_uid))
+        {
+            error!(
+                "{} Failed to drop privileges to {}:{}: {}",
+                self.log_prefix, target_uid, target_gid, e
+            );
+            return auth_misconfiguration();
+        }
+
+        if nix::unistd::ROOT == nix::unistd::getuid() {
+            error!(
+                "{} Crymap is still root! You must either \
+                    (a) Run Crymap as a non-root user; \
+                    (b) Set [security].system_user in crymap.toml; \
+                    (c) Ensure that user directories are not owned by root.",
+                self.log_prefix
+            );
+            return auth_misconfiguration();
+        }
+
+        Ok(())
+    }
+
+    fn parse_seqnum_range(
+        &mut self,
+        raw: &str,
+    ) -> PartialResult<SeqRange<Seqnum>> {
+        let max_seqnum = selected!(self)?.max_seqnum().unwrap_or(Seqnum::MIN);
+        let seqrange = SeqRange::parse(raw, max_seqnum).ok_or_else(|| {
+            s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Bad,
+                code: None,
+                quip: Some(Cow::Borrowed("Unparsable sequence set")),
+            })
+        })?;
+
+        if seqrange.max().unwrap_or(0) > max_seqnum.0.get() {
+            // This behaviour is not explicitly described in RFC 3501, but
+            // Crispin mentions it a couple times in the mailing list --- if
+            // the client requests a seqnum outside the current snapshot, it's
+            // a protocol violation and we return BAD.
+            return Err(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Bad,
+                code: None,
+                quip: Some(Cow::Borrowed(
+                    "Message sequence number out of range",
+                )),
+            }));
+        }
+
+        Ok(seqrange)
+    }
 }
 
 fn capability_data() -> s::CapabilityData<'static> {
@@ -617,4 +937,29 @@ fn success() -> CmdResult {
         code: None,
         quip: None,
     }))
+}
+
+fn auth_misconfiguration() -> PartialResult<()> {
+    Err(s::Response::Cond(s::CondResponse {
+        cond: s::RespCondType::Bye,
+        code: Some(s::RespTextCode::Alert(())),
+        quip: Some(Cow::Borrowed(
+            "Fatal internal error or misconfiguration; refer to \
+             server logs for details.",
+        )),
+    }))
+}
+
+fn catch_all_error_handling(
+    log_prefix: &str,
+    e: Error,
+) -> s::Response<'static> {
+    error!("{} Unhandled internal error: {}", log_prefix, e);
+    s::Response::Cond(s::CondResponse {
+        cond: s::RespCondType::No,
+        code: None,
+        quip: Some(Cow::Borrowed(
+            "Unexpected error; check server logs for details",
+        )),
+    })
 }

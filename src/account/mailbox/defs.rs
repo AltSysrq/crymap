@@ -162,6 +162,16 @@ impl StatefulMailbox {
     pub fn stateless(&self) -> &StatelessMailbox {
         &self.s
     }
+
+    /// Return the maximum `Seqnum` of any message.
+    pub fn max_seqnum(&self) -> Option<Seqnum> {
+        self.state.max_seqnum()
+    }
+
+    /// Return the maximum UID of any message.
+    pub fn max_uid(&self) -> Option<Uid> {
+        self.state.max_uid()
+    }
 }
 
 // Not a great place for these tests, but there's nowhere better right now.

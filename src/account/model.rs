@@ -539,6 +539,11 @@ impl<T: TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync> SeqRange<T> {
             .map(|(start, end)| end - start + 1)
             .sum::<u32>() as usize
     }
+
+    /// Return the maximum value in this sequence set, raw.
+    pub fn max(&self) -> Option<u32> {
+        self.parts.values().rev().copied().next()
+    }
 }
 
 impl<T> fmt::Display for SeqRange<T> {

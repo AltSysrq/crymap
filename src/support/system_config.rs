@@ -18,7 +18,6 @@
 
 use std::path::PathBuf;
 
-use nix::libc::uid_t;
 use serde::{Deserialize, Serialize};
 
 /// The system-wide configuration for Crymap.

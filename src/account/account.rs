@@ -19,7 +19,7 @@
 use std::borrow::Cow;
 use std::fs;
 use std::os::unix::fs::DirBuilderExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::account::key_store::{KeyStore, KeyStoreConfig};
@@ -35,9 +35,16 @@ pub struct Account {
     log_prefix: String,
     root: PathBuf,
     key_store: Arc<Mutex<KeyStore>>,
+    config_file: PathBuf,
     mailbox_root: PathBuf,
     shadow_root: PathBuf,
     common_paths: Arc<CommonPaths>,
+}
+
+/// Given the root of a user directory, return the path to the user's
+/// configuration file.
+pub fn account_config_file(root: &Path) -> PathBuf {
+    root.join("user.toml")
 }
 
 impl Account {
@@ -64,6 +71,7 @@ impl Account {
             key_store: Arc::new(Mutex::new(key_store)),
             mailbox_root: root.join("mail"),
             shadow_root: root.join("shadow"),
+            config_file: account_config_file(&root),
             root,
         }
     }

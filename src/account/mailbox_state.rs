@@ -620,6 +620,17 @@ impl MailboxState {
             .unwrap_or(Some(Cid::MIN))
     }
 
+    /// Return the maximum UID currently in the snapshot, including expunged
+    /// messages.
+    pub fn max_uid(&self) -> Option<Uid> {
+        self.max_modseq.map(Modseq::uid)
+    }
+
+    /// Return the maximum sequence number currently in the snapshot.
+    pub fn max_seqnum(&self) -> Option<Seqnum> {
+        Seqnum::of(self.num_messages() as u32)
+    }
+
     /// Perform the "QRESYNC" operation.
     ///
     /// `resync_from`, if present, gives the `Modseq` that the client is using
