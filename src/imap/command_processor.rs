@@ -16,9 +16,6 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-// TODO Delete once all the stubs are filled in
-#![cfg_attr(not(test), allow(unused_variables))]
-
 use std::borrow::Cow;
 use std::convert::TryInto;
 use std::fmt;
@@ -331,7 +328,7 @@ impl CommandProcessor {
     fn cmd_create(
         &mut self,
         cmd: s::CreateCommand<'_>,
-        sender: SendResponse<'_>,
+        _sender: SendResponse<'_>,
     ) -> CmdResult {
         let account = account!(self)?;
         let request = CreateRequest {
@@ -350,7 +347,7 @@ impl CommandProcessor {
     fn cmd_delete(
         &mut self,
         cmd: s::DeleteCommand<'_>,
-        sender: SendResponse<'_>,
+        _sender: SendResponse<'_>,
     ) -> CmdResult {
         let account = account!(self)?;
         account.delete(&cmd.mailbox).map_err(map_error! {
@@ -438,7 +435,7 @@ impl CommandProcessor {
     fn cmd_rename(
         &mut self,
         cmd: s::RenameCommand<'_>,
-        sender: SendResponse<'_>,
+        _sender: SendResponse<'_>,
     ) -> CmdResult {
         let account = account!(self)?;
         let request = RenameRequest {
@@ -534,7 +531,7 @@ impl CommandProcessor {
     fn cmd_subscribe(
         &mut self,
         cmd: s::SubscribeCommand<'_>,
-        sender: SendResponse<'_>,
+        _sender: SendResponse<'_>,
     ) -> CmdResult {
         account!(self)?
             .subscribe(&cmd.mailbox)
@@ -548,7 +545,7 @@ impl CommandProcessor {
     fn cmd_unsubscribe(
         &mut self,
         cmd: s::UnsubscribeCommand<'_>,
-        sender: SendResponse<'_>,
+        _sender: SendResponse<'_>,
     ) -> CmdResult {
         account!(self)?
             .unsubscribe(&cmd.mailbox)
@@ -562,7 +559,7 @@ impl CommandProcessor {
     fn cmd_log_in(
         &mut self,
         cmd: s::LogInCommand<'_>,
-        sender: SendResponse<'_>,
+        _sender: SendResponse<'_>,
     ) -> CmdResult {
         if self.account.is_some() {
             return Err(s::Response::Cond(s::CondResponse {
@@ -624,7 +621,7 @@ impl CommandProcessor {
         self.account = Some(account);
         Ok(s::Response::Cond(s::CondResponse {
             cond: s::RespCondType::Ok,
-            code: None,
+            code: Some(s::RespTextCode::Capability(capability_data())),
             quip: Some(Cow::Borrowed("User login successful")),
         }))
     }
@@ -632,23 +629,11 @@ impl CommandProcessor {
     fn cmd_copy(
         &mut self,
         cmd: s::CopyCommand<'_>,
-        sender: SendResponse<'_>,
+        _sender: SendResponse<'_>,
     ) -> CmdResult {
         let messages = self.parse_seqnum_range(&cmd.messages)?;
-        let account = account!(self)?;
-        let selected = selected!(self)?;
-        let dst = account.mailbox(&cmd.dst, false).map_err(map_error! {
-            self,
-            NxMailbox => (No, Some(s::RespTextCode::TryCreate(()))),
-            UnsafeName | MailboxUnselectable => (No, None),
-        })?;
         let request = CopyRequest { ids: messages };
-        selected.seqnum_copy(&request, &dst).map_err(map_error! {
-           self,
-            MailboxFull | NxMessage | ExpungedMessage | GaveUpInsertion =>
-                (No, None),
-        })?;
-        success()
+        self.copy(&cmd.dst, request, StatefulMailbox::seqnum_copy)
     }
 
     fn cmd_fetch(
@@ -656,86 +641,24 @@ impl CommandProcessor {
         cmd: s::FetchCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        let mut request = FetchRequest {
-            ids: self.parse_seqnum_range(&cmd.messages)?,
-            ..FetchRequest::default()
-        };
-
-        let fetch_properties = fetch_properties(&cmd.target);
-        fetch_target_from_ast(&mut request, cmd.target);
-
-        let selected = selected!(self)?;
-
-        // If there are non-.PEEK body sections in the request, implicitly set
-        // \Seen on all the messages.
-        //
-        // RFC 3501 does not define the ordering with respect to the data
-        // retrieval itself. Some discussion on the mailing lists vaguely
-        // suggests that the expectation is that the store happens first, which
-        // seems less useful, but it's ultimately moot in the view of IMAP as a
-        // cache-fill protocol.
-        //
-        // This is only best-effort, and we only log if anything goes wrong.
-        if fetch_properties.set_seen && !selected.stateless().read_only() {
-            let store_res = selected.seqnum_store(&StoreRequest {
-                ids: &request.ids,
-                flags: &[Flag::Seen],
-                remove_listed: false,
-                remove_unlisted: false,
-                // We must ensure that the client sees the updates this causes.
-                loud: true,
-                unchanged_since: None,
-            });
-            if let Err(e) = store_res {
-                warn!(
-                    "{} Implicit STORE \\Seen failed: {}",
-                    self.log_prefix, e
-                );
-            }
-        }
-
-        // TODO It would be better to stream these responses out rather than
-        // buffer them
-        let response = selected.seqnum_fetch(request).map_err(map_error! {
-            self,
-            MasterKeyUnavailable | BadEncryptedKey | ExpungedMessage |
-            NxMessage => (No, None),
-        })?;
-        fetch_response(sender, response, fetch_properties)
+        let ids = self.parse_seqnum_range(&cmd.messages)?;
+        self.fetch(
+            cmd,
+            sender,
+            ids,
+            false,
+            StatefulMailbox::seqnum_store,
+            StatefulMailbox::seqnum_fetch,
+        )
     }
 
     fn cmd_store(
         &mut self,
         cmd: s::StoreCommand<'_>,
-        sender: SendResponse<'_>,
+        _sender: SendResponse<'_>,
     ) -> CmdResult {
         let ids = self.parse_seqnum_range(&cmd.messages)?;
-        let request = StoreRequest {
-            ids: &ids,
-            flags: &cmd.flags,
-            remove_listed: s::StoreCommandType::Minus == cmd.typ,
-            remove_unlisted: s::StoreCommandType::Eq == cmd.typ,
-            loud: !cmd.silent,
-            unchanged_since: None,
-        };
-
-        let resp = selected!(self)?.seqnum_store(&request).map_err(
-            map_error! {
-                self,
-                MailboxFull | NxMessage | ExpungedMessage | MailboxReadOnly =>
-                    (No, None),
-            },
-        )?;
-
-        if resp.ok {
-            success()
-        } else {
-            Ok(s::Response::Cond(s::CondResponse {
-                cond: s::RespCondType::No,
-                code: None,
-                quip: Some(Cow::Borrowed("Some messages have been expunged")),
-            }))
-        }
+        self.store(ids, cmd, StatefulMailbox::seqnum_store)
     }
 
     fn cmd_search(
@@ -757,9 +680,11 @@ impl CommandProcessor {
     fn cmd_uid_copy(
         &mut self,
         cmd: s::CopyCommand<'_>,
-        sender: SendResponse<'_>,
+        _sender: SendResponse<'_>,
     ) -> CmdResult {
-        unimplemented!()
+        let messages = self.parse_uid_range(&cmd.messages)?;
+        let request = CopyRequest { ids: messages };
+        self.copy(&cmd.dst, request, StatefulMailbox::copy)
     }
 
     fn cmd_uid_fetch(
@@ -767,7 +692,10 @@ impl CommandProcessor {
         cmd: s::FetchCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        unimplemented!()
+        let ids = self.parse_uid_range(&cmd.messages)?;
+        self.fetch(cmd, sender, ids, true, StatefulMailbox::store, |mb, r| {
+            mb.fetch(&r)
+        })
     }
 
     fn cmd_uid_search(
@@ -775,15 +703,24 @@ impl CommandProcessor {
         cmd: s::SearchCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        unimplemented!()
+        let request = self.search_command_from_ast(cmd)?;
+        let response = selected!(self)?
+            .search(&request)
+            .map_err(map_error!(self))?;
+
+        sender(s::Response::Search(
+            response.hits.into_iter().map(|u| u.0.get()).collect(),
+        ));
+        success()
     }
 
     fn cmd_uid_store(
         &mut self,
         cmd: s::StoreCommand<'_>,
-        sender: SendResponse<'_>,
+        _sender: SendResponse<'_>,
     ) -> CmdResult {
-        unimplemented!()
+        let ids = self.parse_uid_range(&cmd.messages)?;
+        self.store(ids, cmd, StatefulMailbox::store)
     }
 
     fn select(
@@ -1131,6 +1068,140 @@ impl CommandProcessor {
                     .map(|part| self.search_query_from_ast(part))
                     .collect::<PartialResult<Vec<_>>>()?,
             )),
+        }
+    }
+
+    fn copy<T>(
+        &mut self,
+        dst: &str,
+        request: T,
+        f: impl FnOnce(
+            &StatefulMailbox,
+            &T,
+            &StatelessMailbox,
+        ) -> Result<AppendResponse, Error>,
+    ) -> CmdResult {
+        let account = account!(self)?;
+        let selected = selected!(self)?;
+        let dst = account.mailbox(&dst, false).map_err(map_error! {
+            self,
+            NxMailbox => (No, Some(s::RespTextCode::TryCreate(()))),
+            UnsafeName | MailboxUnselectable => (No, None),
+        })?;
+        f(selected, &request, &dst).map_err(map_error! {
+           self,
+            MailboxFull | NxMessage | ExpungedMessage | GaveUpInsertion |
+            UnaddressableMessage => (No, None),
+        })?;
+        success()
+    }
+
+    fn fetch<ID: Default>(
+        &mut self,
+        cmd: s::FetchCommand<'_>,
+        sender: SendResponse<'_>,
+        ids: SeqRange<ID>,
+        force_fetch_uid: bool,
+        f_store: impl FnOnce(
+            &mut StatefulMailbox,
+            &StoreRequest<ID>,
+        ) -> Result<StoreResponse<ID>, Error>,
+        f_fetch: impl FnOnce(
+            &mut StatefulMailbox,
+            FetchRequest<ID>,
+        ) -> Result<FetchResponse, Error>,
+    ) -> CmdResult
+    where
+        SeqRange<ID>: fmt::Debug,
+    {
+        let mut request = FetchRequest {
+            ids,
+            uid: force_fetch_uid,
+            ..FetchRequest::default()
+        };
+
+        let fetch_properties = fetch_properties(&cmd.target);
+        fetch_target_from_ast(&mut request, cmd.target);
+
+        let selected = selected!(self)?;
+
+        // If there are non-.PEEK body sections in the request, implicitly set
+        // \Seen on all the messages.
+        //
+        // RFC 3501 does not define the ordering with respect to the data
+        // retrieval itself. Some discussion on the mailing lists vaguely
+        // suggests that the expectation is that the store happens first, which
+        // seems less useful, but it's ultimately moot in the view of IMAP as a
+        // cache-fill protocol.
+        //
+        // This is only best-effort, and we only log if anything goes wrong.
+        if fetch_properties.set_seen && !selected.stateless().read_only() {
+            let store_res = f_store(
+                selected,
+                &StoreRequest {
+                    ids: &request.ids,
+                    flags: &[Flag::Seen],
+                    remove_listed: false,
+                    remove_unlisted: false,
+                    // We must ensure that the client sees the updates this causes.
+                    loud: true,
+                    unchanged_since: None,
+                },
+            );
+            if let Err(e) = store_res {
+                warn!(
+                    "{} Implicit STORE \\Seen failed: {}",
+                    self.log_prefix, e
+                );
+            }
+        }
+
+        // TODO It would be better to stream these responses out rather than
+        // buffer them
+        let response = f_fetch(selected, request).map_err(map_error! {
+            self,
+            MasterKeyUnavailable | BadEncryptedKey | ExpungedMessage |
+            NxMessage | UnaddressableMessage => (No, None),
+        })?;
+        fetch_response(sender, response, fetch_properties)
+    }
+
+    fn store<ID>(
+        &mut self,
+        ids: SeqRange<ID>,
+        cmd: s::StoreCommand<'_>,
+        f: impl FnOnce(
+            &mut StatefulMailbox,
+            &StoreRequest<ID>,
+        ) -> Result<StoreResponse<ID>, Error>,
+    ) -> CmdResult
+    where
+        SeqRange<ID>: fmt::Debug,
+    {
+        let request = StoreRequest {
+            ids: &ids,
+            flags: &cmd.flags,
+            remove_listed: s::StoreCommandType::Minus == cmd.typ,
+            remove_unlisted: s::StoreCommandType::Eq == cmd.typ,
+            loud: !cmd.silent,
+            unchanged_since: None,
+        };
+
+        let resp = f(selected!(self)?, &request).map_err(map_error! {
+            self,
+            MailboxFull | NxMessage | ExpungedMessage | MailboxReadOnly |
+            UnaddressableMessage | GaveUpInsertion =>
+                (No, None),
+        })?;
+
+        if resp.ok {
+            success()
+        } else {
+            Ok(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::No,
+                code: None,
+                quip: Some(Cow::Borrowed("Some messages have been expunged")),
+            }))
         }
     }
 }

@@ -226,7 +226,7 @@ impl StatelessMailbox {
 impl StatefulMailbox {
     /// The RFC 3501 `COPY` command.
     pub fn seqnum_copy(
-        &mut self,
+        &self,
         request: &CopyRequest<Seqnum>,
         dst: &StatelessMailbox,
     ) -> Result<AppendResponse, Error> {
@@ -245,7 +245,7 @@ impl StatefulMailbox {
     /// messages, but it's not worth testing until the atomicity semantics are
     /// settled.
     pub fn copy(
-        &mut self,
+        &self,
         request: &CopyRequest<Uid>,
         dst: &StatelessMailbox,
     ) -> Result<AppendResponse, Error> {
