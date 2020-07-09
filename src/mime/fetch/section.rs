@@ -142,6 +142,9 @@ pub struct BodySection {
     /// If set, slice the binary data produced by the above to this range,
     /// clamping each endpoint.
     pub partial: Option<(u64, u64)>,
+    /// If set, report this section using the given legacy IMAP2 name (e.g.
+    /// `RFC822.HEADER` instead of `BODY[HEADER]`).
+    pub report_as_legacy: Option<Imap2Section>,
 }
 
 impl Default for BodySection {
@@ -152,8 +155,16 @@ impl Default for BodySection {
             header_filter: vec![],
             discard_matching_headers: false,
             partial: None,
+            report_as_legacy: None,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Imap2Section {
+    Rfc822,
+    Rfc822Header,
+    Rfc822Text,
 }
 
 /// A type which can be passed to `grovel` to produce `FetchedBodySection`

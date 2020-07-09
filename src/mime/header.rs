@@ -278,6 +278,18 @@ impl Default for ContentTransferEncoding {
     }
 }
 
+impl ContentTransferEncoding {
+    pub fn name(self) -> &'static str {
+        match self {
+            ContentTransferEncoding::SevenBit => "7bit",
+            ContentTransferEncoding::EightBit => "8bit",
+            ContentTransferEncoding::Binary => "binary",
+            ContentTransferEncoding::QuotedPrintable => "quoted-printable",
+            ContentTransferEncoding::Base64 => "base64",
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct ContentDisposition<'a> {
     pub disposition: Cow<'a, [u8]>,
