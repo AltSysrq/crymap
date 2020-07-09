@@ -305,9 +305,10 @@ impl CommandProcessor {
     fn cmd_expunge(&mut self, _sender: SendResponse<'_>) -> CmdResult {
         // As with NOOP, the unsolicited responses that go with this are part
         // of the natural poll cycle.
-        selected!(self)?
-            .expunge_all_deleted()
-            .map_err(|e| catch_all_error_handling(&self.log_prefix, e))?;
+        selected!(self)?.expunge_all_deleted().map_err(map_error! {
+            self,
+            MailboxReadOnly => (No, None),
+        })?;
         success()
     }
 
@@ -708,7 +709,33 @@ impl CommandProcessor {
         cmd: s::StoreCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        unimplemented!()
+        let ids = self.parse_seqnum_range(&cmd.messages)?;
+        let request = StoreRequest {
+            ids: &ids,
+            flags: &cmd.flags,
+            remove_listed: s::StoreCommandType::Minus == cmd.typ,
+            remove_unlisted: s::StoreCommandType::Eq == cmd.typ,
+            loud: !cmd.silent,
+            unchanged_since: None,
+        };
+
+        let resp = selected!(self)?.seqnum_store(&request).map_err(
+            map_error! {
+                self,
+                MailboxFull | NxMessage | ExpungedMessage | MailboxReadOnly =>
+                    (No, None),
+            },
+        )?;
+
+        if resp.ok {
+            success()
+        } else {
+            Ok(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::No,
+                code: None,
+                quip: Some(Cow::Borrowed("Some messages have been expunged")),
+            }))
+        }
     }
 
     fn cmd_search(
@@ -716,7 +743,15 @@ impl CommandProcessor {
         cmd: s::SearchCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        unimplemented!()
+        let request = self.search_command_from_ast(cmd)?;
+        let response = selected!(self)?
+            .seqnum_search(&request)
+            .map_err(map_error!(self))?;
+
+        sender(s::Response::Search(
+            response.hits.into_iter().map(|u| u.0.get()).collect(),
+        ));
+        success()
     }
 
     fn cmd_uid_copy(
@@ -971,6 +1006,132 @@ impl CommandProcessor {
         }
 
         Ok(seqrange)
+    }
+
+    fn parse_uid_range(&mut self, raw: &str) -> PartialResult<SeqRange<Uid>> {
+        let max_uid = selected!(self)?.max_uid().unwrap_or(Uid::MIN);
+        let seqrange = SeqRange::parse(raw, max_uid).ok_or_else(|| {
+            s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Bad,
+                code: None,
+                quip: Some(Cow::Borrowed("Unparsable sequence set")),
+            })
+        })?;
+
+        // The client is explicitly allowed to request UIDs out of range, so
+        // there's nothing else to validate here.
+
+        Ok(seqrange)
+    }
+
+    fn search_command_from_ast(
+        &mut self,
+        cmd: s::SearchCommand<'_>,
+    ) -> PartialResult<SearchRequest> {
+        if let Some(charset) = cmd.charset {
+            if !charset.eq_ignore_ascii_case("us-ascii")
+                && !charset.eq_ignore_ascii_case("utf-8")
+            {
+                return Err(s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::No,
+                    code: Some(s::RespTextCode::BadCharset(vec![
+                        Cow::Borrowed("us-ascii"),
+                        Cow::Borrowed("utf-8"),
+                    ])),
+                    quip: None,
+                }));
+            }
+        }
+
+        Ok(SearchRequest {
+            queries: cmd
+                .keys
+                .into_iter()
+                .map(|k| self.search_query_from_ast(k))
+                .collect::<PartialResult<Vec<_>>>()?,
+        })
+    }
+
+    fn search_query_from_ast(
+        &mut self,
+        k: s::SearchKey<'_>,
+    ) -> PartialResult<SearchQuery> {
+        match k {
+            s::SearchKey::Simple(simple) => Ok(match simple {
+                s::SimpleSearchKey::All => SearchQuery::All,
+                s::SimpleSearchKey::Answered => SearchQuery::Answered,
+                s::SimpleSearchKey::Deleted => SearchQuery::Deleted,
+                s::SimpleSearchKey::Flagged => SearchQuery::Flagged,
+                s::SimpleSearchKey::New => SearchQuery::New,
+                s::SimpleSearchKey::Old => SearchQuery::Old,
+                s::SimpleSearchKey::Recent => SearchQuery::Recent,
+                s::SimpleSearchKey::Seen => SearchQuery::Seen,
+                s::SimpleSearchKey::Unanswered => SearchQuery::Unanswered,
+                s::SimpleSearchKey::Undeleted => SearchQuery::Undeleted,
+                s::SimpleSearchKey::Unflagged => SearchQuery::Unflagged,
+                s::SimpleSearchKey::Unseen => SearchQuery::Unseen,
+                s::SimpleSearchKey::Draft => SearchQuery::Draft,
+                s::SimpleSearchKey::Undraft => SearchQuery::Undraft,
+            }),
+            s::SearchKey::Text(text_key) => {
+                let val = text_key.value.into_owned();
+                Ok(match text_key.typ {
+                    s::TextSearchKeyType::Bcc => SearchQuery::Bcc(val),
+                    s::TextSearchKeyType::Body => SearchQuery::Body(val),
+                    s::TextSearchKeyType::Cc => SearchQuery::Cc(val),
+                    s::TextSearchKeyType::From => SearchQuery::From(val),
+                    s::TextSearchKeyType::Subject => SearchQuery::Subject(val),
+                    s::TextSearchKeyType::Text => SearchQuery::Text(val),
+                    s::TextSearchKeyType::To => SearchQuery::To(val),
+                })
+            }
+            s::SearchKey::Date(date_key) => {
+                let date = date_key.date;
+                Ok(match date_key.typ {
+                    s::DateSearchKeyType::Before => SearchQuery::Before(date),
+                    s::DateSearchKeyType::On => SearchQuery::On(date),
+                    s::DateSearchKeyType::Since => SearchQuery::Since(date),
+                    s::DateSearchKeyType::SentBefore => {
+                        SearchQuery::SentBefore(date)
+                    }
+                    s::DateSearchKeyType::SentOn => SearchQuery::SentOn(date),
+                    s::DateSearchKeyType::SentSince => {
+                        SearchQuery::SentSince(date)
+                    }
+                })
+            }
+            s::SearchKey::Keyword(flag) => {
+                Ok(SearchQuery::Keyword(flag.to_string()))
+            }
+            s::SearchKey::Unkeyword(flag) => {
+                Ok(SearchQuery::Unkeyword(flag.to_string()))
+            }
+            s::SearchKey::Header(header) => Ok(SearchQuery::Header(
+                header.header.into_owned(),
+                header.value.into_owned(),
+            )),
+            s::SearchKey::Larger(thresh) => Ok(SearchQuery::Larger(thresh)),
+            s::SearchKey::Not(sub) => Ok(SearchQuery::Not(Box::new(
+                self.search_query_from_ast(*sub)?,
+            ))),
+            s::SearchKey::Or(or) => Ok(SearchQuery::Or(
+                Box::new(self.search_query_from_ast(*or.a)?),
+                Box::new(self.search_query_from_ast(*or.b)?),
+            )),
+            s::SearchKey::Smaller(thresh) => Ok(SearchQuery::Smaller(thresh)),
+            s::SearchKey::Uid(ss) => {
+                Ok(SearchQuery::UidSet(self.parse_uid_range(&ss)?))
+            }
+            s::SearchKey::Seqnum(ss) => {
+                Ok(SearchQuery::SequenceSet(self.parse_seqnum_range(&ss)?))
+            }
+            s::SearchKey::And(parts) => Ok(SearchQuery::And(
+                parts
+                    .into_iter()
+                    .map(|part| self.search_query_from_ast(part))
+                    .collect::<PartialResult<Vec<_>>>()?,
+            )),
+        }
     }
 }
 
