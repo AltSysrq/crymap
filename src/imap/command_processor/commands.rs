@@ -124,6 +124,20 @@ impl CommandProcessor {
             if let Err(err) = poll_res {
                 error!("{} Poll failed: {}", self.log_prefix, err);
             }
+        } else if let Some(selected) = self.selected.as_ref() {
+            // If an error occurred and we have a selected mailbox, check that
+            // the mailbox still exists. If not, disconnect the client instead
+            // of letting them continue to flail in confusion.
+            if !selected.stateless().is_ok() {
+                return s::ResponseLine {
+                    tag: None,
+                    response: s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Bye,
+                        code: None,
+                        quip: Some(Cow::Borrowed("Mailbox renamed or deleted")),
+                    }),
+                };
+            }
         }
 
         let res = match res {
