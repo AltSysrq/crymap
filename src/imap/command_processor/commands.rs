@@ -1,0 +1,168 @@
+//-
+// Copyright (c) 2020 Jason Lingle
+//
+// This file is part of Crymap.
+//
+// Crymap is free software: you can  redistribute it and/or modify it under the
+// terms of  the GNU General Public  License as published by  the Free Software
+// Foundation, either version  3 of the License, or (at  your option) any later
+// version.
+//
+// Crymap is distributed  in the hope that  it will be useful,  but WITHOUT ANY
+// WARRANTY; without  even the implied  warranty of MERCHANTABILITY  or FITNESS
+// FOR  A PARTICULAR  PURPOSE.  See the  GNU General  Public  License for  more
+// details.
+//
+// You should have received a copy of the GNU General Public License along with
+// Crymap. If not, see <http://www.gnu.org/licenses/>.
+
+use std::borrow::Cow;
+
+use super::defs::*;
+
+impl CommandProcessor {
+    /// Return the greeting line to return to the client.
+    pub fn greet(&self) -> s::ResponseLine<'static> {
+        s::ResponseLine {
+            tag: None,
+            response: s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Ok,
+                code: Some(s::RespTextCode::Capability(capability_data())),
+                quip: Some(Cow::Borrowed(TAGLINE)),
+            }),
+        }
+    }
+
+    /// Handles a regular command, i.e., one that the protocol level does not
+    /// give special treatment to.
+    ///
+    /// `sender` can be called with secondary responses as needed.
+    ///
+    /// Returns the final, tagged response. If the response condition is `BYE`,
+    /// the connection will be closed after sending it.
+    pub fn handle_command<'a>(
+        &mut self,
+        command_line: s::CommandLine<'a>,
+        sender: SendResponse<'_>,
+    ) -> s::ResponseLine<'a> {
+        let res = match command_line.cmd {
+            s::Command::Simple(s::SimpleCommand::Capability) => {
+                self.cmd_capability(sender)
+            }
+            s::Command::Simple(s::SimpleCommand::Check) => {
+                self.cmd_noop("Nothing exciting", sender)
+            }
+            s::Command::Simple(s::SimpleCommand::Close) => {
+                self.cmd_close(sender)
+            }
+            s::Command::Simple(s::SimpleCommand::Expunge) => {
+                self.cmd_expunge(sender)
+            }
+            s::Command::Simple(s::SimpleCommand::LogOut) => {
+                self.cmd_log_out(sender)
+            }
+            s::Command::Simple(s::SimpleCommand::Noop) => {
+                self.cmd_noop("NOOP OK", sender)
+            }
+            s::Command::Simple(s::SimpleCommand::StartTls) => {
+                self.cmd_start_tls(sender)
+            }
+            s::Command::Simple(s::SimpleCommand::Xyzzy) => {
+                self.cmd_noop("Nothing happens", sender)
+            }
+
+            s::Command::Create(cmd) => self.cmd_create(cmd, sender),
+            s::Command::Delete(cmd) => self.cmd_delete(cmd, sender),
+            s::Command::Examine(cmd) => self.cmd_examine(cmd, sender),
+            s::Command::List(cmd) => self.cmd_list(cmd, sender),
+            s::Command::Lsub(cmd) => self.cmd_lsub(cmd, sender),
+            s::Command::Rename(cmd) => self.cmd_rename(cmd, sender),
+            s::Command::Select(cmd) => self.cmd_select(cmd, sender),
+            s::Command::Status(cmd) => self.cmd_status(cmd, sender),
+            s::Command::Subscribe(cmd) => self.cmd_subscribe(cmd, sender),
+            s::Command::Unsubscribe(cmd) => self.cmd_unsubscribe(cmd, sender),
+            s::Command::LogIn(cmd) => self.cmd_log_in(cmd, sender),
+            s::Command::Copy(cmd) => self.cmd_copy(cmd, sender),
+            s::Command::Fetch(cmd) => self.cmd_fetch(cmd, sender),
+            s::Command::Store(cmd) => self.cmd_store(cmd, sender),
+            s::Command::Search(cmd) => self.cmd_search(cmd, sender),
+            s::Command::Uid(s::UidCommand::Copy(cmd)) => {
+                self.cmd_uid_copy(cmd, sender)
+            }
+            s::Command::Uid(s::UidCommand::Fetch(cmd)) => {
+                self.cmd_uid_fetch(cmd, sender)
+            }
+            s::Command::Uid(s::UidCommand::Search(cmd)) => {
+                self.cmd_uid_search(cmd, sender)
+            }
+            s::Command::Uid(s::UidCommand::Store(cmd)) => {
+                self.cmd_uid_store(cmd, sender)
+            }
+        };
+
+        let res = match res {
+            Ok(res) => res,
+            Err(res) => res,
+        };
+
+        if matches!(
+            &res,
+            &s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Bye,
+                ..
+            })
+        ) {
+            // BYE is never tagged
+            s::ResponseLine {
+                tag: None,
+                response: res,
+            }
+        } else {
+            s::ResponseLine {
+                tag: Some(command_line.tag),
+                response: res,
+            }
+        }
+    }
+
+    fn cmd_capability(&mut self, sender: SendResponse<'_>) -> CmdResult {
+        sender(s::Response::Capability(capability_data()));
+        success()
+    }
+
+    fn cmd_noop(
+        &mut self,
+        quip: &'static str,
+        _sender: SendResponse<'_>,
+    ) -> CmdResult {
+        // Nothing to do here; shared command processing takes care of the
+        // actual poll operation.
+        Ok(s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Ok,
+            code: None,
+            quip: Some(Cow::Borrowed(quip)),
+        }))
+    }
+
+    fn cmd_log_out(&mut self, _sender: SendResponse<'_>) -> CmdResult {
+        Err(s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Bye,
+            code: None,
+            quip: Some(Cow::Borrowed("BYE")),
+        }))
+    }
+
+    fn cmd_start_tls(&mut self, _sender: SendResponse<'_>) -> CmdResult {
+        Err(s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Bad,
+            code: None,
+            quip: Some(Cow::Borrowed("Already using TLS")),
+        }))
+    }
+}
+
+pub(super) fn capability_data() -> s::CapabilityData<'static> {
+    s::CapabilityData {
+        capabilities: CAPABILITIES.iter().copied().map(Cow::Borrowed).collect(),
+    }
+}
