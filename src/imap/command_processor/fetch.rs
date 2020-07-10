@@ -57,6 +57,32 @@ impl CommandProcessor {
         })
     }
 
+    pub(super) fn fetch_for_background_update(
+        &mut self,
+        sender: SendResponse<'_>,
+        uids: Vec<Uid>,
+    ) {
+        let mut ids = SeqRange::new();
+        for uid in uids {
+            ids.append(uid);
+        }
+
+        let _ = self.fetch(
+            s::FetchCommand {
+                messages: Cow::Borrowed(""),
+                target: s::FetchCommandTarget::Multi(vec![
+                    s::FetchAtt::Uid(()),
+                    s::FetchAtt::Flags(()),
+                ]),
+            },
+            sender,
+            ids,
+            false,
+            |_, _| panic!("Shouldn't STORE in background update"),
+            |mb, r| mb.fetch(&r),
+        );
+    }
+
     fn fetch<ID: Default>(
         &mut self,
         cmd: s::FetchCommand<'_>,

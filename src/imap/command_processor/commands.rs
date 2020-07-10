@@ -17,8 +17,12 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
+use std::convert::TryInto;
+
+use log::error;
 
 use super::defs::*;
+use crate::support::error::Error;
 
 impl CommandProcessor {
     /// Return the greeting line to return to the client.
@@ -45,6 +49,16 @@ impl CommandProcessor {
         command_line: s::CommandLine<'a>,
         sender: SendResponse<'_>,
     ) -> s::ResponseLine<'a> {
+        let allow_full_poll = match command_line.cmd {
+            // FETCH, STORE, and SEARCH (the non-UID versions) are the only
+            // cursed commands that don't allow us to update the message state
+            // in response.
+            s::Command::Fetch(..)
+            | s::Command::Store(..)
+            | s::Command::Search(..) => false,
+            _ => true,
+        };
+
         let res = match command_line.cmd {
             s::Command::Simple(s::SimpleCommand::Capability) => {
                 self.cmd_capability(sender)
@@ -99,6 +113,18 @@ impl CommandProcessor {
                 self.cmd_uid_store(cmd, sender)
             }
         };
+
+        if res.is_ok() {
+            let poll_res = if allow_full_poll {
+                self.full_poll(sender)
+            } else {
+                self.mini_poll(sender)
+            };
+
+            if let Err(err) = poll_res {
+                error!("{} Poll failed: {}", self.log_prefix, err);
+            }
+        }
 
         let res = match res {
             Ok(res) => res,
@@ -158,6 +184,38 @@ impl CommandProcessor {
             code: None,
             quip: Some(Cow::Borrowed("Already using TLS")),
         }))
+    }
+
+    fn full_poll(&mut self, sender: SendResponse<'_>) -> Result<(), Error> {
+        let selected = match self.selected.as_mut() {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+
+        let poll = selected.poll()?;
+        for (seqnum, _) in poll.expunge.into_iter().rev() {
+            sender(s::Response::Expunge(seqnum.0.get()));
+        }
+        if let Some(exists) = poll.exists {
+            sender(s::Response::Exists(exists.try_into().unwrap_or(u32::MAX)));
+        }
+        if let Some(recent) = poll.recent {
+            sender(s::Response::Recent(recent.try_into().unwrap_or(u32::MAX)));
+        }
+
+        self.fetch_for_background_update(sender, poll.fetch);
+        Ok(())
+    }
+
+    fn mini_poll(&mut self, sender: SendResponse<'_>) -> Result<(), Error> {
+        let selected = match self.selected.as_mut() {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+        let uids = selected.mini_poll();
+
+        self.fetch_for_background_update(sender, uids);
+        Ok(())
     }
 }
 
