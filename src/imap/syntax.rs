@@ -1319,7 +1319,19 @@ syntax_rule! {
     }
 }
 
-// ==================== PRIMITIVE PARSERS =================´===
+syntax_rule! {
+    #[]
+    struct UnknownCommandFragment<'a> {
+        #[suffix(" ")]
+        #[primitive(verbatim, tag_atom)]
+        tag: Cow<'a, str>,
+        #[]
+        #[primitive(verbatim, text)]
+        garbage: Cow<'a, str>,
+    }
+}
+
+// ==================== PRIMITIVE PARSERS ====================
 
 fn normal_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
     map(

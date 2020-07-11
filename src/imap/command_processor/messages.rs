@@ -37,7 +37,7 @@ impl CommandProcessor {
     /// `cmd_append_abort()` must be called, and then the error response from
     /// the failing command returned with the tag matching the original
     /// request.
-    pub(super) fn cmd_append_start(
+    pub fn cmd_append_start(
         &mut self,
         cmd: s::AppendCommandStart<'_>,
         item_size: u32,
@@ -56,7 +56,7 @@ impl CommandProcessor {
         self.cmd_append_item(cmd.first_fragment, item_size, item_data)
     }
 
-    pub(super) fn cmd_append_item(
+    pub fn cmd_append_item(
         &mut self,
         cmd: s::AppendFragment<'_>,
         item_size: u32,
@@ -103,7 +103,7 @@ impl CommandProcessor {
         Ok(())
     }
 
-    pub(super) fn cmd_append_commit(
+    pub fn cmd_append_commit(
         &mut self,
         tag: Cow<'static, str>,
         sender: SendResponse<'_>,
@@ -136,7 +136,7 @@ impl CommandProcessor {
         )
     }
 
-    pub(super) fn cmd_append_abort(&mut self) {
+    pub fn cmd_append_abort(&mut self) {
         self.multiappend = None;
     }
 

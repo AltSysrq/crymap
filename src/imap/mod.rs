@@ -19,4 +19,5 @@
 mod command_processor;
 mod lex;
 mod literal_source;
+mod server;
 mod syntax;
