@@ -18,7 +18,8 @@
 
 use std::borrow::Cow;
 use std::fs;
-use std::os::unix::fs::DirBuilderExt;
+use std::io::Write;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -27,13 +28,15 @@ use crate::account::mailbox::StatelessMailbox;
 use crate::account::mailbox_path::*;
 use crate::account::model::*;
 use crate::crypt::master_key::MasterKey;
-use crate::support::error::Error;
-use crate::support::file_ops::IgnoreKinds;
+use crate::support::{
+    error::Error, file_ops::IgnoreKinds, user_config::UserConfig,
+};
 
 #[derive(Clone)]
 pub struct Account {
     log_prefix: String,
     root: PathBuf,
+    master_key: Option<Arc<MasterKey>>,
     key_store: Arc<Mutex<KeyStore>>,
     config_file: PathBuf,
     mailbox_root: PathBuf,
@@ -62,12 +65,13 @@ impl Account {
             log_prefix.clone(),
             root.join("keys"),
             common_paths.tmp.clone(),
-            master_key,
+            master_key.clone(),
         );
 
         Account {
             log_prefix,
             common_paths,
+            master_key,
             key_store: Arc::new(Mutex::new(key_store)),
             mailbox_root: root.join("mail"),
             shadow_root: root.join("shadow"),
@@ -117,11 +121,33 @@ impl Account {
     /// - Trash \Trash
     ///
     /// (INBOX is also created by way of `init()`.)
-    pub fn provision(
-        &self,
-        key_store_config: &KeyStoreConfig,
-    ) -> Result<(), Error> {
-        self.init(key_store_config)?;
+    ///
+    /// The user configuration is also initialised to the defaults and the
+    /// given password.
+    ///
+    /// Note that the *directory* which is the root of the account must already
+    /// exist.
+    pub fn provision(&self, password: &[u8]) -> Result<(), Error> {
+        let user_config = UserConfig {
+            master_key: self
+                .master_key
+                .as_ref()
+                .expect("Account::provision() called without master key")
+                .make_config(password)
+                .expect("Password hashing failed"),
+            key_store: KeyStoreConfig::default(),
+        };
+
+        let user_config_toml = toml::to_vec(&user_config)
+            .expect("Failed to serialise user config to TOML");
+        fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(&self.config_file)?
+            .write_all(&user_config_toml)?;
+
+        self.init(&user_config.key_store)?;
         self.create(CreateRequest {
             name: "Archive".to_owned(),
             special_use: vec!["\\Archive".to_owned()],
@@ -443,7 +469,7 @@ mod test {
         );
 
         account.key_store.lock().unwrap().set_rsa_bits(1024);
-        account.provision(&KeyStoreConfig::default()).unwrap();
+        account.provision(b"hunter2").unwrap();
 
         Setup { root, account }
     }
