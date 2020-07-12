@@ -63,7 +63,7 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
         let mut cmdline = Vec::<u8>::new();
 
         while !self.sent_bye && !self.processor.logged_out() {
-            let nread = self.buffer_next_line(&mut cmdline)?;
+            let nread = self.buffer_next_line(&mut cmdline, true)?;
 
             if let Some((before_literal, length, literal_plus)) =
                 self.check_literal(&cmdline, nread)
@@ -113,6 +113,7 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
                         self.command_line_too_long(
                             &mut cmdline,
                             true,
+                            true,
                             Some((length, literal_plus)),
                         )?;
                         continue;
@@ -159,7 +160,7 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
                             cond: s::RespCondType::Bye,
                             code: Some(s::RespTextCode::Parse(())),
                             quip: Some(Cow::Borrowed(
-                                "This doesn't look anything like \
+                                "That doesn't look anything like \
                                  an IMAP command!",
                             )),
                         }),
@@ -175,7 +176,7 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
 
     /// Read the next line, appending it to `cmdline`.
     ///
-    /// Returns the number of bytes read.
+    /// Returns the number of bytes added to `cmdline`.
     ///
     /// Both DOS newlines and sane newlines (THE HORROR!) are accepted. The
     /// line ending is removed from the buffer.
@@ -189,6 +190,7 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
     fn buffer_next_line(
         &mut self,
         cmdline: &mut Vec<u8>,
+        initial: bool,
     ) -> Result<usize, Error> {
         let mut nread = self
             .read
@@ -204,8 +206,8 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
         }
 
         if cmdline.len() > MAX_CMDLINE || !cmdline.ends_with(b"\n") {
-            self.command_line_too_long(cmdline, false, None)?;
-            return Ok(nread);
+            self.command_line_too_long(cmdline, false, initial, None)?;
+            return Ok(0);
         }
 
         // Drop ending LF
@@ -262,17 +264,24 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
     /// command is reached. This must be `false` if `cmdline` could potentially
     /// contain a partial literal.
     ///
+    /// `initial` indicates whether `cmdline` is expected to contain a tag.
+    ///
     /// `literal_info` gives details about a literal, if any, which is
     /// currently initiated at the end of `cmdline`.
     fn command_line_too_long(
         &mut self,
         cmdline: &mut Vec<u8>,
         recoverable: bool,
+        initial: bool,
         literal_info: Option<(u32, bool)>,
     ) -> Result<(), Error> {
-        if let Ok((_, frag)) = s::UnknownCommandFragment::parse(&cmdline) {
+        if let (true, Ok((_, frag))) =
+            (initial, s::UnknownCommandFragment::parse(&cmdline))
+        {
             self.send_response(s::ResponseLine {
-                tag: Some(frag.tag),
+                // The RFC 3501 grammar doesn't allow tagged BYE, so if we're
+                // going to send BYE, we need to ensure it is untagged.
+                tag: if recoverable { Some(frag.tag) } else { None },
                 response: s::Response::Cond(s::CondResponse {
                     cond: if recoverable {
                         s::RespCondType::No
@@ -290,10 +299,12 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
                 response: s::Response::Cond(s::CondResponse {
                     cond: s::RespCondType::Bye,
                     code: None,
-                    quip: Some(Cow::Borrowed(
-                        "This doesn't look anything like \
-                         an IMAP command!",
-                    )),
+                    quip: Some(Cow::Borrowed(if initial {
+                        "That doesn't look anything like \
+                             an IMAP command!"
+                    } else {
+                        "Command line continuation too long"
+                    })),
                 }),
             })?;
             cmdline.clear();
@@ -324,7 +335,7 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
                 // sent back to the client aborts the literal, so we are
                 // consistent at this point.
                 if !literal_plus {
-                    return Ok(());
+                    break;
                 }
 
                 // Discard the literal
@@ -335,7 +346,7 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
             }
 
             cmdline.clear();
-            let nread = self.buffer_next_line(cmdline)?;
+            let nread = self.buffer_next_line(cmdline, false)?;
             if let Some((_, len, literal_plus)) =
                 self.check_literal(cmdline, nread)
             {
@@ -361,7 +372,7 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
     ) -> Result<(), Error> {
         loop {
             cmdline.clear();
-            let nread = self.buffer_next_line(cmdline)?;
+            let nread = self.buffer_next_line(cmdline, false)?;
 
             // End of append if the command line is empty and this isn't due to
             // reading a bunch of stuff and discarding it.

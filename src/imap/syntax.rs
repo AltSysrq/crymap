@@ -1378,7 +1378,9 @@ fn astring_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
 
 fn tag_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
     map(
-        bytes::complete::take_while1(|b| match b {
+        // RFC 3501 does not specify a maximum size for tags, but 128 should be
+        // more than enough for anyone.
+        bytes::complete::take_while_m_n(1, 128, |b| match b {
             0..=b' ' => false,
             127..=255 => false,
             b'(' | b')' | b'{' | b'*' | b'%' | b'\\' | b'"' | b'+' => false,

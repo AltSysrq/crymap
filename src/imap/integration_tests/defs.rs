@@ -102,7 +102,8 @@ impl Setup {
             match server.run() {
                 Ok(()) => (),
                 Err(crate::support::error::Error::Io(e))
-                    if io::ErrorKind::UnexpectedEof == e.kind() =>
+                    if io::ErrorKind::UnexpectedEof == e.kind()
+                        || Some(nix::libc::EPIPE) == e.raw_os_error() =>
                 {
                     ()
                 }

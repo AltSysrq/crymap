@@ -70,7 +70,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
     }
 
     pub fn write_raw(&mut self, bytes: &[u8]) -> Result<(), Error> {
-        self.trace(">>[raw]", bytes);
+        self.trace(true, ">>[raw]", bytes);
         self.write.write_all(bytes)?;
         Ok(())
     }
@@ -78,7 +78,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
     pub fn read_line_raw(&mut self, dst: &mut Vec<u8>) -> Result<usize, Error> {
         let start = dst.len();
         let nread = self.read.read_until(b'\n', dst)?;
-        self.trace("<<[eol]", &dst[start..]);
+        self.trace(false, "<<[eol]", &dst[start..]);
         Ok(nread)
     }
 
@@ -89,7 +89,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
     ) -> Result<usize, Error> {
         let start = dst.len();
         let nread = self.read.by_ref().take(n.into()).read_to_end(dst)?;
-        self.trace("<<[lit]", &dst[start..]);
+        self.trace(true, "<<[lit]", &dst[start..]);
         if n > nread as u32 {
             return Err(Error::Io(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
@@ -201,16 +201,23 @@ impl<R: BufRead, W: Write> Client<R, W> {
         }
 
         command_buffer.extend_from_slice(b"\r\n");
-        self.trace(">>[cmd]", &command_buffer);
+        self.trace(false, ">>[cmd]", &command_buffer);
         self.write.write_all(&command_buffer)?;
         self.read_commands_until_tagged(response_buffer)
     }
 
-    fn trace(&self, what: &str, data: &[u8]) {
+    fn trace(&self, truncate: bool, what: &str, data: &[u8]) {
         if let Some(prefix) = self.trace_stderr {
             if data.is_empty() {
                 eprintln!("{} WIRE {}<empty>", prefix, what);
+                return;
             }
+
+            let (data, truncated) = if truncate {
+                data.split_at(data.len().min(128))
+            } else {
+                (data, &[] as &[u8])
+            };
 
             let mut start = 0;
             for split in memchr::memchr_iter(b'\n', data)
@@ -234,6 +241,15 @@ impl<R: BufRead, W: Write> Client<R, W> {
                 }
 
                 eprintln!("{} WIRE {} {}", prefix, what, vis);
+            }
+
+            if !truncated.is_empty() {
+                eprintln!(
+                    "{} WIRE {}<{} more bytes>",
+                    prefix,
+                    what,
+                    truncated.len()
+                );
             }
         }
     }

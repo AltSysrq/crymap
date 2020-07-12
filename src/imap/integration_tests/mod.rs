@@ -61,7 +61,7 @@ macro_rules! ok_command {
 
 macro_rules! unpack_cond_response {
     (($tag:pat, $cond:pat, $code:pat, $quip:pat) = $resp:expr
-     => $body:block) => {
+     => $body:expr) => {
         match $resp {
             s::ResponseLine {
                 tag: $tag,

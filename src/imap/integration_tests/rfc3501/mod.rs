@@ -17,5 +17,6 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 mod auth;
+mod bad_commands;
 mod first_contact;
 mod mailboxes;
