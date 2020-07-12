@@ -475,9 +475,13 @@ impl MailboxPath {
                     info.attributes.push(MailboxAttribute::NonExistent);
                 }
             } else if !selectable {
-                // In all cases, we return \Noselect for non-selectable
-                // mailboxes that do exist.
-                info.attributes.push(MailboxAttribute::Noselect);
+                // In most cases, we return \Noselect for non-selectable
+                // mailboxes that do exist. The exception is LSUB, where
+                // \Noselect is repurposed to mean "not subscribed, but has
+                // unreported inferiors which are subscribed".
+                if !request.lsub_style {
+                    info.attributes.push(MailboxAttribute::Noselect);
+                }
             }
 
             if !self.allows_children() {

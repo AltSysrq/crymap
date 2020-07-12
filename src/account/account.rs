@@ -688,6 +688,28 @@ mod test {
                 }
             )
         );
+
+        // Edge case not described by RFC 3501: Since \Noselect means "mailbox
+        // has subscribed inferiors but is not itself subscribed", we can't use
+        // it to indicate mailboxes that are actually \Noselect.
+        setup.account.subscribe("news/comp").unwrap();
+        setup.account.delete("news/comp").unwrap();
+        assert_eq!(
+            "'news/comp' [] [\"SUBSCRIBED\"]\n\
+             'news/comp/mail/mime' [] []\n\
+             'news/comp/mail/misc' [] []\n",
+            list_formatted(
+                &setup.account,
+                ListRequest {
+                    reference: "".to_owned(),
+                    patterns: vec!["news/*".to_owned()],
+                    select_subscribed: true,
+                    recursive_match: true,
+                    lsub_style: true,
+                    ..ListRequest::default()
+                }
+            )
+        );
     }
 
     #[test]
