@@ -164,7 +164,7 @@ impl CommandProcessor {
         account.rename(request).map_err(map_error! {
             self,
             NxMailbox | BadOperationOnInbox | MailboxExists |
-            RenameToSelf | RenameIntoSelf => (No, None),
+            RenameToSelf | RenameIntoSelf | UnsafeName => (No, None),
         })?;
 
         success()

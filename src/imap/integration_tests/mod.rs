@@ -43,6 +43,11 @@ macro_rules! command {
         let mut buffer = Vec::new();
         let mut $responses = $client.command($command, &mut buffer).unwrap();
     };
+    ([$response:ident] = $client:expr, $command:expr) => {
+        command!(responses = $client, $command);
+        assert_eq!(1, responses.len());
+        let $response = responses.into_iter().next().unwrap();
+    };
 }
 
 macro_rules! ok_command {
@@ -52,6 +57,24 @@ macro_rules! ok_command {
         assert!(responses.len() >= 1);
         assert_tagged_ok_any(responses.pop().unwrap());
     }};
+}
+
+macro_rules! unpack_cond_response {
+    (($tag:pat, $cond:pat, $code:pat, $quip:pat) = $resp:expr
+     => $body:block) => {
+        match $resp {
+            s::ResponseLine {
+                tag: $tag,
+                response:
+                    s::Response::Cond(s::CondResponse {
+                        cond: $cond,
+                        code: $code,
+                        quip: $quip,
+                    }),
+            } => $body,
+            r => panic!("Unexpected response: {:?}", r),
+        }
+    };
 }
 
 mod defs;

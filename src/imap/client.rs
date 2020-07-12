@@ -208,6 +208,10 @@ impl<R: BufRead, W: Write> Client<R, W> {
 
     fn trace(&self, what: &str, data: &[u8]) {
         if let Some(prefix) = self.trace_stderr {
+            if data.is_empty() {
+                eprintln!("{} WIRE {}<empty>", prefix, what);
+            }
+
             let mut start = 0;
             for split in memchr::memchr_iter(b'\n', data)
                 .chain(std::iter::once(data.len() - 1))
