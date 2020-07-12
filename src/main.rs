@@ -52,6 +52,10 @@ static INIT_TEST_LOG: std::sync::Once = std::sync::Once::new();
 #[cfg(test)]
 fn init_test_log() {
     INIT_TEST_LOG.call_once(|| {
+        if !std::env::var("TEST_LOG").ok().map_or(false, |v| "1" == v) {
+            return;
+        }
+
         fern::Dispatch::new()
             .format(|out, message, record| {
                 out.finish(format_args!(

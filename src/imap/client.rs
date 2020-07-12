@@ -208,9 +208,6 @@ impl<R: BufRead, W: Write> Client<R, W> {
 
     fn trace(&self, what: &str, data: &[u8]) {
         if let Some(prefix) = self.trace_stderr {
-            let stderr = io::stderr();
-            let mut stderr = stderr.lock();
-
             let mut start = 0;
             for split in memchr::memchr_iter(b'\n', data)
                 .chain(std::iter::once(data.len() - 1))
@@ -232,7 +229,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
                     }
                 }
 
-                let _ = writeln!(stderr, "{} WIRE {} {}", prefix, what, vis);
+                eprintln!("{} WIRE {} {}", prefix, what, vis);
             }
         }
     }
