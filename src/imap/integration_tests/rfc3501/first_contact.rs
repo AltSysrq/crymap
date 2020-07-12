@@ -16,16 +16,33 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+use std::borrow::Cow;
+
 use super::super::defs::*;
 
 #[test]
 fn greeting_goodbye() {
     let setup = set_up();
     let mut client = setup.connect("A");
-    receive_line_like(
-        &mut client,
-        r#"^\* OK \[CAPABILITY IMAP4rev1 [^\]]+\] It's my IMAP"#,
-    );
+
+    let mut buffer = Vec::new();
+    let greeting = client.read_one_response(&mut buffer).unwrap();
+    match greeting {
+        s::ResponseLine {
+            tag: None,
+            response:
+                s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Ok,
+                    code: Some(s::RespTextCode::Capability(caps)),
+                    quip: _,
+                }),
+        } => {
+            assert!(caps.capabilities.contains(&Cow::Borrowed("IMAP4rev1")));
+            assert!(caps.capabilities.contains(&Cow::Borrowed("LITERAL+")));
+        }
+        g => panic!("Unexpected greeting: {:?}", g),
+    }
+
     client.write_raw(b"1 LOGOUT\r\n").unwrap();
     receive_line_like(&mut client, r#"^* BYE BYE\r\n$"#);
 }

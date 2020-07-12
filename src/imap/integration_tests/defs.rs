@@ -32,6 +32,8 @@ use crate::imap::command_processor::CommandProcessor;
 use crate::imap::server::Server;
 use crate::support::system_config::*;
 
+pub(super) use crate::imap::syntax as s;
+
 lazy_static! {
     static ref SYSTEM_DIR: Mutex<Weak<TempDir>> = Mutex::new(Weak::new());
 }
