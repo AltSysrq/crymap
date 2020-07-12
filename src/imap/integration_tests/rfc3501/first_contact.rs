@@ -45,6 +45,7 @@ fn greeting_goodbye() {
 
     client.write_raw(b"1 LOGOUT\r\n").unwrap();
     receive_line_like(&mut client, r#"^* BYE BYE\r\n$"#);
+    receive_line_like(&mut client, r#"^1 OK"#);
 }
 
 #[test]

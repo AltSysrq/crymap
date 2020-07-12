@@ -184,12 +184,16 @@ impl CommandProcessor {
         }))
     }
 
-    fn cmd_log_out(&mut self, _sender: SendResponse<'_>) -> CmdResult {
-        Err(s::Response::Cond(s::CondResponse {
+    fn cmd_log_out(&mut self, sender: SendResponse<'_>) -> CmdResult {
+        // LOGOUT is a bit weird because RFC 3501 requires sending an OK
+        // response *AFTER* the BYE.
+        self.logged_out = true;
+        sender(s::Response::Cond(s::CondResponse {
             cond: s::RespCondType::Bye,
             code: None,
             quip: Some(Cow::Borrowed("BYE")),
-        }))
+        }));
+        success()
     }
 
     fn cmd_start_tls(&mut self, _sender: SendResponse<'_>) -> CmdResult {

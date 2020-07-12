@@ -62,7 +62,7 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
 
         let mut cmdline = Vec::<u8>::new();
 
-        while !self.sent_bye {
+        while !self.sent_bye && !self.processor.logged_out() {
             let nread = self.buffer_next_line(&mut cmdline)?;
 
             if let Some((before_literal, length, literal_plus)) =

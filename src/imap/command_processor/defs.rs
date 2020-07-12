@@ -65,6 +65,8 @@ pub struct CommandProcessor {
     pub(super) caches_cleared: Option<Instant>,
 
     pub(super) multiappend: Option<Multiappend>,
+
+    pub(super) logged_out: bool,
 }
 
 pub(super) struct Multiappend {
@@ -101,7 +103,13 @@ impl CommandProcessor {
             caches_cleared: None,
 
             multiappend: None,
+
+            logged_out: false,
         }
+    }
+
+    pub fn logged_out(&self) -> bool {
+        self.logged_out
     }
 
     pub(super) fn parse_seqnum_range(
