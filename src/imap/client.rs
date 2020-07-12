@@ -201,7 +201,8 @@ impl<R: BufRead, W: Write> Client<R, W> {
         }
 
         command_buffer.extend_from_slice(b"\r\n");
-        self.write_raw(&command_buffer)?;
+        self.trace(">>[cmd]", &command_buffer);
+        self.write.write_all(&command_buffer)?;
         self.read_commands_until_tagged(response_buffer)
     }
 
