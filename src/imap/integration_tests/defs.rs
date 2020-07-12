@@ -71,7 +71,10 @@ impl Setup {
     pub fn connect(&self, name: &'static str) -> PipeClient {
         let (server_in, client_out) = os_pipe::pipe().unwrap();
         let (client_in, server_out) = os_pipe::pipe().unwrap();
-        let data_root = Arc::clone(&self.system_dir);
+        // We don't want the server thread to hold on to the TempDir since the
+        // test process can exit before the last server thread notices the EOF
+        // and terminates.
+        let data_root: PathBuf = self.system_dir.path().to_owned();
 
         std::thread::spawn(move || {
             let processor = CommandProcessor::new(
@@ -83,7 +86,7 @@ impl Setup {
                         certificate_chain: PathBuf::new(),
                     },
                 }),
-                data_root.path().to_owned(),
+                data_root,
             );
             let mut server = Server::new(
                 io::BufReader::new(server_in),
