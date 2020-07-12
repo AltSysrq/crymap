@@ -95,7 +95,7 @@ impl Setup {
             );
             let mut server = Server::new(
                 io::BufReader::new(server_in),
-                server_out,
+                io::BufWriter::new(server_out),
                 processor,
             );
 
