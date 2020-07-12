@@ -296,6 +296,7 @@ impl MailboxPath {
                 file_ops::delete_async(p, garbage).map_err(|e| e.into())
             }) {
                 Ok(()) => true,
+                Err(Error::MailboxUnselectable) => false,
                 Err(Error::Io(e)) if io::ErrorKind::NotFound == e.kind() => {
                     false
                 }
@@ -378,8 +379,8 @@ impl MailboxPath {
             .write(true)
             .mode(0o600)
             .open(&self.sub_path)
-            .map(|_| ())
-            .on_not_found(Error::MailboxUnselectable)
+            .map(|_| ())?;
+        Ok(())
     }
 
     /// Mark this mailbox as unsubscribed.

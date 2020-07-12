@@ -69,6 +69,19 @@ impl CommandProcessor {
                 Some((config, master_key))
             })
             .ok_or_else(|| {
+                // Only log a warning if a password was actually provided.
+                // Login attempts with now password aren't generally
+                // remarkable, but importantly, they can occur if the user
+                // accidentally inputs their password in the username field.
+                // For the same reason, we're silent if the userid and password
+                // are equal.
+                if !cmd.password.is_empty() && cmd.password != cmd.userid {
+                    warn!(
+                        "{} Rejected login for user '{}'",
+                        self.log_prefix, cmd.userid
+                    );
+                }
+
                 s::Response::Cond(s::CondResponse {
                     cond: s::RespCondType::No,
                     code: None,

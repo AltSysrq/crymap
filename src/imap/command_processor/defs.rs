@@ -162,6 +162,7 @@ pub(super) fn success() -> CmdResult {
     }))
 }
 
+#[cfg(not(test))]
 pub(super) fn catch_all_error_handling(
     log_prefix: &str,
     e: Error,
@@ -174,4 +175,13 @@ pub(super) fn catch_all_error_handling(
             "Unexpected error; check server logs for details",
         )),
     })
+}
+
+#[cfg(test)]
+pub(super) fn catch_all_error_handling(
+    log_prefix: &str,
+    e: Error,
+) -> s::Response<'static> {
+    error!("{} Unhandled internal error: {}", log_prefix, e);
+    panic!("{} Unhandled internal error: {}", log_prefix, e);
 }

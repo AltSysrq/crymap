@@ -45,3 +45,26 @@ mod test_data;
 fn main() {
     println!("Hello, world!");
 }
+
+#[cfg(test)]
+static INIT_TEST_LOG: std::sync::Once = std::sync::Once::new();
+
+#[cfg(test)]
+fn init_test_log() {
+    INIT_TEST_LOG.call_once(|| {
+        fern::Dispatch::new()
+            .format(|out, message, record| {
+                out.finish(format_args!(
+                    "{} [{}][{}] {}",
+                    chrono::Local::now().format("%H:%M:%S%.3f"),
+                    record.level(),
+                    record.target(),
+                    message,
+                ))
+            })
+            .level(log::LevelFilter::Debug)
+            .chain(std::io::stderr())
+            .apply()
+            .unwrap();
+    })
+}

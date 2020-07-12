@@ -16,6 +16,7 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+use std::borrow::Cow;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -44,6 +45,8 @@ pub struct Setup {
 }
 
 pub fn set_up() -> Setup {
+    crate::init_test_log();
+
     let mut lock = SYSTEM_DIR.lock().unwrap();
 
     if let Some(system_dir) = lock.upgrade() {
@@ -122,4 +125,63 @@ pub fn receive_line_like(client: &mut PipeClient, pat: &str) {
         pat,
         String::from_utf8_lossy(&buf)
     );
+}
+
+pub fn skip_greeting(client: &mut PipeClient) {
+    let mut buf = Vec::new();
+    client.read_one_response(&mut buf).unwrap();
+}
+
+pub fn quick_log_in(client: &mut PipeClient) {
+    let mut buf = Vec::new();
+    client.read_one_response(&mut buf).unwrap();
+    buf.clear();
+
+    let responses = client
+        .command(
+            s::Command::LogIn(s::LogInCommand {
+                userid: Cow::Borrowed("azure"),
+                password: Cow::Borrowed("hunter2"),
+            }),
+            &mut buf,
+        )
+        .unwrap();
+
+    assert_eq!(1, responses.len());
+}
+
+pub fn assert_tagged_ok(r: s::ResponseLine<'_>) {
+    assert_matches!(
+        s::ResponseLine {
+            tag: Some(_),
+            response: s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Ok,
+                code: None,
+                quip: _,
+            }),
+        }, r);
+}
+
+pub fn assert_tagged_ok_any(r: s::ResponseLine<'_>) {
+    assert_matches!(
+        s::ResponseLine {
+            tag: Some(_),
+            response: s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Ok,
+                code: _,
+                quip: _,
+            }),
+        }, r);
+}
+
+pub fn assert_tagged_no(r: s::ResponseLine<'_>) {
+    assert_matches!(
+        s::ResponseLine {
+            tag: Some(_),
+            response: s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::No,
+                code: None,
+                quip: _,
+            }),
+        }, r);
 }

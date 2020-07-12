@@ -39,3 +39,11 @@ zstd = "0.5"
 [dev-dependencies]
 os_pipe = "0.9"
 proptest = "0.10"
+
+# rust-argon2 and openssl can be quite slow without optimisations. We don't
+# need to debug them, so optimise even in dev/test builds.
+[profile.dev.package.rust-argon2]
+opt-level = 3
+
+[profile.dev.package.openssl]
+opt-level = 3

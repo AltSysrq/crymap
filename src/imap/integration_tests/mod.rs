@@ -34,6 +34,26 @@
 //! Since the tests run within one account, they typically create their own
 //! mailbox or mailbox hierarchy, each named after the test in question.
 
+macro_rules! command {
+    ($responses:ident = $client:expr, $command:expr) => {
+        let mut buffer = Vec::new();
+        let $responses = $client.command($command, &mut buffer).unwrap();
+    };
+    (mut $responses:ident = $client:expr, $command:expr) => {
+        let mut buffer = Vec::new();
+        let mut $responses = $client.command($command, &mut buffer).unwrap();
+    };
+}
+
+macro_rules! ok_command {
+    ($client:ident, $command:expr) => {{
+        let mut buffer = Vec::new();
+        let mut responses = $client.command($command, &mut buffer).unwrap();
+        assert!(responses.len() >= 1);
+        assert_tagged_ok_any(responses.pop().unwrap());
+    }};
+}
+
 mod defs;
 
 mod rfc3501;

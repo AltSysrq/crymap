@@ -606,7 +606,8 @@ syntax_rule! {
     #[]
     struct MailboxList<'a> {
         // Note that we're also encoding the hierarchy delimiter field into
-        // the suffix.
+        // the suffix. Yes, the quotes are required, even though / is legal in
+        // atoms and the other fields in this structure are all astrings.
         #[surrounded("(", ") \"/\" ") 0*(" ")]
         #[primitive(verbatim, backslash_atom)]
         flags: Vec<Cow<'a, str>>,

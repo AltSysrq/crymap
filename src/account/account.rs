@@ -1132,7 +1132,7 @@ mod test {
         );
 
         assert_matches!(
-            Err(Error::MailboxUnselectable),
+            Err(Error::MailboxHasInferiors),
             setup.account.delete("foo")
         );
 

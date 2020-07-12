@@ -23,7 +23,7 @@ use super::super::defs::*;
 #[test]
 fn greeting_goodbye() {
     let setup = set_up();
-    let mut client = setup.connect("A");
+    let mut client = setup.connect("3501fcgg");
 
     let mut buffer = Vec::new();
     let greeting = client.read_one_response(&mut buffer).unwrap();
@@ -45,4 +45,34 @@ fn greeting_goodbye() {
 
     client.write_raw(b"1 LOGOUT\r\n").unwrap();
     receive_line_like(&mut client, r#"^* BYE BYE\r\n$"#);
+}
+
+#[test]
+fn request_capabilities() {
+    let setup = set_up();
+    let mut client = setup.connect("3501fcrc");
+
+    skip_greeting(&mut client);
+
+    let mut buffer = Vec::new();
+    let responses = client
+        .command(
+            s::Command::Simple(s::SimpleCommand::Capability),
+            &mut buffer,
+        )
+        .unwrap();
+    assert_eq!(2, responses.len());
+
+    let mut responses = responses.into_iter();
+    match responses.next().unwrap() {
+        s::ResponseLine {
+            tag: None,
+            response: s::Response::Capability(caps),
+        } => {
+            assert!(caps.capabilities.contains(&Cow::Borrowed("IMAP4rev1")));
+            assert!(caps.capabilities.contains(&Cow::Borrowed("LITERAL+")));
+        }
+        r => panic!("Unexpected response: {:?}", r),
+    }
+    assert_tagged_ok(responses.next().unwrap());
 }
