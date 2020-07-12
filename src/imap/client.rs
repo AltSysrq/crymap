@@ -212,8 +212,12 @@ impl<R: BufRead, W: Write> Client<R, W> {
 
             let mut start = 0;
             for split in memchr::memchr_iter(b'\n', data)
-                .chain(std::iter::once(data.len()))
+                .chain(std::iter::once(data.len() - 1))
             {
+                if split < start {
+                    continue;
+                }
+
                 let data = &data[start..=split];
                 start = split + 1;
 
@@ -227,7 +231,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
                     }
                 }
 
-                let _ = write!(stderr, "{} WIRE {} {}", prefix, what, vis);
+                let _ = writeln!(stderr, "{} WIRE {} {}", prefix, what, vis);
             }
         }
     }

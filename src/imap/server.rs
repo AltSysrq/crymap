@@ -58,6 +58,8 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
     ///
     /// Blocks until an error occurs or a BYE response has been sent.
     pub fn run(&mut self) -> Result<(), Error> {
+        self.send_response(self.processor.greet())?;
+
         let mut cmdline = Vec::<u8>::new();
 
         while !self.sent_bye {

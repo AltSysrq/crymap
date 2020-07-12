@@ -37,4 +37,5 @@ toml = "0.5"
 zstd = "0.5"
 
 [dev-dependencies]
+os_pipe = "0.9"
 proptest = "0.10"

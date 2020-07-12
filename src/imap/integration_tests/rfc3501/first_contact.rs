@@ -16,12 +16,16 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-mod client;
-mod command_processor;
-mod lex;
-mod literal_source;
-mod server;
-mod syntax;
+use super::super::defs::*;
 
-#[cfg(test)]
-mod integration_tests;
+#[test]
+fn greeting_goodbye() {
+    let setup = set_up();
+    let mut client = setup.connect("A");
+    receive_line_like(
+        &mut client,
+        r#"^\* OK \[CAPABILITY IMAP4rev1 [^\]]+\] It's my IMAP"#,
+    );
+    client.write_raw(b"1 LOGOUT\r\n").unwrap();
+    receive_line_like(&mut client, r#"^* BYE BYE\r\n$"#);
+}

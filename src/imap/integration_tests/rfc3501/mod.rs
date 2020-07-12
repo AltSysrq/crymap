@@ -16,12 +16,4 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-mod client;
-mod command_processor;
-mod lex;
-mod literal_source;
-mod server;
-mod syntax;
-
-#[cfg(test)]
-mod integration_tests;
+mod first_contact;
