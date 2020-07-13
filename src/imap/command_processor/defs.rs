@@ -33,7 +33,7 @@ use crate::support::{error::Error, system_config::SystemConfig};
 pub(super) use crate::imap::syntax as s;
 
 pub(super) static CAPABILITIES: &[&str] =
-    &["IMAP4rev1", "AUTH=PLAIN", "LITERAL+", "XYZZY"];
+    &["IMAP4rev1", "AUTH=PLAIN", "LITERAL+", "XVANQUISH", "XYZZY"];
 
 pub(super) static TAGLINE: &str = concat!(
     "It's my IMAP and I'll CRY if I want to! (",

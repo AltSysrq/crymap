@@ -100,17 +100,7 @@ fn copy_messages() {
         })
     );
 
-    ok_command!(
-        client,
-        s::Command::Uid(s::UidCommand::Store(s::StoreCommand {
-            messages: Cow::Borrowed("2:3"),
-            typ: s::StoreCommandType::Plus,
-            silent: false,
-            flags: vec![Flag::Deleted],
-            _marker: PhantomData,
-        }))
-    );
-    ok_command!(client, s::Command::Simple(s::SimpleCommand::Expunge));
+    ok_command!(client, s::Command::XVanquish(Cow::Borrowed("2:3")));
 
     ok_command!(
         client,

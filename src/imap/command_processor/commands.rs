@@ -103,6 +103,8 @@ impl CommandProcessor {
             s::Command::Fetch(cmd) => self.cmd_fetch(cmd, sender),
             s::Command::Store(cmd) => self.cmd_store(cmd, sender),
             s::Command::Search(cmd) => self.cmd_search(cmd, sender),
+            s::Command::XVanquish(uids) => self.cmd_vanquish(uids, sender),
+
             s::Command::Uid(s::UidCommand::Copy(cmd)) => {
                 self.cmd_uid_copy(cmd, sender)
             }

@@ -163,8 +163,24 @@ impl CommandProcessor {
             .expunge_deleted(&uids)
             .map_err(map_error! {
                 self,
-                MailboxReadOnly | NxMessage => (No, None),
+                MailboxReadOnly | NxMessage | UnaddressableMessage =>
+                    (No, None),
             })?;
+        success()
+    }
+
+    pub(super) fn cmd_vanquish(
+        &mut self,
+        uids: Cow<'_, str>,
+        _sender: SendResponse<'_>,
+    ) -> CmdResult {
+        let uids = self.parse_uid_range(&uids)?;
+        let uids = uids.items(u32::MAX).take(65536).collect::<Vec<_>>();
+        selected!(self)?.vanquish(uids).map_err(map_error! {
+            self,
+            MailboxReadOnly | NxMessage | UnaddressableMessage =>
+                (No, None),
+        })?;
         success()
     }
 

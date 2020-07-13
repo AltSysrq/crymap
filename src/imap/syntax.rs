@@ -1280,6 +1280,9 @@ syntax_rule! {
         #[]
         #[delegate]
         Search(SearchCommand<'a>),
+        #[prefix("XVANQUISH ")]
+        #[primitive(verbatim, sequence_set)]
+        XVanquish(Cow<'a, str>),
     }
 }
 
@@ -3583,6 +3586,12 @@ mod test {
                 charset: None,
                 keys: vec![SearchKey::Simple(SimpleSearchKey::Unseen)],
             })
+        );
+
+        assert_reversible!(
+            Command,
+            "XVANQUISH 1:*",
+            Command::XVanquish(s("1:*"))
         );
 
         assert_reversible!(
