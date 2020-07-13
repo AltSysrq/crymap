@@ -163,6 +163,13 @@ impl StatefulMailbox {
             this.start_gc(rollups);
         }
 
+        // Ensure all the system flags are defined
+        this.state.flag_id_mut(Flag::Answered);
+        this.state.flag_id_mut(Flag::Deleted);
+        this.state.flag_id_mut(Flag::Draft);
+        this.state.flag_id_mut(Flag::Flagged);
+        this.state.flag_id_mut(Flag::Seen);
+
         let select_response = SelectResponse {
             flags: this.flags_response(),
             exists: this.state.num_messages(),
