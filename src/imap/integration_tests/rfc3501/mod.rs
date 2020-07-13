@@ -20,3 +20,4 @@ mod auth;
 mod bad_commands;
 mod first_contact;
 mod mailboxes;
+mod messages;

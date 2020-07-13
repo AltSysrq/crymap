@@ -64,6 +64,10 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
 
         while !self.sent_bye && !self.processor.logged_out() {
             let nread = self.buffer_next_line(&mut cmdline, true)?;
+            let nread = match nread {
+                Some(n) => n,
+                None => continue,
+            };
 
             if let Some((before_literal, length, literal_plus)) =
                 self.check_literal(&cmdline, nread)
@@ -186,12 +190,12 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
     ///
     /// If the maximum command line length is exceeded, sends an appropriate
     /// response to the client, swallows the whole command, and returns
-    /// successfully with `cmdline` clear.
+    /// `None` successfully with `cmdline` clear.
     fn buffer_next_line(
         &mut self,
         cmdline: &mut Vec<u8>,
         initial: bool,
-    ) -> Result<usize, Error> {
+    ) -> Result<Option<usize>, Error> {
         let mut nread = self
             .read
             .by_ref()
@@ -207,7 +211,7 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
 
         if cmdline.len() > MAX_CMDLINE || !cmdline.ends_with(b"\n") {
             self.command_line_too_long(cmdline, false, initial, None)?;
-            return Ok(0);
+            return Ok(None);
         }
 
         // Drop ending LF
@@ -219,7 +223,7 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
             nread -= 1;
         }
 
-        Ok(nread)
+        Ok(Some(nread))
     }
 
     /// Check whether the current command line ends with a literal.
@@ -251,7 +255,9 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
     /// Send the appropriate continuation for a literal.
     fn accept_literal(&self, literal_plus: bool) -> Result<(), Error> {
         if !literal_plus {
-            self.write.lock().unwrap().write_all(b"+ go\r\n")?;
+            let mut w = self.write.lock().unwrap();
+            w.write_all(b"+ go\r\n")?;
+            w.flush()?;
         }
 
         Ok(())
@@ -347,6 +353,11 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
 
             cmdline.clear();
             let nread = self.buffer_next_line(cmdline, false)?;
+            let nread = match nread {
+                Some(n) => n,
+                None => break,
+            };
+
             if let Some((_, len, literal_plus)) =
                 self.check_literal(cmdline, nread)
             {
@@ -373,16 +384,22 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
         loop {
             cmdline.clear();
             let nread = self.buffer_next_line(cmdline, false)?;
+            let nread = match nread {
+                Some(n) => n,
+                None => {
+                    self.processor.cmd_append_abort();
+                    break;
+                }
+            };
 
-            // End of append if the command line is empty and this isn't due to
-            // reading a bunch of stuff and discarding it.
-            if cmdline.is_empty() && nread <= 2 {
+            // End of append if the command line is empty
+            if cmdline.is_empty() {
                 let r = self.processor.cmd_append_commit(
                     Cow::Owned(tag),
                     &response_sender(&self.write),
                 );
                 self.send_response(r)?;
-                return Ok(());
+                break;
             }
 
             if let Some((before_literal, length, literal_plus)) =
@@ -396,7 +413,7 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
                         literal_plus,
                     )?;
                     self.processor.cmd_append_abort();
-                    return Ok(());
+                    break;
                 }
 
                 if let Ok((b"", frag)) =
@@ -420,8 +437,10 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
                         })?;
                         self.discard_command(cmdline, None)?;
                         self.processor.cmd_append_abort();
-                        return Ok(());
+                        break;
                     }
+
+                    continue;
                 } else {
                     self.send_response(s::ResponseLine {
                         tag: Some(Cow::Owned(tag)),
@@ -436,7 +455,7 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
                         Some((length, literal_plus)),
                     )?;
                     self.processor.cmd_append_abort();
-                    return Ok(());
+                    break;
                 }
             }
 
@@ -446,13 +465,16 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
                 response: s::Response::Cond(s::CondResponse {
                     cond: s::RespCondType::Bad,
                     code: None,
-                    quip: Some(Cow::Borrowed("Bad APPEND syntax")),
+                    quip: Some(Cow::Borrowed("Bad APPEND syntax (no literal)")),
                 }),
             })?;
             self.discard_command(cmdline, None)?;
             self.processor.cmd_append_abort();
-            return Ok(());
+            break;
         }
+
+        cmdline.clear();
+        Ok(())
     }
 
     fn append_limit_exceeded(

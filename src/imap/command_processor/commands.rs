@@ -84,6 +84,9 @@ impl CommandProcessor {
             s::Command::Simple(s::SimpleCommand::Xyzzy) => {
                 self.cmd_noop("Nothing happens", sender)
             }
+            s::Command::Simple(s::SimpleCommand::XAppendFinishedNoop) => {
+                self.cmd_noop("APPEND OK", sender)
+            }
 
             s::Command::Create(cmd) => self.cmd_create(cmd, sender),
             s::Command::Delete(cmd) => self.cmd_delete(cmd, sender),
@@ -111,6 +114,9 @@ impl CommandProcessor {
             }
             s::Command::Uid(s::UidCommand::Store(cmd)) => {
                 self.cmd_uid_store(cmd, sender)
+            }
+            s::Command::Uid(s::UidCommand::Expunge(uids)) => {
+                self.cmd_uid_expunge(uids, sender)
             }
         };
 

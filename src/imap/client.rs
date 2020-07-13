@@ -50,6 +50,8 @@ pub enum Error {
     Nom(String),
     #[error("Failed to parse whole response")]
     PartialParse,
+    #[error("Append rejected: {0}")]
+    AppendRejected(String),
 }
 
 pub struct Client<R, W> {
@@ -158,6 +160,13 @@ impl<R: BufRead, W: Write> Client<R, W> {
             self.read_logical_line(dst)?;
             boundaries.push(dst.len());
 
+            if start == dst.len() {
+                return Err(Error::Io(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "Expected continuation line, got nothing",
+                )));
+            }
+
             if b'*' != dst[start] {
                 break;
             }
@@ -206,6 +215,79 @@ impl<R: BufRead, W: Write> Client<R, W> {
         self.read_commands_until_tagged(response_buffer)
     }
 
+    pub fn start_append(
+        &mut self,
+        mailbox: &str,
+        frag: s::AppendFragment<'_>,
+        data: &[u8],
+    ) -> Result<(), Error> {
+        let tag = self.next_tag;
+        self.next_tag += 1;
+
+        let mut command = s::AppendCommandStart {
+            tag: Cow::Owned(format!("{}", tag)),
+            mailbox: Cow::Borrowed(mailbox),
+            first_fragment: frag,
+        };
+
+        let mut request_buffer = Vec::<u8>::new();
+        command.write_to(&mut LexWriter::new(
+            &mut request_buffer,
+            true,
+            true,
+        ))?;
+        write!(request_buffer, "{{{}}}\r\n", data.len())?;
+
+        self.trace(false, ">>[app]", &request_buffer);
+        self.write.write_all(&request_buffer)?;
+
+        let mut response_buffer = Vec::new();
+        self.read_logical_line(&mut response_buffer)?;
+        if !response_buffer.starts_with(b"+ ") {
+            return Err(Error::AppendRejected(
+                String::from_utf8_lossy(&response_buffer).into_owned(),
+            ));
+        }
+
+        self.trace(true, ">>[lit]", data);
+        self.write.write_all(data)?;
+        Ok(())
+    }
+
+    pub fn append_item(
+        &mut self,
+        mut frag: s::AppendFragment<'_>,
+        data: &[u8],
+    ) -> Result<(), Error> {
+        let mut request_buffer = Vec::<u8>::new();
+        frag.write_to(&mut LexWriter::new(&mut request_buffer, true, true))?;
+        write!(request_buffer, "{{{}}}\r\n", data.len())?;
+
+        self.trace(false, ">>[app]", &request_buffer);
+        self.write.write_all(&request_buffer)?;
+
+        let mut response_buffer = Vec::new();
+        self.read_logical_line(&mut response_buffer)?;
+        if !response_buffer.starts_with(b"+ ") {
+            return Err(Error::AppendRejected(
+                String::from_utf8_lossy(&response_buffer).into_owned(),
+            ));
+        }
+
+        self.trace(true, ">>[lit]", data);
+        self.write.write_all(data)?;
+        Ok(())
+    }
+
+    pub fn finish_append<'a>(
+        &mut self,
+        response_buffer: &'a mut Vec<u8>,
+    ) -> Result<Vec<s::ResponseLine<'a>>, Error> {
+        self.trace(false, ">>[app]", b"\r\n");
+        self.write.write_all(b"\r\n")?;
+        self.read_commands_until_tagged(response_buffer)
+    }
+
     fn trace(&self, truncate: bool, what: &str, data: &[u8]) {
         if let Some(prefix) = self.trace_stderr {
             if data.is_empty() {
@@ -245,10 +327,11 @@ impl<R: BufRead, W: Write> Client<R, W> {
 
             if !truncated.is_empty() {
                 eprintln!(
-                    "{} WIRE {}<{} more bytes>",
+                    "{} WIRE {}<{} more bytes, {} total>",
                     prefix,
                     what,
-                    truncated.len()
+                    truncated.len(),
+                    truncated.len() + data.len(),
                 );
             }
         }

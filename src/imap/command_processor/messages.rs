@@ -130,7 +130,7 @@ impl CommandProcessor {
         self.handle_command(
             s::CommandLine {
                 tag,
-                cmd: s::Command::Simple(s::SimpleCommand::Noop),
+                cmd: s::Command::Simple(s::SimpleCommand::XAppendFinishedNoop),
             },
             sender,
         )
@@ -150,6 +150,21 @@ impl CommandProcessor {
             self,
             MailboxReadOnly => (No, None),
         })?;
+        success()
+    }
+
+    pub(super) fn cmd_uid_expunge(
+        &mut self,
+        uids: Cow<'_, str>,
+        _sender: SendResponse<'_>,
+    ) -> CmdResult {
+        let uids = self.parse_uid_range(&uids)?;
+        selected!(self)?
+            .expunge_deleted(&uids)
+            .map_err(map_error! {
+                self,
+                MailboxReadOnly | NxMessage => (No, None),
+            })?;
         success()
     }
 

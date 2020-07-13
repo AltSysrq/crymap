@@ -1193,6 +1193,9 @@ syntax_rule! {
         #[]
         #[delegate]
         Store(StoreCommand<'a>),
+        #[prefix("EXPUNGE ")]
+        #[primitive(verbatim, sequence_set)]
+        Expunge(Cow<'a, str>),
     }
 }
 
@@ -1205,6 +1208,8 @@ simple_enum! {
         LogOut("LOGOUT"),
         Noop("NOOP"),
         StartTls("STARTTLS"),
+        // Used internally, not expected to match anything
+        XAppendFinishedNoop("XAppendFinishedNoop"),
         Xyzzy("XYZZY"),
     }
 }
@@ -3614,6 +3619,11 @@ mod test {
                 flags: vec![],
                 _marker: PhantomData,
             }))
+        );
+        assert_reversible!(
+            Command,
+            "UID EXPUNGE 1:*",
+            Command::Uid(UidCommand::Expunge(s("1:*")))
         );
     }
 

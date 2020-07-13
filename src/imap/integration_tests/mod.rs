@@ -77,6 +77,28 @@ macro_rules! unpack_cond_response {
     };
 }
 
+macro_rules! has_untagged_response_matching {
+    ($pat:pat in $responses:expr) => {
+        has_untagged_response_matching! {
+            $pat in $responses => ()
+        }
+    };
+    ($pat:pat in $responses:expr => $result:expr) => {{
+        $responses
+            .iter()
+            .filter_map(|response| match *response {
+                s::ResponseLine {
+                    tag: None,
+                    response: $pat,
+                } => Some($result),
+
+                _ => None,
+            })
+            .next()
+            .expect("Expected response not found")
+    }};
+}
+
 mod defs;
 
 mod rfc3501;
