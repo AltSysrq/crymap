@@ -35,7 +35,6 @@ use crate::imap::server::Server;
 use crate::support::system_config::*;
 use crate::test_data::*;
 
-pub(super) use crate::account::model::Flag;
 pub(super) use crate::imap::syntax as s;
 
 lazy_static! {
@@ -230,4 +229,11 @@ pub fn assert_tagged_no(r: s::ResponseLine<'_>) {
                 quip: _,
             }),
         }, r);
+}
+
+pub fn c(s: &'static str) -> s::Command<'static> {
+    match s::Command::parse(s.as_bytes()) {
+        Ok((b"", command)) => command,
+        _ => panic!("Bad command: {}", s),
+    }
 }

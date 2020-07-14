@@ -16,8 +16,6 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-use std::borrow::Cow;
-
 use super::super::defs::*;
 
 #[test]
@@ -141,58 +139,30 @@ fn inappropriate_commands() {
     let mut client = setup.connect("3501bcic");
     skip_greeting(&mut client);
 
-    command!(
-        [response] = client,
-        s::Command::Delete(s::DeleteCommand {
-            mailbox: Cow::Borrowed("azure"),
-        })
-    );
+    command!([response] = client, c("DELETE azure"));
     unpack_cond_response! {
         (Some(_), s::RespCondType::Bad, _, _) = response => { }
     }
 
-    command!(
-        [response] = client,
-        s::Command::Simple(s::SimpleCommand::Expunge)
-    );
+    command!([response] = client, c("EXPUNGE"));
     unpack_cond_response! {
         (Some(_), s::RespCondType::Bad, _, _) = response => { }
     }
 
-    command!(
-        [response] = client,
-        s::Command::LogIn(s::LogInCommand {
-            userid: Cow::Borrowed("../foo"),
-            password: Cow::Borrowed("hunter2"),
-        })
-    );
+    command!([response] = client, c("LOGIN ../foo hunter2"));
     unpack_cond_response! {
         (Some(_), s::RespCondType::No, _, _) = response => { }
     }
 
-    ok_command!(
-        client,
-        s::Command::LogIn(s::LogInCommand {
-            userid: Cow::Borrowed("azure"),
-            password: Cow::Borrowed("hunter2"),
-        })
-    );
+    ok_command!(client, c("LOGIN azure hunter2"));
 
-    command!(
-        [response] = client,
-        s::Command::Simple(s::SimpleCommand::Expunge)
-    );
+    command!([response] = client, c("EXPUNGE"));
     unpack_cond_response! {
         (Some(_), s::RespCondType::Bad, _, _) = response => { }
     }
 
-    command!(
-        [response] = client,
-        s::Command::LogIn(s::LogInCommand {
-            userid: Cow::Borrowed("azure"),
-            password: Cow::Borrowed("hunter2"),
-        })
-    );
+    command!([response] = client, c("LOGIN azure hunter2"));
+
     unpack_cond_response! {
         (Some(_), s::RespCondType::Bad, _, _) = response => { }
     }

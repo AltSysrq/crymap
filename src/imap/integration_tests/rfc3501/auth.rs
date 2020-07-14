@@ -28,13 +28,7 @@ fn login_basic() {
 
     let mut buffer = Vec::new();
     let responses = client
-        .command(
-            s::Command::LogIn(s::LogInCommand {
-                userid: Cow::Borrowed("azure"),
-                password: Cow::Borrowed("hunter2"),
-            }),
-            &mut buffer,
-        )
+        .command(c("LOGIN azure hunter2"), &mut buffer)
         .unwrap();
 
     assert_eq!(1, responses.len());
@@ -64,13 +58,7 @@ fn login_invalid() {
     {
         let mut buffer = Vec::new();
         let responses = client
-            .command(
-                s::Command::LogIn(s::LogInCommand {
-                    userid: Cow::Borrowed("azure"),
-                    password: Cow::Borrowed("letmein"),
-                }),
-                &mut buffer,
-            )
+            .command(c("LOGIN azure letmein"), &mut buffer)
             .unwrap();
 
         assert_eq!(1, responses.len());
@@ -80,13 +68,7 @@ fn login_invalid() {
     {
         let mut buffer = Vec::new();
         let responses = client
-            .command(
-                s::Command::LogIn(s::LogInCommand {
-                    userid: Cow::Borrowed("root"),
-                    password: Cow::Borrowed("hunter2"),
-                }),
-                &mut buffer,
-            )
+            .command(c("LOGIN root hunter2"), &mut buffer)
             .unwrap();
 
         assert_eq!(1, responses.len());

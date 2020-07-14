@@ -16,7 +16,6 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-use std::borrow::Cow;
 use std::marker::PhantomData;
 
 use super::super::defs::*;
@@ -45,9 +44,7 @@ fn append_message() {
     assert!(responses.len() >= 1);
     assert_tagged_ok(responses.pop().unwrap());
 
-    command!(mut responses = client, s::Command::Examine(s::ExamineCommand {
-        mailbox: Cow::Borrowed("3501meam"),
-    }));
+    command!(mut responses = client, c("EXAMINE 3501meam"));
     assert_tagged_ok_any(responses.pop().unwrap());
     has_untagged_response_matching! {
         s::Response::Exists(1) in responses
@@ -86,36 +83,13 @@ fn copy_messages() {
     let num_messages = 5;
     quick_append_enron(&mut client, "3501mecm/src", num_messages);
 
-    ok_command!(
-        client,
-        s::Command::Select(s::SelectCommand {
-            mailbox: Cow::Borrowed("3501mecm/src"),
-        })
-    );
-    ok_command!(
-        client,
-        s::Command::Copy(s::CopyCommand {
-            dst: Cow::Borrowed("3501mecm/dst1"),
-            messages: Cow::Borrowed("3:*"),
-        })
-    );
+    ok_command!(client, c("SELECT 3501mecm/src"));
+    ok_command!(client, c("COPY 3:* 3501mecm/dst1"));
+    ok_command!(client, c("XVANQUISH 2:3"));
 
-    ok_command!(client, s::Command::XVanquish(Cow::Borrowed("2:3")));
+    ok_command!(client, c("UID COPY 1:4 3501mecm/dst2"));
 
-    ok_command!(
-        client,
-        s::Command::Uid(s::UidCommand::Copy(s::CopyCommand {
-            dst: Cow::Borrowed("3501mecm/dst2"),
-            messages: Cow::Borrowed("1:4"),
-        }))
-    );
-
-    command!(
-        responses = client,
-        s::Command::Examine(s::ExamineCommand {
-            mailbox: Cow::Borrowed("3501mecm/dst1"),
-        })
-    );
+    command!(responses = client, c("EXAMINE 3501mecm/dst1"));
 
     has_untagged_response_matching! {
         s::Response::Exists(n) in responses => {
@@ -123,12 +97,7 @@ fn copy_messages() {
         }
     };
 
-    command!(
-        responses = client,
-        s::Command::Examine(s::ExamineCommand {
-            mailbox: Cow::Borrowed("3501mecm/dst2"),
-        })
-    );
+    command!(responses = client, c("EXAMINE 3501mecm/dst2"));
     has_untagged_response_matching! {
         s::Response::Exists(2) in responses
     };
@@ -143,36 +112,19 @@ fn expunge_messages() {
     quick_append_enron(&mut client, "3501mexm", 5);
     quick_select(&mut client, "3501mexm");
 
-    ok_command!(
-        client,
-        s::Command::Store(s::StoreCommand {
-            messages: Cow::Borrowed("2"),
-            typ: s::StoreCommandType::Plus,
-            silent: false,
-            flags: vec![Flag::Deleted],
-            _marker: PhantomData,
-        })
-    );
-    command!(mut responses = client, s::Command::Simple(s::SimpleCommand::Expunge));
+    ok_command!(client, c("STORE 2 +FLAGS (\\Deleted)"));
+    command!(mut responses = client, c("EXPUNGE"));
     assert_tagged_ok(responses.pop().unwrap());
     assert_eq!(1, responses.len());
     has_untagged_response_matching! {
         s::Response::Expunge(2) in responses
     };
 
-    ok_command!(
-        client,
-        s::Command::Uid(s::UidCommand::Store(s::StoreCommand {
-            messages: Cow::Borrowed("3"),
-            typ: s::StoreCommandType::Plus,
-            silent: false,
-            flags: vec![Flag::Deleted],
-            _marker: PhantomData,
-        }))
-    );
-    command!(mut responses = client, s::Command::Uid(s::UidCommand::Expunge(
-        Cow::Borrowed("3,4"),
-    )));
+    ok_command!(client, c("UID STORE 3 +FLAGS (\\Deleted)"));
+
+    // TODO This is actually a UIDPLUS command, move to those tests once
+    // written.
+    command!(mut responses = client, c("UID EXPUNGE 3,4"));
 
     assert_tagged_ok(responses.pop().unwrap());
     assert_eq!(1, responses.len());
