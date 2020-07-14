@@ -32,6 +32,7 @@ use crate::crypt::master_key::MasterKey;
 use crate::imap::client::Client;
 use crate::imap::command_processor::CommandProcessor;
 use crate::imap::server::Server;
+use crate::support::error::Error;
 use crate::support::system_config::*;
 use crate::test_data::*;
 
@@ -229,6 +230,19 @@ pub fn assert_tagged_no(r: s::ResponseLine<'_>) {
                 quip: _,
             }),
         }, r);
+}
+
+pub fn assert_error_response(
+    response: s::ResponseLine<'_>,
+    expected_code: Option<s::RespTextCode<'_>>,
+    error: Error,
+) {
+    unpack_cond_response! {
+        (Some(_), s::RespCondType::No, code, Some(quip)) = response => {
+            assert_eq!(expected_code, code);
+            assert_eq!(error.to_string(), quip);
+        }
+    };
 }
 
 pub fn c(s: &'static str) -> s::Command<'static> {

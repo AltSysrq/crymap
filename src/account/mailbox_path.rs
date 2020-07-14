@@ -110,6 +110,10 @@ impl MailboxPath {
     /// Return the *current* UID validity, i.e., that which would be used if
     /// the mailbox were opened right now.
     pub fn current_uid_validity(&self) -> Result<u32, Error> {
+        if !self.exists() {
+            return Err(Error::NxMailbox);
+        }
+
         parse_uid_validity(
             &nix::fcntl::readlink(&self.data_path)
                 .on_not_found(Error::MailboxUnselectable)?,
@@ -360,6 +364,10 @@ impl MailboxPath {
 
     /// Loads and returns the metadata for this mailbox.
     pub fn metadata(&self) -> Result<MailboxMetadata, Error> {
+        if !self.exists() {
+            return Err(Error::NxMailbox);
+        }
+
         let mut reader = fs::File::open(&self.metadata_path)
             .on_not_found(Error::MailboxUnselectable)?;
         let mut data = Vec::new();

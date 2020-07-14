@@ -46,7 +46,8 @@ impl CommandProcessor {
         let dst = account!(self)?.mailbox(&cmd.mailbox, false).map_err(
             map_error! {
                 self,
-                NxMailbox | UnsafeName | MailboxUnselectable => (No, None),
+                NxMailbox => (No, Some(s::RespTextCode::TryCreate(()))),
+                UnsafeName | MailboxUnselectable => (No, None),
             },
         )?;
         self.multiappend = Some(Multiappend {
