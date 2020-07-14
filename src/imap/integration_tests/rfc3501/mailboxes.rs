@@ -72,7 +72,7 @@ fn mailbox_management() {
     quick_log_in(&mut client);
 
     ok_command!(client, c("CREATE 3501mbmm/noselect/foo"));
-    ok_command!(client, c("CREATE 3501mbmm/parent/bar"));
+    ok_command!(client, c("CREATE 3501mbmm/parent/bar/"));
 
     command!(mut responses = client,
              c("LIST \"\" 3501mbmm/*"));
@@ -175,128 +175,56 @@ fn error_cases() {
     quick_log_in(&mut client);
 
     command!([response] = client, c("CREATE INBOX"));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::MailboxExists.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::MailboxExists);
 
     command!([response] = client, c("CREATE INBOX/child"));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::BadOperationOnInbox.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::BadOperationOnInbox);
 
     command!([response] = client, c("CREATE Archive"));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::MailboxExists.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::MailboxExists);
 
     command!([response] = client, c("CREATE \"\""));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::UnsafeName.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::UnsafeName);
 
     command!([response] = client, c("CREATE ../foo"));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::UnsafeName.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::UnsafeName);
 
     command!([response] = client, c("DELETE INBOX"));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::BadOperationOnInbox.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::BadOperationOnInbox);
 
     command!([response] = client, c("DELETE 3501mbec"));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::NxMailbox.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::NxMailbox);
 
     command!([response] = client, c("DELETE \"\""));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::NxMailbox.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::NxMailbox);
 
     command!([response] = client, c("DELETE ../foo"));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::UnsafeName.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::UnsafeName);
 
     command!([response] = client, c("RENAME INBOX Archive"));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::MailboxExists.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::MailboxExists);
 
     command!([response] = client, c("RENAME Archive INBOX"));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::MailboxExists.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::MailboxExists);
 
     command!([response] = client, c("RENAME Archive Archive"));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::RenameToSelf.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::RenameToSelf);
 
     command!([response] = client, c("RENAME Archive Archive/child"));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::RenameIntoSelf.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::RenameIntoSelf);
 
     command!([response] = client, c("RENAME Archive INBOX/child"));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::BadOperationOnInbox.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::BadOperationOnInbox);
 
     command!([response] = client, c("RENAME Archive \"\""));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::UnsafeName.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::UnsafeName);
 
     command!([response] = client, c("RENAME Archive ../foo"));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::UnsafeName.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::UnsafeName);
 
     command!([response] = client, c("RENAME \"\" bar"));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::NxMailbox.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::NxMailbox);
 
     command!([response] = client, c("RENAME ../foo bar"));
-    unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, Some(quip)) = response => {
-            assert_eq!(Error::UnsafeName.to_string(), quip);
-        }
-    };
+    assert_error_response(response, None, Error::UnsafeName);
 }
