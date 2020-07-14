@@ -17,6 +17,7 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use super::super::defs::*;
+use crate::account::model::Flag;
 use crate::support::error::Error;
 
 #[test]
@@ -234,5 +235,33 @@ fn error_conditions() {
     command!([response] = client, c("CLOSE"));
     unpack_cond_response! {
         (Some(_), s::RespCondType::Bad, _, _) = response => ()
+    };
+}
+
+#[test]
+fn keywords_included_in_flags() {
+    let setup = set_up();
+    let mut client = setup.connect("3501sekf");
+    quick_log_in(&mut client);
+    quick_create(&mut client, "3501sekf");
+    quick_append_enron(&mut client, "3501sekf", 1);
+
+    ok_command!(client, c("SELECT 3501sekf"));
+    ok_command!(client, c("STORE 1 +FLAGS ($Important)"));
+
+    command!(responses = client, c("EXAMINE 3501sekf"));
+    has_untagged_response_matching! {
+        s::Response::Flags(ref flags) in responses => {
+            assert!(flags.contains(&Flag::Keyword("$Important".to_owned())));
+        }
+    };
+    has_untagged_response_matching! {
+        s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Ok,
+            code: Some(s::RespTextCode::PermanentFlags(ref flags)),
+            ..
+        }) in responses => {
+            assert!(flags.contains(&Flag::Keyword("$Important".to_owned())));
+        }
     };
 }
