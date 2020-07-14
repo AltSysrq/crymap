@@ -194,7 +194,7 @@ mod test {
         assert!(!setup.stateless.is_ok());
         assert!(matches!(
             setup.stateless.path().current_uid_validity(),
-            Err(Error::MailboxUnselectable)
+            Err(Error::NxMailbox)
         ));
 
         // Ensure we get a distinct UID validity
