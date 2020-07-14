@@ -28,7 +28,8 @@ use crate::support::error::Error;
 
 impl CommandProcessor {
     pub(super) fn cmd_close(&mut self, _sender: SendResponse<'_>) -> CmdResult {
-        if let Some(mut selected) = self.selected.take() {
+        {
+            let selected = selected!(self)?;
             if !selected.stateless().read_only() {
                 if let Err(e) = selected.expunge_all_deleted() {
                     warn!(
@@ -40,6 +41,7 @@ impl CommandProcessor {
             }
         }
 
+        self.selected = None;
         success()
     }
 
