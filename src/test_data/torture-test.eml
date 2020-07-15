@@ -9,6 +9,11 @@ Status: RO
 X-Status: 
 X-Keywords:
 X-UID: 1
+Remark: The rest of this header block is not part of Crispin's original torture test.
+        These were added so that all fields of `BodyExtMPart` would be filled.
+Content-Language: en
+Content-Location: /plugh
+Content-Disposition: inline; name="torture"
 
 --owatagusiam
 Content-Type: TEXT/PLAIN

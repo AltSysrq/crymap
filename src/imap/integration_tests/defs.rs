@@ -23,11 +23,13 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
 
+use chrono::prelude::*;
 use lazy_static::lazy_static;
 use regex::bytes::Regex;
 use tempfile::TempDir;
 
 use crate::account::account::Account;
+use crate::account::model::Flag;
 use crate::crypt::master_key::MasterKey;
 use crate::imap::client::Client;
 use crate::imap::command_processor::CommandProcessor;
@@ -194,6 +196,90 @@ pub fn quick_select(client: &mut PipeClient, mailbox: &str) {
             mailbox: Cow::Borrowed(mailbox),
         })
     );
+}
+
+/// Causes the client to EXAMINE a particular mailbox which is shared among a
+/// number of read-only tests.
+///
+/// The content of the mailbox is similar to the `account::mailbox::search`
+/// unit tests:
+/// - UID 1 is the CHRISTMAS_TREE test message
+/// - UID 2 is the TORTURE_TEST test message
+/// - UIDs 3 through 22 are the ENRON_SMALL_MULTIPARTS messages
+/// - UIDs 8 through 22 are \Recent
+/// - UID 1 is \Answered
+/// - UID 2 is \Deleted
+/// - UID 3 is \Draft
+/// - UID 4 is \Flagged
+/// - UID 5 is \Seen
+/// - UID 6 has been expunged
+/// - UID 7 is $Important
+///
+/// The INTERNALDATE of each message is midnight UTC on 2020-01-$uid.
+pub fn examine_shared(client: &mut PipeClient) {
+    lazy_static! {
+        static ref MUTEX: Mutex<()> = Mutex::new(());
+    }
+
+    const MBOX: &str = "shared";
+
+    let _lock = MUTEX.lock().unwrap();
+
+    command!(mut responses = client, c("EXAMINE shared"));
+    unpack_cond_response! {
+        (Some(_), cond, _, _) = responses.pop().unwrap() => {
+            if s::RespCondType::Ok == cond {
+                return;
+            }
+        }
+    };
+
+    quick_create(client, MBOX);
+    quick_select(client, MBOX);
+
+    fn internal_date_for_uid(uid: u32) -> Option<DateTime<FixedOffset>> {
+        Some(FixedOffset::east(0).ymd(2020, 1, uid).and_hms(0, 0, 0))
+    }
+
+    macro_rules! append {
+        ($uid:expr, $flags:expr, $message:expr) => {{
+            client
+                .start_append(
+                    MBOX,
+                    s::AppendFragment {
+                        flags: $flags,
+                        internal_date: internal_date_for_uid($uid),
+                        _marker: PhantomData,
+                    },
+                    $message,
+                )
+                .unwrap();
+            let mut buffer = Vec::new();
+            let mut responses = client.finish_append(&mut buffer).unwrap();
+            assert_tagged_ok(responses.pop().unwrap());
+        }};
+    };
+
+    append!(1, Some(vec![Flag::Answered]), CHRISTMAS_TREE);
+    append!(2, Some(vec![Flag::Deleted]), TORTURE_TEST);
+    append!(3, Some(vec![Flag::Draft]), ENRON_SMALL_MULTIPARTS[0]);
+    append!(4, Some(vec![Flag::Flagged]), ENRON_SMALL_MULTIPARTS[1]);
+    append!(5, Some(vec![Flag::Seen]), ENRON_SMALL_MULTIPARTS[2]);
+    append!(6, None, ENRON_SMALL_MULTIPARTS[3]);
+    ok_command!(client, c("XVANQUISH 6"));
+    append!(
+        7,
+        Some(vec![Flag::Keyword("$Important".to_owned())]),
+        ENRON_SMALL_MULTIPARTS[4]
+    );
+
+    // Switch to EXAMINE so the remainder of the messages are \Recent for
+    // future sessions
+    ok_command!(client, c("EXAMINE shared"));
+
+    for i in 5u32..20 {
+        append!(i + 3, None, ENRON_SMALL_MULTIPARTS[i as usize]);
+    }
 }
 
 pub fn assert_tagged_ok(r: s::ResponseLine<'_>) {

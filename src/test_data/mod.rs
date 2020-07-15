@@ -21,6 +21,11 @@ pub static RFC3501_P56: &[u8] = include_bytes!("rfc3501_p56.eml");
 
 /// The 20 smallest messages in the Enron corpus which contain "multipart" and
 /// have a line that looks like the final boundary of multipart content.
+///
+/// Unfortunately, none of them are actually multiparts. Most are forwarded
+/// messages by some agent that apparently felt it was appropriate to include
+/// the raw multipart structure in the quoted part as text; others are attempts
+/// to be multipart but completely malformed.
 pub static ENRON_SMALL_MULTIPARTS: &[&[u8]] = &[
     include_bytes!("enron_dasovich-j_all_documents_11634.eml"),
     include_bytes!("enron_dasovich-j_notes_inbox_3944.eml"),

@@ -506,7 +506,7 @@ fn envelope_to_ast(env: fetch::envelope::Envelope) -> s::Envelope<'static> {
 }
 
 fn body_structure_to_ast(
-    bs: fetch::bodystructure::BodyStructure,
+    mut bs: fetch::bodystructure::BodyStructure,
     extended: bool,
 ) -> s::Body<'static> {
     if bs.content_type.0.eq_ignore_ascii_case("multipart") {
@@ -549,7 +549,14 @@ fn body_structure_to_ast(
         {
             s::ClassifiedBodyType1Part::Message(s::BodyTypeMsg {
                 body_fields,
-                envelope: envelope_to_ast(bs.envelope),
+                // The envelope needs to reflect the content of the header
+                // block **inside** this part.
+                envelope: envelope_to_ast(if bs.children.is_empty() {
+                    // Nothing to work with
+                    bs.envelope
+                } else {
+                    mem::replace(&mut bs.children[0].envelope, bs.envelope)
+                }),
                 body: Box::new(body_structure_to_ast(
                     bs.children.into_iter().next().unwrap_or_default(),
                     extended,

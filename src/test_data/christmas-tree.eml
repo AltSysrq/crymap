@@ -2,10 +2,11 @@ Remark: This is a message with every interesting header set. The headers are
         not necessarily set to *interesting* or unusual values, but they are
         distinct.
 From: from@example.com
-To: to@example.com
+To: A Mäiling List: "Töm Orwell" <to@example.com>;
 Cc: cc@example.com
 Bcc: bcc@example.com
 Sender: sender@example.com
+Reply-To: reply-to@example.com
 Date: Fri, 21 Nov 1997 09:55:06 -0600
 Subject: This is the subject
 XYZZY: Nothing happens

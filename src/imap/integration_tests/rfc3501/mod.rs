@@ -18,6 +18,7 @@
 
 mod auth;
 mod bad_commands;
+mod fetch;
 mod first_contact;
 mod flags;
 mod mailboxes;
