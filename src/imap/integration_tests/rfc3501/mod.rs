@@ -19,6 +19,7 @@
 mod auth;
 mod bad_commands;
 mod first_contact;
+mod flags;
 mod mailboxes;
 mod messages;
 mod select;

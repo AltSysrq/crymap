@@ -291,7 +291,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
     fn trace(&self, truncate: bool, what: &str, data: &[u8]) {
         if let Some(prefix) = self.trace_stderr {
             if data.is_empty() {
-                eprintln!("{} WIRE {}<empty>", prefix, what);
+                eprintln!("{:10} WIRE {}<empty>", prefix, what);
                 return;
             }
 
@@ -322,12 +322,12 @@ impl<R: BufRead, W: Write> Client<R, W> {
                     }
                 }
 
-                eprintln!("{} WIRE {} {}", prefix, what, vis);
+                eprintln!("{:10} WIRE {} {}", prefix, what, vis);
             }
 
             if !truncated.is_empty() {
                 eprintln!(
-                    "{} WIRE {}<{} more bytes, {} total>",
+                    "{:10} WIRE {}<{} more bytes, {} total>",
                     prefix,
                     what,
                     truncated.len(),

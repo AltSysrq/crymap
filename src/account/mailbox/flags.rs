@@ -154,7 +154,7 @@ impl StatefulMailbox {
                     //
                     // > A non-existent unique identifier is ignored without
                     // > any error message generated. Thus, it is possible for
-                    // > a UID > FETCH command to return an OK without any data
+                    // > a UID FETCH command to return an OK without any data
                     // > or a UID COPY or UID STORE to return an OK without
                     // > performing any operations.
                     continue;

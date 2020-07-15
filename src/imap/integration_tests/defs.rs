@@ -251,3 +251,10 @@ pub fn c(s: &'static str) -> s::Command<'static> {
         _ => panic!("Bad command: {}", s),
     }
 }
+
+pub fn r(s: &'static str) -> s::Response<'static> {
+    match s::Response::parse(s.as_bytes()) {
+        Ok((b"", response)) => response,
+        _ => panic!("Bad response: {}", s),
+    }
+}
