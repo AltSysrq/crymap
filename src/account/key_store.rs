@@ -108,7 +108,7 @@ pub struct KeyStore {
     root: PathBuf,
     tmp: PathBuf,
     master_key: Option<Arc<MasterKey>>,
-    private_keys: HashMap<String, Rsa<Private>>,
+    private_keys: HashMap<String, Arc<Rsa<Private>>>,
     public_key: Option<(String, Rsa<Public>)>,
     preferred_private_key: Option<String>,
     rsa_bits: u32,
@@ -325,7 +325,7 @@ impl KeyStore {
     pub fn get_private_key(
         &mut self,
         name: &str,
-    ) -> Result<&Rsa<Private>, Error> {
+    ) -> Result<Arc<Rsa<Private>>, Error> {
         let master_key = self
             .master_key
             .as_ref()
@@ -356,14 +356,14 @@ fn load_private_key<'a>(
     master_key: &MasterKey,
     name: &str,
     root: &Path,
-    cache: &'a mut HashMap<String, Rsa<Private>>,
-) -> Result<&'a Rsa<Private>, Error> {
+    cache: &'a mut HashMap<String, Arc<Rsa<Private>>>,
+) -> Result<Arc<Rsa<Private>>, Error> {
     if !is_safe_name(name) {
         return Err(Error::UnsafeName);
     }
 
     if cache.contains_key(name) {
-        return Ok(cache.get(name).unwrap());
+        return Ok(Arc::clone(cache.get(name).unwrap()));
     }
 
     let mut pem_data = Vec::new();
@@ -375,7 +375,9 @@ fn load_private_key<'a>(
         master_key.pem_passphrase(name).as_bytes(),
     )?;
 
-    Ok(cache.entry(name.to_owned()).or_insert(priv_key))
+    Ok(Arc::clone(
+        cache.entry(name.to_owned()).or_insert(Arc::new(priv_key)),
+    ))
 }
 
 #[cfg(test)]

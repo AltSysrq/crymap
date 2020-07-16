@@ -36,10 +36,10 @@ impl StatelessMailbox {
         src: &Path,
     ) -> Result<T, Error> {
         let file = fs::File::open(src)?;
-        let stream = {
+        let stream = data_stream::Reader::new(file, |k| {
             let mut ks = self.key_store.lock().unwrap();
-            data_stream::Reader::new(file, |k| ks.get_private_key(k))?
-        };
+            ks.get_private_key(k)
+        })?;
         let compression = stream.metadata.compression;
         let stream = compression.decompressor(stream)?;
 

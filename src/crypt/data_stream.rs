@@ -50,6 +50,7 @@
 
 use std::convert::TryInto;
 use std::io::{self, BufRead, Cursor, Read, Write};
+use std::sync::Arc;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use openssl::{
@@ -129,9 +130,9 @@ impl<R: Read> Reader<R> {
     /// session key.
     ///
     /// The header block is fully read in by this call.
-    pub fn new<'a>(
+    pub fn new(
         mut reader: R,
-        priv_key_lookup: impl FnOnce(&str) -> Result<&'a Rsa<Private>, Error> + 'a,
+        priv_key_lookup: impl FnOnce(&str) -> Result<Arc<Rsa<Private>>, Error>,
     ) -> Result<Self, Error> {
         let meta_length = reader.read_u16::<LittleEndian>()?;
         let meta: Metadata =
@@ -398,9 +399,10 @@ mod test {
             }
 
             let decrypted = {
-                let mut reader =
-                    Reader::new(Cursor::new(ciphertext), |_| Ok(&RSA1024A))
-                        .unwrap();
+                let mut reader = Reader::new(Cursor::new(ciphertext), |_| {
+                    Ok(Arc::clone(&RSA1024A))
+                })
+                .unwrap();
                 let mut d = Vec::new();
                 reader.read_to_end(&mut d).unwrap();
                 d
