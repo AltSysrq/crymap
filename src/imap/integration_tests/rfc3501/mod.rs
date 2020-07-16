@@ -23,4 +23,5 @@ mod first_contact;
 mod flags;
 mod mailboxes;
 mod messages;
+mod search;
 mod select;

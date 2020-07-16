@@ -214,6 +214,7 @@ pub fn quick_select(client: &mut PipeClient, mailbox: &str) {
 /// - UID 5 is \Seen
 /// - UID 6 has been expunged
 /// - UID 7 is $Important
+/// - UID 22 is \Seen (so that there is a \Seen \Recent message)
 ///
 /// The INTERNALDATE of each message is midnight UTC on 2020-01-$uid.
 pub fn examine_shared(client: &mut PipeClient) {
@@ -278,7 +279,15 @@ pub fn examine_shared(client: &mut PipeClient) {
     ok_command!(client, c("EXAMINE shared"));
 
     for i in 5u32..20 {
-        append!(i + 3, None, ENRON_SMALL_MULTIPARTS[i as usize]);
+        append!(
+            i + 3,
+            if 19 == i {
+                Some(vec![Flag::Seen])
+            } else {
+                None
+            },
+            ENRON_SMALL_MULTIPARTS[i as usize]
+        );
     }
 }
 

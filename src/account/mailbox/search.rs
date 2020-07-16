@@ -334,6 +334,9 @@ mod test {
 
     // Since setup is a bit slow and at the same time uninteresting, all the
     // searching tests are in this one test function.
+    //
+    // Note that `imap::integration_tests::rfc3501::search` has a test parallel
+    // to this one. If you update this test, also update that one.
     #[test]
     fn test_search_queries() {
         use crate::account::model::SearchQuery::*;
@@ -415,6 +418,7 @@ mod test {
             unchanged_since: None,
         })
         .unwrap();
+        mb1.poll().unwrap();
 
         macro_rules! uids {
             ($($ix:expr),*) => {
@@ -444,7 +448,7 @@ mod test {
         let today = Utc::today().naive_utc();
 
         assert_eq!(
-            uids![4, 6],
+            uids![4, 6, 7],
             search!(SequenceSet(SeqRange::range(Seqnum::u(5), Seqnum::u(7))))
         );
 
