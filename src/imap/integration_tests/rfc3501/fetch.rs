@@ -22,8 +22,29 @@ use chrono::prelude::*;
 
 use super::super::defs::*;
 use crate::account::model::Flag;
+use crate::imap::literal_source::LiteralSource;
+use crate::support::error::Error;
 
 macro_rules! has_msgatt_matching {
+    (move $pat:pat in $fetch_response:expr) => {
+        has_msgatt_matching! {
+            move $pat in $fetch_response => ()
+        }
+    };
+
+    (move $pat:pat in $fetch_response:expr => $result:expr) => {
+        $fetch_response
+            .atts
+            .atts
+            .into_iter()
+            .filter_map(|msgatt| match msgatt {
+                $pat => Some($result),
+                _ => None,
+            })
+            .next()
+            .expect("Expected FETCH attribute not found")
+    };
+
     ($pat:pat in $fetch_response:expr) => {
         has_msgatt_matching! {
             $pat in $fetch_response => ()
@@ -49,8 +70,12 @@ macro_rules! fetch_single {
         command!(mut responses = $client, $cmd);
         assert_eq!(2, responses.len());
         assert_tagged_ok(responses.pop().unwrap());
-        has_untagged_response_matching! {
-            s::Response::Fetch($fr) in responses => $result
+        match responses.pop().unwrap() {
+            s::ResponseLine {
+                tag: None,
+                response: s::Response::Fetch($fr),
+            } => $result,
+            r => panic!("Unexpected response: {:?}", r),
         }
     }};
 }
@@ -477,4 +502,411 @@ fn check_torture_test_body_structure(bs: &s::Body<'_>, extended: bool) {
     } else {
         assert!(p3.ext.is_none());
     }
+}
+
+#[test]
+fn fetch_body_parts() {
+    let setup = set_up();
+    let mut client = setup.connect("3501febp");
+    quick_log_in(&mut client);
+    examine_shared(&mut client);
+
+    fetch_single!(client, c("FETCH 1 RFC822"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Rfc822Full(lit) in fr => {
+                assert_literal_like(
+                    b"Remark:", b"even death may die.\r\n", 937, false, lit);
+            }
+        };
+    });
+
+    fetch_single!(client, c("FETCH 1 RFC822.HEADER"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Rfc822Header(lit) in fr => {
+                assert_literal_like(
+                    b"Remark:", b"Encoding: 8bit\r\n\r\n", 0, false, lit);
+            }
+        };
+    });
+
+    fetch_single!(client, c("FETCH 1 RFC822.TEXT"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Rfc822Text(lit) in fr => {
+                assert_literal_like(
+                    b"That is not dead which can eternal lie.\r\n",
+                    "And with strange æons even death may die.\r\n".as_bytes(),
+                    0, false, lit);
+            }
+        };
+    });
+
+    fetch_single!(client, c("FETCH 1 BODY[]"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Body(s::MsgAttBody {
+                section: None,
+                slice_origin: None,
+                data: lit,
+            }) in fr => {
+                assert_literal_like(
+                    b"Remark:", b"even death may die.\r\n", 937, false, lit);
+            }
+        };
+    });
+
+    fetch_single!(client, c("FETCH 1 BODY[HEADER]"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Body(s::MsgAttBody {
+                section: Some(s::SectionSpec::TopLevel(
+                    s::SectionText::Header(()))),
+                slice_origin: None,
+                data: lit,
+            }) in fr => {
+                assert_literal_like(
+                    b"Remark:", b"Encoding: 8bit\r\n\r\n", 0, false, lit);
+            }
+        };
+    });
+
+    fetch_single!(client, c("FETCH 1 BODY[HEADER.FIELDS (From To)]"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Body(s::MsgAttBody {
+                section: Some(s::SectionSpec::TopLevel(
+                    s::SectionText::HeaderFields(s::SectionTextHeaderField {
+                        negative: false,
+                        headers
+                    }))),
+                slice_origin: None,
+                data: lit,
+            }) in fr => {
+                assert_eq!(vec![Cow::Borrowed("From"), Cow::Borrowed("To")],
+                           headers);
+                assert_literal_like(
+                    b"From:", b"<to@example.com>;\r\n\r\n", 0, false, lit);
+            }
+        };
+    });
+
+    fetch_single!(client, c("FETCH 1 BODY[HEADER.FIELDS.NOT \
+                             (Remark Content-Transfer-Encoding)]"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Body(s::MsgAttBody {
+                section: Some(s::SectionSpec::TopLevel(
+                    s::SectionText::HeaderFields(s::SectionTextHeaderField {
+                        negative: true,
+                        headers
+                    }))),
+                slice_origin: None,
+                data: lit,
+            }) in fr => {
+                assert_eq!(vec![Cow::Borrowed("Remark"),
+                                Cow::Borrowed("Content-Transfer-Encoding")],
+                           headers);
+                assert_literal_like(
+                    b"From:", b"A test message\r\n\r\n", 0, false, lit);
+            }
+        };
+    });
+
+    fetch_single!(client, c("FETCH 1 BODY[TEXT]"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Body(s::MsgAttBody {
+                section: Some(s::SectionSpec::TopLevel(
+                    s::SectionText::Text(()))),
+                slice_origin: None,
+                data: lit,
+            }) in fr => {
+                assert_literal_like(
+                    b"That is not dead which can eternal lie.\r\n",
+                    "And with strange æons even death may die.\r\n".as_bytes(),
+                    0, false, lit);
+            }
+        };
+    });
+
+    fetch_single!(client, c("FETCH 2 BODY[1]"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Body(s::MsgAttBody {
+                section: Some(s::SectionSpec::Sub(s::SubSectionSpec {
+                    subscripts,
+                    text: None,
+                })),
+                slice_origin: None,
+                data: lit,
+            }) in fr => {
+                assert_eq!(vec![1], subscripts);
+                assert_literal_like(
+                    b"This is a demonstration",
+                    b"new multi-part message standard.\r\n",
+                    0,
+                    false,
+                    lit);
+            }
+        };
+    });
+
+    fetch_single!(client, c("FETCH 2 BODY[1.MIME]"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Body(s::MsgAttBody {
+                section: Some(s::SectionSpec::Sub(s::SubSectionSpec {
+                    subscripts,
+                    text: Some(s::SectionText::Mime(())),
+                })),
+                slice_origin: None,
+                data: lit,
+            }) in fr => {
+                assert_eq!(vec![1], subscripts);
+                assert_literal_like(
+                    b"Content-Type: TEXT/PLAIN",
+                    b"Content-Description: Explanation\r\n\r\n",
+                    0,
+                    false,
+                    lit);
+            }
+        };
+    });
+
+    fetch_single!(client, c("FETCH 2 BODY[2.MIME]"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Body(s::MsgAttBody {
+                section: Some(s::SectionSpec::Sub(s::SubSectionSpec {
+                    subscripts,
+                    text: Some(s::SectionText::Mime(())),
+                })),
+                slice_origin: None,
+                data: lit,
+            }) in fr => {
+                assert_eq!(vec![2], subscripts);
+                assert_literal_like(
+                    b"Content-Type: MESSAGE/RFC822",
+                    b"Content-Description: Rich Text demo\r\n\r\n",
+                    0,
+                    false,
+                    lit);
+            }
+        };
+    });
+
+    fetch_single!(client, c("FETCH 2 BODY[2.HEADER]"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Body(s::MsgAttBody {
+                section: Some(s::SectionSpec::Sub(s::SubSectionSpec {
+                    subscripts,
+                    text: Some(s::SectionText::Header(())),
+                })),
+                slice_origin: None,
+                data: lit,
+            }) in fr => {
+                assert_eq!(vec![2], subscripts);
+                assert_literal_like(
+                    b"Received: from dimacs.rutgers",
+                    b"Subject: Re: a MIME-Version misfeature\r\n\r\n",
+                    0,
+                    false,
+                    lit);
+            }
+        };
+    });
+
+    fetch_single!(client, c("FETCH 2 BODY[2.TEXT]"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Body(s::MsgAttBody {
+                section: Some(s::SectionSpec::Sub(s::SubSectionSpec {
+                    subscripts,
+                    text: Some(s::SectionText::Text(())),
+                })),
+                slice_origin: None,
+                data: lit,
+            }) in fr => {
+                assert_eq!(vec![2], subscripts);
+                assert_literal_like(
+                    b"This message has been composed",
+                    b"mu0M2YtJKaFk=--\r\n",
+                    0,
+                    false,
+                    lit);
+            }
+        };
+    });
+
+    fetch_single!(client, c("FETCH 1 BODY[]<1.5>"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Body(s::MsgAttBody {
+                section: None,
+                slice_origin: Some(1),
+                data: lit,
+            }) in fr => {
+                assert_literal_like(b"emark", b"", 5, false, lit);
+            }
+        };
+    });
+
+    fetch_single!(client, c("FETCH 1 BODY[]<0.5000>"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Body(s::MsgAttBody {
+                section: None,
+                slice_origin: Some(0),
+                data: lit,
+            }) in fr => {
+                assert_literal_like(
+                    b"Remark:", b"even death may die.\r\n", 937, false, lit);
+            }
+        };
+    });
+}
+
+fn assert_literal_like(
+    start: &[u8],
+    end: &[u8],
+    len: u64,
+    binary: bool,
+    mut lit: LiteralSource,
+) {
+    if 0 != len {
+        assert_eq!(len, lit.len);
+    }
+    assert_eq!(binary, lit.binary);
+
+    let mut data = Vec::<u8>::new();
+    lit.data.read_to_end(&mut data).unwrap();
+    if 0 != len {
+        assert_eq!(len as usize, data.len());
+    }
+    assert_eq!(lit.len as usize, data.len());
+    assert!(
+        data.starts_with(start),
+        "Data didn't have expected prefix; got:\n{}",
+        String::from_utf8_lossy(&data)
+    );
+    assert!(
+        data.ends_with(end),
+        "Data didn't have expected end; got:\n{}",
+        String::from_utf8_lossy(&data)
+    );
+}
+
+#[test]
+fn implicit_seen() {
+    let setup = set_up();
+    let mut client = setup.connect("3501feis");
+    quick_log_in(&mut client);
+    quick_create(&mut client, "3501feis");
+    quick_append_enron(&mut client, "3501feis", 2);
+
+    ok_command!(client, c("EXAMINE 3501feis"));
+    // Nothing we do during EXAMINE should have any effect
+    ok_command!(client, c("FETCH 1 RFC822"));
+    ok_command!(client, c("UID FETCH 1 BODY[]"));
+
+    fetch_single!(client, c("FETCH 1 FLAGS"), ref fr => {
+        has_msgatt_matching! {
+            s::MsgAtt::Flags(s::FlagsFetch::Recent(ref flags)) in fr => {
+                assert!(flags.is_empty());
+            }
+        };
+    });
+
+    ok_command!(client, c("SELECT 3501feis"));
+    // IMAP2-style fetches and BODY.PEEK don't cause an implicit \Seen status
+    ok_command!(client, c("FETCH 1 RFC822"));
+    ok_command!(client, c("FETCH 1 BODY.PEEK[]"));
+
+    fetch_single!(client, c("FETCH 1 FLAGS"), ref fr => {
+        has_msgatt_matching! {
+            s::MsgAtt::Flags(s::FlagsFetch::Recent(ref flags)) in fr => {
+                assert!(flags.is_empty());
+            }
+        };
+    });
+
+    // Fetching the IMAP4-style body without .PEEK sets \Seen
+    ok_command!(client, c("FETCH 1 BODY[]"));
+    fetch_single!(client, c("FETCH 1 FLAGS"), ref fr => {
+        has_msgatt_matching! {
+            s::MsgAtt::Flags(s::FlagsFetch::Recent(ref flags)) in fr => {
+                assert_eq!(&vec![Flag::Seen], flags);
+            }
+        };
+    });
+
+    // If we fetch the body and FLAGS at the same time, FLAGS reflects the new
+    // \Seen status.
+    // We can't use fetch_single! here since we also get an echo from the
+    // change notification about the flag.
+    command!(mut responses = client, c("FETCH 2 (FLAGS BODY[HEADER])"));
+    assert_eq!(3, responses.len());
+    assert_tagged_ok(responses.pop().unwrap());
+    // The actual fetch response is always before the echo
+    match responses.into_iter().next().unwrap() {
+        s::ResponseLine {
+            tag: None,
+            response: s::Response::Fetch(fr),
+        } => {
+            has_msgatt_matching! {
+                s::MsgAtt::Flags(s::FlagsFetch::Recent(ref flags)) in fr => {
+                    assert_eq!(&vec![Flag::Seen], flags);
+                }
+            };
+
+            // Also ensure this is the fetch response we think it is
+            has_msgatt_matching! { s::MsgAtt::Body(..) in fr };
+        }
+        r => panic!("Unexpected response: {:?}", r),
+    }
+}
+
+#[test]
+fn error_conditions() {
+    let setup = set_up();
+    let mut client = setup.connect("3501feec");
+    quick_log_in(&mut client);
+    quick_create(&mut client, "3501feec");
+    quick_append_enron(&mut client, "3501feec", 2);
+    quick_select(&mut client, "3501feec");
+
+    let mut client2 = setup.connect("3501feec2");
+    quick_log_in(&mut client2);
+    quick_select(&mut client2, "3501feec");
+
+    // Expunge UID 2 without letting the first client remove that from its
+    // seqnum mapping.
+    ok_command!(client2, c("XVANQUISH 2"));
+
+    // First attempt to fetch the expunged message - NO
+    command!([response] = client, c("FETCH 2 BODY[]"));
+    unpack_cond_response! {
+        (Some(_), s::RespCondType::No, None, _) = response => ()
+    };
+
+    // Second attempt to fetch the expunged message - BYE
+    client.write_raw(b"F1 FETCH 2 BODY[]\r\n").unwrap();
+    let mut buffer = Vec::new();
+    let response = client.read_one_response(&mut buffer).unwrap();
+    unpack_cond_response! {
+        (None, s::RespCondType::Bye, None, _) = response => ()
+    };
+
+    let mut client = setup.connect("3501feec");
+    quick_log_in(&mut client);
+    quick_select(&mut client, "3501feec");
+
+    // Also do some flag storing to make the first client aware of UID 3 even
+    // though it is not in the UID map.
+    quick_append_enron(&mut client2, "3501feec", 1);
+    ok_command!(client2, c("UID STORE 3 +FLAGS.SILENT (\\Seen)"));
+    ok_command!(client, c("STORE 1 +FLAGS.SILENT (\\Seen)"));
+
+    command!([response] = client, c("UID FETCH 3 BODY[]"));
+    assert_error_response(response, None, Error::UnaddressableMessage);
+
+    ok_command!(client, c("NOOP"));
+
+    command!([response] = client, c("FETCH 100 BODY[]"));
+    unpack_cond_response! {
+        (Some(_), s::RespCondType::Bad, _, _) = response => ()
+    }
+
+    // UID FETCH for messages not in the current set are allowed
+    command!(mut responses = client, c("UID FETCH 1:* UID"));
+    assert_eq!(3, responses.len());
+    assert_tagged_ok(responses.pop().unwrap());
 }
