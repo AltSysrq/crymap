@@ -140,7 +140,6 @@ use nom::{
 use super::lex::LexWriter;
 use super::literal_source::LiteralSource;
 use crate::account::model::Flag;
-use crate::mime::encoded_word::ew_decode;
 use crate::mime::utf7;
 
 include!("syntax-macros.rs");
@@ -1570,13 +1569,7 @@ fn text(i: &[u8]) -> IResult<&[u8], Cow<str>> {
 }
 
 fn keyword(i: &[u8]) -> IResult<&[u8], Flag> {
-    map_opt(normal_atom, |a| {
-        ew_decode(&a)
-            .map(Cow::Owned)
-            .unwrap_or(a)
-            .parse::<Flag>()
-            .ok()
-    })(i)
+    map_opt(normal_atom, |a| a.parse::<Flag>().ok())(i)
 }
 
 fn flag(i: &[u8]) -> IResult<&[u8], Flag> {
@@ -2838,20 +2831,6 @@ mod test {
             "FLAGS (keyword)",
             MsgAtt::Flags(FlagsFetch::NotRecent(vec![Flag::Keyword(
                 "keyword".to_owned()
-            )]))
-        );
-        assert_reversible!(
-            MsgAtt,
-            "FLAGS (=?utf-8?q?With_Space?=)",
-            MsgAtt::Flags(FlagsFetch::NotRecent(vec![Flag::Keyword(
-                "With Space".to_owned()
-            )]))
-        );
-        assert_reversible!(
-            MsgAtt,
-            "FLAGS (=?utf-8?q?With=2AStar?=)",
-            MsgAtt::Flags(FlagsFetch::NotRecent(vec![Flag::Keyword(
-                "With*Star".to_owned()
             )]))
         );
     }

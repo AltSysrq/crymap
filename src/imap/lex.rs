@@ -217,12 +217,7 @@ impl<W: Write> LexWriter<W> {
     }
 
     pub fn flag(&mut self, flag: &Flag) -> io::Result<()> {
-        match flag {
-            &Flag::Keyword(ref kw) if !self.is_liberal_atom(kw) => {
-                self.encoded_keyword(kw)
-            }
-            _ => write!(self.writer, "{}", flag),
-        }
+        write!(self.writer, "{}", flag)
     }
 
     pub fn date(&mut self, date: &NaiveDate) -> io::Result<()> {
@@ -242,26 +237,6 @@ impl<W: Write> LexWriter<W> {
 
     pub fn num_u32(&mut self, value: &u32) -> io::Result<()> {
         write!(self.writer, "{}", *value)
-    }
-
-    fn encoded_keyword(&mut self, kw: &str) -> io::Result<()> {
-        write!(self.writer, "=?utf-8?q?")?;
-        for &ch in kw.as_bytes() {
-            match ch {
-                b' ' => self.writer.write_all(b"_")?,
-                33..=126
-                    if b'=' != ch
-                        && b'?' != ch
-                        && self.is_liberal_atom_char(ch) =>
-                {
-                    self.writer.write_all(&[ch])?
-                }
-                c => write!(self.writer, "={:02X}", c)?,
-            }
-        }
-        write!(self.writer, "?=")?;
-
-        Ok(())
     }
 
     fn astring(&mut self, s: &str) -> io::Result<()> {
@@ -526,15 +501,8 @@ mod test {
         l.flag(&Flag::Flagged).unwrap();
         l.verbatim(" ").unwrap();
         l.flag(&Flag::Keyword("foo".to_owned())).unwrap();
-        l.verbatim(" ").unwrap();
-        l.flag(&Flag::Keyword("foo bar?".to_owned())).unwrap();
-        l.verbatim(" ").unwrap();
-        l.flag(&Flag::Keyword("föö".to_owned())).unwrap();
 
-        assert_eq!(
-            "\\Flagged foo =?utf-8?q?foo_bar=3F?= =?utf-8?q?f=C3=B6=C3=B6?=",
-            to_str(l)
-        );
+        assert_eq!("\\Flagged foo", to_str(l));
     }
 
     #[test]
@@ -544,25 +512,14 @@ mod test {
         l.flag(&Flag::Flagged).unwrap();
         l.verbatim(" ").unwrap();
         l.flag(&Flag::Keyword("foo".to_owned())).unwrap();
-        l.verbatim(" ").unwrap();
-        l.flag(&Flag::Keyword("foo bar?".to_owned())).unwrap();
-        l.verbatim(" ").unwrap();
-        l.flag(&Flag::Keyword("föö".to_owned())).unwrap();
 
-        assert_eq!(
-            "\\Flagged foo =?utf-8?q?foo_bar=3F?= =?utf-8?q?f=C3=B6=C3=B6?=",
-            to_str(l)
-        );
+        assert_eq!("\\Flagged foo", to_str(l));
     }
 
     #[test]
     fn encoded_words_are_decodable() {
         let mut l = LexWriter::new(Vec::<u8>::new(), false, false);
         l.encoded_astring("föö").unwrap();
-        assert_eq!(Some("föö".to_owned()), encoded_word::ew_decode(&to_str(l)));
-
-        let mut l = LexWriter::new(Vec::<u8>::new(), false, false);
-        l.flag(&Flag::Keyword("föö".to_owned())).unwrap();
         assert_eq!(Some("föö".to_owned()), encoded_word::ew_decode(&to_str(l)));
     }
 }

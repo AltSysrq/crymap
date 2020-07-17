@@ -635,9 +635,20 @@ impl FromStr for Flag {
             Ok(Flag::Seen)
         } else if s.starts_with("\\") {
             Err(Error::NxFlag)
-        } else {
+        } else if s.as_bytes().iter().copied().all(is_atom_char) {
             Ok(Flag::Keyword(s.to_owned()))
+        } else {
+            Err(Error::UnsafeName)
         }
+    }
+}
+
+fn is_atom_char(ch: u8) -> bool {
+    match ch {
+        0..=b' ' => false,
+        127..=255 => false,
+        b'(' | b')' | b'{' | b'*' | b'%' | b'\\' | b'"' | b']' => false,
+        _ => true,
     }
 }
 
