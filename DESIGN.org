@@ -210,8 +210,8 @@ The message store can stay exactly as it is currently, except with
 The "change store" is similar to the "message store", but stores encrypted
 changesets identified by 31-bit change-ids (CID). Changes are things such as
 additions and removals of tags and expungement of messages. We have a rollup
-system (TODO) which folds changes into single rollup files which also serve as
-a cache for the set of extant UIDs.
+system which folds changes into single rollup files which also serve as a cache
+for the set of extant UIDs.
 
 A Modseq has the greatest UID in the upper 32 bits and the greatest CID in the
 lower 32 bits. The modseq is thus effectively a 2-element vector clock,
@@ -288,8 +288,8 @@ ID [RFC2971], to exchange implementation info with the server
 IDLE [RFC 2177]
 
 UTF8=ONLY [RFC6855], so we don't need to deal with the obsolete UTF-7 stuff.
-TODO: Does Thunderbird actually support this? Looks like it doesn't, oh well.
-We should try to implement UTF8=ACCEPT at least though.
+Looks like Thunderbird doesn't support this, oh well. We should try to
+implement UTF8=ACCEPT at least though.
 
 ENABLE [RFC5161], for clients to acknowledge UTF8=ONLY
 
