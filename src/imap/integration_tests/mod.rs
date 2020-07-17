@@ -102,3 +102,4 @@ macro_rules! has_untagged_response_matching {
 mod defs;
 
 mod rfc3501;
+mod rfc7888;

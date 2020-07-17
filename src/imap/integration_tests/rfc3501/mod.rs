@@ -21,6 +21,7 @@ mod bad_commands;
 mod fetch;
 mod first_contact;
 mod flags;
+mod literal;
 mod mailboxes;
 mod messages;
 mod search;

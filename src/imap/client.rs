@@ -150,7 +150,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
         Ok(r)
     }
 
-    pub fn read_commands_until_tagged<'a>(
+    pub fn read_responses_until_tagged<'a>(
         &mut self,
         dst: &'a mut Vec<u8>,
     ) -> Result<Vec<s::ResponseLine<'a>>, Error> {
@@ -212,7 +212,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
         command_buffer.extend_from_slice(b"\r\n");
         self.trace(false, ">>[cmd]", &command_buffer);
         self.write.write_all(&command_buffer)?;
-        self.read_commands_until_tagged(response_buffer)
+        self.read_responses_until_tagged(response_buffer)
     }
 
     pub fn start_append(
@@ -285,7 +285,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
     ) -> Result<Vec<s::ResponseLine<'a>>, Error> {
         self.trace(false, ">>[app]", b"\r\n");
         self.write.write_all(b"\r\n")?;
-        self.read_commands_until_tagged(response_buffer)
+        self.read_responses_until_tagged(response_buffer)
     }
 
     fn trace(&self, truncate: bool, what: &str, data: &[u8]) {
