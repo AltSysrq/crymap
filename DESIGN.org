@@ -988,3 +988,12 @@ during business hours would require 64 years for the same task.
 
 So basically, only a very unreasonable automated process would cause a problem
 here.
+* Issues with flags and unicode
+
+TODO: Investigate later
+https://bugzilla.mozilla.org/show_bug.cgi?id=650623
+http://dovecot.2317879.n4.nabble.com/Gmail-like-labels-three-years-later-td41128.html
+
+It looks like Thunderbird uses MUTF7 for unrepresentable flags, which is an odd
+choice given that they are normally expected to be case-insensitive, but it may
+make sense to move over to that from the current encoded word hack.
