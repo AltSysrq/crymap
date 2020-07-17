@@ -131,8 +131,6 @@ fn unknown_commands() {
     }
 }
 
-// TODO Test bad APPEND operations
-
 #[test]
 fn inappropriate_commands() {
     let setup = set_up();
@@ -165,5 +163,57 @@ fn inappropriate_commands() {
 
     unpack_cond_response! {
         (Some(_), s::RespCondType::Bad, _, _) = response => { }
+    }
+}
+
+#[test]
+fn bad_append_recovery() {
+    let setup = set_up();
+    let mut client = setup.connect("3501bcar");
+    quick_log_in(&mut client);
+    quick_create(&mut client, "3501bcar");
+    quick_select(&mut client, "3501bcar");
+
+    // Invalid start of append with synchronising literals
+    // Parser doesn't actually recognise it as an APPEND, so we fall through to
+    // regular command handling, which will buffer the literal onto the command
+    // line and then reject the whole thing.
+    client.write_raw(b"A1 APPEND  {5}\r\n").unwrap();
+
+    let mut buffer = Vec::new();
+    client.read_logical_line(&mut buffer).unwrap();
+    assert!(buffer.starts_with(b"+ "));
+
+    client.write_raw(b"plugh\r\n").unwrap();
+
+    buffer.clear();
+    let response = client.read_one_response(&mut buffer).unwrap();
+    unpack_cond_response! {
+        (Some(_), s::RespCondType::Bad,
+         Some(s::RespTextCode::Parse(())), _) = response => ()
+    };
+
+    // Invalid start of append using LITERAL+.
+    // As before, the parser doesn't recognise it as an append, so it
+    // ultimately buffers the literal and then rejects it.
+    client.write_raw(b"A2 APPEND  {5+}\r\nplugh\r\n").unwrap();
+
+    buffer.clear();
+    let response = client.read_one_response(&mut buffer).unwrap();
+    unpack_cond_response! {
+        (Some(_), s::RespCondType::Bad,
+         Some(s::RespTextCode::Parse(())), _) = response => ()
+    };
+
+    // Ensure connection remains consistent
+    ok_command!(client, c("NOOP"));
+
+    // Testing issues with any part of APPEND after the first literal is the
+    // demesne of MULTIAPPEND in the rfc3502 test module.
+
+    // None of the above should have inserted anything
+    command!(responses = client, c("EXAMINE 3501bcar"));
+    has_untagged_response_matching! {
+        s::Response::Exists(0) in responses
     }
 }

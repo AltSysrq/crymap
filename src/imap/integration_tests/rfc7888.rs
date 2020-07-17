@@ -21,8 +21,26 @@
 //! Note that some tests involving LITERAL+ handling in unusual situations is
 //! handled by `rfc3501::bad_commands` due to its lower-level nature.
 
+use std::borrow::Cow;
+
 use super::defs::*;
 use crate::test_data;
+
+#[test]
+fn capability_declared() {
+    let setup = set_up();
+    let mut client = setup.connect("7888capa");
+
+    let mut buffer = Vec::new();
+    let response = client.read_one_response(&mut buffer).unwrap();
+    unpack_cond_response! {
+        (None, s::RespCondType::Ok, Some(s::RespTextCode::Capability(caps)), _)
+            = response
+        => {
+            assert!(caps.capabilities.contains(&Cow::Borrowed("LITERAL+")));
+        }
+    }
+}
 
 #[test]
 fn command_non_synchronising_literal() {
@@ -34,8 +52,8 @@ fn command_non_synchronising_literal() {
     client
         .write_raw(
             b"A1 SEARCH TEXT {5+}\r\n\
-                       enron TEXT {5+}\r\n\
-                       plugh\r\n",
+              enron TEXT {5+}\r\n\
+              plugh\r\n",
         )
         .unwrap();
     let mut buffer = Vec::new();
@@ -48,8 +66,8 @@ fn command_non_synchronising_literal() {
     client
         .write_raw(
             b"A2 SEARCH TEXT {4+}\r\n\
-                       {3+} TEXT {6+}\r\n\
-                       {3+}\r\n\r\n",
+              {3+} TEXT {6+}\r\n\
+              {3+}\r\n\r\n",
         )
         .unwrap();
     buffer.clear();
