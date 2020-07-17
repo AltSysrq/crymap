@@ -121,7 +121,7 @@ fn authenticate_plain() {
 #[test]
 fn authenticate_invalid() {
     let setup = set_up();
-    let mut client = setup.connect("3501auap");
+    let mut client = setup.connect("3501auai");
     skip_greeting(&mut client);
 
     fn reject_authenticate(
