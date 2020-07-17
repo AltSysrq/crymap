@@ -16,6 +16,8 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+use std::borrow::Cow;
+
 use super::super::defs::*;
 
 fn search(client: &mut PipeClient, command: &'static str) -> Vec<u32> {
@@ -224,4 +226,30 @@ fn search_queries() {
     // End of parallel test cases
     // Now just check that seqnum translation works
     assert_eq!(vec![5, 6], search(&mut client, "SEARCH UID 5:7"));
+}
+
+#[test]
+fn charsets() {
+    let setup = set_up();
+    let mut client = setup.connect("3501secs");
+    quick_log_in(&mut client);
+    examine_shared(&mut client);
+
+    ok_command!(client, c(r#"SEARCH CHARSET "us-ascii" TEXT "enron""#));
+    ok_command!(client, c(r#"SEARCH CHARSET "utf-8" TEXT "enron""#));
+    ok_command!(client, c(r#"SEARCH CHARSET "US-ASCII" TEXT "enron""#));
+    ok_command!(client, c(r#"SEARCH CHARSET "UTF-8" TEXT "enron""#));
+
+    command!(
+        [response] = client,
+        c(r#"SEARCH CHARSET "CP-437" TEXT "enron""#)
+    );
+    unpack_cond_response! {
+        (Some(_), s::RespCondType::No,
+         Some(s::RespTextCode::BadCharset(charsets)), _) = response => {
+            assert_eq!(
+                vec![Cow::Borrowed("us-ascii"), Cow::Borrowed("utf-8")],
+                charsets);
+        }
+    };
 }
