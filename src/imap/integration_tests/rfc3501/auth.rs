@@ -75,3 +75,146 @@ fn login_invalid() {
         assert_tagged_no(responses.into_iter().next().unwrap());
     }
 }
+
+#[test]
+fn authenticate_plain() {
+    let setup = set_up();
+    let mut client = setup.connect("3501auap");
+    skip_greeting(&mut client);
+
+    client.write_raw(b"A1 AUTHENTICATE PLAIN\r\n").unwrap();
+
+    let mut buffer = Vec::new();
+    client.read_logical_line(&mut buffer).unwrap();
+    assert_eq!(b"+ \r\n", &buffer[..]);
+
+    // azure\0azure\0hunter2
+    client
+        .write_raw(b"YXp1cmUAYXp1cmUAaHVudGVyMg==\r\n")
+        .unwrap();
+
+    buffer.clear();
+    let response = client.read_one_response(&mut buffer).unwrap();
+    unpack_cond_response! {
+        (Some(_), s::RespCondType::Ok, _, _) = response => ()
+    };
+
+    let mut client = setup.connect("3501auap");
+    skip_greeting(&mut client);
+
+    client.write_raw(b"A2 AUTHENTICATE PLAIN\r\n").unwrap();
+
+    buffer.clear();
+    client.read_logical_line(&mut buffer).unwrap();
+    assert_eq!(b"+ \r\n", &buffer[..]);
+
+    // \0azure\0hunter2
+    client.write_raw(b"AGF6dXJlAGh1bnRlcjI=\r\n").unwrap();
+
+    buffer.clear();
+    let response = client.read_one_response(&mut buffer).unwrap();
+    unpack_cond_response! {
+        (Some(_), s::RespCondType::Ok, _, _) = response => ()
+    };
+}
+
+#[test]
+fn authenticate_invalid() {
+    let setup = set_up();
+    let mut client = setup.connect("3501auap");
+    skip_greeting(&mut client);
+
+    fn reject_authenticate(
+        client: &mut PipeClient,
+        base64: &[u8],
+        expected_cond: s::RespCondType,
+    ) {
+        client.write_raw(b"A1 AUTHENTICATE plain\r\n").unwrap();
+
+        let mut buffer = Vec::new();
+        client.read_logical_line(&mut buffer).unwrap();
+        assert_eq!(b"+ \r\n", &buffer[..]);
+
+        client.write_raw(base64).unwrap();
+
+        buffer.clear();
+        let response = client.read_one_response(&mut buffer).unwrap();
+        unpack_cond_response! {
+            (Some(_), cond, _, _) = response => {
+                assert_eq!(expected_cond, cond);
+            }
+        };
+    }
+
+    // azure\0azure\0hunter3
+    reject_authenticate(
+        &mut client,
+        b"YXp1cmUAYXp1cmUAaHVudGVyMw==\r\n",
+        s::RespCondType::No,
+    );
+    // azure\0root\0hunter2
+    reject_authenticate(
+        &mut client,
+        b"YXp1cmUAcm9vdABodW50ZXIy\r\n",
+        s::RespCondType::No,
+    );
+    // root\0azure\0hunter2
+    reject_authenticate(
+        &mut client,
+        b"cm9vdABhenVyZQBodW50ZXIy\r\n",
+        s::RespCondType::No,
+    );
+    // azüre\0azüre\0hünter2, but in ISO-8859-1
+    reject_authenticate(
+        &mut client,
+        b"YXr8cmUAYXr8cmUAOmj8bnRlcjI=\r\n",
+        s::RespCondType::Bad,
+    );
+    // azure\0hunter2
+    reject_authenticate(
+        &mut client,
+        b"YXp1cmUAaHVudGVyMg==\r\n",
+        s::RespCondType::Bad,
+    );
+    // azure\0azure\0hunter2\0plugh
+    reject_authenticate(
+        &mut client,
+        b"YXp1cmUAYXp1cmUAaHVudGVyMgBwbHVnaA==\r\n",
+        s::RespCondType::Bad,
+    );
+
+    reject_authenticate(&mut client, b"*\r\n", s::RespCondType::Bad);
+    reject_authenticate(
+        &mut client,
+        b"azure:hunter2\r\n",
+        s::RespCondType::Bad,
+    );
+    reject_authenticate(&mut client, b"\r\n", s::RespCondType::Bad);
+
+    client.write_raw(b"A1 AUTHENTICATE plain\r\n").unwrap();
+    let mut buffer = Vec::new();
+    client.read_logical_line(&mut buffer).unwrap();
+    assert_eq!(b"+ \r\n", &buffer[..]);
+
+    // Ignore errors since the server might hang up first
+    let _ = client.write_raw("x".repeat(100_000).as_bytes());
+    buffer.clear();
+    let response = client.read_one_response(&mut buffer).unwrap();
+    unpack_cond_response! {
+        (None, s::RespCondType::Bye, _, _) = response => ()
+    };
+}
+
+#[test]
+fn authenticate_unsupported() {
+    let setup = set_up();
+    let mut client = setup.connect("3501auau");
+    skip_greeting(&mut client);
+
+    client.write_raw(b"A1 AUTHENTICATE NLTM\r\n").unwrap();
+    let mut buffer = Vec::new();
+    let response = client.read_one_response(&mut buffer).unwrap();
+    unpack_cond_response! {
+        (Some(_), s::RespCondType::Bad, _, _) = response => ()
+    };
+}

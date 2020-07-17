@@ -1158,8 +1158,11 @@ simple_enum! {
 }
 
 syntax_rule! {
-    #[prefix("AUTHENTICATE ")]
+    #[]
     struct AuthenticateCommandStart<'a> {
+        #[suffix(" AUTHENTICATE ")]
+        #[primitive(verbatim, tag_atom)]
+        tag: Cow<'a, str>,
         #[]
         #[primitive(verbatim, normal_atom)]
         auth_type: Cow<'a, str>,
@@ -3415,8 +3418,9 @@ mod test {
     fn authentication_command_syntax() {
         assert_reversible!(
             AuthenticateCommandStart,
-            "AUTHENTICATE plain",
+            "A1 AUTHENTICATE plain",
             AuthenticateCommandStart {
+                tag: s("A1"),
                 auth_type: s("plain"),
             }
         );

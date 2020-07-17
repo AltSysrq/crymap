@@ -31,11 +31,115 @@ use crate::crypt::master_key::MasterKey;
 use crate::support::{safe_name::is_safe_name, user_config::UserConfig};
 
 impl CommandProcessor {
-    pub(crate) fn cmd_log_in(
+    /// Called when a line initiating an `AUTHENTICATE` is received.
+    ///
+    /// If this returns `Some`, that response is sent to the client and the
+    /// server returns to the normal command loop. If it returns `None`, the
+    /// sever will send a continuation line to the client and the next line is
+    /// fed to `authenticate_finish`.
+    ///
+    /// Note that we currently only support `AUTHENTICATE` flows that take at
+    /// most one input from the client and no server challenge.
+    pub(crate) fn authenticate_start<'a>(
         &mut self,
-        cmd: s::LogInCommand<'_>,
-        _sender: SendResponse<'_>,
-    ) -> CmdResult {
+        cmd: &'a s::AuthenticateCommandStart<'a>,
+    ) -> Option<s::ResponseLine<'a>> {
+        if "plain".eq_ignore_ascii_case(&cmd.auth_type) {
+            None
+        } else {
+            Some(s::ResponseLine {
+                tag: Some(Cow::Borrowed(&cmd.tag)),
+                response: s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Bad,
+                    code: None,
+                    quip: Some(Cow::Borrowed("Unsupported AUTHENTICATE type")),
+                }),
+            })
+        }
+    }
+
+    pub(crate) fn authenticate_finish<'a>(
+        &mut self,
+        cmd: s::AuthenticateCommandStart<'a>,
+        data: &[u8],
+    ) -> s::ResponseLine<'a> {
+        if b"*" == data {
+            return s::ResponseLine {
+                tag: Some(cmd.tag),
+                response: s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Bad,
+                    code: None,
+                    quip: Some(Cow::Borrowed("AUTHENTICATE aborted")),
+                }),
+            };
+        }
+
+        let string = match base64::decode(data)
+            .ok()
+            .and_then(|decoded| String::from_utf8(decoded).ok())
+        {
+            Some(s) => s,
+            None => {
+                return s::ResponseLine {
+                    tag: Some(cmd.tag),
+                    response: s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Bad,
+                        code: None,
+                        quip: Some(Cow::Borrowed("Bad base64 or UTF-8")),
+                    }),
+                }
+            }
+        };
+
+        // All we currently support is RFC 2595 PLAIN
+        // Format is <authorise-id>NUL<authenticate-id<NUL>password
+        // <authorise-id> is optional if it is the same as <authenticate-id>.
+        let mut parts = string.split('\x00');
+        match (parts.next(), parts.next(), parts.next(), parts.next()) {
+            (Some(authorise), Some(authenticate), Some(password), None) => {
+                if !authorise.is_empty() && authorise != authenticate {
+                    return s::ResponseLine {
+                        tag: Some(cmd.tag),
+                        response: s::Response::Cond(s::CondResponse {
+                            cond: s::RespCondType::No,
+                            code: None,
+                            quip: Some(Cow::Borrowed(
+                                "AUTHENTICATE PLAIN with different \
+                                 authorising and authenticating users \
+                                 is not supported",
+                            )),
+                        }),
+                    };
+                }
+
+                let r = self.cmd_log_in(s::LogInCommand {
+                    userid: Cow::Borrowed(authenticate),
+                    password: Cow::Borrowed(password),
+                });
+                let r = match r {
+                    Ok(r) => r,
+                    Err(r) => r,
+                };
+
+                s::ResponseLine {
+                    tag: Some(cmd.tag),
+                    response: r,
+                }
+            }
+            _ => s::ResponseLine {
+                tag: Some(cmd.tag),
+                response: s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Bad,
+                    code: None,
+                    quip: Some(Cow::Borrowed(
+                        "Malformed AUTHENTICATE PLAIN string",
+                    )),
+                }),
+            },
+        }
+    }
+
+    pub(crate) fn cmd_log_in(&mut self, cmd: s::LogInCommand<'_>) -> CmdResult {
         if self.account.is_some() {
             return Err(s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::Bad,

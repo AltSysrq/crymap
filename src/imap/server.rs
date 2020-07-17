@@ -138,8 +138,13 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
                 }
             } else {
                 // No ending literal; this should be a complete command
-                // TODO AUTHENTICATE flow
-                if let Ok((b"", cmdline)) = s::CommandLine::parse(&cmdline) {
+                if let Ok((b"", auth_start)) =
+                    s::AuthenticateCommandStart::parse(&cmdline)
+                {
+                    self.handle_authenticate(auth_start)?;
+                } else if let Ok((b"", cmdline)) =
+                    s::CommandLine::parse(&cmdline)
+                {
                     let r = self
                         .processor
                         .handle_command(cmdline, &response_sender(&self.write));
@@ -369,6 +374,54 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
         }
 
         cmdline.clear();
+        Ok(())
+    }
+
+    /// Handle the full AUTHENTICATE flow.
+    fn handle_authenticate(
+        &mut self,
+        cmd: s::AuthenticateCommandStart<'_>,
+    ) -> Result<(), Error> {
+        if let Some(response_line) = self.processor.authenticate_start(&cmd) {
+            self.send_response(response_line)?;
+            return Ok(());
+        }
+
+        {
+            let mut w = self.write.lock().unwrap();
+            // The space after the + is mandatory, and what follows is any
+            // Base64 data we have to send, but there is none.
+            w.write_all(b"+ \r\n")?;
+            w.flush()?;
+        }
+
+        let mut buffer = Vec::new();
+        self.read
+            .by_ref()
+            .take(MAX_CMDLINE as u64)
+            .read_until(b'\n', &mut buffer)?;
+
+        if !buffer.ends_with(b"\n") {
+            self.send_response(s::ResponseLine {
+                tag: None,
+                response: s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Bye,
+                    code: None,
+                    quip: Some(Cow::Borrowed(
+                        "AUTHENTICATE data too long or read truncated",
+                    )),
+                }),
+            })?;
+            return Ok(());
+        }
+
+        buffer.pop();
+        if buffer.ends_with(b"\r") {
+            buffer.pop();
+        }
+
+        let response_line = self.processor.authenticate_finish(cmd, &buffer);
+        self.send_response(response_line)?;
         Ok(())
     }
 

@@ -98,7 +98,7 @@ impl CommandProcessor {
             s::Command::Status(cmd) => self.cmd_status(cmd, sender),
             s::Command::Subscribe(cmd) => self.cmd_subscribe(cmd, sender),
             s::Command::Unsubscribe(cmd) => self.cmd_unsubscribe(cmd, sender),
-            s::Command::LogIn(cmd) => self.cmd_log_in(cmd, sender),
+            s::Command::LogIn(cmd) => self.cmd_log_in(cmd),
             s::Command::Copy(cmd) => self.cmd_copy(cmd, sender),
             s::Command::Fetch(cmd) => self.cmd_fetch(cmd, sender),
             s::Command::Store(cmd) => self.cmd_store(cmd, sender),
