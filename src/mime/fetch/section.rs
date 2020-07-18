@@ -56,9 +56,6 @@
 //! whole parts). The implementation currently reflects what RFC 3501 implies,
 //! i.e., that there is no subscript to access the content of a non-multipart
 //! message.
-//!
-//! TODO A message from Crispin in 2011-04 indicates that a subscript 1 on a
-//! non-multipart must be equivalent to `TEXT`.
 
 use std::fmt;
 use std::io::{self, Write};
