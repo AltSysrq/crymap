@@ -121,6 +121,18 @@ pub trait Visitor: fmt::Debug {
         Ok(())
     }
 
+    /// Indicates that `start_part` will not get called at this level.
+    ///
+    /// If the method returns `Some`, the new visitor will *replace* the
+    /// current one, receiving all future callbacks.
+    ///
+    /// This callback occurs before `start_content()`.
+    fn leaf_section(
+        &mut self,
+    ) -> Option<Box<dyn Visitor<Output = Self::Output>>> {
+        None
+    }
+
     /// Indicates that the start of "content" (and the end of the headers) has
     /// been reached and will run to the end of this segment.
     ///
@@ -679,6 +691,13 @@ impl<V> Groveller<V> {
         }
 
         self.in_headers = false;
+
+        if !self.is_message_rfc822 && self.boundary.is_none() {
+            if let Some(new_visitor) = self.visitor.leaf_section() {
+                self.visitor = new_visitor;
+            }
+        }
+
         self.visitor.start_content()?;
 
         if self.is_message_rfc822 {

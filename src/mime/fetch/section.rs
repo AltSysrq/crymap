@@ -261,6 +261,30 @@ impl Visitor for SectionLocator {
         Ok(())
     }
 
+    fn leaf_section(&mut self) -> Option<Fetcher> {
+        // A message from Crispin in 2011-04 indicates that a subscript 1 on a
+        // non-multipart must be equivalent to `TEXT`.
+        //
+        // We handle the general case of nonsense extraneous subscripts here:
+        // whatever subscripts follow doesn't matter; as long as the LeafType
+        // only cares about the content of this part, we simply fetch this
+        // part's content. (We can't handle leaf types that involve the headers
+        // because we've missed the headers at this point, but apparently those
+        // aren't important.)
+        //
+        // TODO Once we implement BINARY and CONVERT, we also need to fall
+        // through to returning an empty string if any conversion was
+        // requested, since at this point it is too late to know what
+        // conversion needs to happen. Hopefully BINARY and CONVERT clients are
+        // more well-behaved and don't try to access invalid subscripts.
+        match self.target.as_ref().map(|t| t.leaf_type) {
+            Some(LeafType::Content) | Some(LeafType::Text) => {
+                Some(self.make_section_fetcher())
+            }
+            _ => None,
+        }
+    }
+
     fn start_part(&mut self) -> Option<Fetcher> {
         enum NextLevel {
             NoMatch,
@@ -320,17 +344,7 @@ impl Visitor for SectionLocator {
         match next_level {
             NextLevel::NoMatch => None,
 
-            NextLevel::Final => {
-                let leaf: Fetcher = Box::new(SectionFetcher::new(
-                    self.target.take().unwrap(),
-                    Arc::clone(&self.common_paths),
-                ));
-                if let Some(content_filter) = self.content_filter.as_mut() {
-                    Some(content_filter(leaf))
-                } else {
-                    Some(leaf)
-                }
-            }
+            NextLevel::Final => Some(self.make_section_fetcher()),
 
             NextLevel::Recurse(next_level) => Some(Box::new(SectionLocator {
                 target: self.target.take(),
@@ -357,6 +371,20 @@ impl Visitor for SectionLocator {
                 contains_nul: false,
             }),
         )
+    }
+}
+
+impl SectionLocator {
+    fn make_section_fetcher(&mut self) -> Fetcher {
+        let leaf: Fetcher = Box::new(SectionFetcher::new(
+            self.target.take().unwrap(),
+            Arc::clone(&self.common_paths),
+        ));
+        if let Some(content_filter) = self.content_filter.as_mut() {
+            content_filter(leaf)
+        } else {
+            leaf
+        }
     }
 }
 
@@ -859,6 +887,32 @@ mod test {
             partial: Some((8, 1)),
             ..BodySection::default()
         });
+        assert_eq!("", fetched);
+    }
+
+    #[test]
+    fn single_part_with_subscript_1() {
+        let fetched = do_fetch_bytes(
+            b"Content-Type: text/plain\r\n\r\nhello".to_vec(),
+            BodySection {
+                subscripts: vec![1],
+                leaf_type: LeafType::Content,
+                ..BodySection::default()
+            },
+        );
+        assert_eq!("hello", fetched);
+    }
+
+    #[test]
+    fn single_part_with_subscript_1_and_bad_leaf() {
+        let fetched = do_fetch_bytes(
+            b"Content-Type: text/plain\r\n\r\nhello".to_vec(),
+            BodySection {
+                subscripts: vec![1],
+                leaf_type: LeafType::Headers,
+                ..BodySection::default()
+            },
+        );
         assert_eq!("", fetched);
     }
 }
