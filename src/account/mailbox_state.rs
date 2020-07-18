@@ -82,8 +82,8 @@ pub struct MailboxState {
     /// or observing a transaction that implies its existence, it is
     /// immediately added to this map with empty flags and a `GENESIS` CID.
     ///
-    /// When an expungement is observed, the entry for the UID is immediately
-    /// removed.
+    /// When an expungement is observed, the entry for the UID is not removed
+    /// until the next flush.
     message_status: HashMap<Uid, MessageStatus>,
 
     /// The greatest known `Modseq` currently in the system.
@@ -327,6 +327,11 @@ impl MailboxState {
 
             self.unapplied_expunge.sort_unstable();
             self.unapplied_expunge.dedup();
+
+            for uid in &self.unapplied_expunge {
+                self.message_status.remove(uid);
+            }
+
             let mut expunged = self.unapplied_expunge.drain(..).peekable();
             let mut index = 0;
 
@@ -808,7 +813,9 @@ impl MailboxState {
     ) {
         self.soft_expungements
             .push(SoftExpungement { deadline, uid });
-        if let Some(_) = self.message_status.remove(&uid) {
+        if let Some(status) = self.message_status.get_mut(&uid) {
+            status.last_modified = canonical_modseq;
+
             self.unapplied_expunge.push(uid);
             if let Some(back) = self.recent_expungements.back() {
                 assert!(canonical_modseq >= back.0);
@@ -1161,13 +1168,16 @@ mod test {
 
         assert!(matches!(state.validate_uid(Uid::u(1)), Ok(())));
         assert!(matches!(state.validate_uid(Uid::u(4)), Ok(())));
-        assert!(matches!(
-            state.validate_uid(Uid::u(2)),
-            Err(Error::ExpungedMessage)
-        ));
+        assert!(matches!(state.validate_uid(Uid::u(2)), Ok(())));
         assert!(matches!(
             state.validate_uid(Uid::u(5)),
             Err(Error::NxMessage)
+        ));
+
+        state.flush();
+        assert!(matches!(
+            state.validate_uid(Uid::u(2)),
+            Err(Error::ExpungedMessage)
         ));
     }
 

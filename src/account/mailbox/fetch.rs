@@ -677,7 +677,7 @@ mod test {
     }
 
     #[test]
-    fn fetch_unexpected_expunged_alread_known() {
+    fn fetch_unexpected_expunged_already_known_but_still_snapshotted() {
         let mut setup = set_up_fetch();
 
         setup.mb2.vanquish(iter::once(setup.uids[0])).unwrap();
@@ -697,16 +697,8 @@ mod test {
         };
         setup.mb1.prefetch(&request, &request.ids);
         let result = setup.mb1.fetch(&request, &setup.receiver()).unwrap();
-        assert_eq!(FetchResponseKind::No, result.kind);
-
-        // Happens implicitly after command
-        setup.mb1.mini_poll();
-
-        // Buggy client retries without even doing anything that would cause a
-        // full poll
-        setup.mb1.prefetch(&request, &request.ids);
-        let result = setup.mb1.fetch(&request, &setup.receiver()).unwrap();
-        assert_eq!(FetchResponseKind::Bye, result.kind);
+        assert_eq!(FetchResponseKind::Ok, result.kind);
+        assert_eq!(1, setup.received().len());
     }
 
     #[test]

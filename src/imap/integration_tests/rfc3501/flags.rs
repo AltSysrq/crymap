@@ -81,18 +81,29 @@ fn flag_crud() {
 
     // STORE with .SILENT = return OK, no fetches.
     // Also we must not be notified about the expunge yet, but we do get the
-    // RFC 5530 [EXPUNGEISSUED] code.
-    command!([response] = client, c("STORE 1 +FLAGS.SILENT (\\Answered)"));
+    // RFC 5530 [EXPUNGEISSUED] code. We *do*, however, get notified about the
+    // change we just made to the flag.
+    command!(mut responses = client, c("STORE 1 +FLAGS.SILENT (\\Answered)"));
+    assert_eq!(2, responses.len());
     unpack_cond_response! {
         (Some(_), s::RespCondType::Ok,
-         Some(s::RespTextCode::ExpungeIssued(())), _) = response => ()
+         Some(s::RespTextCode::ExpungeIssued(())), _) =
+            responses.pop().unwrap() => ()
+    };
+    has_untagged_response_matching! {
+        s::Response::Fetch(..) in responses
     };
 
-    // STORE without .SILENT = return NO, no fetches
-    command!([response] = client, c("STORE 1 +FLAGS (\\Answered)"));
+    // STORE without .SILENT = as above
+    command!(mut responses = client, c("STORE 1 +FLAGS (\\Answered)"));
+    assert_eq!(2, responses.len());
     unpack_cond_response! {
-        (Some(_), s::RespCondType::No,
-         Some(s::RespTextCode::ExpungeIssued(())), _) = response => ()
+        (Some(_), s::RespCondType::Ok,
+         Some(s::RespTextCode::ExpungeIssued(())), _) =
+            responses.pop().unwrap() => ()
+    };
+    has_untagged_response_matching! {
+        s::Response::Fetch(..) in responses
     };
 }
 

@@ -1082,10 +1082,6 @@ where
     /// > and non-expunged messages are referenced, the server MAY return
     /// > an untagged NO and not set any flags.
     ///
-    /// This field reflects RFC 2180's recommendations (opting for 4.2.3
-    /// instead of 4.2.4) and RFC 7162's example. It is `false` if `loud` was
-    /// set on the request and at least one expunged message was referenced.
-    ///
     /// Strangely, RFC 7162 doesn't permit a `VANISHED (EARLIER)` response to
     /// `UID STORE` which would make this whole thing more graceful at least
     /// for QRESYNC clients.
@@ -1105,8 +1101,13 @@ where
     /// number" rather than a present/expunged status, since IMAP4rev1
     /// extensively disregards the possibility of concurrent access and
     /// pervasively assumes that a message exists if and only if it has a
-    /// sequence number. This is the interpretation this implementation uses,
-    /// so as to keep `STORE` and `UID STORE` consistent.
+    /// sequence number.
+    ///
+    /// Though not discussed in any RFC, it appears that a number of mail
+    /// stores allow STORE to keep working on expunged messages that are still
+    /// in the current snapshot. That is what this implementation does as well.
+    /// We return NO only if the request is loud and references no existing
+    /// messages (as defined by its snapshot) at all.
     pub ok: bool,
     // ==================== RFC 7162 ====================
     /// If empty, the operation completed successfully.

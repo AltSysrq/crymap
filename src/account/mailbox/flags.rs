@@ -433,16 +433,18 @@ mod test {
             .unwrap();
         assert_eq!(
             StoreResponse {
-                ok: false,
+                ok: true,
                 modified: SeqRange::new()
             },
             res
         );
 
-        assert!(mb.mini_poll().is_empty());
+        // Due to snapshot isolation, the store still "works" and we do affect
+        // the flag on the message.
+        assert_eq!(vec![uid1], mb.mini_poll());
+        assert!(mb.state.test_flag_o(&Flag::Flagged, uid1));
         let poll = mb.poll().unwrap();
-        // Ensure there was not a spurious transaction
-        assert_eq!(Some(Modseq::new(uid1, Cid(1))), poll.max_modseq);
+        assert_eq!(Some(Modseq::new(uid1, Cid(2))), poll.max_modseq);
         assert!(poll.fetch.is_empty());
     }
 
@@ -574,10 +576,12 @@ mod test {
             res
         );
 
-        assert!(mb.mini_poll().is_empty());
+        // Due to snapshot isolation, the store still "works" and we do affect
+        // the flag on the message.
+        assert_eq!(vec![uid1], mb.mini_poll());
+        assert!(mb.state.test_flag_o(&Flag::Flagged, uid1));
         let poll = mb.poll().unwrap();
-        // Ensure there was not a spurious transaction
-        assert_eq!(Some(Modseq::new(uid1, Cid(1))), poll.max_modseq);
+        assert_eq!(Some(Modseq::new(uid1, Cid(2))), poll.max_modseq);
         assert!(poll.fetch.is_empty());
     }
 
