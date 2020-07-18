@@ -17,7 +17,7 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 //! Implementation of the _hierarchical identifier scheme_ described in
-//! `mailbox.rs`.
+//! `mailbox/mod.rs`.
 
 use std::fs;
 use std::io::{self, Seek};
@@ -94,6 +94,110 @@ impl<'a> HierIdScheme<'a> {
             | Err(nix::Error::Sys(nix::errno::Errno::ELOOP)) => Ok(false),
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// Atomically emplace many (2 to 65536) paths into this hierarchy, such
+    /// that no item has an id greater than `max_id`.
+    ///
+    /// This process will create gravestones where no item existed previously;
+    /// the store built on top of it must be able to tolerate that.
+    ///
+    /// On success, returns the id of the first item. Subsequent items have
+    /// successive ids.
+    pub fn emplace_many(
+        &self,
+        srcs: &[&Path],
+        tmp: &Path,
+        max_id: u32,
+    ) -> Result<u32, Error> {
+        const BASE: u32 = 256 * 256 * 256;
+
+        let (allocation_size, levels) = match srcs.len() {
+            0 => panic!("emplace_many with 0 items"),
+            1 => panic!("emplace_many with 1 item"),
+            2..=256 => (256, 1),
+            257..=65536 => (65536, 2),
+            _ => return Err(Error::BatchTooBig),
+        };
+
+        let tmp_root = tempfile::TempDir::new_in(tmp)?;
+        let isolated = HierIdScheme {
+            prefix: self.prefix,
+            extension: self.extension,
+            root: tmp_root.path(),
+        };
+
+        // Emplace everything into our isolated hierarchy with aligned ids
+        for (ix, src) in srcs.iter().enumerate() {
+            isolated.emplace(src, BASE + (ix as u32))?;
+        }
+
+        // Determine the first ID we'll be allocating, and the base ID for an
+        // actual item.
+        let first_id = self.first_unallocated_id();
+        if max_id.saturating_sub(first_id) < allocation_size {
+            return Err(Error::MailboxFull);
+        }
+
+        let target_id = (first_id + allocation_size - 1) / allocation_size
+            * allocation_size;
+        if max_id.saturating_sub(first_id) < srcs.len() as u32 {
+            return Err(Error::MailboxFull);
+        }
+
+        // Create gravestones between the nominal next ID and the alignment
+        // target
+        for id in first_id..target_id {
+            let gravestone = self.path_for_id(id);
+            self.mkdirs(&gravestone)?;
+            match std::os::unix::fs::symlink(
+                gravestone.file_name().unwrap(),
+                &gravestone,
+            ) {
+                Ok(_) => (),
+                // ID was already exposed and garbage collection collapsed the
+                // containing directory
+                Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => (),
+                Err(e) if io::ErrorKind::AlreadyExists == e.kind() => (),
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        // Now to move the whole aligned directory
+        let mut atomic_src = isolated.path_for_id(BASE);
+        let mut atomic_dst = self.path_for_id(target_id);
+        for _ in 0..levels {
+            atomic_src.pop();
+            atomic_dst.pop();
+        }
+
+        atomic_src.set_extension("d");
+        let atomic_dst_nominal = atomic_dst.clone();
+        atomic_dst.set_extension("d");
+
+        self.mkdirs(&atomic_dst)?;
+        fs::rename(&atomic_src, &atomic_dst).map_err(|e| {
+            // ENOTEMPTY: Someone else made the directory first
+            // ELOOP: The directory was created and expunged by GC before we
+            // got here
+            // AlreadyExists: Not entirely expected, but something else was put
+            // here first
+            if Some(nix::libc::ENOTEMPTY) == e.raw_os_error()
+                || Some(nix::libc::ELOOP) == e.raw_os_error()
+                || io::ErrorKind::AlreadyExists == e.kind()
+            {
+                Error::GaveUpInsertion
+            } else {
+                e.into()
+            }
+        })?;
+        std::os::unix::fs::symlink(
+            atomic_dst.file_name().unwrap(),
+            atomic_dst_nominal,
+        )
+        .ignore_already_exists()?;
+
+        Ok(target_id)
     }
 
     /// Expunge the item with the given identifier.
@@ -205,7 +309,7 @@ impl<'a> HierIdScheme<'a> {
         }
 
         let path = path.strip_prefix(&self.root).unwrap();
-        let mut iter = path.iter();
+        let mut iter = path.parent().unwrap().iter();
 
         let mut cur_path =
             self.root.join(iter.next().expect("No path components?"));
@@ -215,11 +319,6 @@ impl<'a> HierIdScheme<'a> {
             .ignore_already_exists()?;
 
         for component in iter {
-            if 2 != component.len() {
-                // Reached the final file, nothing to do for it
-                break;
-            }
-
             cur_path.push(component);
             match fs::symlink_metadata(&cur_path) {
                 // If we get anything, this is already set up or expunged
@@ -524,6 +623,7 @@ fn probe_for_first_id(guess: u32, exists: impl Fn(u32) -> bool) -> u32 {
 #[cfg(test)]
 mod test {
     use proptest::prelude::*;
+    use rayon::prelude::*;
 
     use super::*;
 
@@ -674,6 +774,52 @@ mod test {
                 .file_name()
                 .to_string_lossy()
                 .starts_with("expunge"));
+        }
+    }
+
+    #[test]
+    fn test_emplace_many() {
+        [
+            0u32, 1, 128, 254, 255, 256, 257, 510, 511, 512, 513, 65534, 65535,
+            65536, 65537, 131070, 131071, 131072, 131073,
+        ]
+        .par_iter()
+        .for_each(|&num_prefix_messages| {
+            for &num_new_messages in &[2u32, 255, 256, 257, 1024, 65536] {
+                do_test_emplace_many(num_prefix_messages, num_new_messages);
+            }
+        });
+    }
+
+    fn do_test_emplace_many(num_prefix_messages: u32, num_new_messages: u32) {
+        let root = tempfile::TempDir::new().unwrap();
+        let scheme = HierIdScheme {
+            prefix: b'x',
+            extension: "foo",
+            root: root.path(),
+        };
+
+        for i in 1..=num_prefix_messages {
+            let dummy = root.path().join(format!("dummy{}", i));
+            fs::File::create(&dummy).unwrap();
+            assert!(scheme.emplace(&dummy, i).unwrap());
+        }
+
+        let mut path_bufs = Vec::new();
+        for i in 0..num_new_messages {
+            let dummy = root.path().join(format!("newdummy{}", i));
+            fs::File::create(&dummy).unwrap();
+            path_bufs.push(dummy);
+        }
+
+        let paths: Vec<&Path> =
+            path_bufs.iter().map(|pb| pb as &Path).collect();
+
+        let base = scheme.emplace_many(&paths, root.path(), 1 << 30).unwrap();
+
+        // All values from 1 to base + num_new_messages should be allocated now
+        for i in 1..base + num_new_messages {
+            assert!(scheme.is_allocated(i), "ID {} not allocated", i);
         }
     }
 

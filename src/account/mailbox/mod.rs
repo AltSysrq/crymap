@@ -138,6 +138,28 @@
 //! a LE u32 that indicates the best guess for the most recently allocated
 //! item. It is updated non-atomically every time an item is created.
 //!
+//! Multiple items can be inserted into a hierarchy by the following process.
+//!
+//! First, all items are inserted into an isolated hierarchy starting at index
+//! 16777216 (0x1_00_00_00). The final item count is rounded up to the next
+//! power (not multiple) of 256 to get the allocation unit size. Expunged items
+//! are added to the target hierarchy until the next item's id would be a
+//! multiple of the allocation unit size. Finally, the directory in the
+//! isolated hierarchy that corresponds to the level equal to the allocation
+//! size is moved in its entirety into the target hierarchy.
+//!
+//! Batch inserts are only done for messages, since change transactions
+//! naturally store multiple changes in one file already.
+//!
+//! This approach would allow atomic inserts of up to 16777216 items, but we
+//! arteficially limit it to 65536 to reduce the complexity of the code and
+//! testing and due to the extremely high fragmentation that batches over 65536
+//! items would produce.
+//!
+//! We also only make one attempt at a bulk insert; if we lose a race to
+//! another process, we immediately abandon the attempt so that concurrent bulk
+//! inserts do not rapidly exhaust the id space.
+//!
 //! ## Metadata rollup and garbage collection
 //!
 //! Whenever a read-write mailbox ingests a state transaction whose CID is

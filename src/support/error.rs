@@ -64,6 +64,8 @@ pub enum Error {
     RenameToSelf,
     #[error("Rename destination is child of self")]
     RenameIntoSelf,
+    #[error("Too many items in batch operation")]
+    BatchTooBig,
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]
