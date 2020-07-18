@@ -182,17 +182,24 @@ pub type Output = (BodySection, Result<FetchedBodySection, Error>);
 impl BodySection {
     /// Create a fetcher for this body section.
     ///
-    /// `content_filter` is a function which optionally wraps the bottom-level
-    /// fetcher so as to modify its content or headers.
+    /// `content_filter` is an function which optionally wraps the bottom-level
+    /// fetcher so as to modify its content or headers. If `None`, the content
+    /// is not transformed.
     ///
     /// `common_paths` is used for allocating temporary files as needed.
     pub fn fetcher(
         self,
-        mut content_filter: ContentFilter,
+        content_filter: Option<ContentFilter>,
         common_paths: Arc<CommonPaths>,
     ) -> Fetcher {
         if self.subscripts.is_empty() {
-            content_filter(Box::new(SectionFetcher::new(self, common_paths)))
+            let leaf: Fetcher =
+                Box::new(SectionFetcher::new(self, common_paths));
+            if let Some(mut content_filter) = content_filter {
+                content_filter(leaf)
+            } else {
+                leaf
+            }
         } else {
             Box::new(SectionLocator {
                 target: Some(self),
@@ -200,7 +207,7 @@ impl BodySection {
                 curr_part_number: 0,
                 common_paths,
                 is_message_rfc822: false,
-                content_filter: Some(content_filter),
+                content_filter: content_filter,
             })
         }
     }
@@ -262,7 +269,7 @@ impl Visitor for SectionLocator {
 
     fn leaf_section(&mut self) -> Option<Fetcher> {
         // A message from Crispin in 2011-04 indicates that a subscript 1 on a
-        // non-multipart must be equivalent to `TEXT`.
+        // non-multipart should be equivalent to `TEXT`.
         //
         // We handle the general case of nonsense extraneous subscripts here:
         // whatever subscripts follow doesn't matter; as long as the LeafType
@@ -271,11 +278,14 @@ impl Visitor for SectionLocator {
         // because we've missed the headers at this point, but apparently those
         // aren't important.)
         //
-        // TODO Once we implement BINARY and CONVERT, we also need to fall
-        // through to returning an empty string if any conversion was
-        // requested, since at this point it is too late to know what
-        // conversion needs to happen. Hopefully BINARY and CONVERT clients are
-        // more well-behaved and don't try to access invalid subscripts.
+        // If there are any content filters, we can't do this and need to fall
+        // through to the normal behaviour of returning an empty string upon a
+        // reference to a non-existent section, since at this point any headers
+        // the filter is interested in are long gone.
+        if self.content_filter.is_some() {
+            return None;
+        }
+
         match self.target.as_ref().map(|t| t.leaf_type) {
             Some(LeafType::Content) | Some(LeafType::Text) => {
                 Some(self.make_section_fetcher())
@@ -556,7 +566,7 @@ mod test {
                 ..grovel::SimpleAccessor::default()
             },
             section.fetcher(
-                Box::new(|v| v),
+                None,
                 Arc::new(CommonPaths {
                     tmp: std::env::temp_dir(),
                     garbage: std::env::temp_dir(),

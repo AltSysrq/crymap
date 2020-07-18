@@ -287,10 +287,11 @@ impl StatefulMailbox {
                     fetcher.add_body_structure();
                 }
                 for section in &request.sections {
-                    fetcher.add_section(section.to_owned().fetcher(
-                        Box::new(|v| v),
-                        Arc::clone(&self.s.common_paths),
-                    ));
+                    fetcher.add_section(
+                        section
+                            .to_owned()
+                            .fetcher(None, Arc::clone(&self.s.common_paths)),
+                    );
                 }
 
                 let mut fetched = grovel(&accessor, fetcher)?;
