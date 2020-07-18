@@ -19,6 +19,7 @@
 use std::fs;
 use std::os::unix::fs::DirBuilderExt;
 
+use chrono::prelude::*;
 use log::warn;
 
 use super::defs::*;
@@ -100,26 +101,9 @@ impl StatefulMailbox {
             }
         }
 
-        // For any newly expunged messages, ensure they have gravestones.
+        // Remove any soft expunges past their deadline
         if !self.s.read_only {
-            let message_scheme = self.s.message_scheme();
-            for uid in flush
-                .expunged
-                .iter()
-                .map(|&(_, u)| u)
-                .chain(flush.stillborn.into_iter())
-            {
-                if let Err(e) = message_scheme
-                    .expunge(uid.0.get(), &self.s.common_paths.tmp)
-                {
-                    warn!(
-                        "{} Failed to fully expunge {}: {}",
-                        self.s.log_prefix,
-                        uid.0.get(),
-                        e
-                    );
-                }
-            }
+            self.purge(Utc::now());
         }
 
         let should_rollup = if self.suggest_rollup == 0 {

@@ -667,8 +667,9 @@ mod test {
         mb2.poll().unwrap();
 
         mb2.vanquish(uids[1..].iter().copied()).unwrap();
-        // Poll cycle is needed to actually expunge the files
+        // Poll cycle and purge is needed to actually expunge the files
         mb2.poll().unwrap();
+        mb2.purge_all();
 
         let result = mb1
             .search(&SearchRequest {

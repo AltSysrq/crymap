@@ -198,6 +198,15 @@ impl CommandProcessor {
         success()
     }
 
+    pub(super) fn cmd_purge(&mut self) -> CmdResult {
+        let n = selected!(self)?.purge_all();
+        Ok(s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Ok,
+            code: None,
+            quip: Some(Cow::Owned(format!("{} messages purged", n))),
+        }))
+    }
+
     pub(super) fn cmd_copy(
         &mut self,
         cmd: s::CopyCommand<'_>,

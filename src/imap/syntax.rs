@@ -1263,9 +1263,10 @@ simple_enum! {
         LogOut("LOGOUT"),
         Noop("NOOP"),
         StartTls("STARTTLS"),
-        // Used internally, not expected to match anything
-        XAppendFinishedNoop("XAppendFinishedNoop"),
+        XPurge("XPURGE"),
         Xyzzy("XYZZY"),
+        // Used internally, not expected to match anything
+        XAppendFinishedNoop("\nXAppendFinishedNoop"),
     }
 }
 

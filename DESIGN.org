@@ -777,6 +777,10 @@ renaming a mailbox can still suffer the same fate. However, that's an inherent
 problem with such backup tools, and is a much less common operation than moving
 a handful of messages, e.g., from inbox to archive or trash.
 
+<2020-07-18 Sa 18:00> On further thought, it's probably best to keep the soft
+expunge data in the `MailboxState` just deal with the (small) cost of doing a
+full select.
+
 * On atomicity of bulk operations TODO IMPLEMENT
 
 RFC 3501 and its extensions define a number of mutating bulk (multi-message)

@@ -870,16 +870,20 @@ fn error_conditions() {
     // Expunge UID 2 without letting the first client remove that from its
     // seqnum mapping.
     ok_command!(client2, c("XVANQUISH 2"));
+    ok_command!(client2, c("XPURGE"));
 
     // First attempt to fetch the expunged message - NO
-    command!([response] = client, c("FETCH 2 BODY[]"));
+    // We need to use BODY.PEEK[] or else it will try to store \Seen, which
+    // causes it to become aware of the EXPUNGE command without needing to hit
+    // disk.
+    command!([response] = client, c("FETCH 2 BODY.PEEK[]"));
     unpack_cond_response! {
         (Some(_), s::RespCondType::No,
          Some(s::RespTextCode::ExpungeIssued(())), _) = response => ()
     };
 
     // Second attempt to fetch the expunged message - BYE
-    client.write_raw(b"F1 FETCH 2 BODY[]\r\n").unwrap();
+    client.write_raw(b"F1 FETCH 2 BODY.PEEK[]\r\n").unwrap();
     let mut buffer = Vec::new();
     let response = client.read_one_response(&mut buffer).unwrap();
     unpack_cond_response! {

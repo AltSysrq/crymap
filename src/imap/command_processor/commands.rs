@@ -81,6 +81,7 @@ impl CommandProcessor {
             s::Command::Simple(s::SimpleCommand::StartTls) => {
                 self.cmd_start_tls(sender)
             }
+            s::Command::Simple(s::SimpleCommand::XPurge) => self.cmd_purge(),
             s::Command::Simple(s::SimpleCommand::Xyzzy) => {
                 self.cmd_noop("Nothing happens", sender)
             }

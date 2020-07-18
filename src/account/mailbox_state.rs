@@ -24,6 +24,7 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::mem;
 
+use chrono::prelude::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -104,6 +105,12 @@ pub struct MailboxState {
     /// date.
     recent_expungements: VecDeque<(Modseq, Uid)>,
 
+    /// Messages that have been marked expunged but may still be resident on
+    /// disk.
+    ///
+    /// This is in no particular order.
+    soft_expungements: Vec<SoftExpungement>,
+
     /// The number of new elements in `extant_messages` that are not considered
     /// to have sequence numbers.
     ///
@@ -131,6 +138,13 @@ pub struct MailboxState {
     /// client once possible.
     #[serde(skip)]
     changed_flags_uids: Vec<Uid>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+struct SoftExpungement {
+    #[serde(with = "chrono::serde::ts_seconds")]
+    deadline: DateTime<Utc>,
+    uid: Uid,
 }
 
 /// The current status for a single message.
@@ -232,7 +246,7 @@ impl MailboxState {
         for op in &tx.ops {
             use self::StateMutation::*;
             match op {
-                &AddFlag(uid, _) | &RmFlag(uid, _) | &Expunge(uid) => {
+                &AddFlag(uid, _) | &RmFlag(uid, _) | &Expunge(_, uid) => {
                     if let Some(status) = self.message_status.get(&uid) {
                         if status.last_modified.cid() >= starting_cid {
                             return false;
@@ -292,7 +306,7 @@ impl MailboxState {
             match op {
                 AddFlag(uid, flag) => self.set_flag(uid, m, flag, true),
                 RmFlag(uid, flag) => self.set_flag(uid, m, flag, false),
-                Expunge(uid) => self.expunge(uid, m),
+                Expunge(deadline, uid) => self.expunge(deadline, uid, m),
             }
         }
     }
@@ -749,6 +763,21 @@ impl MailboxState {
         }
     }
 
+    /// Return UIDs which are currently "soft expunged" and have a deadline
+    /// before the given time.
+    ///
+    /// Those UIDs are removed from the soft expunged state.
+    pub fn drain_soft_expunged(&mut self, before: DateTime<Utc>) -> Vec<Uid> {
+        let ret = self
+            .soft_expungements
+            .iter()
+            .filter(|s| s.deadline < before)
+            .map(|s| s.uid)
+            .collect::<Vec<_>>();
+        self.soft_expungements.retain(|s| s.deadline >= before);
+        ret
+    }
+
     fn set_flag(
         &mut self,
         uid: Uid,
@@ -771,7 +800,14 @@ impl MailboxState {
         self.changed_flags_uids.push(uid);
     }
 
-    fn expunge(&mut self, uid: Uid, canonical_modseq: Modseq) {
+    fn expunge(
+        &mut self,
+        deadline: DateTime<Utc>,
+        uid: Uid,
+        canonical_modseq: Modseq,
+    ) {
+        self.soft_expungements
+            .push(SoftExpungement { deadline, uid });
         if let Some(_) = self.message_status.remove(&uid) {
             self.unapplied_expunge.push(uid);
             if let Some(back) = self.recent_expungements.back() {
@@ -849,7 +885,10 @@ pub struct StateTransaction {
 enum StateMutation {
     AddFlag(Uid, Flag),
     RmFlag(Uid, Flag),
-    Expunge(Uid),
+    Expunge(
+        #[serde(with = "chrono::serde::ts_seconds")] DateTime<Utc>,
+        Uid,
+    ),
 }
 
 impl StateTransaction {
@@ -875,9 +914,9 @@ impl StateTransaction {
         self.ops.push(StateMutation::RmFlag(uid, flag));
     }
 
-    pub fn expunge(&mut self, uid: Uid) {
+    pub fn expunge(&mut self, deadline: DateTime<Utc>, uid: Uid) {
         assert!(uid <= self.max_uid);
-        self.ops.push(StateMutation::Expunge(uid));
+        self.ops.push(StateMutation::Expunge(deadline, uid));
     }
 
     pub fn is_empty(&self) -> bool {
@@ -957,7 +996,7 @@ mod test {
 
         // Expunge a message
         let (cid, mut tx) = state.start_tx().unwrap();
-        tx.expunge(Uid::u(2));
+        tx.expunge(Utc::now(), Uid::u(2));
         state.commit(cid, tx);
 
         // But it doesn't affect the snapshot yet
@@ -1015,9 +1054,9 @@ mod test {
 
         state.seen(Uid::u(5));
         let (cid, mut tx) = state.start_tx().unwrap();
-        tx.expunge(Uid::u(1));
-        tx.expunge(Uid::u(3));
-        tx.expunge(Uid::u(5));
+        tx.expunge(Utc::now(), Uid::u(1));
+        tx.expunge(Utc::now(), Uid::u(3));
+        tx.expunge(Utc::now(), Uid::u(5));
         state.commit(cid, tx);
 
         let flush = state.flush();
@@ -1030,8 +1069,8 @@ mod test {
 
         state.seen(Uid::u(7));
         let (cid, mut tx) = state.start_tx().unwrap();
-        tx.expunge(Uid::u(4));
-        tx.expunge(Uid::u(6));
+        tx.expunge(Utc::now(), Uid::u(4));
+        tx.expunge(Utc::now(), Uid::u(6));
         state.commit(cid, tx);
 
         let flush = state.flush();
@@ -1049,7 +1088,7 @@ mod test {
         let mut state2 = MailboxState::new();
         state2.seen(Uid::u(4));
         let (cid, mut tx) = state2.start_tx().unwrap();
-        tx.expunge(Uid::u(4));
+        tx.expunge(Utc::now(), Uid::u(4));
         // Commit to `state`, not `state2`
         state.commit(cid, tx);
 
@@ -1065,7 +1104,7 @@ mod test {
         state.flush();
 
         let (cid, mut tx) = state.start_tx().unwrap();
-        tx.expunge(Uid::u(2));
+        tx.expunge(Utc::now(), Uid::u(2));
         state.commit(cid, tx);
         state.seen(Uid::u(4));
 
@@ -1090,7 +1129,7 @@ mod test {
         state.flush();
 
         let (cid, mut tx) = state.start_tx().unwrap();
-        tx.expunge(Uid::u(2));
+        tx.expunge(Utc::now(), Uid::u(2));
         state.commit(cid, tx);
         state.flush();
         state.seen(Uid::u(4));
@@ -1116,7 +1155,7 @@ mod test {
         state.flush();
 
         let (cid, mut tx) = state.start_tx().unwrap();
-        tx.expunge(Uid::u(2));
+        tx.expunge(Utc::now(), Uid::u(2));
         state.commit(cid, tx);
         state.seen(Uid::u(4));
 
@@ -1147,7 +1186,7 @@ mod test {
                 all_expunged.insert(uid);
 
                 let (cid, mut tx) = state.start_tx().unwrap();
-                tx.expunge(uid);
+                tx.expunge(Utc::now(), uid);
                 state.commit(cid, tx);
             }
             state.flush();
@@ -1164,7 +1203,7 @@ mod test {
                 all_expunged.insert(uid);
 
                 let (cid, mut tx) = state.start_tx().unwrap();
-                tx.expunge(uid);
+                tx.expunge(Utc::now(), uid);
                 state.commit(cid, tx);
             }
             state.flush();
@@ -1229,5 +1268,33 @@ mod test {
             state.take_changed_flags_uids()
         );
         assert!(state.take_changed_flags_uids().is_empty());
+    }
+
+    #[test]
+    fn test_drain_soft_expunged() {
+        let mut state = MailboxState::new();
+        state.seen(Uid::u(10));
+        state.flush();
+
+        let date = Date::<Utc>::from_utc(NaiveDate::from_ymd(2020, 1, 1), Utc);
+
+        let (cid, mut tx) = state.start_tx().unwrap();
+        tx.expunge(date.and_hms(1, 1, 1), Uid::u(2));
+        tx.expunge(date.and_hms(2, 2, 2), Uid::u(3));
+        tx.expunge(date.and_hms(3, 3, 3), Uid::u(1));
+        state.commit(cid, tx);
+
+        let mut se = state.drain_soft_expunged(date.and_hms(2, 59, 59));
+        se.sort();
+        assert_eq!(vec![Uid::u(2), Uid::u(3)], se);
+        assert!(state
+            .drain_soft_expunged(date.and_hms(2, 59, 59))
+            .is_empty());
+
+        assert!(state.drain_soft_expunged(date.and_hms(3, 3, 3)).is_empty());
+        assert_eq!(
+            vec![Uid::u(1)],
+            state.drain_soft_expunged(date.and_hms(3, 3, 4))
+        );
     }
 }

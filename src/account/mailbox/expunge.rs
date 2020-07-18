@@ -16,6 +16,10 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+use chrono::prelude::*;
+
+use log::warn;
+
 use super::defs::*;
 use crate::account::model::*;
 use crate::support::error::Error;
@@ -57,6 +61,7 @@ impl StatefulMailbox {
             return Ok(());
         }
 
+        let deadline = expunge_deadline();
         self.change_transaction(|this, tx| {
             let deleted = match this.state.flag_id(&Flag::Deleted) {
                 Some(deleted) => deleted,
@@ -69,7 +74,7 @@ impl StatefulMailbox {
             for uid in this.state.uids() {
                 if let Some(status) = this.state.message_status(uid) {
                     if status.test_flag(deleted) && uids.contains(uid) {
-                        tx.expunge(uid);
+                        tx.expunge(deadline, uid);
                     }
                 }
             }
@@ -81,8 +86,8 @@ impl StatefulMailbox {
     /// Directly expunge the given UIDs, without going through the \Deleted
     /// dance.
     ///
-    /// This would make a good extension, but it isn't one. It's used
-    /// internally as a convenience function.
+    /// This would make a good extension, but it isn't an official one. It's
+    /// used internally as a convenience function.
     pub fn vanquish(
         &mut self,
         uids: impl IntoIterator<Item = Uid> + Clone,
@@ -93,6 +98,7 @@ impl StatefulMailbox {
             return Ok(());
         }
 
+        let deadline = expunge_deadline();
         self.change_transaction(|this, tx| {
             for uid in uids.clone() {
                 if !this.state.is_assigned_uid(uid) {
@@ -100,13 +106,60 @@ impl StatefulMailbox {
                 }
 
                 if this.state.message_status(uid).is_some() {
-                    tx.expunge(uid);
+                    tx.expunge(deadline, uid);
                 }
             }
 
             Ok(())
         })
     }
+
+    /// Immediately purge all pending soft expunges which have a deadline
+    /// before the given date.
+    ///
+    /// This is mainly used for testing cases where a hard expunge occurs while
+    /// a client still has a message in its snapshot as well as periodic
+    /// maintenance.
+    ///
+    /// While this is sort of a mutating operation, it is allowed on read-only
+    /// mailboxes as well to allow maintenance processes to execute it.
+    ///
+    /// Returns the number of messages that were purged.
+    pub fn purge(&mut self, dt: DateTime<Utc>) -> u32 {
+        let message_scheme = self.s.message_scheme();
+        let mut count = 0;
+        for uid in self.state.drain_soft_expunged(dt) {
+            if let Err(e) =
+                message_scheme.expunge(uid.0.get(), &self.s.common_paths.tmp)
+            {
+                warn!(
+                    "{} Failed to fully expunge {}: {}",
+                    self.s.log_prefix,
+                    uid.0.get(),
+                    e
+                );
+            } else {
+                // Trigger a rollup so that future maintenance processes
+                // don't try to do the expunge over and over again.
+                self.suggest_rollup = 1;
+                count += 1;
+            }
+        }
+
+        count
+    }
+
+    /// Convenience for calling `purge()` with a date far in the future.
+    pub fn purge_all(&mut self) -> u32 {
+        self.purge(
+            Date::<Utc>::from_utc(NaiveDate::from_ymd(9999, 12, 31), Utc)
+                .and_hms(23, 59, 59),
+        )
+    }
+}
+
+fn expunge_deadline() -> DateTime<Utc> {
+    Utc::now() + chrono::Duration::hours(24)
 }
 
 #[cfg(test)]
@@ -138,7 +191,8 @@ mod test {
         // Let mb2 see it
         mb2.poll().unwrap();
 
-        // Expunge it in mb1, and call poll() to ensure it really gets deleted
+        // Expunge it in mb1, and call poll() and purge_all() to ensure it
+        // really gets deleted
         assert!(mb1
             .stateless()
             .message_scheme()
@@ -146,6 +200,7 @@ mod test {
             .is_file());
         mb1.expunge_all_deleted().unwrap();
         mb1.poll().unwrap();
+        mb1.purge_all();
         assert!(!mb1
             .stateless()
             .message_scheme()
@@ -193,6 +248,7 @@ mod test {
 
         let poll = mb2.poll().unwrap();
         assert_eq!(vec![(Seqnum::u(1), uid)], poll.expunge);
+        mb2.purge_all();
         assert!(!mb2
             .stateless()
             .message_scheme()

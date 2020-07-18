@@ -651,6 +651,7 @@ mod test {
         let mut setup = set_up_fetch();
 
         setup.mb2.vanquish(iter::once(setup.uids[0])).unwrap();
+        setup.mb2.purge_all();
         setup.mb2.poll().unwrap();
 
         let request = FetchRequest {
