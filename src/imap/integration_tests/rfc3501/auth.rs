@@ -57,22 +57,30 @@ fn login_invalid() {
 
     {
         let mut buffer = Vec::new();
-        let responses = client
+        let mut responses = client
             .command(c("LOGIN azure letmein"), &mut buffer)
             .unwrap();
 
         assert_eq!(1, responses.len());
-        assert_tagged_no(responses.into_iter().next().unwrap());
+        unpack_cond_response! {
+            (Some(_), s::RespCondType::No,
+             Some(s::RespTextCode::AuthenticationFailed(())), _) =
+                responses.pop().unwrap() => ()
+        };
     }
 
     {
         let mut buffer = Vec::new();
-        let responses = client
+        let mut responses = client
             .command(c("LOGIN root hunter2"), &mut buffer)
             .unwrap();
 
         assert_eq!(1, responses.len());
-        assert_tagged_no(responses.into_iter().next().unwrap());
+        unpack_cond_response! {
+            (Some(_), s::RespCondType::No,
+             Some(s::RespTextCode::AuthenticationFailed(())), _) =
+                responses.pop().unwrap() => ()
+        };
     }
 }
 
@@ -128,6 +136,7 @@ fn authenticate_invalid() {
         client: &mut PipeClient,
         base64: &[u8],
         expected_cond: s::RespCondType,
+        expected_code: Option<s::RespTextCode<'_>>,
     ) {
         client.write_raw(b"A1 AUTHENTICATE plain\r\n").unwrap();
 
@@ -140,8 +149,9 @@ fn authenticate_invalid() {
         buffer.clear();
         let response = client.read_one_response(&mut buffer).unwrap();
         unpack_cond_response! {
-            (Some(_), cond, _, _) = response => {
+            (Some(_), cond, code, _) = response => {
                 assert_eq!(expected_cond, cond);
+                assert_eq!(expected_code, code);
             }
         };
     }
@@ -151,45 +161,57 @@ fn authenticate_invalid() {
         &mut client,
         b"YXp1cmUAYXp1cmUAaHVudGVyMw==\r\n",
         s::RespCondType::No,
+        Some(s::RespTextCode::AuthenticationFailed(())),
     );
     // azure\0root\0hunter2
     reject_authenticate(
         &mut client,
         b"YXp1cmUAcm9vdABodW50ZXIy\r\n",
         s::RespCondType::No,
+        Some(s::RespTextCode::Cannot(())),
     );
     // root\0azure\0hunter2
     reject_authenticate(
         &mut client,
         b"cm9vdABhenVyZQBodW50ZXIy\r\n",
         s::RespCondType::No,
+        Some(s::RespTextCode::Cannot(())),
     );
     // azüre\0azüre\0hünter2, but in ISO-8859-1
     reject_authenticate(
         &mut client,
         b"YXr8cmUAYXr8cmUAOmj8bnRlcjI=\r\n",
         s::RespCondType::Bad,
+        Some(s::RespTextCode::Parse(())),
     );
     // azure\0hunter2
     reject_authenticate(
         &mut client,
         b"YXp1cmUAaHVudGVyMg==\r\n",
         s::RespCondType::Bad,
+        Some(s::RespTextCode::Parse(())),
     );
     // azure\0azure\0hunter2\0plugh
     reject_authenticate(
         &mut client,
         b"YXp1cmUAYXp1cmUAaHVudGVyMgBwbHVnaA==\r\n",
         s::RespCondType::Bad,
+        Some(s::RespTextCode::Parse(())),
     );
 
-    reject_authenticate(&mut client, b"*\r\n", s::RespCondType::Bad);
+    reject_authenticate(&mut client, b"*\r\n", s::RespCondType::Bad, None);
     reject_authenticate(
         &mut client,
         b"azure:hunter2\r\n",
         s::RespCondType::Bad,
+        Some(s::RespTextCode::Parse(())),
     );
-    reject_authenticate(&mut client, b"\r\n", s::RespCondType::Bad);
+    reject_authenticate(
+        &mut client,
+        b"\r\n",
+        s::RespCondType::Bad,
+        Some(s::RespTextCode::Parse(())),
+    );
 
     client.write_raw(b"A1 AUTHENTICATE plain\r\n").unwrap();
     let mut buffer = Vec::new();
@@ -215,6 +237,7 @@ fn authenticate_unsupported() {
     let mut buffer = Vec::new();
     let response = client.read_one_response(&mut buffer).unwrap();
     unpack_cond_response! {
-        (Some(_), s::RespCondType::Bad, _, _) = response => ()
+        (Some(_), s::RespCondType::Bad,
+         Some(s::RespTextCode::Cannot(())), _) = response => ()
     };
 }

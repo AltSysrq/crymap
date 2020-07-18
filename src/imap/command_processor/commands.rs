@@ -148,14 +148,29 @@ impl CommandProcessor {
             }
         }
 
-        let res = match res {
+        let mut res = match res {
             Ok(res) => res,
             Err(res) => res,
         };
 
+        // For a cond response, if we have nothing better to say as far as a
+        // "response code" goes and there's a pending unapplied expunge, tell
+        // the client about it.
+        if let s::Response::Cond(ref mut cr) = res {
+            if cr.code.is_none()
+                && self
+                    .selected
+                    .as_ref()
+                    .map(|s| s.has_pending_expunge())
+                    .unwrap_or(false)
+            {
+                cr.code = Some(s::RespTextCode::ExpungeIssued(()));
+            }
+        }
+
         if matches!(
-            &res,
-            &s::Response::Cond(s::CondResponse {
+            res,
+            s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::Bye,
                 ..
             })

@@ -874,7 +874,8 @@ fn error_conditions() {
     // First attempt to fetch the expunged message - NO
     command!([response] = client, c("FETCH 2 BODY[]"));
     unpack_cond_response! {
-        (Some(_), s::RespCondType::No, None, _) = response => ()
+        (Some(_), s::RespCondType::No,
+         Some(s::RespTextCode::ExpungeIssued(())), _) = response => ()
     };
 
     // Second attempt to fetch the expunged message - BYE
@@ -882,7 +883,8 @@ fn error_conditions() {
     let mut buffer = Vec::new();
     let response = client.read_one_response(&mut buffer).unwrap();
     unpack_cond_response! {
-        (None, s::RespCondType::Bye, None, _) = response => ()
+        (None, s::RespCondType::Bye,
+         Some(s::RespTextCode::ClientBug(())), _) = response => ()
     };
 
     let mut client = setup.connect("3501feec");
@@ -896,7 +898,11 @@ fn error_conditions() {
     ok_command!(client, c("STORE 1 +FLAGS.SILENT (\\Seen)"));
 
     command!([response] = client, c("UID FETCH 3 BODY[]"));
-    assert_error_response(response, None, Error::UnaddressableMessage);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::ClientBug(())),
+        Error::UnaddressableMessage,
+    );
 
     ok_command!(client, c("NOOP"));
 

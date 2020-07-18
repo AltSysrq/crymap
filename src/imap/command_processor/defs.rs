@@ -120,7 +120,7 @@ impl CommandProcessor {
         let seqrange = SeqRange::parse(raw, max_seqnum).ok_or_else(|| {
             s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::Bad,
-                code: None,
+                code: Some(s::RespTextCode::Parse(())),
                 quip: Some(Cow::Borrowed("Unparsable sequence set")),
             })
         })?;
@@ -132,7 +132,7 @@ impl CommandProcessor {
             // a protocol violation and we return BAD.
             return Err(s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::Bad,
-                code: None,
+                code: Some(s::RespTextCode::ClientBug(())),
                 quip: Some(Cow::Borrowed(
                     "Message sequence number out of range",
                 )),
@@ -150,7 +150,7 @@ impl CommandProcessor {
         let seqrange = SeqRange::parse(raw, max_uid).ok_or_else(|| {
             s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::Bad,
-                code: None,
+                code: Some(s::RespTextCode::Parse(())),
                 quip: Some(Cow::Borrowed("Unparsable sequence set")),
             })
         })?;
@@ -178,7 +178,7 @@ pub(super) fn catch_all_error_handling(
     error!("{} Unhandled internal error: {}", log_prefix, e);
     s::Response::Cond(s::CondResponse {
         cond: s::RespCondType::No,
-        code: None,
+        code: Some(s::RespTextCode::ServerBug(())),
         quip: Some(Cow::Borrowed(
             "Unexpected error; check server logs for details",
         )),

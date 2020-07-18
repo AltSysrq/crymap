@@ -154,10 +154,18 @@ fn append_copy_nx_destination() {
     );
 
     command!([response] = client, c("COPY 1 ../foo"));
-    assert_error_response(response, None, Error::UnsafeName);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Cannot(())),
+        Error::UnsafeName,
+    );
 
     command!([response] = client, c("COPY 1 3501meac/noselect"));
-    assert_error_response(response, None, Error::MailboxUnselectable);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Nonexistent(())),
+        Error::MailboxUnselectable,
+    );
 
     client
         .write_raw(b"A1 APPEND nonexistent {3+}\r\nfoo\r\n")
@@ -175,14 +183,22 @@ fn append_copy_nx_destination() {
         .unwrap();
     let mut buffer = Vec::new();
     let response = client.read_one_response(&mut buffer).unwrap();
-    assert_error_response(response, None, Error::UnsafeName);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Cannot(())),
+        Error::UnsafeName,
+    );
 
     client
         .write_raw(b"A3 APPEND 3501meac/noselect {3+}\r\nfoo\r\n")
         .unwrap();
     let mut buffer = Vec::new();
     let response = client.read_one_response(&mut buffer).unwrap();
-    assert_error_response(response, None, Error::MailboxUnselectable);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Nonexistent(())),
+        Error::MailboxUnselectable,
+    );
 }
 
 #[test]
@@ -194,21 +210,34 @@ fn error_conditions() {
     ok_command!(client, c("EXAMINE INBOX"));
 
     command!([response] = client, c("EXPUNGE"));
-    assert_error_response(response, None, Error::MailboxReadOnly);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Cannot(())),
+        Error::MailboxReadOnly,
+    );
 
     // TODO UIDPLUS command, move later
     command!([response] = client, c("UID EXPUNGE 1:*"));
-    assert_error_response(response, None, Error::MailboxReadOnly);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Cannot(())),
+        Error::MailboxReadOnly,
+    );
 
     // The distinction between COPY 1 and COPY 2 on empty mailboxes isn't
     // important. It's a consequence of the fact that we treat the maximum
     // valid seqnum as 1 until much later for empty mailboxes, since `*` needs
     // to resolve to *something*.
     command!([response] = client, c("COPY 1 INBOX"));
-    assert_error_response(response, None, Error::NxMessage);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Nonexistent(())),
+        Error::NxMessage,
+    );
 
     command!([response] = client, c("COPY 2 INBOX"));
     unpack_cond_response! {
-        (Some(_), s::RespCondType::Bad, None, Some(_)) = response => ()
+        (Some(_), s::RespCondType::Bad,
+         Some(s::RespTextCode::ClientBug(())), Some(_)) = response => ()
     };
 }

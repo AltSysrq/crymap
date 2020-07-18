@@ -363,6 +363,11 @@ impl MailboxState {
         }
     }
 
+    /// Return whether there are any pending expunge operations.
+    pub fn has_pending_expunge(&self) -> bool {
+        !self.unapplied_expunge.is_empty()
+    }
+
     /// Return a vec of UIDs whose flags have changed since the last call to
     /// this function.
     pub fn take_changed_flags_uids(&mut self) -> Vec<Uid> {

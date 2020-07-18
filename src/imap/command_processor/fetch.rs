@@ -147,8 +147,11 @@ impl CommandProcessor {
         // buffer them
         let response = f_fetch(selected, request).map_err(map_error! {
             self,
-            MasterKeyUnavailable | BadEncryptedKey | ExpungedMessage |
-            NxMessage | UnaddressableMessage => (No, None),
+            MasterKeyUnavailable => (No, Some(s::RespTextCode::ServerBug(()))),
+            BadEncryptedKey => (No, Some(s::RespTextCode::Corruption(()))),
+            ExpungedMessage => (No, Some(s::RespTextCode::ExpungeIssued(()))),
+            NxMessage => (No, Some(s::RespTextCode::Nonexistent(()))),
+            UnaddressableMessage => (No, Some(s::RespTextCode::ClientBug(()))),
         })?;
         fetch_response(sender, response, fetch_properties)
     }
@@ -339,14 +342,14 @@ fn fetch_response(
         FetchResponseKind::Ok => success(),
         FetchResponseKind::No => Ok(s::Response::Cond(s::CondResponse {
             cond: s::RespCondType::No,
-            code: None,
+            code: Some(s::RespTextCode::ExpungeIssued(())),
             quip: Some(Cow::Borrowed(
                 "Message state out of sync; suggest NOOP",
             )),
         })),
         FetchResponseKind::Bye => Err(s::Response::Cond(s::CondResponse {
             cond: s::RespCondType::Bye,
-            code: None,
+            code: Some(s::RespTextCode::ClientBug(())),
             quip: Some(Cow::Borrowed("Possible FETCH loop bug detected")),
         })),
     }

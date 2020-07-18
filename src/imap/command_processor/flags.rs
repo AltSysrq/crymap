@@ -65,9 +65,12 @@ impl CommandProcessor {
 
         let resp = f(selected!(self)?, &request).map_err(map_error! {
             self,
-            MailboxFull | NxMessage | ExpungedMessage | MailboxReadOnly |
-            UnaddressableMessage | GaveUpInsertion =>
-                (No, None),
+            MailboxFull => (No, Some(s::RespTextCode::Limit(()))),
+            NxMessage => (No, Some(s::RespTextCode::Nonexistent(()))),
+            ExpungedMessage => (No, Some(s::RespTextCode::ExpungeIssued(()))),
+            MailboxReadOnly => (No, Some(s::RespTextCode::Cannot(()))),
+            UnaddressableMessage => (No, Some(s::RespTextCode::ClientBug(()))),
+            GaveUpInsertion => (No, Some(s::RespTextCode::Unavailable(()))),
         })?;
 
         if resp.ok {
@@ -75,7 +78,7 @@ impl CommandProcessor {
         } else {
             Ok(s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::No,
-                code: None,
+                code: Some(s::RespTextCode::ExpungeIssued(())),
                 quip: Some(Cow::Borrowed("Some messages have been expunged")),
             }))
         }

@@ -46,8 +46,12 @@ impl CommandProcessor {
         let dst = account!(self)?.mailbox(&cmd.mailbox, false).map_err(
             map_error! {
                 self,
-                NxMailbox => (No, Some(s::RespTextCode::TryCreate(()))),
-                UnsafeName | MailboxUnselectable => (No, None),
+                NxMailbox =>
+                    (No, Some(s::RespTextCode::TryCreate(()))),
+                MailboxUnselectable =>
+                    (No, Some(s::RespTextCode::Nonexistent(()))),
+                UnsafeName =>
+                    (No, Some(s::RespTextCode::Cannot(()))),
             },
         )?;
         self.multiappend = Some(Multiappend {
@@ -79,7 +83,7 @@ impl CommandProcessor {
         if append.request.items.len() >= 65536 {
             return Err(s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::No,
-                code: None,
+                code: Some(s::RespTextCode::Limit(())),
                 quip: Some(Cow::Borrowed(
                     "Maximum message count for MULTIAPPEND is 65536",
                 )),
@@ -115,7 +119,8 @@ impl CommandProcessor {
             .expect("cmd_append_commit with no append in progress");
         match append.dst.multiappend(append.request).map_err(map_error! {
             self,
-            MailboxFull | GaveUpInsertion => (No, None),
+            MailboxFull => (No, Some(s::RespTextCode::Limit(()))),
+            GaveUpInsertion => (No, Some(s::RespTextCode::Unavailable(()))),
         }) {
             Ok(_appended) => { /* TODO UIDPLUS */ }
             Err(response) => {
@@ -149,7 +154,7 @@ impl CommandProcessor {
         // of the natural poll cycle.
         selected!(self)?.expunge_all_deleted().map_err(map_error! {
             self,
-            MailboxReadOnly => (No, None),
+            MailboxReadOnly => (No, Some(s::RespTextCode::Cannot(()))),
         })?;
         success()
     }
@@ -164,8 +169,12 @@ impl CommandProcessor {
             .expunge_deleted(&uids)
             .map_err(map_error! {
                 self,
-                MailboxReadOnly | NxMessage | UnaddressableMessage =>
-                    (No, None),
+                MailboxReadOnly =>
+                    (No, Some(s::RespTextCode::Cannot(()))),
+                NxMessage =>
+                    (No, Some(s::RespTextCode::Nonexistent(()))),
+                UnaddressableMessage =>
+                    (No, Some(s::RespTextCode::ClientBug(()))),
             })?;
         success()
     }
@@ -179,8 +188,9 @@ impl CommandProcessor {
         let uids = uids.items(u32::MAX).take(65536).collect::<Vec<_>>();
         selected!(self)?.vanquish(uids).map_err(map_error! {
             self,
-            MailboxReadOnly | NxMessage | UnaddressableMessage =>
-                (No, None),
+            MailboxReadOnly => (No, Some(s::RespTextCode::Cannot(()))),
+            NxMessage => (No, Some(s::RespTextCode::Nonexistent(()))),
+            UnaddressableMessage => (No, Some(s::RespTextCode::ClientBug(()))),
         })?;
         success()
     }
@@ -220,12 +230,16 @@ impl CommandProcessor {
         let dst = account.mailbox(&dst, false).map_err(map_error! {
             self,
             NxMailbox => (No, Some(s::RespTextCode::TryCreate(()))),
-            UnsafeName | MailboxUnselectable => (No, None),
+            UnsafeName => (No, Some(s::RespTextCode::Cannot(()))),
+            MailboxUnselectable => (No, Some(s::RespTextCode::Nonexistent(()))),
         })?;
         f(selected, &request, &dst).map_err(map_error! {
-           self,
-            MailboxFull | NxMessage | ExpungedMessage | GaveUpInsertion |
-            UnaddressableMessage => (No, None),
+            self,
+            MailboxFull => (No, Some(s::RespTextCode::Limit(()))),
+            NxMessage => (No, Some(s::RespTextCode::Nonexistent(()))),
+            ExpungedMessage => (No, Some(s::RespTextCode::ExpungeIssued(()))),
+            GaveUpInsertion => (No, Some(s::RespTextCode::Unavailable(()))),
+            UnaddressableMessage => (No, Some(s::RespTextCode::ClientBug(()))),
         })?;
         success()
     }

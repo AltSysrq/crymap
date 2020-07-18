@@ -80,13 +80,20 @@ fn flag_crud() {
     ok_command!(client2, c("XVANQUISH 1"));
 
     // STORE with .SILENT = return OK, no fetches.
-    // Also we must not be notified about the expunge yet.
+    // Also we must not be notified about the expunge yet, but we do get the
+    // RFC 5530 [EXPUNGEISSUED] code.
     command!([response] = client, c("STORE 1 +FLAGS.SILENT (\\Answered)"));
-    assert_tagged_ok(response);
+    unpack_cond_response! {
+        (Some(_), s::RespCondType::Ok,
+         Some(s::RespTextCode::ExpungeIssued(())), _) = response => ()
+    };
 
     // STORE without .SILENT = return NO, no fetches
     command!([response] = client, c("STORE 1 +FLAGS (\\Answered)"));
-    assert_tagged_no(response);
+    unpack_cond_response! {
+        (Some(_), s::RespCondType::No,
+         Some(s::RespTextCode::ExpungeIssued(())), _) = response => ()
+    };
 }
 
 #[test]
@@ -147,5 +154,9 @@ fn error_conditions() {
 
     ok_command!(client, c("EXAMINE 3501flec"));
     command!([response] = client, c("STORE 1 +FLAGS (\\Deleted)"));
-    assert_error_response(response, None, Error::MailboxReadOnly);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Cannot(())),
+        Error::MailboxReadOnly,
+    );
 }

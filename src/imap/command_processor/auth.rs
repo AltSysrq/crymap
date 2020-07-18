@@ -51,7 +51,7 @@ impl CommandProcessor {
                 tag: Some(Cow::Borrowed(&cmd.tag)),
                 response: s::Response::Cond(s::CondResponse {
                     cond: s::RespCondType::Bad,
-                    code: None,
+                    code: Some(s::RespTextCode::Cannot(())),
                     quip: Some(Cow::Borrowed("Unsupported AUTHENTICATE type")),
                 }),
             })
@@ -84,7 +84,7 @@ impl CommandProcessor {
                     tag: Some(cmd.tag),
                     response: s::Response::Cond(s::CondResponse {
                         cond: s::RespCondType::Bad,
-                        code: None,
+                        code: Some(s::RespTextCode::Parse(())),
                         quip: Some(Cow::Borrowed("Bad base64 or UTF-8")),
                     }),
                 }
@@ -102,7 +102,7 @@ impl CommandProcessor {
                         tag: Some(cmd.tag),
                         response: s::Response::Cond(s::CondResponse {
                             cond: s::RespCondType::No,
-                            code: None,
+                            code: Some(s::RespTextCode::Cannot(())),
                             quip: Some(Cow::Borrowed(
                                 "AUTHENTICATE PLAIN with different \
                                  authorising and authenticating users \
@@ -130,7 +130,7 @@ impl CommandProcessor {
                 tag: Some(cmd.tag),
                 response: s::Response::Cond(s::CondResponse {
                     cond: s::RespCondType::Bad,
-                    code: None,
+                    code: Some(s::RespTextCode::Parse(())),
                     quip: Some(Cow::Borrowed(
                         "Malformed AUTHENTICATE PLAIN string",
                     )),
@@ -143,7 +143,7 @@ impl CommandProcessor {
         if self.account.is_some() {
             return Err(s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::Bad,
-                code: None,
+                code: Some(s::RespTextCode::ClientBug(())),
                 quip: Some(Cow::Borrowed("Already logged in")),
             }));
         }
@@ -151,7 +151,7 @@ impl CommandProcessor {
         if !is_safe_name(&cmd.userid) {
             return Err(s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::No,
-                code: None,
+                code: Some(s::RespTextCode::AuthenticationFailed(())),
                 quip: Some(Cow::Borrowed("Illegal user id")),
             }));
         }
@@ -188,7 +188,7 @@ impl CommandProcessor {
 
                 s::Response::Cond(s::CondResponse {
                     cond: s::RespCondType::No,
-                    code: None,
+                    code: Some(s::RespTextCode::AuthenticationFailed(())),
                     quip: Some(Cow::Borrowed("Bad user id or password")),
                 })
             })?;
@@ -350,7 +350,7 @@ impl CommandProcessor {
 fn auth_misconfiguration() -> PartialResult<()> {
     Err(s::Response::Cond(s::CondResponse {
         cond: s::RespCondType::Bye,
-        code: Some(s::RespTextCode::Alert(())),
+        code: Some(s::RespTextCode::ContactAdmin(())),
         quip: Some(Cow::Borrowed(
             "Fatal internal error or misconfiguration; refer to \
              server logs for details.",

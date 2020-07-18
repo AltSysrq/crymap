@@ -232,6 +232,7 @@ syntax_rule! {
 syntax_rule! {
     #[]
     enum RespTextCode<'a> {
+        // RFC 3507
         #[]
         #[tag("ALERT")]
         Alert(()),
@@ -268,6 +269,58 @@ syntax_rule! {
         #[prefix("UNSEEN ")]
         #[primitive(num_u32, number)]
         Unseen(u32),
+        // RFC 5530
+        #[]
+        #[tag("UNAVAILABLE")]
+        Unavailable(()),
+        #[]
+        #[tag("AUTHENTICATIONFAILED")]
+        AuthenticationFailed(()),
+        #[]
+        #[tag("AUTHORIZATIONFAILED")]
+        AuthorizationFailed(()),
+        #[]
+        #[tag("EXPIRED")]
+        Expired(()),
+        #[]
+        #[tag("PRIVACYREQUIRED")]
+        PrivacyRequired(()),
+        #[]
+        #[tag("CONTACTADMIN")]
+        ContactAdmin(()),
+        #[]
+        #[tag("NOPERM")]
+        NoPerm(()),
+        #[]
+        #[tag("INUSE")]
+        InUse(()),
+        #[]
+        #[tag("EXPUNGEISSUED")]
+        ExpungeIssued(()),
+        #[]
+        #[tag("CORRUPTION")]
+        Corruption(()),
+        #[]
+        #[tag("SERVERBUG")]
+        ServerBug(()),
+        #[]
+        #[tag("CLIENTBUG")]
+        ClientBug(()),
+        #[]
+        #[tag("CANNOT")]
+        Cannot(()),
+        #[]
+        #[tag("LIMIT")]
+        Limit(()),
+        #[]
+        #[tag("OVERQUOTA")]
+        OverQuota(()),
+        #[]
+        #[tag("ALREADYEXISTS")]
+        AlreadyExists(()),
+        #[]
+        #[tag("NONEXISTENT")]
+        Nonexistent(()),
         // We don't handle unknown response codes, since the server never needs
         // to parse this. Unknown response codes just become part of the text.
     }

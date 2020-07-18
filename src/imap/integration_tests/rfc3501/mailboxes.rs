@@ -90,7 +90,11 @@ fn mailbox_management() {
 
     command!(responses = client, c("DELETE 3501mbmm/noselect"));
     assert_eq!(1, responses.len());
-    assert_tagged_no(responses.into_iter().next().unwrap());
+    assert_error_response(
+        responses.into_iter().next().unwrap(),
+        Some(s::RespTextCode::InUse(())),
+        Error::MailboxHasInferiors,
+    );
 
     ok_command!(
         client,
@@ -175,56 +179,128 @@ fn error_cases() {
     quick_log_in(&mut client);
 
     command!([response] = client, c("CREATE INBOX"));
-    assert_error_response(response, None, Error::MailboxExists);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::AlreadyExists(())),
+        Error::MailboxExists,
+    );
 
     command!([response] = client, c("CREATE INBOX/child"));
-    assert_error_response(response, None, Error::BadOperationOnInbox);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Cannot(())),
+        Error::BadOperationOnInbox,
+    );
 
     command!([response] = client, c("CREATE Archive"));
-    assert_error_response(response, None, Error::MailboxExists);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::AlreadyExists(())),
+        Error::MailboxExists,
+    );
 
     command!([response] = client, c("CREATE \"\""));
-    assert_error_response(response, None, Error::UnsafeName);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Cannot(())),
+        Error::UnsafeName,
+    );
 
     command!([response] = client, c("CREATE ../foo"));
-    assert_error_response(response, None, Error::UnsafeName);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Cannot(())),
+        Error::UnsafeName,
+    );
 
     command!([response] = client, c("DELETE INBOX"));
-    assert_error_response(response, None, Error::BadOperationOnInbox);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Cannot(())),
+        Error::BadOperationOnInbox,
+    );
 
     command!([response] = client, c("DELETE 3501mbec"));
-    assert_error_response(response, None, Error::NxMailbox);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Nonexistent(())),
+        Error::NxMailbox,
+    );
 
     command!([response] = client, c("DELETE \"\""));
-    assert_error_response(response, None, Error::NxMailbox);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Nonexistent(())),
+        Error::NxMailbox,
+    );
 
     command!([response] = client, c("DELETE ../foo"));
-    assert_error_response(response, None, Error::UnsafeName);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Cannot(())),
+        Error::UnsafeName,
+    );
 
     command!([response] = client, c("RENAME INBOX Archive"));
-    assert_error_response(response, None, Error::MailboxExists);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::AlreadyExists(())),
+        Error::MailboxExists,
+    );
 
     command!([response] = client, c("RENAME Archive INBOX"));
-    assert_error_response(response, None, Error::MailboxExists);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::AlreadyExists(())),
+        Error::MailboxExists,
+    );
 
     command!([response] = client, c("RENAME Archive Archive"));
-    assert_error_response(response, None, Error::RenameToSelf);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::AlreadyExists(())),
+        Error::RenameToSelf,
+    );
 
     command!([response] = client, c("RENAME Archive Archive/child"));
-    assert_error_response(response, None, Error::RenameIntoSelf);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Cannot(())),
+        Error::RenameIntoSelf,
+    );
 
     command!([response] = client, c("RENAME Archive INBOX/child"));
-    assert_error_response(response, None, Error::BadOperationOnInbox);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Cannot(())),
+        Error::BadOperationOnInbox,
+    );
 
     command!([response] = client, c("RENAME Archive \"\""));
-    assert_error_response(response, None, Error::UnsafeName);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Cannot(())),
+        Error::UnsafeName,
+    );
 
     command!([response] = client, c("RENAME Archive ../foo"));
-    assert_error_response(response, None, Error::UnsafeName);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Cannot(())),
+        Error::UnsafeName,
+    );
 
     command!([response] = client, c("RENAME \"\" bar"));
-    assert_error_response(response, None, Error::NxMailbox);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Nonexistent(())),
+        Error::NxMailbox,
+    );
 
     command!([response] = client, c("RENAME ../foo bar"));
-    assert_error_response(response, None, Error::UnsafeName);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Cannot(())),
+        Error::UnsafeName,
+    );
 }

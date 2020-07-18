@@ -57,7 +57,10 @@ impl CommandProcessor {
         };
         account.create(request).map_err(map_error! {
             self,
-            MailboxExists | UnsafeName | BadOperationOnInbox => (No, None),
+            MailboxExists =>
+                (No, Some(s::RespTextCode::AlreadyExists(()))),
+            UnsafeName | BadOperationOnInbox =>
+                (No, Some(s::RespTextCode::Cannot(()))),
             // TODO This has its own code
             UnsupportedSpecialUse => (No, None),
         })?;
@@ -72,8 +75,12 @@ impl CommandProcessor {
         let account = account!(self)?;
         account.delete(&cmd.mailbox).map_err(map_error! {
             self,
-            NxMailbox | UnsafeName | BadOperationOnInbox |
-            MailboxHasInferiors => (No, None),
+            NxMailbox =>
+                (No, Some(s::RespTextCode::Nonexistent(()))),
+            MailboxHasInferiors =>
+                (No, Some(s::RespTextCode::InUse(()))),
+            UnsafeName | BadOperationOnInbox =>
+                (No, Some(s::RespTextCode::Cannot(()))),
         })?;
         success()
     }
@@ -165,8 +172,12 @@ impl CommandProcessor {
 
         account.rename(request).map_err(map_error! {
             self,
-            NxMailbox | BadOperationOnInbox | MailboxExists |
-            RenameToSelf | RenameIntoSelf | UnsafeName => (No, None),
+            NxMailbox =>
+                (No, Some(s::RespTextCode::Nonexistent(()))),
+            MailboxExists | RenameToSelf =>
+                (No, Some(s::RespTextCode::AlreadyExists(()))),
+            BadOperationOnInbox | RenameIntoSelf | UnsafeName =>
+                (No, Some(s::RespTextCode::Cannot(()))),
         })?;
 
         success()
@@ -197,7 +208,10 @@ impl CommandProcessor {
 
         let responses = account.status(&request).map_err(map_error! {
             self,
-            UnsafeName | NxMailbox | MailboxUnselectable => (No, None),
+            UnsafeName =>
+                (No, Some(s::RespTextCode::Cannot(()))),
+            NxMailbox | MailboxUnselectable =>
+                (No, Some(s::RespTextCode::Nonexistent(()))),
         })?;
 
         for response in responses {
@@ -257,7 +271,8 @@ impl CommandProcessor {
             .subscribe(&cmd.mailbox)
             .map_err(map_error! {
                 self,
-                NxMailbox | UnsafeName => (No, None),
+                NxMailbox => (No, Some(s::RespTextCode::Nonexistent(()))),
+                UnsafeName => (No, Some(s::RespTextCode::Cannot(()))),
             })?;
         success()
     }
@@ -271,7 +286,8 @@ impl CommandProcessor {
             .unsubscribe(&cmd.mailbox)
             .map_err(map_error! {
                 self,
-                NxMailbox | UnsafeName => (No, None),
+                NxMailbox => (No, Some(s::RespTextCode::Nonexistent(()))),
+                UnsafeName => (No, Some(s::RespTextCode::Cannot(()))),
             })?;
         success()
     }
@@ -289,7 +305,10 @@ impl CommandProcessor {
         let stateless = account!(self)?.mailbox(mailbox, read_only).map_err(
             map_error! {
                 self,
-                NxMailbox | UnsafeName | MailboxUnselectable => (No, None),
+                NxMailbox | MailboxUnselectable =>
+                    (No, Some(s::RespTextCode::Nonexistent(()))),
+                UnsafeName =>
+                    (No, Some(s::RespTextCode::Cannot(()))),
             },
         )?;
         let (stateful, select) =

@@ -221,16 +221,32 @@ fn error_conditions() {
     };
 
     command!([response] = client, c("SELECT nonexistent"));
-    assert_error_response(response, None, Error::NxMailbox);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Nonexistent(())),
+        Error::NxMailbox,
+    );
 
     command!([response] = client, c("SELECT 3501seec/noselect"));
-    assert_error_response(response, None, Error::MailboxUnselectable);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Nonexistent(())),
+        Error::MailboxUnselectable,
+    );
 
     command!([response] = client, c("SELECT ../foo"));
-    assert_error_response(response, None, Error::UnsafeName);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Cannot(())),
+        Error::UnsafeName,
+    );
 
     command!([response] = client, c("SELECT \"\""));
-    assert_error_response(response, None, Error::NxMailbox);
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Nonexistent(())),
+        Error::NxMailbox,
+    );
 
     command!([response] = client, c("CLOSE"));
     unpack_cond_response! {

@@ -172,6 +172,14 @@ impl StatefulMailbox {
     pub fn max_uid(&self) -> Option<Uid> {
         self.state.max_uid()
     }
+
+    /// Return whether there are any unapplied expunge events currently known.
+    ///
+    /// This does not result in any polling, but just looks at the
+    /// already-known internal state.
+    pub fn has_pending_expunge(&self) -> bool {
+        self.state.has_pending_expunge()
+    }
 }
 
 // Not a great place for these tests, but there's nowhere better right now.
