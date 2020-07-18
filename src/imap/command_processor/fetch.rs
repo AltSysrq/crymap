@@ -20,7 +20,6 @@ use std::borrow::Cow;
 use std::convert::TryInto;
 use std::fmt;
 use std::mem;
-use std::sync::Mutex;
 
 use log::{error, warn};
 
@@ -46,6 +45,7 @@ impl CommandProcessor {
             ids,
             false,
             StatefulMailbox::seqnum_store,
+            |mb, r| mb.prefetch(&r, &SeqRange::new()),
             StatefulMailbox::seqnum_fetch,
         )
     }
@@ -62,6 +62,7 @@ impl CommandProcessor {
             ids,
             true,
             StatefulMailbox::store,
+            |mb, r| mb.prefetch(&r, &r.ids),
             |mb, r, f| mb.fetch(&r, f),
         )
     }
@@ -88,6 +89,7 @@ impl CommandProcessor {
             ids,
             false,
             |_, _| panic!("Shouldn't STORE in background update"),
+            |mb, r| mb.prefetch(&r, &r.ids),
             |mb, r, f| mb.fetch(&r, f),
         );
     }
@@ -102,6 +104,10 @@ impl CommandProcessor {
             &mut StatefulMailbox,
             &StoreRequest<ID>,
         ) -> Result<StoreResponse<ID>, Error>,
+        f_prefetch: impl FnOnce(
+            &mut StatefulMailbox,
+            &FetchRequest<ID>,
+        ) -> PrefetchResponse,
         f_fetch: impl FnOnce(
             &mut StatefulMailbox,
             FetchRequest<ID>,
@@ -153,13 +159,11 @@ impl CommandProcessor {
             }
         }
 
-        // TODO It would be better to stream these responses out rather than
-        // buffer them in memory
-        let received: Mutex<Vec<(Seqnum, Vec<fetch::multi::FetchedItem>)>> =
-            Mutex::new(Vec::new());
+        let prefetch = f_prefetch(selected, &request);
+        fetch_preresponse(sender, prefetch)?;
+
         let receiver = |seqnum, items| {
-            let mut lock = received.lock().unwrap();
-            lock.push((seqnum, items));
+            fetch_response(sender, fetch_properties, seqnum, items);
         };
 
         let response = f_fetch(selected, request, &receiver).map_err(map_error! {
@@ -170,8 +174,7 @@ impl CommandProcessor {
             NxMessage => (No, Some(s::RespTextCode::Nonexistent(()))),
             UnaddressableMessage => (No, Some(s::RespTextCode::ClientBug(()))),
         })?;
-        let mut received = received.lock().unwrap();
-        fetch_response(sender, response, received.drain(..), fetch_properties)
+        fetch_response_final(response)
     }
 }
 
@@ -335,28 +338,34 @@ where
     }
 }
 
-fn fetch_response(
+fn fetch_preresponse(
     sender: SendResponse,
-    response: FetchResponse,
-    received: impl IntoIterator<Item = (Seqnum, Vec<fetch::multi::FetchedItem>)>,
-    fetch_properties: FetchProperties,
-) -> CmdResult {
+    response: PrefetchResponse,
+) -> PartialResult<()> {
     if !response.flags.is_empty() {
         sender(s::Response::Flags(response.flags));
     }
+    Ok(())
+}
 
-    for (seqnum, items) in received {
-        sender(s::Response::Fetch(s::FetchResponse {
-            seqnum: seqnum.0.get(),
-            atts: s::MsgAtts {
-                atts: items
-                    .into_iter()
-                    .filter_map(|att| fetch_att_to_ast(att, fetch_properties))
-                    .collect(),
-            },
-        }));
-    }
+fn fetch_response(
+    sender: SendResponse,
+    fetch_properties: FetchProperties,
+    seqnum: Seqnum,
+    items: Vec<fetch::multi::FetchedItem>,
+) {
+    sender(s::Response::Fetch(s::FetchResponse {
+        seqnum: seqnum.0.get(),
+        atts: s::MsgAtts {
+            atts: items
+                .into_iter()
+                .filter_map(|att| fetch_att_to_ast(att, fetch_properties))
+                .collect(),
+        },
+    }));
+}
 
+fn fetch_response_final(response: FetchResponse) -> CmdResult {
     match response.kind {
         FetchResponseKind::Ok => success(),
         FetchResponseKind::No => Ok(s::Response::Cond(s::CondResponse {

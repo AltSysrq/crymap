@@ -17,6 +17,7 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::collections::HashSet;
+use std::fmt;
 use std::io::BufRead;
 use std::mem;
 use std::sync::Arc;
@@ -90,6 +91,65 @@ impl StatefulMailbox {
         })
     }
 
+    /// Obtain pre-responses for the `FETCH` and `UID FETCH` commands.
+    ///
+    /// For this to produce an output compliant with the standards, no actions
+    /// may be taken before this call and the subsequent `seqnum_fetch()` or
+    /// `fetch()` call. The separation is merely to allow the pre-responses to
+    /// be sent before streaming the real responses.
+    ///
+    /// Note that `collect_vanished` is handled in terms of `uids` to avoid
+    /// needing to leak the UID->Seqnum translation out of the abstraction.
+    /// This is fine since `collect_vanished` is invalid on seqnum FETCH
+    /// anyway.
+    ///
+    /// There's still an inherent race between `prefetch()` and `fetch()`:
+    /// Another process could expunge messages between our check here and
+    /// actually fetching them. There's not much we can do here, since RFC 7162
+    /// requires returning `VANISHED` and `FETCH` in the wrong order.
+    pub fn prefetch<ID>(
+        &mut self,
+        request: &FetchRequest<ID>,
+        uids: &SeqRange<Uid>,
+    ) -> PrefetchResponse
+    where
+        SeqRange<ID>: fmt::Debug,
+    {
+        let mut response = PrefetchResponse::default();
+        // If we now know of any flags that haven't been sent to the client,
+        // update that now
+        if request.flags
+            && self
+                .state
+                .flags()
+                .any(|(_, f)| !self.client_known_flags.contains(f))
+        {
+            response.flags = self.flags_response();
+        }
+
+        let precise_expunged = if request.collect_vanished {
+            request
+                .changed_since
+                .and_then(|since| self.state.uids_expunged_since(since))
+                .map(|it| it.collect::<HashSet<Uid>>())
+        } else {
+            None
+        };
+
+        for uid in uids.items(self.state.max_uid_val()) {
+            if precise_expunged
+                .as_ref()
+                .map(|p| p.contains(&uid))
+                .unwrap_or(true)
+                && self.state.message_status(uid).is_none()
+            {
+                response.vanished.append(uid);
+            }
+        }
+
+        response
+    }
+
     /// The `FETCH` command.
     ///
     /// `receiver` is called with fetched data as it becomes available. The
@@ -123,19 +183,8 @@ impl StatefulMailbox {
         request: &FetchRequest<Uid>,
         receiver: FetchReceiver<'_>,
     ) -> Result<FetchResponse, Error> {
-        let precise_expunged = if request.collect_vanished {
-            request
-                .changed_since
-                .and_then(|since| self.state.uids_expunged_since(since))
-                .map(|it| it.collect::<HashSet<Uid>>())
-        } else {
-            None
-        };
-
         enum StrippedFetchResponse {
             Nil,
-            NewFlags,
-            VanishedEarlier(Uid),
             UnexpectedExpunge(Uid),
         }
 
@@ -143,8 +192,7 @@ impl StatefulMailbox {
             .ids
             .par_items(self.state.max_uid_val())
             .map(|uid| {
-                let full_response =
-                    self.fetch_single(request, uid, &precise_expunged);
+                let full_response = self.fetch_single(request, uid);
 
                 let full_response = match full_response {
                     Ok(f) => f,
@@ -153,27 +201,13 @@ impl StatefulMailbox {
 
                 match full_response {
                     SingleFetchResponse::Fetched(seqnum, fetched) => {
-                        // See if we're returning a flag the client hasn't
-                        // seen yet. If so, we'll need to send a FLAGS
-                        // response first.
-                        let has_unknown_flags =
-                            request.flags && self.has_unknown_flags(&fetched);
                         receiver(seqnum, fetched);
-
-                        if has_unknown_flags {
-                            Ok(StrippedFetchResponse::NewFlags)
-                        } else {
-                            Ok(StrippedFetchResponse::Nil)
-                        }
+                        Ok(StrippedFetchResponse::Nil)
                     }
 
                     SingleFetchResponse::NotModified
                     | SingleFetchResponse::SilentExpunge => {
                         Ok(StrippedFetchResponse::Nil)
-                    }
-
-                    SingleFetchResponse::VanishedEarlier => {
-                        Ok(StrippedFetchResponse::VanishedEarlier(uid))
                     }
 
                     SingleFetchResponse::UnexpectedExpunge => {
@@ -184,17 +218,10 @@ impl StatefulMailbox {
             .collect();
 
         let mut response = FetchResponse::default();
-        let mut need_flags_response = false;
 
         for result in fetched {
             match result? {
                 StrippedFetchResponse::Nil => (),
-                StrippedFetchResponse::NewFlags => {
-                    need_flags_response = true;
-                }
-                StrippedFetchResponse::VanishedEarlier(uid) => {
-                    response.vanished.append(uid);
-                }
                 StrippedFetchResponse::UnexpectedExpunge(uid) => {
                     let r = if self.fetch_loopbreaker.insert(uid) {
                         FetchResponseKind::No
@@ -207,10 +234,6 @@ impl StatefulMailbox {
             }
         }
 
-        if need_flags_response {
-            response.flags = self.flags_response();
-        }
-
         Ok(response)
     }
 
@@ -218,29 +241,17 @@ impl StatefulMailbox {
         &self,
         request: &FetchRequest<Uid>,
         uid: Uid,
-        precise_expunged: &Option<HashSet<Uid>>,
     ) -> Result<SingleFetchResponse, Error> {
         let seqnum = match self.state.uid_to_seqnum(uid) {
             Ok(s) => s,
             Err(Error::ExpungedMessage) => {
-                if request.collect_vanished
-                    && precise_expunged
-                        .as_ref()
-                        .map(|pe| pe.contains(&uid))
-                        .unwrap_or(true)
-                {
-                    return Ok(SingleFetchResponse::VanishedEarlier);
-                } else {
-                    // If the client didn't request collect_vanished, we
-                    // silently drop requests for unaddressable UIDs.
-                    return Ok(SingleFetchResponse::SilentExpunge);
-                }
+                // Silently drop requests for unaddressable UIDs
+                return Ok(SingleFetchResponse::SilentExpunge);
             }
-            Err(Error::NxMessage) =>
-            // Similar to the above, silently drop UIDs outside the
-            // addressable range.
-            {
-                return Ok(SingleFetchResponse::SilentExpunge)
+            Err(Error::NxMessage) => {
+                // Similar to the above, silently drop UIDs outside the
+                // addressable range.
+                return Ok(SingleFetchResponse::SilentExpunge);
             }
             Err(e) => return Err(e),
         };
@@ -305,33 +316,17 @@ impl StatefulMailbox {
         });
 
         if let &Err(Error::ExpungedMessage) = &result {
-            if request.collect_vanished {
-                // If the client requested collect_vanished and we got here,
-                // that means the expunge took place later than the latest
-                // Modseq we currently know about, so always treat as
-                // VanishedEarlier.
-                return Ok(SingleFetchResponse::VanishedEarlier);
-            } else {
-                // Otherwise, dive into the quagmire that is FetchResponseKind.
-                return Ok(SingleFetchResponse::UnexpectedExpunge);
-            }
+            // If the client requested collect_vanished and we got here, that
+            // means the expunge took place later than the latest Modseq we
+            // currently know about. In a perfect world, we would report this
+            // as `VANISHED (EARLIER)`, but due to RFC 7162's odd ordering
+            // requirements, that train has already left the station, so we
+            // treat this situation the same way we do for non-QRESYNC clients:
+            // Dive into the quagmire that is FetchResponseKind.
+            return Ok(SingleFetchResponse::UnexpectedExpunge);
         }
 
         result
-    }
-
-    fn has_unknown_flags(&self, fetched: &[FetchedItem]) -> bool {
-        for item in fetched {
-            if let &FetchedItem::Flags(ref flags) = item {
-                for flag in &flags.flags {
-                    if !self.client_known_flags.contains(flag) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        false
     }
 }
 
@@ -339,7 +334,6 @@ impl StatefulMailbox {
 enum SingleFetchResponse {
     Fetched(Seqnum, Vec<FetchedItem>),
     NotModified,
-    VanishedEarlier,
     SilentExpunge,
     UnexpectedExpunge,
 }
@@ -404,34 +398,31 @@ mod test {
     #[test]
     fn fetch_all_the_things() {
         let mut setup = set_up_fetch();
-        let response = setup
-            .mb1
-            .fetch(
-                &FetchRequest {
-                    ids: SeqRange::range(
-                        *setup.uids.first().unwrap(),
-                        *setup.uids.last().unwrap(),
-                    ),
-                    uid: true,
-                    flags: true,
-                    rfc822size: true,
-                    internal_date: true,
-                    envelope: true,
-                    bodystructure: true,
-                    sections: vec![section::BodySection::default()],
-                    modseq: true,
-                    changed_since: None,
-                    collect_vanished: false,
-                },
-                &setup.receiver(),
-            )
-            .unwrap();
+
+        let request = FetchRequest {
+            ids: SeqRange::range(
+                *setup.uids.first().unwrap(),
+                *setup.uids.last().unwrap(),
+            ),
+            uid: true,
+            flags: true,
+            rfc822size: true,
+            internal_date: true,
+            envelope: true,
+            bodystructure: true,
+            sections: vec![section::BodySection::default()],
+            modseq: true,
+            changed_since: None,
+            collect_vanished: false,
+        };
+        let prefetch = setup.mb1.prefetch(&request, &request.ids);
+        let response = setup.mb1.fetch(&request, &setup.receiver()).unwrap();
 
         let fetched = setup.received();
 
         assert_eq!(FetchResponseKind::Ok, response.kind);
-        assert!(response.flags.is_empty());
-        assert!(response.vanished.is_empty());
+        assert!(prefetch.flags.is_empty());
+        assert!(prefetch.vanished.is_empty());
         assert_eq!(setup.uids.len(), fetched.len());
 
         for (_, fetched) in fetched {
@@ -481,17 +472,13 @@ mod test {
         seq.insert(setup.uids[0], setup.uids[0]);
         seq.insert(setup.uids[2], setup.uids[2]);
 
-        setup
-            .mb1
-            .fetch(
-                &FetchRequest {
-                    ids: seq,
-                    envelope: true,
-                    ..FetchRequest::default()
-                },
-                &setup.receiver(),
-            )
-            .unwrap();
+        let request = FetchRequest {
+            ids: seq,
+            envelope: true,
+            ..FetchRequest::default()
+        };
+        setup.mb1.prefetch(&request, &request.ids);
+        setup.mb1.fetch(&request, &setup.receiver()).unwrap();
 
         let mut fetched = setup.received();
         fetched.sort_by_key(|&(seqnum, _)| seqnum);
@@ -531,35 +518,22 @@ mod test {
             .unwrap();
         setup.mb1.poll().unwrap();
 
-        let result = setup
-            .mb1
-            .fetch(
-                &FetchRequest {
-                    ids: SeqRange::just(setup.uids[2]),
-                    flags: true,
-                    ..FetchRequest::default()
-                },
-                &setup.receiver(),
-            )
-            .unwrap();
+        let request = FetchRequest {
+            ids: SeqRange::just(setup.uids[2]),
+            flags: true,
+            ..FetchRequest::default()
+        };
+        let prefetch = setup.mb1.prefetch(&request, &request.ids);
+        setup.mb1.fetch(&request, &setup.receiver()).unwrap();
 
-        assert!(result
+        assert!(prefetch
             .flags
             .contains(&Flag::Keyword("NewKeyword".to_owned())));
 
-        let result = setup
-            .mb1
-            .fetch(
-                &FetchRequest {
-                    ids: SeqRange::just(setup.uids[2]),
-                    flags: true,
-                    ..FetchRequest::default()
-                },
-                &setup.receiver(),
-            )
-            .unwrap();
+        let prefetch = setup.mb1.prefetch(&request, &request.ids);
+        setup.mb1.fetch(&request, &setup.receiver()).unwrap();
 
-        assert!(result.flags.is_empty());
+        assert!(prefetch.flags.is_empty());
     }
 
     #[test]
@@ -592,18 +566,14 @@ mod test {
             .unwrap();
         setup.mb1.poll().unwrap();
 
-        setup
-            .mb1
-            .fetch(
-                &FetchRequest {
-                    ids: SeqRange::range(Uid::MIN, Uid::MAX),
-                    uid: true,
-                    changed_since: modseq,
-                    ..FetchRequest::default()
-                },
-                &setup.receiver(),
-            )
-            .unwrap();
+        let request = FetchRequest {
+            ids: SeqRange::range(Uid::MIN, Uid::MAX),
+            uid: true,
+            changed_since: modseq,
+            ..FetchRequest::default()
+        };
+        setup.mb1.prefetch(&request, &request.ids);
+        setup.mb1.fetch(&request, &setup.receiver()).unwrap();
 
         let fetched = setup.received();
         assert_eq!(1, fetched.len());
@@ -626,24 +596,20 @@ mod test {
             .unwrap();
         setup.mb1.poll().unwrap();
 
-        let result = setup
-            .mb1
-            .fetch(
-                &FetchRequest {
-                    ids: SeqRange::range(Uid::MIN, Uid::MAX),
-                    uid: true,
-                    changed_since: modseq,
-                    collect_vanished: true,
-                    ..FetchRequest::default()
-                },
-                &setup.receiver(),
-            )
-            .unwrap();
+        let request = FetchRequest {
+            ids: SeqRange::range(Uid::MIN, Uid::MAX),
+            uid: true,
+            changed_since: modseq,
+            collect_vanished: true,
+            ..FetchRequest::default()
+        };
+        let prefetch = setup.mb1.prefetch(&request, &request.ids);
+        let result = setup.mb1.fetch(&request, &setup.receiver()).unwrap();
 
         assert!(setup.received().is_empty());
         assert_eq!(
             SeqRange::range(setup.uids[2], setup.uids[3]),
-            result.vanished
+            prefetch.vanished
         );
         assert_eq!(FetchResponseKind::Ok, result.kind);
     }
@@ -663,23 +629,19 @@ mod test {
         }
         setup.mb1.poll().unwrap();
 
-        let result = setup
-            .mb1
-            .fetch(
-                &FetchRequest {
-                    ids: SeqRange::range(Uid::MIN, Uid::MAX),
-                    uid: true,
-                    changed_since: modseq,
-                    collect_vanished: true,
-                    ..FetchRequest::default()
-                },
-                &setup.receiver(),
-            )
-            .unwrap();
+        let request = FetchRequest {
+            ids: SeqRange::range(Uid::MIN, Uid::MAX),
+            uid: true,
+            changed_since: modseq,
+            collect_vanished: true,
+            ..FetchRequest::default()
+        };
+        let prefetch = setup.mb1.prefetch(&request, &request.ids);
+        let result = setup.mb1.fetch(&request, &setup.receiver()).unwrap();
 
         let mut expected = SeqRange::range(setup.uids[0], setup.uids[1]);
         expected.insert(setup.uids[4], *setup.uids.last().unwrap());
-        assert_eq!(expected, result.vanished);
+        assert_eq!(expected, prefetch.vanished);
         assert_eq!(FetchResponseKind::Ok, result.kind);
     }
 
@@ -690,20 +652,16 @@ mod test {
         setup.mb2.vanquish(iter::once(setup.uids[0])).unwrap();
         setup.mb2.poll().unwrap();
 
-        let result = setup
-            .mb1
-            .fetch(
-                &FetchRequest {
-                    ids: SeqRange::just(setup.uids[0]),
-                    // Need to try to fetch something from the file in order to
-                    // discover the hard way that someone else expunged the message
-                    // meanwhile.
-                    envelope: true,
-                    ..FetchRequest::default()
-                },
-                &setup.receiver(),
-            )
-            .unwrap();
+        let request = FetchRequest {
+            ids: SeqRange::just(setup.uids[0]),
+            // Need to try to fetch something from the file in order to
+            // discover the hard way that someone else expunged the message
+            // meanwhile.
+            envelope: true,
+            ..FetchRequest::default()
+        };
+        setup.mb1.prefetch(&request, &request.ids);
+        let result = setup.mb1.fetch(&request, &setup.receiver()).unwrap();
         assert_eq!(FetchResponseKind::No, result.kind);
 
         // Happens implicitly after command
@@ -711,17 +669,8 @@ mod test {
 
         // Buggy client retries without even doing anything that would cause a
         // full poll
-        let result = setup
-            .mb1
-            .fetch(
-                &FetchRequest {
-                    ids: SeqRange::just(setup.uids[0]),
-                    envelope: true,
-                    ..FetchRequest::default()
-                },
-                &setup.receiver(),
-            )
-            .unwrap();
+        setup.mb1.prefetch(&request, &request.ids);
+        let result = setup.mb1.fetch(&request, &setup.receiver()).unwrap();
         assert_eq!(FetchResponseKind::Bye, result.kind);
     }
 
@@ -736,20 +685,16 @@ mod test {
         // applied to the snapshot yet
         setup.mb1.poll_for_new_changes().unwrap();
 
-        let result = setup
-            .mb1
-            .fetch(
-                &FetchRequest {
-                    ids: SeqRange::just(setup.uids[0]),
-                    // Need to try to fetch something from the file in order to
-                    // discover the hard way that someone else expunged the message
-                    // meanwhile.
-                    envelope: true,
-                    ..FetchRequest::default()
-                },
-                &setup.receiver(),
-            )
-            .unwrap();
+        let request = FetchRequest {
+            ids: SeqRange::just(setup.uids[0]),
+            // Need to try to fetch something from the file in order to
+            // discover the hard way that someone else expunged the message
+            // meanwhile.
+            envelope: true,
+            ..FetchRequest::default()
+        };
+        setup.mb1.prefetch(&request, &request.ids);
+        let result = setup.mb1.fetch(&request, &setup.receiver()).unwrap();
         assert_eq!(FetchResponseKind::No, result.kind);
 
         // Happens implicitly after command
@@ -757,17 +702,8 @@ mod test {
 
         // Buggy client retries without even doing anything that would cause a
         // full poll
-        let result = setup
-            .mb1
-            .fetch(
-                &FetchRequest {
-                    ids: SeqRange::just(setup.uids[0]),
-                    envelope: true,
-                    ..FetchRequest::default()
-                },
-                &setup.receiver(),
-            )
-            .unwrap();
+        setup.mb1.prefetch(&request, &request.ids);
+        let result = setup.mb1.fetch(&request, &setup.receiver()).unwrap();
         assert_eq!(FetchResponseKind::Bye, result.kind);
     }
 
@@ -778,17 +714,13 @@ mod test {
         setup.mb1.vanquish(setup.uids[..4].iter().copied()).unwrap();
         setup.mb1.poll().unwrap();
 
-        setup
-            .mb1
-            .seqnum_fetch(
-                FetchRequest {
-                    ids: SeqRange::just(Seqnum::u(1)),
-                    uid: true,
-                    ..FetchRequest::default()
-                },
-                &setup.receiver(),
-            )
-            .unwrap();
+        let request = FetchRequest {
+            ids: SeqRange::just(Seqnum::u(1)),
+            uid: true,
+            ..FetchRequest::default()
+        };
+        setup.mb1.prefetch(&request, &SeqRange::new());
+        setup.mb1.seqnum_fetch(request, &setup.receiver()).unwrap();
 
         let fetched = setup.received();
         assert_eq!(1, fetched.len());

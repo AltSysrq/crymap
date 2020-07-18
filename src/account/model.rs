@@ -1288,14 +1288,9 @@ impl Default for FetchResponseKind {
     }
 }
 
-/// Response from a `FETCH` or `UID FETCH` command.
-///
-/// Fields are in transmission order.
-///
-/// Note that the fetched data itself is *not* in this structure. The caller of
-/// the `fetch` implementation must buffer that itself.
+/// The part of a `FETCH` response that must be sent before the fetched items.
 #[derive(Debug, Default)]
-pub struct FetchResponse {
+pub struct PrefetchResponse {
     /// UIDs to report in a `VANISHED (EARLIER)` response.
     ///
     /// RFC 7162 has this curious line:
@@ -1324,9 +1319,17 @@ pub struct FetchResponse {
     /// client to determine that the presence of a flag in a `FETCH` implies
     /// that that flag now exists.
     pub flags: Vec<Flag>,
+}
 
-    // FETCH RESPONSES GO HERE
-    // RFC 3501
+/// Response from a `FETCH` or `UID FETCH` command.
+///
+/// Fields are in transmission order.
+///
+/// Note that the fetched data itself is *not* in this structure. The caller of
+/// the `fetch` implementation must handle that itself. Those responses are
+/// placed immediately before the contents of this struct.
+#[derive(Debug, Default)]
+pub struct FetchResponse {
     /// What type of tagged response to return.
     ///
     /// RFC 3501, RFC 2180, and mailing list discussion (see
