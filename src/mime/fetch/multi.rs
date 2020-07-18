@@ -43,7 +43,12 @@ pub enum FetchedItem {
     InternalDate(DateTime<FixedOffset>),
     Envelope(envelope::Envelope),
     BodyStructure(bodystructure::BodyStructure),
-    BodySection(Result<section::FetchedBodySection, Error>),
+    BodySection(
+        (
+            section::BodySection,
+            Result<section::FetchedBodySection, Error>,
+        ),
+    ),
 }
 
 impl FetchedItem {
@@ -63,7 +68,10 @@ impl FetchedItem {
 
     pub fn into_body_section(
         self,
-    ) -> Option<Result<section::FetchedBodySection, Error>> {
+    ) -> Option<(
+        section::BodySection,
+        Result<section::FetchedBodySection, Error>,
+    )> {
         match self {
             FetchedItem::BodySection(s) => Some(s),
             _ => None,
@@ -392,7 +400,7 @@ mod test {
         }
 
         match &mut result[1] {
-            &mut FetchedItem::BodySection(Ok(ref mut bs)) => {
+            &mut FetchedItem::BodySection((_, Ok(ref mut bs))) => {
                 let mut content = String::new();
                 bs.buffer.read_to_string(&mut content).unwrap();
                 assert_eq!("Part 3.1\r\n", content);
@@ -401,7 +409,7 @@ mod test {
         }
 
         match &mut result[2] {
-            &mut FetchedItem::BodySection(Ok(ref mut bs)) => {
+            &mut FetchedItem::BodySection((_, Ok(ref mut bs))) => {
                 let mut content = String::new();
                 bs.buffer.read_to_string(&mut content).unwrap();
                 assert!(content.starts_with("Content-Id: 2"));
@@ -410,7 +418,7 @@ mod test {
         }
 
         match &mut result[3] {
-            &mut FetchedItem::BodySection(Ok(ref mut bs)) => {
+            &mut FetchedItem::BodySection((_, Ok(ref mut bs))) => {
                 let mut content = String::new();
                 bs.buffer.read_to_string(&mut content).unwrap();
                 assert_eq!("Part 4.2.2.1\r\n", content);

@@ -178,7 +178,7 @@ pub type ContentFilter = Box<dyn FnMut(Fetcher) -> Fetcher>;
 ///
 /// Any errors encountered during the fetch process are reported through the
 /// output (i.e., in `Ok(Err(..))` returned from `grovel`).
-pub type Output = Result<FetchedBodySection, Error>;
+pub type Output = (BodySection, Result<FetchedBodySection, Error>);
 
 impl BodySection {
     /// Create a fetcher for this body section.
@@ -209,8 +209,6 @@ impl BodySection {
 
 /// A section which was successfully fetched.
 pub struct FetchedBodySection {
-    /// The section that was fetched.
-    pub section: BodySection,
     /// The data from this section.
     pub buffer: BufferReader,
     /// Whether this section contains a NUL byte.
@@ -223,7 +221,6 @@ pub struct FetchedBodySection {
 impl fmt::Debug for FetchedBodySection {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("FetchedBodySection")
-            .field("section", &self.section)
             .field("buffer", &self.buffer.len())
             .field("contains_nul", &self.contains_nul)
             .finish()
@@ -354,7 +351,10 @@ impl Visitor for SectionLocator {
         // TODO Per a message from Crispin in 2008-03, we need to return an
         // empty string here. He also recommends returning empty strings as ""
         // instead of a 0-byte literal.
-        Err(Error::NoSuchMessageSection)
+        (
+            self.target.take().unwrap(),
+            Err(Error::NoSuchMessageSection),
+        )
     }
 }
 
@@ -414,7 +414,7 @@ impl SectionFetcher {
                 .expect("Write to SectionFetcher after end")
                 .write_all(data)
             {
-                return Err(Err(e.into()));
+                return Err((self.target.take().unwrap(), Err(e.into())));
             }
         }
 
@@ -423,6 +423,18 @@ impl SectionFetcher {
         } else {
             Err(self.end())
         }
+    }
+
+    fn end_buffer(&mut self) -> Result<FetchedBodySection, Error> {
+        let buffer = self.buffer.take().unwrap();
+        let buffer = buffer
+            .into_inner()
+            .map_err(|e| io::Error::from(e))?
+            .flip()?;
+        Ok(FetchedBodySection {
+            buffer,
+            contains_nul: self.contains_nul,
+        })
     }
 }
 
@@ -487,16 +499,8 @@ impl Visitor for SectionFetcher {
 
     fn end(&mut self) -> Output {
         let target = self.target.take().unwrap();
-        let buffer = self.buffer.take().unwrap();
-        let buffer = buffer
-            .into_inner()
-            .map_err(|e| io::Error::from(e))?
-            .flip()?;
-        Ok(FetchedBodySection {
-            section: target,
-            buffer,
-            contains_nul: self.contains_nul,
-        })
+        let fetched = self.end_buffer();
+        (target, fetched)
     }
 }
 
@@ -517,7 +521,7 @@ mod test {
     }
 
     fn do_fetch_bytes(message: Vec<u8>, section: BodySection) -> String {
-        let mut result = grovel::grovel(
+        let (_, result) = grovel::grovel(
             &grovel::SimpleAccessor {
                 data: message.into(),
                 ..grovel::SimpleAccessor::default()
@@ -530,8 +534,8 @@ mod test {
                 }),
             ),
         )
-        .unwrap()
         .unwrap();
+        let mut result = result.unwrap();
 
         let mut ret = String::new();
         result.buffer.read_to_string(&mut ret).unwrap();

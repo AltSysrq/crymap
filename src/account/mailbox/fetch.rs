@@ -18,7 +18,6 @@
 
 use std::collections::HashSet;
 use std::io::BufRead;
-use std::mem;
 use std::sync::Arc;
 
 use rayon::prelude::*;
@@ -251,24 +250,7 @@ impl StatefulMailbox {
                     ));
                 }
 
-                let mut fetched = grovel(&accessor, fetcher)?;
-
-                // Ensure any section parts are OK
-                for part in &mut fetched {
-                    match part {
-                        &mut FetchedItem::BodySection(ref mut section) => {
-                            if section.is_err() {
-                                return mem::replace(
-                                    section,
-                                    Err(Error::NxMessage),
-                                )
-                                .map(|_| unreachable!());
-                            }
-                        }
-                        _ => (),
-                    }
-                }
-
+                let fetched = grovel(&accessor, fetcher)?;
                 Ok(SingleFetchResponse::Fetched(seqnum, fetched))
             }
         });
@@ -381,7 +363,7 @@ mod test {
                     FetchedItem::InternalDate(_) => has_internal_date = true,
                     FetchedItem::Envelope(_) => has_envelope = true,
                     FetchedItem::BodyStructure(_) => has_bodystructure = true,
-                    FetchedItem::BodySection(Ok(_)) => has_section = true,
+                    FetchedItem::BodySection((_, Ok(_))) => has_section = true,
                     FetchedItem::Modseq(_) => has_modseq = true,
                     part => panic!("Unexpected part: {:?}", part),
                 }

@@ -384,18 +384,19 @@ fn fetch_att_to_ast(
                 s::MsgAtt::ShortBodyStructure(converted)
             })
         }
-        FI::BodySection(Err(e)) => {
-            // TODO We should make BodySection be (BodySection, Result<Data>)
-            // or something, so then we could do the proper catch-all case and
-            // return `SECTION {0}` here.
-            error!("Dropping unfetchable body section: {}", e);
-            None
-        }
-        FI::BodySection(Ok(mut fetched)) => {
-            let len = fetched.buffer.len();
-            let data = LiteralSource::of_reader(fetched.buffer, len, false);
+        FI::BodySection((mut section, fetched_result)) => {
+            let data = match fetched_result {
+                Ok(fetched) => {
+                    let len = fetched.buffer.len();
+                    LiteralSource::of_reader(fetched.buffer, len, false)
+                }
+                Err(e) => {
+                    error!("Dropping unfetchable body section: {}", e);
+                    LiteralSource::of_data(&[], false)
+                }
+            };
 
-            match fetched.section.report_as_legacy {
+            match section.report_as_legacy {
                 None => (),
                 Some(Imap2Section::Rfc822) => {
                     return Some(s::MsgAtt::Rfc822Full(data));
@@ -432,24 +433,24 @@ fn fetch_att_to_ast(
                 }
             }
 
-            let partial = fetched.section.partial;
-            let section_spec = match (
-                fetched.section.subscripts.is_empty(),
-                fetched.section.leaf_type,
-            ) {
-                (true, LeafType::Full) => None,
-                (true, _) => Some(s::SectionSpec::TopLevel(
-                    section_text_to_ast(fetched.section)
-                        .expect("Content leaf at top-level?"),
-                )),
-                (false, _) => Some(s::SectionSpec::Sub(s::SubSectionSpec {
-                    subscripts: mem::replace(
-                        &mut fetched.section.subscripts,
-                        vec![],
-                    ),
-                    text: section_text_to_ast(fetched.section),
-                })),
-            };
+            let partial = section.partial;
+            let section_spec =
+                match (section.subscripts.is_empty(), section.leaf_type) {
+                    (true, LeafType::Full) => None,
+                    (true, _) => Some(s::SectionSpec::TopLevel(
+                        section_text_to_ast(section)
+                            .expect("Content leaf at top-level?"),
+                    )),
+                    (false, _) => {
+                        Some(s::SectionSpec::Sub(s::SubSectionSpec {
+                            subscripts: mem::replace(
+                                &mut section.subscripts,
+                                vec![],
+                            ),
+                            text: section_text_to_ast(section),
+                        }))
+                    }
+                };
 
             Some(s::MsgAtt::Body(s::MsgAttBody {
                 section: section_spec,
