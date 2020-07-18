@@ -54,8 +54,10 @@
 //! `bodystructure.rs`), he gives the content of a non-multipart message a
 //! subscript of 1 (but uses all subscripts to refer to content instead of
 //! whole parts). The implementation currently reflects what RFC 3501 implies,
-//! i.e., that there is no subscript to access the content of a non-multipart
-//! message.
+//! i.e., that there is not supposed to be subscript to access the content of a
+//! non-multipart message. However, given this example and some historical
+//! discussion on the mailing list, we do allow accessing a part's content with
+//! extraneous subscripts that would imply the part should be a multipart.
 
 use std::fmt;
 use std::io::{self, Write};
