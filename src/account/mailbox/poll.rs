@@ -207,7 +207,10 @@ impl StatefulMailbox {
         }
     }
 
-    fn dump_rollup(&mut self) -> Result<(), Error> {
+    /// Dump the current rollup of this mailbox's state.
+    ///
+    /// This isn't normally called directly except for passive maintenance.
+    pub fn dump_rollup(&mut self) -> Result<(), Error> {
         let mut path = self.s.root.join("rollup");
 
         fs::DirBuilder::new()
@@ -235,7 +238,7 @@ impl StatefulMailbox {
         self.rollups_since_gc += 1;
         if self.rollups_since_gc > START_GC_AFTER_ROLLUPS {
             self.rollups_since_gc = 0;
-            if let Err(e) = self.schedule_gc() {
+            if let Err(e) = self.schedule_gc(false) {
                 warn!("{} Failed to schedule GC: {}", self.s.log_prefix, e);
             }
         }

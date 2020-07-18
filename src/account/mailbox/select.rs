@@ -160,7 +160,7 @@ impl StatefulMailbox {
         // (unless the GC is so fast it completed already, in which case doing
         // it again isn't a big deal).
         if rollups.iter().any(|r| r.delete_rollup) {
-            this.start_gc(rollups);
+            this.start_gc(rollups, false);
         }
 
         // Ensure all the system flags are defined
@@ -193,8 +193,8 @@ impl StatefulMailbox {
         Ok((this, select_response))
     }
 
-    fn start_gc(&self, rollups: Vec<RollupInfo>) {
-        if self.s.read_only {
+    fn start_gc(&self, rollups: Vec<RollupInfo>, force: bool) {
+        if self.s.read_only && !force {
             return;
         }
 
@@ -219,13 +219,15 @@ impl StatefulMailbox {
     /// If there is not already a garbage-collection cycle planned or running
     /// and this is not a read-only mailbox, arrange for a GC cycle to happen.
     ///
+    /// `force` can be passed as `true` to force a GC on a read-only mailbox.
+    ///
     /// Returns as soon as the task is scheduled.
-    pub(super) fn schedule_gc(&self) -> Result<(), Error> {
-        if self.s.read_only {
+    pub fn schedule_gc(&self, force: bool) -> Result<(), Error> {
+        if self.s.read_only && !force {
             return Ok(());
         }
 
-        self.start_gc(list_rollups(&self.s)?);
+        self.start_gc(list_rollups(&self.s)?, force);
         Ok(())
     }
 

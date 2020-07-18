@@ -615,7 +615,7 @@ Ordinarily, there should be exactly one token; the steps to create a new one or
 remove an old one are a recovery process in case the token is lost somehow. The
 create step is not atomic since multiple processes could concurrently claim
 different UIDs in different orders.
-* On "soft expunge" and fetching of expunged messages TODO IMPLEMENT
+* On "soft expunge" and fetching of expunged messages
 
 The original plan was to strictly have hard expunges, where an expunge
 immediately destroys the underlying message. This is one of the most

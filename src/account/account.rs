@@ -23,7 +23,8 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use log::{error, warn};
+use chrono::prelude::*;
+use log::{error, info, warn};
 
 use crate::account::key_store::{KeyStore, KeyStoreConfig};
 use crate::account::mailbox::StatelessMailbox;
@@ -105,17 +106,7 @@ impl Account {
             .unwrap()
             .create_if_nx(&self.common_paths.tmp)?;
 
-        let common_paths = Arc::clone(&self.common_paths);
-        let log_prefix = self.log_prefix.clone();
-        rayon::spawn(move || {
-            if let Err(e) = clean_garbage(&common_paths.garbage) {
-                error!("{} Failed to clean up garbage: {}", log_prefix, e);
-            }
-
-            if let Err(e) = clean_tmp(&log_prefix, &common_paths.tmp) {
-                error!("{} Failed to clean up tmp: {}", log_prefix, e);
-            }
-        });
+        self.start_maintenance();
 
         Ok(())
     }
@@ -190,6 +181,93 @@ impl Account {
         self.subscribe("Trash")?;
 
         Ok(())
+    }
+
+    fn start_maintenance(&self) {
+        // Avoid running maintenance more than once per day
+        // This isn't atomic, so it's possible for more than one process to
+        // start maintenance at the same time, but that's ok.
+        let timestamp_path = self.root.join("maintenance-run");
+        if timestamp_path
+            .metadata()
+            .ok()
+            .and_then(|md| md.modified().ok())
+            .and_then(|mtime| mtime.elapsed().ok())
+            .map_or(false, |dur| dur.as_secs() < 24 * 3600)
+        {
+            return;
+        }
+
+        if let Err(e) = fs::File::create(&timestamp_path) {
+            warn!("{} Cannot start maintenance: {}", self.log_prefix, e);
+            return;
+        }
+
+        let this = self.clone();
+        rayon::spawn(move || this.run_maintenance());
+    }
+
+    fn run_maintenance(&self) {
+        if let Err(e) = clean_garbage(&self.common_paths.garbage) {
+            error!("{} Failed to clean up garbage: {}", self.log_prefix, e);
+        }
+
+        if let Err(e) = clean_tmp(&self.log_prefix, &self.common_paths.tmp) {
+            error!("{} Failed to clean up tmp: {}", self.log_prefix, e);
+        }
+
+        if let Ok(readdir) = fs::read_dir(&self.mailbox_root) {
+            for entry in readdir {
+                if let Some(mp) = entry
+                    .ok()
+                    .and_then(|entry| entry.file_name().into_string().ok())
+                    .and_then(|name| self.root_mailbox_path(name).ok())
+                {
+                    self.run_maintenance_on_mailbox(mp);
+                }
+            }
+        }
+    }
+
+    fn run_maintenance_on_mailbox(&self, path: MailboxPath) {
+        match self.open(path.clone(), true).and_then(|mb| mb.select()) {
+            Ok((mut mb, _)) => {
+                let npurged = mb.purge(Utc::now());
+                if npurged > 0 {
+                    info!(
+                        "{} Purged {} messages, running other maintenance",
+                        mb.stateless().log_prefix(),
+                        npurged
+                    );
+
+                    // If anything was purged, we know there's at least one
+                    // CID, so dump_rollup() is safe.
+                    if let Err(e) = mb.dump_rollup() {
+                        warn!(
+                            "{} Error dumping rollup: {}",
+                            mb.stateless().log_prefix(),
+                            e
+                        );
+                    } else if let Err(e) = mb.schedule_gc(true) {
+                        warn!(
+                            "{} Error scheduling GC: {}",
+                            mb.stateless().log_prefix(),
+                            e
+                        );
+                    }
+                }
+            }
+            Err(e) => warn!(
+                "{} Error opening {} for maintenance: {}",
+                self.log_prefix,
+                path.name(),
+                e
+            ),
+        }
+
+        for child in path.children() {
+            self.run_maintenance_on_mailbox(child);
+        }
     }
 
     /// Clear cache(s) only used for the duration of individual commands.
