@@ -18,10 +18,12 @@
 
 use std::borrow::Cow;
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+use log::{error, warn};
 
 use crate::account::key_store::{KeyStore, KeyStoreConfig};
 use crate::account::mailbox::StatelessMailbox;
@@ -103,8 +105,17 @@ impl Account {
             .unwrap()
             .create_if_nx(&self.common_paths.tmp)?;
 
-        // TODO We should do maintenance here like cleaning `tmp` and
-        // `garbage`.
+        let common_paths = Arc::clone(&self.common_paths);
+        let log_prefix = self.log_prefix.clone();
+        rayon::spawn(move || {
+            if let Err(e) = clean_garbage(&common_paths.garbage) {
+                error!("{} Failed to clean up garbage: {}", log_prefix, e);
+            }
+
+            if let Err(e) = clean_tmp(&log_prefix, &common_paths.tmp) {
+                error!("{} Failed to clean up tmp: {}", log_prefix, e);
+            }
+        });
 
         Ok(())
     }
@@ -435,6 +446,46 @@ impl Account {
         // Treat the empty mailbox name as "unsafe" for simplicity
         mp.ok_or(Error::UnsafeName)
     }
+}
+
+fn clean_tmp(log_prefix: &str, tmp: &Path) -> Result<(), io::Error> {
+    for entry in fs::read_dir(tmp)? {
+        let entry = entry?;
+        if entry
+            .metadata()
+            .ok()
+            .and_then(|md| md.modified().ok())
+            .and_then(|mtime| mtime.elapsed().ok())
+            .map_or(false, |elapsed| elapsed.as_secs() > 24 * 3600)
+        {
+            let path = entry.path();
+            warn!(
+                "{} Removing orphaned temp file: {}",
+                log_prefix,
+                path.display()
+            );
+            if path.is_dir() {
+                fs::remove_dir_all(entry.path()).ignore_not_found()?;
+            } else {
+                fs::remove_file(entry.path()).ignore_not_found()?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn clean_garbage(garbage: &Path) -> Result<(), io::Error> {
+    for entry in fs::read_dir(garbage)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            fs::remove_dir_all(entry.path()).ignore_not_found()?;
+        } else {
+            fs::remove_file(entry.path()).ignore_not_found()?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
