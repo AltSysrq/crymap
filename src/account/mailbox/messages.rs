@@ -20,6 +20,7 @@ use std::convert::TryInto;
 use std::fs;
 use std::io::{self, BufRead, Read, Seek, Write};
 use std::path::Path;
+use std::sync::Arc;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::prelude::*;
@@ -28,6 +29,7 @@ use rand::{rngs::OsRng, Rng};
 use tempfile::{NamedTempFile, TempPath};
 
 use super::defs::*;
+use crate::account::mailbox_path::MailboxPath;
 use crate::account::model::*;
 use crate::crypt::data_stream;
 use crate::support::compression::{Compression, FinishWrite};
@@ -85,8 +87,6 @@ impl StatelessMailbox {
     ///
     /// This does not handle the special case of 0-length inputs cancelling the
     /// request. That must be handled at the protocol level.
-    ///
-    /// TODO Make this atomic (see DESIGN.org)
     pub fn multiappend(
         &self,
         request: AppendRequest,
@@ -96,11 +96,12 @@ impl StatelessMailbox {
             uids: SeqRange::new(),
         };
 
-        for item in request.items {
-            response
-                .uids
-                .append(self.append_buffered(item.buffer_file, item.flags)?);
-        }
+        let message_count = request.items.len() as u32;
+        let base_uid = self.append_buffered(request.items)?;
+        response.uids.insert(
+            base_uid,
+            Uid::of(base_uid.0.get() + message_count - 1).unwrap(),
+        );
 
         Ok(response)
     }
@@ -118,20 +119,35 @@ impl StatelessMailbox {
         data: impl Read,
     ) -> Result<Uid, Error> {
         let buffer_file = self.buffer_message(internal_date, data)?;
-        self.append_buffered(buffer_file, flags)
+        self.append_buffered(vec![AppendItem {
+            buffer_file,
+            flags: flags.into_iter().collect(),
+        }])
     }
 
     /// Append a message which was buffered with `buffer_message` to this
     /// mailbox.
     ///
-    /// Returns the UID of the new message.
+    /// Returns the UID of the first new message. If there was more than one
+    /// message appended, later messages have successive UIDs.
     pub fn append_buffered(
         &self,
-        buffer_file: BufferedMessage,
-        flags: impl IntoIterator<Item = Flag>,
+        items: Vec<AppendItem>,
     ) -> Result<Uid, Error> {
-        let uid = self.insert_message(buffer_file.0.as_ref())?;
-        self.propagate_flags_best_effort(uid, flags);
+        let paths = items
+            .iter()
+            .map(|item| item.buffer_file.0.as_ref())
+            .collect::<Vec<_>>();
+        let uid = self.insert_messages(&paths)?;
+        self.propagate_flags_best_effort(
+            items
+                .into_iter()
+                .enumerate()
+                .map(|(ix, item)| {
+                    (Uid::of(uid.0.get() + ix as u32).unwrap(), item.flags)
+                })
+                .collect::<Vec<_>>(),
+        );
         Ok(uid)
     }
 
@@ -201,25 +217,43 @@ impl StatelessMailbox {
     ///
     /// This is used for `COPY` and `MOVE`, though it is not exactly either of
     /// those.
-    fn insert_message(&self, src: &Path) -> Result<Uid, Error> {
+    ///
+    /// If `src` is more than 1 element long, the return value gives the UID of
+    /// the first message, and subsequent messages have subsequent UIDs.
+    fn insert_messages(&self, src: &[&Path]) -> Result<Uid, Error> {
         self.not_read_only()?;
 
         let scheme = self.message_scheme();
 
-        for _ in 0..1000 {
-            let uid = Uid::of(scheme.first_unallocated_id())
-                .ok_or(Error::MailboxFull)?;
-            if scheme.emplace(src, uid.0.get())? {
-                info!(
-                    "{} Delivered message to {}",
-                    self.log_prefix,
-                    uid.0.get()
-                );
-                return Ok(uid);
+        if 1 == src.len() {
+            for _ in 0..1000 {
+                let uid = Uid::of(scheme.first_unallocated_id())
+                    .ok_or(Error::MailboxFull)?;
+                if scheme.emplace(src[0], uid.0.get())? {
+                    info!(
+                        "{} Delivered message to {}",
+                        self.log_prefix,
+                        uid.0.get()
+                    );
+                    return Ok(uid);
+                }
             }
-        }
 
-        Err(Error::GaveUpInsertion)
+            Err(Error::GaveUpInsertion)
+        } else {
+            let base_id = scheme.emplace_many(
+                src,
+                &self.common_paths.tmp,
+                Uid::MAX.0.get(),
+            )?;
+            info!(
+                "{} Delivered messages to {}..={}",
+                self.log_prefix,
+                base_id,
+                base_id + src.len() as u32
+            );
+            Ok(Uid::of(base_id).unwrap())
+        }
     }
 }
 
@@ -239,11 +273,6 @@ impl StatefulMailbox {
     }
 
     /// The RFC 3501 `UID COPY` command.
-    ///
-    /// TODO Make this atomic.
-    /// TODO Test, there's special cases involving unexpectedly expunged
-    /// messages, but it's not worth testing until the atomicity semantics are
-    /// settled.
     pub fn copy(
         &self,
         request: &CopyRequest<Uid>,
@@ -254,6 +283,8 @@ impl StatefulMailbox {
             uids: SeqRange::new(),
         };
 
+        let mut path_bufs = Vec::new();
+        let mut flags = Vec::new();
         for uid in request.ids.items(self.state.max_uid_val()) {
             let status = match self.state.message_status(uid) {
                 Some(status) => status,
@@ -262,14 +293,36 @@ impl StatefulMailbox {
                 None => continue,
             };
 
-            let flags =
-                status.flags().filter_map(|id| self.state.flag(id).cloned());
-            response.uids.append(dst.insert_message(
-                &self.s.message_scheme().path_for_id(uid.0.get()),
-            )?);
-            dst.propagate_flags_best_effort(uid, flags);
+            flags.push(
+                status
+                    .flags()
+                    .filter_map(|id| self.state.flag(id).cloned())
+                    .collect::<Vec<_>>(),
+            );
+            path_bufs.push(self.s.message_scheme().path_for_id(uid.0.get()));
         }
 
+        if path_bufs.is_empty() {
+            return Ok(response);
+        }
+
+        let paths = path_bufs.iter().map(|p| p as &Path).collect::<Vec<_>>();
+        let base_uid = dst.insert_messages(&paths)?;
+        let message_count = paths.len() as u32;
+        dst.propagate_flags_best_effort(
+            flags
+                .into_iter()
+                .enumerate()
+                .map(|(ix, f)| {
+                    (Uid::of(base_uid.0.get() + ix as u32).unwrap(), f)
+                })
+                .collect(),
+        );
+
+        response.uids.insert(
+            base_uid,
+            Uid::of(base_uid.0.get() + message_count - 1).unwrap(),
+        );
         Ok(response)
     }
 }
@@ -318,5 +371,294 @@ mod test {
         assert_eq!(now, md.internal_date);
         r.read_to_string(&mut content).unwrap();
         assert_eq!("another message", &content);
+    }
+
+    #[test]
+    fn copy_into_self() {
+        let setup = set_up();
+
+        let (mut mb1, _) = setup.stateless.clone().select().unwrap();
+        let (mut mb2, _) = setup.stateless.clone().select().unwrap();
+
+        let uid1 = simple_append(mb1.stateless());
+        let uid2 = simple_append(mb1.stateless());
+        mb1.stateless()
+            .set_flags_blind(vec![
+                (uid1, vec![(true, Flag::Answered)]),
+                (uid2, vec![(true, Flag::Draft)]),
+            ])
+            .unwrap();
+        mb1.poll().unwrap();
+        mb2.poll().unwrap();
+
+        let uids3 = mb1
+            .copy(
+                &CopyRequest {
+                    ids: SeqRange::just(uid1),
+                },
+                mb2.stateless(),
+            )
+            .unwrap()
+            .uids
+            .items(u32::MAX)
+            .collect::<Vec<_>>();
+        assert_eq!(1, uids3.len());
+
+        let poll = mb1.poll().unwrap();
+        assert_eq!(Some(3), poll.exists);
+        assert_eq!(0, poll.expunge.len());
+
+        let poll = mb2.poll().unwrap();
+        assert_eq!(Some(3), poll.exists);
+        assert_eq!(0, poll.expunge.len());
+
+        assert!(mb1.state.test_flag_o(&Flag::Answered, uids3[0]));
+        assert!(!mb1.state.test_flag_o(&Flag::Draft, uids3[0]));
+        assert!(mb2.state.test_flag_o(&Flag::Answered, uids3[0]));
+        assert!(!mb2.state.test_flag_o(&Flag::Draft, uids3[0]));
+
+        let uids4 = mb1
+            .copy(
+                &CopyRequest {
+                    ids: SeqRange::range(uid1, uid2),
+                },
+                mb2.stateless(),
+            )
+            .unwrap()
+            .uids
+            .items(u32::MAX)
+            .collect::<Vec<_>>();
+        assert_eq!(2, uids4.len());
+
+        let poll = mb1.poll().unwrap();
+        assert_eq!(Some(5), poll.exists);
+        assert_eq!(0, poll.expunge.len());
+
+        let poll = mb2.poll().unwrap();
+        assert_eq!(Some(5), poll.exists);
+        assert_eq!(0, poll.expunge.len());
+
+        assert!(mb1.state.test_flag_o(&Flag::Answered, uids4[0]));
+        assert!(!mb1.state.test_flag_o(&Flag::Draft, uids4[0]));
+        assert!(mb2.state.test_flag_o(&Flag::Answered, uids4[0]));
+        assert!(!mb2.state.test_flag_o(&Flag::Draft, uids4[0]));
+
+        assert!(!mb1.state.test_flag_o(&Flag::Answered, uids4[1]));
+        assert!(mb1.state.test_flag_o(&Flag::Draft, uids4[1]));
+        assert!(!mb2.state.test_flag_o(&Flag::Answered, uids4[1]));
+        assert!(mb2.state.test_flag_o(&Flag::Draft, uids4[1]));
+    }
+
+    #[test]
+    fn copy_into_other() {
+        let setup = set_up();
+
+        let (mut mb1, _) = setup.stateless.select().unwrap();
+
+        let mbox2_path = MailboxPath::root(
+            "archive".to_owned(),
+            setup.root.path(),
+            setup.root.path(),
+        )
+        .unwrap();
+        mbox2_path.create(setup.root.path(), None).unwrap();
+        let stateless2 = StatelessMailbox::new(
+            "mailbox".to_owned(),
+            mbox2_path,
+            false,
+            Arc::clone(&setup.key_store),
+            Arc::clone(&setup.common_paths),
+        )
+        .unwrap();
+        let (mut mb2, _) = stateless2.select().unwrap();
+
+        let uid1 = simple_append(mb1.stateless());
+        let uid2 = simple_append(mb1.stateless());
+        mb1.stateless()
+            .set_flags_blind(vec![
+                (uid1, vec![(true, Flag::Answered)]),
+                (uid2, vec![(true, Flag::Draft)]),
+            ])
+            .unwrap();
+        mb1.poll().unwrap();
+
+        simple_append(mb2.stateless());
+        mb2.poll().unwrap();
+
+        let uids3 = mb1
+            .copy(
+                &CopyRequest {
+                    ids: SeqRange::just(uid1),
+                },
+                mb2.stateless(),
+            )
+            .unwrap()
+            .uids
+            .items(u32::MAX)
+            .collect::<Vec<_>>();
+        assert_eq!(1, uids3.len());
+
+        let poll = mb2.poll().unwrap();
+        assert_eq!(Some(2), poll.exists);
+        assert_eq!(0, poll.expunge.len());
+
+        assert!(mb2.state.test_flag_o(&Flag::Answered, uids3[0]));
+        assert!(!mb2.state.test_flag_o(&Flag::Draft, uids3[0]));
+
+        let uids4 = mb1
+            .copy(
+                &CopyRequest {
+                    ids: SeqRange::range(uid1, uid2),
+                },
+                mb2.stateless(),
+            )
+            .unwrap()
+            .uids
+            .items(u32::MAX)
+            .collect::<Vec<_>>();
+        assert_eq!(2, uids4.len());
+
+        let poll = mb2.poll().unwrap();
+        assert_eq!(Some(4), poll.exists);
+        assert_eq!(0, poll.expunge.len());
+
+        assert!(mb2.state.test_flag_o(&Flag::Answered, uids4[0]));
+        assert!(!mb2.state.test_flag_o(&Flag::Draft, uids4[0]));
+
+        assert!(!mb2.state.test_flag_o(&Flag::Answered, uids4[1]));
+        assert!(mb2.state.test_flag_o(&Flag::Draft, uids4[1]));
+    }
+
+    #[test]
+    fn bulk_copy_into_empty_other() {
+        let setup = set_up();
+
+        let (mut mb1, _) = setup.stateless.select().unwrap();
+
+        let mbox2_path = MailboxPath::root(
+            "archive".to_owned(),
+            setup.root.path(),
+            setup.root.path(),
+        )
+        .unwrap();
+        mbox2_path.create(setup.root.path(), None).unwrap();
+        let stateless2 = StatelessMailbox::new(
+            "mailbox".to_owned(),
+            mbox2_path,
+            false,
+            Arc::clone(&setup.key_store),
+            Arc::clone(&setup.common_paths),
+        )
+        .unwrap();
+        let (mut mb2, _) = stateless2.select().unwrap();
+
+        let uid1 = simple_append(mb1.stateless());
+        let uid2 = simple_append(mb1.stateless());
+        mb1.stateless()
+            .set_flags_blind(vec![
+                (uid1, vec![(true, Flag::Answered)]),
+                (uid2, vec![(true, Flag::Draft)]),
+            ])
+            .unwrap();
+        mb1.poll().unwrap();
+
+        let uids3 = mb1
+            .copy(
+                &CopyRequest {
+                    ids: SeqRange::range(uid1, uid2),
+                },
+                mb2.stateless(),
+            )
+            .unwrap()
+            .uids
+            .items(u32::MAX)
+            .collect::<Vec<_>>();
+        assert_eq!(2, uids3.len());
+
+        let poll = mb2.poll().unwrap();
+        assert_eq!(Some(2), poll.exists);
+        assert_eq!(0, poll.expunge.len());
+
+        assert!(mb2.state.test_flag_o(&Flag::Answered, uids3[0]));
+        assert!(!mb2.state.test_flag_o(&Flag::Draft, uids3[0]));
+
+        assert!(!mb2.state.test_flag_o(&Flag::Answered, uids3[1]));
+        assert!(mb2.state.test_flag_o(&Flag::Draft, uids3[1]));
+    }
+
+    #[test]
+    fn test_multiappend() {
+        let setup = set_up();
+        let (mut mb1, _) = setup.stateless.select().unwrap();
+
+        let internal_date =
+            FixedOffset::east(0).from_utc_datetime(&Utc::now().naive_local());
+        let mut append_request = AppendRequest::default();
+        append_request.items.push(AppendItem {
+            buffer_file: mb1
+                .stateless()
+                .buffer_message(internal_date, b"foo" as &[u8])
+                .unwrap(),
+            flags: vec![Flag::Answered],
+        });
+        append_request.items.push(AppendItem {
+            buffer_file: mb1
+                .stateless()
+                .buffer_message(internal_date, b"bar" as &[u8])
+                .unwrap(),
+            flags: vec![Flag::Draft],
+        });
+
+        let uids = mb1
+            .stateless()
+            .multiappend(append_request)
+            .unwrap()
+            .uids
+            .items(u32::MAX)
+            .collect::<Vec<_>>();
+        assert_eq!(2, uids.len());
+
+        let poll = mb1.poll().unwrap();
+        assert_eq!(Some(2), poll.exists);
+        assert_eq!(0, poll.expunge.len());
+
+        assert!(mb1.state.test_flag_o(&Flag::Answered, uids[0]));
+        assert!(!mb1.state.test_flag_o(&Flag::Answered, uids[1]));
+        assert!(!mb1.state.test_flag_o(&Flag::Draft, uids[0]));
+        assert!(mb1.state.test_flag_o(&Flag::Draft, uids[1]));
+
+        let mut append_request = AppendRequest::default();
+        append_request.items.push(AppendItem {
+            buffer_file: mb1
+                .stateless()
+                .buffer_message(internal_date, b"xyzzy" as &[u8])
+                .unwrap(),
+            flags: vec![Flag::Deleted],
+        });
+        append_request.items.push(AppendItem {
+            buffer_file: mb1
+                .stateless()
+                .buffer_message(internal_date, b"plugh" as &[u8])
+                .unwrap(),
+            flags: vec![Flag::Seen],
+        });
+
+        let uids2 = mb1
+            .stateless()
+            .multiappend(append_request)
+            .unwrap()
+            .uids
+            .items(u32::MAX)
+            .collect::<Vec<_>>();
+        assert_eq!(2, uids2.len());
+
+        let poll = mb1.poll().unwrap();
+        assert_eq!(Some(4), poll.exists);
+        assert_eq!(0, poll.expunge.len());
+
+        assert!(mb1.state.test_flag_o(&Flag::Deleted, uids2[0]));
+        assert!(!mb1.state.test_flag_o(&Flag::Deleted, uids2[1]));
+        assert!(!mb1.state.test_flag_o(&Flag::Seen, uids2[0]));
+        assert!(mb1.state.test_flag_o(&Flag::Seen, uids2[1]));
     }
 }

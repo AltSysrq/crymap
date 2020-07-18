@@ -781,7 +781,7 @@ a handful of messages, e.g., from inbox to archive or trash.
 expunge data in the `MailboxState` just deal with the (small) cost of doing a
 full select.
 
-* On atomicity of bulk operations TODO IMPLEMENT
+* On atomicity of bulk operations
 
 RFC 3501 and its extensions define a number of mutating bulk (multi-message)
 operations:

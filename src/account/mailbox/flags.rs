@@ -24,25 +24,29 @@ use crate::account::model::*;
 use crate::support::error::Error;
 
 impl StatelessMailbox {
-    /// Blindly set and clear the given flags on the given message.
+    /// Blindly set and clear the given flags on the given message(s).
     ///
-    /// The caller must already know that `uid` refers to an allocated message.
+    /// The caller must already know that each UID refers to an allocated message.
     ///
     /// On success, returns the CID of the change, or `None` if there were not
     /// actually any changes to make.
     pub(super) fn set_flags_blind(
         &self,
-        uid: Uid,
-        flags: impl IntoIterator<Item = (bool, Flag)>,
+        items: Vec<(Uid, Vec<(bool, Flag)>)>,
     ) -> Result<Option<Cid>, Error> {
         self.not_read_only()?;
 
-        let mut tx = StateTransaction::new_unordered(uid);
-        for (add, flag) in flags {
-            if add {
-                tx.add_flag(uid, flag);
-            } else {
-                tx.rm_flag(uid, flag);
+        let max_uid =
+            items.iter().map(|&(uid, _)| uid).max().unwrap_or(Uid::MIN);
+
+        let mut tx = StateTransaction::new_unordered(max_uid);
+        for (uid, flags) in items {
+            for (add, flag) in flags {
+                if add {
+                    tx.add_flag(uid, flag);
+                } else {
+                    tx.rm_flag(uid, flag);
+                }
             }
         }
 
@@ -66,27 +70,32 @@ impl StatelessMailbox {
         Err(Error::GaveUpInsertion)
     }
 
-    /// Try to add all the given flags to `uid`.
+    /// Try to add all the given flags to the given messages.
     ///
     /// On error, the error is logged.
     pub(super) fn propagate_flags_best_effort(
         &self,
-        uid: Uid,
-        flags: impl IntoIterator<Item = Flag>,
+        items: Vec<(Uid, Vec<Flag>)>,
     ) {
-        if let Err(e) =
-            self.set_flags_blind(uid, flags.into_iter().map(|f| (true, f)))
-        {
+        let items = items
+            .into_iter()
+            .map(|(uid, flags)| {
+                (
+                    uid,
+                    flags.into_iter().map(|f| (true, f)).collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        if let Err(e) = self.set_flags_blind(items) {
             // If APPEND/COPY/MOVE returns an error, the call must have had no
             // effect, so we can't return an error to the client here since we
             // already emplaced the new message. Transferring the flags is only
             // a SHOULD, however, so we're fine to just log the error and carry
             // on if anything failed.
             warn!(
-                "{} Failed to set flags on {}: {}",
-                self.log_prefix,
-                uid.0.get(),
-                e
+                "{} Failed to set flags new/copied/moved messages: {}",
+                self.log_prefix, e
             );
         }
     }

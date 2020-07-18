@@ -1406,7 +1406,7 @@ pub struct SearchResponse<ID> {
 }
 
 /// The `APPEND` request.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AppendRequest {
     /// The items to append.
     ///

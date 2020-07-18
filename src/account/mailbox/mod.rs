@@ -263,6 +263,8 @@ mod test_prelude {
 
     pub(super) struct Setup {
         pub root: TempDir,
+        pub key_store: Arc<Mutex<KeyStore>>,
+        pub common_paths: Arc<CommonPaths>,
         pub stateless: StatelessMailbox,
     }
 
@@ -292,12 +294,17 @@ mod test_prelude {
             "mailbox".to_owned(),
             mbox_path,
             false,
-            key_store,
-            common_paths,
+            Arc::clone(&key_store),
+            Arc::clone(&common_paths),
         )
         .unwrap();
 
-        Setup { root, stateless }
+        Setup {
+            root,
+            key_store,
+            common_paths,
+            stateless,
+        }
     }
 
     pub(super) fn simple_append(dst: &StatelessMailbox) -> Uid {

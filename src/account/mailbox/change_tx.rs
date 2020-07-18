@@ -141,7 +141,7 @@ mod test {
             Some(Cid(1)),
             setup
                 .stateless
-                .set_flags_blind(Uid::u(1), vec![(true, Flag::Flagged)])
+                .set_flags_blind(vec![(Uid::u(1), vec![(true, Flag::Flagged)])])
                 .unwrap()
         );
 
@@ -198,7 +198,7 @@ mod test {
         // modseq (1,2) even though it comes after the (2,1) we just created
         // above. When reading the stream, it should get fixed up to (2,2).
         mb1.s
-            .set_flags_blind(uid1, vec![(true, Flag::Seen)])
+            .set_flags_blind(vec![(uid1, vec![(true, Flag::Seen)])])
             .unwrap();
 
         let poll = mb1.poll().unwrap();

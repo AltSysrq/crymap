@@ -67,10 +67,36 @@ impl StatefulMailbox {
     /// server are left in an inconsistent state.
     pub fn poll(&mut self) -> Result<PollResponse, Error> {
         let reported_modseq = self.state.report_max_modseq();
+        let first_unchecked_uid = reported_modseq
+            .map(Modseq::uid)
+            .map_or(Uid::MIN, |uid| uid.next().unwrap_or(Uid::MAX));
 
         self.fetch_loopbreaker.clear();
         self.poll_for_new_uids();
         self.poll_for_new_changes()?;
+
+        let last_unchecked_uid =
+            self.state.max_modseq().map_or(Uid::MIN, Modseq::uid);
+
+        // Check if any new UIDs are gravestones so we don't report them as
+        // real messages, even if there is no Expunge event for them. This is
+        // needed to deal with bulk inserts which create gravestones which
+        // never represented real messages.
+        //
+        // We can't do this inside `poll_for_new_uids()` because we may have
+        // previously discovered new UIDs through transactions.
+        if first_unchecked_uid <= last_unchecked_uid {
+            let scheme = self.s.message_scheme();
+            for uid in first_unchecked_uid.0.get()..=last_unchecked_uid.0.get()
+            {
+                match fs::metadata(scheme.path_for_id(uid)) {
+                    Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
+                        self.state.silent_expunge(Uid::of(uid).unwrap());
+                    }
+                    _ => (),
+                }
+            }
+        }
 
         let flush = self.state.flush();
         let has_new = !flush.new.is_empty();
@@ -145,9 +171,9 @@ impl StatefulMailbox {
 
     /// Probe for UIDs allocated later than the last known UID.
     fn poll_for_new_uids(&mut self) {
-        let messages_scheme = self.s.message_scheme();
+        let message_scheme = self.s.message_scheme();
         while let Some(next_uid) = self.state.next_uid() {
-            if messages_scheme.is_allocated(next_uid.0.get()) {
+            if message_scheme.is_allocated(next_uid.0.get()) {
                 self.state.seen(next_uid);
                 // Plan to generate a rollup at every multiple of 256 messages
                 // discovered by probing. (We don't expend effort to consider
@@ -450,7 +476,7 @@ mod test {
 
         for _ in 0..300 {
             mb1.stateless()
-                .set_flags_blind(uid, [(true, Flag::Flagged)].iter().cloned())
+                .set_flags_blind(vec![(uid, vec![(true, Flag::Flagged)])])
                 .unwrap();
         }
 
@@ -524,7 +550,7 @@ mod test {
         for _ in 0..4000 {
             setup
                 .stateless
-                .set_flags_blind(uid, [(true, Flag::Flagged)].iter().cloned())
+                .set_flags_blind(vec![(uid, vec![(true, Flag::Flagged)])])
                 .unwrap();
             mb1.poll().unwrap();
             std::thread::sleep(std::time::Duration::from_millis(2));

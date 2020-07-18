@@ -783,6 +783,19 @@ impl MailboxState {
         ret
     }
 
+    /// Silently mark the given UID as expunged.
+    ///
+    /// The next flush will behave as if an `Expunged` transaction had been
+    /// inserted for that UID. Unlike a proper transaction however, the event
+    /// is not visible to QRESYNC and this does not result in a soft expunge
+    /// entry.
+    ///
+    /// It is safe to call this for a UID that at one point did represent a
+    /// real message.
+    pub fn silent_expunge(&mut self, uid: Uid) {
+        self.unapplied_expunge.push(uid);
+    }
+
     fn set_flag(
         &mut self,
         uid: Uid,
@@ -813,16 +826,21 @@ impl MailboxState {
     ) {
         self.soft_expungements
             .push(SoftExpungement { deadline, uid });
+
+        // Add to recent_expungements whether we think this was a real message
+        // or not --- everyone needs to report the same history of events to
+        // QRESYNC.
+        self.recent_expungements.push_back((canonical_modseq, uid));
+        while self.recent_expungements.len() > MAX_RECENT_EXPUNGEMENTS {
+            self.recent_expungements.pop_front();
+        }
+
         if let Some(status) = self.message_status.get_mut(&uid) {
             status.last_modified = canonical_modseq;
 
             self.unapplied_expunge.push(uid);
             if let Some(back) = self.recent_expungements.back() {
                 assert!(canonical_modseq >= back.0);
-            }
-            self.recent_expungements.push_back((canonical_modseq, uid));
-            while self.recent_expungements.len() > MAX_RECENT_EXPUNGEMENTS {
-                self.recent_expungements.pop_front();
             }
         }
     }
