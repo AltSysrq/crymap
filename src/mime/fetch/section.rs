@@ -348,12 +348,14 @@ impl Visitor for SectionLocator {
     }
 
     fn end(&mut self) -> Output {
-        // TODO Per a message from Crispin in 2008-03, we need to return an
-        // empty string here. He also recommends returning empty strings as ""
-        // instead of a 0-byte literal.
+        // Per a message from Crispin in 2008-03, we need to return an
+        // empty string here.
         (
             self.target.take().unwrap(),
-            Err(Error::NoSuchMessageSection),
+            Ok(FetchedBodySection {
+                buffer: BufferReader::new(vec![]),
+                contains_nul: false,
+            }),
         )
     }
 }
@@ -748,6 +750,16 @@ mod test {
             ..BodySection::default()
         });
         assert_eq!("Part 4.2.2.2\r\n", fetched);
+    }
+
+    #[test]
+    fn fetch_out_of_bounds_section() {
+        let fetched = do_fetch_sample(BodySection {
+            subscripts: vec![10],
+            leaf_type: LeafType::Content,
+            ..BodySection::default()
+        });
+        assert_eq!("", fetched);
     }
 
     #[test]

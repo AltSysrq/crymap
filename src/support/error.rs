@@ -58,8 +58,6 @@ pub enum Error {
     GaveUpInsertion,
     #[error("File/directory layout is corrupt")]
     CorruptFileLayout,
-    #[error("Requested message section does not exist")]
-    NoSuchMessageSection,
     #[error("Unsupported special-use for CREATE")]
     UnsupportedSpecialUse,
     #[error("Rename source and destination are the same")]
