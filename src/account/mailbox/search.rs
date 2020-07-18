@@ -595,6 +595,43 @@ mod test {
     }
 
     #[test]
+    fn search_encoded_bodies() {
+        let setup = set_up();
+        let (mut mb1, _) = setup.stateless.clone().select().unwrap();
+        let uid1 = simple_append_data(
+            &mb1.stateless(),
+            b"Content-Type: text/plain; charset=\"SHIFT-JIS\"\n\
+              Content-Transfer-Encoding: base64\n\
+              \n\
+              iOqPj4LJiOqU1IuWgrOC6oLIgqKCsYLGgvCCtYLmgqQ=\n",
+        );
+        let uid2 = simple_append_data(
+            &mb1.stateless(),
+            b"Content-Type: text/plain; charset=UTF-7\n\
+              Content-Transfer-Encoding: quoted-printable\n\
+              \n\
+              That is not dead which can eternal lie.\n\
+              And with strange +AOY-=\n\
+              ons even death may die.\n",
+        );
+        mb1.poll().unwrap();
+
+        let result = mb1
+            .search(&SearchRequest {
+                queries: vec![SearchQuery::Text("許されない".to_owned())],
+            })
+            .unwrap();
+        assert_eq!(vec![uid1], result.hits);
+
+        let result = mb1
+            .search(&SearchRequest {
+                queries: vec![SearchQuery::Text("ÆONS".to_owned())],
+            })
+            .unwrap();
+        assert_eq!(vec![uid2], result.hits);
+    }
+
+    #[test]
     fn test_seqnum_search() {
         let setup = set_up();
         let (mut mb1, _) = setup.stateless.clone().select().unwrap();

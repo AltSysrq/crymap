@@ -39,6 +39,7 @@ use chrono::prelude::*;
 
 use super::strings::*;
 use crate::account::model::*;
+use crate::mime::content_encoding::ContentDecoder;
 use crate::mime::grovel::Visitor;
 use crate::mime::header;
 
@@ -121,7 +122,7 @@ pub struct SearchFetcher<F> {
     want: OptionalSearchParts,
 
     headers: HashMap<String, String>,
-    content_accumulator: ContentAccumulator,
+    content_accumulator: ContentDecoder<ContentAccumulator>,
     bytes_scanned: usize,
 }
 
@@ -154,10 +155,13 @@ impl<F: FnMut(&SearchData) -> Option<bool>> SearchFetcher<F> {
             data: SearchData::default(),
             want,
             headers: HashMap::new(),
-            content_accumulator: ContentAccumulator {
-                dst: Rc::new(RefCell::new(String::new())),
-                collect_content: false,
-            },
+            content_accumulator: ContentDecoder::new(
+                Box::new(ContentAccumulator {
+                    dst: Rc::new(RefCell::new(String::new())),
+                    collect_content: false,
+                }),
+                true,
+            ),
             bytes_scanned: 0,
         }
     }
@@ -213,10 +217,12 @@ impl<F: FnMut(&SearchData) -> Option<bool>> Visitor for SearchFetcher<F> {
 
     fn header(
         &mut self,
-        _raw: &[u8],
+        raw: &[u8],
         name: &str,
         value: &[u8],
     ) -> Result<(), bool> {
+        let _ = self.content_accumulator.header(raw, name, value);
+
         if self.want.contains(OptionalSearchParts::HEADER_MAP) {
             let mut name = name.to_owned();
             name.make_ascii_lowercase();
@@ -258,6 +264,7 @@ impl<F: FnMut(&SearchData) -> Option<bool>> Visitor for SearchFetcher<F> {
     }
 
     fn start_content(&mut self) -> Result<(), bool> {
+        let _ = self.content_accumulator.start_content();
         self.finish_headers();
         self.eval()
     }
@@ -299,8 +306,12 @@ impl<F: FnMut(&SearchData) -> Option<bool>> Visitor for SearchFetcher<F> {
             internal_date: FixedOffset::east(0).timestamp_millis(0),
         });
         self.finish_headers();
-        self.data.content =
-            Some(self.content_accumulator.dst.replace(String::new()));
+        self.data.content = Some(
+            self.content_accumulator
+                .inner_mut()
+                .dst
+                .replace(String::new()),
+        );
 
         self.eval()
             .err()
@@ -400,10 +411,9 @@ impl Visitor for ContentAccumulator {
 
     fn content(&mut self, data: &[u8]) -> Result<(), bool> {
         if self.collect_content {
-            // TODO Actually convert data properly
-            // This will probably take the form of using one of the interposers
-            // we'll be using for the BINARY and CONVERT extensions.
-            // For now, just coerce everything into UTF-8 clumsily.
+            // We can only get non-UTF-8 data here if the text encoding is not
+            // recognised. In this case, we just lossily coerce it to UTF-8 and
+            // hope for the best.
             self.dst
                 .borrow_mut()
                 .push_str(&String::from_utf8_lossy(data));
@@ -551,5 +561,19 @@ Outer epilogue
 ",
         );
         assert_eq!("Content A\0Content C\0", result.content.unwrap());
+    }
+
+    #[test]
+    fn parse_encoded() {
+        let result = parse(
+            "Content-Type: text/plain; charset=\"SHIFT-JIS\"\n\
+             Content-Transfer-Encoding: base64\n\
+             \n\
+             iOqPj4LJiOqU1IuWgrOC6oLIgqKCsYLGgvCCtYLmgqQ=\n",
+        );
+        assert_eq!(
+            "一緒に一番許されないことをしよう\0",
+            result.content.unwrap()
+        );
     }
 }

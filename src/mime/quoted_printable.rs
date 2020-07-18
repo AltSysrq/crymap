@@ -30,9 +30,11 @@ use std::str;
 /// including invalid UTF-8.
 ///
 /// Returns the decoded text, as well as a possible "dangling" slice, which
-/// represents a QP escape sequence that is not yet complete.
+/// represents a QP escape sequence that is not yet complete. It will always
+/// extend to the end of the input slice.
 pub fn qp_decode(s: &[u8]) -> (Cow<[u8]>, &[u8]) {
     let mut transformed = Vec::new();
+    let mut soft_line_break = false;
     let mut dangling: Option<&[u8]> = None;
 
     let mut split = s.split(|&b| b'=' == b);
@@ -56,6 +58,7 @@ pub fn qp_decode(s: &[u8]) -> (Cow<[u8]>, &[u8]) {
         if b'\n' == element[0] {
             // Soft line break with UNIX ending, discard
             transformed.extend_from_slice(&element[1..]);
+            soft_line_break = true;
             continue;
         }
 
@@ -70,6 +73,7 @@ pub fn qp_decode(s: &[u8]) -> (Cow<[u8]>, &[u8]) {
         if b"\r\n" == encoded {
             // Soft line break with DOS ending, discard
             transformed.extend_from_slice(tail);
+            soft_line_break = true;
             continue;
         }
 
@@ -87,13 +91,11 @@ pub fn qp_decode(s: &[u8]) -> (Cow<[u8]>, &[u8]) {
         }
     }
 
-    if transformed.is_empty() {
-        (Cow::Borrowed(s), &[])
+    let dangling = dangling.map(|d| &s[s.len() - d.len() - 1..]).unwrap_or(&[]);
+    if transformed.is_empty() && !soft_line_break {
+        (Cow::Borrowed(&s[..s.len() - dangling.len()]), dangling)
     } else {
-        (
-            Cow::Owned(transformed),
-            dangling.map(|d| &s[s.len() - d.len() - 1..]).unwrap_or(&[]),
-        )
+        (Cow::Owned(transformed), dangling)
     }
 }
 
@@ -105,8 +107,12 @@ mod test {
 
     fn assert_qp(expected: &[u8], expected_dangling: &[u8], input: &[u8]) {
         let (actual, actual_dangling) = qp_decode(input);
-        assert_eq!(expected, &actual[..]);
-        assert_eq!(expected_dangling, actual_dangling);
+        assert_eq!(expected, &actual[..], "Unexpected decode of {:?}", input);
+        assert_eq!(
+            expected_dangling, actual_dangling,
+            "Unexpected dangling of {:?}",
+            input
+        );
     }
 
     #[test]
@@ -133,6 +139,11 @@ mod test {
         assert_qp(b"foo", b"=", b"foo=");
         assert_qp(b"foo", b"=A", b"foo=A");
         assert_qp(b"foo", b"=\r", b"foo=\r");
+
+        assert_qp(b"", b"=", b"=");
+        assert_qp(b"", b"=\r", b"=\r");
+        assert_qp(b"", b"", b"=\n");
+        assert_qp(b"", b"", b"=\r\n");
     }
 
     proptest! {

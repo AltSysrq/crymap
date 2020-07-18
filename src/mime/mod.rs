@@ -16,6 +16,7 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+mod content_encoding;
 pub mod encoded_word;
 pub mod fetch;
 pub mod grovel;
