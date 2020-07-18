@@ -18,6 +18,7 @@
 
 use std::collections::HashSet;
 use std::io::BufRead;
+use std::mem;
 use std::sync::Arc;
 
 use rayon::prelude::*;
@@ -250,7 +251,24 @@ impl StatefulMailbox {
                     ));
                 }
 
-                let fetched = grovel(&accessor, fetcher)?;
+                let mut fetched = grovel(&accessor, fetcher)?;
+
+                // Ensure any section parts are OK
+                for part in &mut fetched {
+                    match part {
+                        &mut FetchedItem::BodySection((_, ref mut section)) => {
+                            if section.is_err() {
+                                return mem::replace(
+                                    section,
+                                    Err(Error::NxMessage),
+                                )
+                                .map(|_| unreachable!());
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+
                 Ok(SingleFetchResponse::Fetched(seqnum, fetched))
             }
         });

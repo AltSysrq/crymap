@@ -391,8 +391,10 @@ fn fetch_att_to_ast(
                     LiteralSource::of_reader(fetched.buffer, len, false)
                 }
                 Err(e) => {
+                    // Should never happen since the `fetch` implementation
+                    // lifts all fetch errors up to top-level.
                     error!("Dropping unfetchable body section: {}", e);
-                    LiteralSource::of_data(&[], false)
+                    return None;
                 }
             };
 
