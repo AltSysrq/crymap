@@ -20,11 +20,15 @@ use std::borrow::Cow;
 use std::convert::TryInto;
 use std::fmt;
 use std::mem;
+use std::sync::Mutex;
 
 use log::{error, warn};
 
 use super::defs::*;
-use crate::account::{mailbox::StatefulMailbox, model::*};
+use crate::account::{
+    mailbox::{FetchReceiver, StatefulMailbox},
+    model::*,
+};
 use crate::imap::literal_source::LiteralSource;
 use crate::mime::fetch::{self, section::*};
 use crate::support::error::Error;
@@ -52,9 +56,14 @@ impl CommandProcessor {
         sender: SendResponse<'_>,
     ) -> CmdResult {
         let ids = self.parse_uid_range(&cmd.messages)?;
-        self.fetch(cmd, sender, ids, true, StatefulMailbox::store, |mb, r| {
-            mb.fetch(&r)
-        })
+        self.fetch(
+            cmd,
+            sender,
+            ids,
+            true,
+            StatefulMailbox::store,
+            |mb, r, f| mb.fetch(&r, f),
+        )
     }
 
     pub(super) fn fetch_for_background_update(
@@ -79,7 +88,7 @@ impl CommandProcessor {
             ids,
             false,
             |_, _| panic!("Shouldn't STORE in background update"),
-            |mb, r| mb.fetch(&r),
+            |mb, r, f| mb.fetch(&r, f),
         );
     }
 
@@ -96,6 +105,7 @@ impl CommandProcessor {
         f_fetch: impl FnOnce(
             &mut StatefulMailbox,
             FetchRequest<ID>,
+            FetchReceiver<'_>,
         ) -> Result<FetchResponse, Error>,
     ) -> CmdResult
     where
@@ -144,8 +154,15 @@ impl CommandProcessor {
         }
 
         // TODO It would be better to stream these responses out rather than
-        // buffer them
-        let response = f_fetch(selected, request).map_err(map_error! {
+        // buffer them in memory
+        let received: Mutex<Vec<(Seqnum, Vec<fetch::multi::FetchedItem>)>> =
+            Mutex::new(Vec::new());
+        let receiver = |seqnum, items| {
+            let mut lock = received.lock().unwrap();
+            lock.push((seqnum, items));
+        };
+
+        let response = f_fetch(selected, request, &receiver).map_err(map_error! {
             self,
             MasterKeyUnavailable => (No, Some(s::RespTextCode::ServerBug(()))),
             BadEncryptedKey => (No, Some(s::RespTextCode::Corruption(()))),
@@ -153,7 +170,8 @@ impl CommandProcessor {
             NxMessage => (No, Some(s::RespTextCode::Nonexistent(()))),
             UnaddressableMessage => (No, Some(s::RespTextCode::ClientBug(()))),
         })?;
-        fetch_response(sender, response, fetch_properties)
+        let mut received = received.lock().unwrap();
+        fetch_response(sender, response, received.drain(..), fetch_properties)
     }
 }
 
@@ -320,13 +338,14 @@ where
 fn fetch_response(
     sender: SendResponse,
     response: FetchResponse,
+    received: impl IntoIterator<Item = (Seqnum, Vec<fetch::multi::FetchedItem>)>,
     fetch_properties: FetchProperties,
 ) -> CmdResult {
     if !response.flags.is_empty() {
         sender(s::Response::Flags(response.flags));
     }
 
-    for (seqnum, items) in response.fetched {
+    for (seqnum, items) in received {
         sender(s::Response::Fetch(s::FetchResponse {
             seqnum: seqnum.0.get(),
             atts: s::MsgAtts {

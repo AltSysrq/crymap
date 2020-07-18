@@ -1291,6 +1291,9 @@ impl Default for FetchResponseKind {
 /// Response from a `FETCH` or `UID FETCH` command.
 ///
 /// Fields are in transmission order.
+///
+/// Note that the fetched data itself is *not* in this structure. The caller of
+/// the `fetch` implementation must buffer that itself.
 #[derive(Debug, Default)]
 pub struct FetchResponse {
     /// UIDs to report in a `VANISHED (EARLIER)` response.
@@ -1305,10 +1308,13 @@ pub struct FetchResponse {
     /// not affect the sequence number mapping, so a client could only become
     /// confused if it modified the sequence number mapping anyway, in which
     /// case it would be better to send the `VANISHED (EARLIER)` *after* the
-    /// `FETCH` responses.
+    /// `FETCH` responses. There's also the simple fact that 3501 permits the
+    /// server to send any `FETCH` response whenever it wants, so this
+    /// requirement overall seems like it should be moot.
     ///
     /// Nonetheless, we order this first since it's a "MUST" requirement.
     pub vanished: SeqRange<Uid>,
+
     /// If non-empty, send a `FLAGS` response with these flags before the
     /// `FETCH` responses.
     ///
@@ -1318,10 +1324,9 @@ pub struct FetchResponse {
     /// client to determine that the presence of a flag in a `FETCH` implies
     /// that that flag now exists.
     pub flags: Vec<Flag>,
-    /// The message data that was fetched.
-    ///
-    /// RFC 3501
-    pub fetched: Vec<(Seqnum, Vec<fetch::multi::FetchedItem>)>,
+
+    // FETCH RESPONSES GO HERE
+    // RFC 3501
     /// What type of tagged response to return.
     ///
     /// RFC 3501, RFC 2180, and mailing list discussion (see

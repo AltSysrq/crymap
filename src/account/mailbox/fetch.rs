@@ -36,6 +36,9 @@ pub struct MailboxMessageAccessor<'a> {
     message_status: &'a MessageStatus,
 }
 
+pub type FetchReceiver<'a> =
+    &'a (dyn Fn(Seqnum, Vec<FetchedItem>) + Send + Sync + 'a);
+
 impl<'a> MessageAccessor for MailboxMessageAccessor<'a> {
     type Reader = Box<dyn BufRead + 'a>;
 
@@ -88,9 +91,15 @@ impl StatefulMailbox {
     }
 
     /// The `FETCH` command.
+    ///
+    /// `receiver` is called with fetched data as it becomes available. The
+    /// caller must buffer the fetch responses in a way it deems appropriate,
+    /// so that they can be sent out at the appropriate, awkward point half-way
+    /// through the fixed-size fetch responses.
     pub fn seqnum_fetch(
         &mut self,
         request: FetchRequest<Seqnum>,
+        receiver: FetchReceiver<'_>,
     ) -> Result<FetchResponse, Error> {
         let request = FetchRequest {
             ids: self.state.seqnum_range_to_uid(&request.ids, false)?,
@@ -105,16 +114,15 @@ impl StatefulMailbox {
             changed_since: request.changed_since,
             collect_vanished: request.collect_vanished,
         };
-        self.fetch(&request)
+        self.fetch(&request, receiver)
     }
 
     /// The `UID FETCH` command.
     pub fn fetch(
         &mut self,
         request: &FetchRequest<Uid>,
+        receiver: FetchReceiver<'_>,
     ) -> Result<FetchResponse, Error> {
-        let mut response = FetchResponse::default();
-
         let precise_expunged = if request.collect_vanished {
             request
                 .changed_since
@@ -124,47 +132,70 @@ impl StatefulMailbox {
             None
         };
 
-        let mut fetched: Vec<(Uid, Result<SingleFetchResponse, Error>)> =
-            request
-                .ids
-                .par_items(self.state.max_uid_val())
-                .map(|uid| {
-                    (uid, self.fetch_single(request, uid, &precise_expunged))
-                })
-                .collect();
+        enum StrippedFetchResponse {
+            Nil,
+            NewFlags,
+            VanishedEarlier(Uid),
+            UnexpectedExpunge(Uid),
+        }
 
-        fetched.sort_unstable_by_key(|&(uid, _)| uid);
+        let fetched: Vec<Result<StrippedFetchResponse, Error>> = request
+            .ids
+            .par_items(self.state.max_uid_val())
+            .map(|uid| {
+                let full_response =
+                    self.fetch_single(request, uid, &precise_expunged);
 
-        let mut need_flags_response = false;
+                let full_response = match full_response {
+                    Ok(f) => f,
+                    Err(e) => return Err(e),
+                };
 
-        for (uid, result) in fetched {
-            let result = result?;
+                match full_response {
+                    SingleFetchResponse::Fetched(seqnum, fetched) => {
+                        // See if we're returning a flag the client hasn't
+                        // seen yet. If so, we'll need to send a FLAGS
+                        // response first.
+                        let has_unknown_flags =
+                            request.flags && self.has_unknown_flags(&fetched);
+                        receiver(seqnum, fetched);
 
-            match result {
-                SingleFetchResponse::Fetched(seqnum, fetched) => {
-                    // See if we're returning a flag the client hasn't seen
-                    // yet. If so, we'll need to send a FLAGS response first.
-                    if !need_flags_response && request.flags {
-                        'outer: for item in &fetched {
-                            if let &FetchedItem::Flags(ref flags) = item {
-                                for flag in &flags.flags {
-                                    if !self.client_known_flags.contains(flag) {
-                                        need_flags_response = true;
-                                        break 'outer;
-                                    }
-                                }
-                            }
+                        if has_unknown_flags {
+                            Ok(StrippedFetchResponse::NewFlags)
+                        } else {
+                            Ok(StrippedFetchResponse::Nil)
                         }
                     }
 
-                    response.fetched.push((seqnum, fetched));
+                    SingleFetchResponse::NotModified
+                    | SingleFetchResponse::SilentExpunge => {
+                        Ok(StrippedFetchResponse::Nil)
+                    }
+
+                    SingleFetchResponse::VanishedEarlier => {
+                        Ok(StrippedFetchResponse::VanishedEarlier(uid))
+                    }
+
+                    SingleFetchResponse::UnexpectedExpunge => {
+                        Ok(StrippedFetchResponse::UnexpectedExpunge(uid))
+                    }
                 }
-                SingleFetchResponse::NotModified => continue,
-                SingleFetchResponse::SilentExpunge => continue,
-                SingleFetchResponse::VanishedEarlier => {
-                    response.vanished.append(uid)
+            })
+            .collect();
+
+        let mut response = FetchResponse::default();
+        let mut need_flags_response = false;
+
+        for result in fetched {
+            match result? {
+                StrippedFetchResponse::Nil => (),
+                StrippedFetchResponse::NewFlags => {
+                    need_flags_response = true;
                 }
-                SingleFetchResponse::UnexpectedExpunge => {
+                StrippedFetchResponse::VanishedEarlier(uid) => {
+                    response.vanished.append(uid);
+                }
+                StrippedFetchResponse::UnexpectedExpunge(uid) => {
                     let r = if self.fetch_loopbreaker.insert(uid) {
                         FetchResponseKind::No
                     } else {
@@ -288,6 +319,20 @@ impl StatefulMailbox {
 
         result
     }
+
+    fn has_unknown_flags(&self, fetched: &[FetchedItem]) -> bool {
+        for item in fetched {
+            if let &FetchedItem::Flags(ref flags) = item {
+                for flag in &flags.flags {
+                    if !self.client_known_flags.contains(flag) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
 }
 
 #[derive(Debug)]
@@ -302,6 +347,7 @@ enum SingleFetchResponse {
 #[cfg(test)]
 mod test {
     use std::iter;
+    use std::sync::{Arc, Mutex};
 
     use tempfile::TempDir;
 
@@ -315,6 +361,25 @@ mod test {
         mb1: StatefulMailbox,
         mb2: StatefulMailbox,
         uids: Vec<Uid>,
+
+        received: Arc<Mutex<Vec<(Seqnum, Vec<FetchedItem>)>>>,
+    }
+
+    impl FetchSetup {
+        fn receiver(
+            &self,
+        ) -> impl Fn(Seqnum, Vec<FetchedItem>) + Send + Sync + 'static {
+            let received = Arc::clone(&self.received);
+            move |seqnum, fetched| {
+                let mut lock = received.lock().unwrap();
+                lock.push((seqnum, fetched));
+            }
+        }
+
+        fn received(&self) -> Vec<(Seqnum, Vec<FetchedItem>)> {
+            let mut lock = self.received.lock().unwrap();
+            mem::replace(&mut *lock, Vec::new())
+        }
     }
 
     fn set_up_fetch() -> FetchSetup {
@@ -332,6 +397,7 @@ mod test {
             mb1,
             mb2,
             uids,
+            received: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -340,30 +406,35 @@ mod test {
         let mut setup = set_up_fetch();
         let response = setup
             .mb1
-            .fetch(&FetchRequest {
-                ids: SeqRange::range(
-                    *setup.uids.first().unwrap(),
-                    *setup.uids.last().unwrap(),
-                ),
-                uid: true,
-                flags: true,
-                rfc822size: true,
-                internal_date: true,
-                envelope: true,
-                bodystructure: true,
-                sections: vec![section::BodySection::default()],
-                modseq: true,
-                changed_since: None,
-                collect_vanished: false,
-            })
+            .fetch(
+                &FetchRequest {
+                    ids: SeqRange::range(
+                        *setup.uids.first().unwrap(),
+                        *setup.uids.last().unwrap(),
+                    ),
+                    uid: true,
+                    flags: true,
+                    rfc822size: true,
+                    internal_date: true,
+                    envelope: true,
+                    bodystructure: true,
+                    sections: vec![section::BodySection::default()],
+                    modseq: true,
+                    changed_since: None,
+                    collect_vanished: false,
+                },
+                &setup.receiver(),
+            )
             .unwrap();
+
+        let fetched = setup.received();
 
         assert_eq!(FetchResponseKind::Ok, response.kind);
         assert!(response.flags.is_empty());
         assert!(response.vanished.is_empty());
-        assert_eq!(setup.uids.len(), response.fetched.len());
+        assert_eq!(setup.uids.len(), fetched.len());
 
-        for (_, fetched) in response.fetched {
+        for (_, fetched) in fetched {
             let mut has_uid = false;
             let mut has_flags = false;
             let mut has_rfc822size = false;
@@ -410,26 +481,32 @@ mod test {
         seq.insert(setup.uids[0], setup.uids[0]);
         seq.insert(setup.uids[2], setup.uids[2]);
 
-        let response = setup
+        setup
             .mb1
-            .fetch(&FetchRequest {
-                ids: seq,
-                envelope: true,
-                ..FetchRequest::default()
-            })
+            .fetch(
+                &FetchRequest {
+                    ids: seq,
+                    envelope: true,
+                    ..FetchRequest::default()
+                },
+                &setup.receiver(),
+            )
             .unwrap();
-        assert_eq!(2, response.fetched.len());
 
-        assert_eq!(Seqnum::u(1), response.fetched[0].0);
-        match &response.fetched[0].1[0] {
+        let mut fetched = setup.received();
+        fetched.sort_by_key(|&(seqnum, _)| seqnum);
+        assert_eq!(2, fetched.len());
+
+        assert_eq!(Seqnum::u(1), fetched[0].0);
+        match &fetched[0].1[0] {
             FetchedItem::Envelope(e) => {
                 assert_eq!("Fwd: failure delivery", e.subject.as_ref().unwrap())
             }
             f => panic!("Unexpected item: {:?}", f),
         }
 
-        assert_eq!(Seqnum::u(2), response.fetched[1].0);
-        match &response.fetched[1].1[0] {
+        assert_eq!(Seqnum::u(2), fetched[1].0);
+        match &fetched[1].1[0] {
             FetchedItem::Envelope(e) => {
                 assert_eq!("Entex apr 3 noms", e.subject.as_ref().unwrap())
             }
@@ -456,11 +533,14 @@ mod test {
 
         let result = setup
             .mb1
-            .fetch(&FetchRequest {
-                ids: SeqRange::just(setup.uids[2]),
-                flags: true,
-                ..FetchRequest::default()
-            })
+            .fetch(
+                &FetchRequest {
+                    ids: SeqRange::just(setup.uids[2]),
+                    flags: true,
+                    ..FetchRequest::default()
+                },
+                &setup.receiver(),
+            )
             .unwrap();
 
         assert!(result
@@ -469,11 +549,14 @@ mod test {
 
         let result = setup
             .mb1
-            .fetch(&FetchRequest {
-                ids: SeqRange::just(setup.uids[2]),
-                flags: true,
-                ..FetchRequest::default()
-            })
+            .fetch(
+                &FetchRequest {
+                    ids: SeqRange::just(setup.uids[2]),
+                    flags: true,
+                    ..FetchRequest::default()
+                },
+                &setup.receiver(),
+            )
             .unwrap();
 
         assert!(result.flags.is_empty());
@@ -509,19 +592,23 @@ mod test {
             .unwrap();
         setup.mb1.poll().unwrap();
 
-        let result = setup
+        setup
             .mb1
-            .fetch(&FetchRequest {
-                ids: SeqRange::range(Uid::MIN, Uid::MAX),
-                uid: true,
-                changed_since: modseq,
-                ..FetchRequest::default()
-            })
+            .fetch(
+                &FetchRequest {
+                    ids: SeqRange::range(Uid::MIN, Uid::MAX),
+                    uid: true,
+                    changed_since: modseq,
+                    ..FetchRequest::default()
+                },
+                &setup.receiver(),
+            )
             .unwrap();
 
-        assert_eq!(1, result.fetched.len());
-        assert_eq!(Seqnum::u(4), result.fetched[0].0);
-        match &result.fetched[0].1[0] {
+        let fetched = setup.received();
+        assert_eq!(1, fetched.len());
+        assert_eq!(Seqnum::u(4), fetched[0].0);
+        match &fetched[0].1[0] {
             &FetchedItem::Uid(uid) => assert_eq!(setup.uids[3], uid),
             f => panic!("Unexpected item: {:?}", f),
         }
@@ -541,16 +628,19 @@ mod test {
 
         let result = setup
             .mb1
-            .fetch(&FetchRequest {
-                ids: SeqRange::range(Uid::MIN, Uid::MAX),
-                uid: true,
-                changed_since: modseq,
-                collect_vanished: true,
-                ..FetchRequest::default()
-            })
+            .fetch(
+                &FetchRequest {
+                    ids: SeqRange::range(Uid::MIN, Uid::MAX),
+                    uid: true,
+                    changed_since: modseq,
+                    collect_vanished: true,
+                    ..FetchRequest::default()
+                },
+                &setup.receiver(),
+            )
             .unwrap();
 
-        assert!(result.fetched.is_empty());
+        assert!(setup.received().is_empty());
         assert_eq!(
             SeqRange::range(setup.uids[2], setup.uids[3]),
             result.vanished
@@ -575,13 +665,16 @@ mod test {
 
         let result = setup
             .mb1
-            .fetch(&FetchRequest {
-                ids: SeqRange::range(Uid::MIN, Uid::MAX),
-                uid: true,
-                changed_since: modseq,
-                collect_vanished: true,
-                ..FetchRequest::default()
-            })
+            .fetch(
+                &FetchRequest {
+                    ids: SeqRange::range(Uid::MIN, Uid::MAX),
+                    uid: true,
+                    changed_since: modseq,
+                    collect_vanished: true,
+                    ..FetchRequest::default()
+                },
+                &setup.receiver(),
+            )
             .unwrap();
 
         let mut expected = SeqRange::range(setup.uids[0], setup.uids[1]);
@@ -599,14 +692,17 @@ mod test {
 
         let result = setup
             .mb1
-            .fetch(&FetchRequest {
-                ids: SeqRange::just(setup.uids[0]),
-                // Need to try to fetch something from the file in order to
-                // discover the hard way that someone else expunged the message
-                // meanwhile.
-                envelope: true,
-                ..FetchRequest::default()
-            })
+            .fetch(
+                &FetchRequest {
+                    ids: SeqRange::just(setup.uids[0]),
+                    // Need to try to fetch something from the file in order to
+                    // discover the hard way that someone else expunged the message
+                    // meanwhile.
+                    envelope: true,
+                    ..FetchRequest::default()
+                },
+                &setup.receiver(),
+            )
             .unwrap();
         assert_eq!(FetchResponseKind::No, result.kind);
 
@@ -617,11 +713,14 @@ mod test {
         // full poll
         let result = setup
             .mb1
-            .fetch(&FetchRequest {
-                ids: SeqRange::just(setup.uids[0]),
-                envelope: true,
-                ..FetchRequest::default()
-            })
+            .fetch(
+                &FetchRequest {
+                    ids: SeqRange::just(setup.uids[0]),
+                    envelope: true,
+                    ..FetchRequest::default()
+                },
+                &setup.receiver(),
+            )
             .unwrap();
         assert_eq!(FetchResponseKind::Bye, result.kind);
     }
@@ -639,14 +738,17 @@ mod test {
 
         let result = setup
             .mb1
-            .fetch(&FetchRequest {
-                ids: SeqRange::just(setup.uids[0]),
-                // Need to try to fetch something from the file in order to
-                // discover the hard way that someone else expunged the message
-                // meanwhile.
-                envelope: true,
-                ..FetchRequest::default()
-            })
+            .fetch(
+                &FetchRequest {
+                    ids: SeqRange::just(setup.uids[0]),
+                    // Need to try to fetch something from the file in order to
+                    // discover the hard way that someone else expunged the message
+                    // meanwhile.
+                    envelope: true,
+                    ..FetchRequest::default()
+                },
+                &setup.receiver(),
+            )
             .unwrap();
         assert_eq!(FetchResponseKind::No, result.kind);
 
@@ -657,11 +759,14 @@ mod test {
         // full poll
         let result = setup
             .mb1
-            .fetch(&FetchRequest {
-                ids: SeqRange::just(setup.uids[0]),
-                envelope: true,
-                ..FetchRequest::default()
-            })
+            .fetch(
+                &FetchRequest {
+                    ids: SeqRange::just(setup.uids[0]),
+                    envelope: true,
+                    ..FetchRequest::default()
+                },
+                &setup.receiver(),
+            )
             .unwrap();
         assert_eq!(FetchResponseKind::Bye, result.kind);
     }
@@ -673,18 +778,22 @@ mod test {
         setup.mb1.vanquish(setup.uids[..4].iter().copied()).unwrap();
         setup.mb1.poll().unwrap();
 
-        let result = setup
+        setup
             .mb1
-            .seqnum_fetch(FetchRequest {
-                ids: SeqRange::just(Seqnum::u(1)),
-                uid: true,
-                ..FetchRequest::default()
-            })
+            .seqnum_fetch(
+                FetchRequest {
+                    ids: SeqRange::just(Seqnum::u(1)),
+                    uid: true,
+                    ..FetchRequest::default()
+                },
+                &setup.receiver(),
+            )
             .unwrap();
 
-        assert_eq!(1, result.fetched.len());
-        assert_eq!(Seqnum::u(1), result.fetched[0].0);
-        match &result.fetched[0].1[0] {
+        let fetched = setup.received();
+        assert_eq!(1, fetched.len());
+        assert_eq!(Seqnum::u(1), fetched[0].0);
+        match &fetched[0].1[0] {
             &FetchedItem::Uid(uid) => assert_eq!(setup.uids[4], uid),
             f => panic!("Unexpected item: {:?}", f),
         }
