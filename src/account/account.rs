@@ -192,6 +192,11 @@ impl Account {
         Ok(())
     }
 
+    /// Clear cache(s) only used for the duration of individual commands.
+    pub fn clear_cache(&mut self) {
+        self.key_store.lock().unwrap().clear_cache();
+    }
+
     /// The RFC 3501 `CREATE` command.
     pub fn create(&self, request: CreateRequest) -> Result<(), Error> {
         if request.special_use.len() > 1 {

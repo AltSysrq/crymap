@@ -148,6 +148,10 @@ impl CommandProcessor {
             }
         }
 
+        if let Some(ref mut account) = self.account {
+            account.clear_cache();
+        }
+
         let mut res = match res {
             Ok(res) => res,
             Err(res) => res,

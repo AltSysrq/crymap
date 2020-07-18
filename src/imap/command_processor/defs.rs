@@ -19,7 +19,6 @@
 use std::borrow::Cow;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
 
 use log::error;
 
@@ -63,9 +62,6 @@ pub struct CommandProcessor {
     pub(super) selected: Option<StatefulMailbox>,
     pub(super) unicode_aware: bool,
 
-    // TODO
-    pub(super) caches_cleared: Option<Instant>,
-
     pub(super) multiappend: Option<Multiappend>,
 
     pub(super) logged_out: bool,
@@ -102,8 +98,6 @@ impl CommandProcessor {
             account: None,
             selected: None,
             unicode_aware: false,
-
-            caches_cleared: None,
 
             multiappend: None,
 
