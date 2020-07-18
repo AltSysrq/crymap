@@ -894,6 +894,18 @@ impl<
         self.delegate.content_type(ct).map_err(&mut self.map_to)
     }
 
+    fn leaf_section(
+        &mut self,
+    ) -> Option<Box<dyn Visitor<Output = Self::Output>>> {
+        self.delegate.leaf_section().map(|delegate| {
+            Box::new(VisitorMap {
+                delegate,
+                map_to: self.map_to.clone(),
+                map_from: self.map_from.clone(),
+            }) as Box<dyn Visitor<Output = Self::Output>>
+        })
+    }
+
     fn start_content(&mut self) -> Result<(), Self::Output> {
         self.delegate.start_content().map_err(&mut self.map_to)
     }
