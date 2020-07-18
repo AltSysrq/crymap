@@ -124,6 +124,7 @@ impl CommandProcessor {
             self,
             MailboxFull => (No, Some(s::RespTextCode::Limit(()))),
             GaveUpInsertion => (No, Some(s::RespTextCode::Unavailable(()))),
+            BatchTooBig => (No, Some(s::RespTextCode::Limit(()))),
         }) {
             Ok(_appended) => { /* TODO UIDPLUS */ }
             Err(response) => {
@@ -242,9 +243,12 @@ impl CommandProcessor {
         let dst = dst.get_utf8(self.unicode_aware);
         let dst = account.mailbox(&dst, false).map_err(map_error! {
             self,
-            NxMailbox => (No, Some(s::RespTextCode::TryCreate(()))),
-            UnsafeName => (No, Some(s::RespTextCode::Cannot(()))),
-            MailboxUnselectable => (No, Some(s::RespTextCode::Nonexistent(()))),
+            NxMailbox =>
+                (No, Some(s::RespTextCode::TryCreate(()))),
+            UnsafeName =>
+                (No, Some(s::RespTextCode::Cannot(()))),
+            MailboxUnselectable =>
+                (No, Some(s::RespTextCode::Nonexistent(()))),
         })?;
         f(selected, &request, &dst).map_err(map_error! {
             self,
@@ -253,6 +257,7 @@ impl CommandProcessor {
             ExpungedMessage => (No, Some(s::RespTextCode::ExpungeIssued(()))),
             GaveUpInsertion => (No, Some(s::RespTextCode::Unavailable(()))),
             UnaddressableMessage => (No, Some(s::RespTextCode::ClientBug(()))),
+            BatchTooBig => (No, Some(s::RespTextCode::Limit(()))),
         })?;
         success()
     }
