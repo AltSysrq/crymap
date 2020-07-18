@@ -20,6 +20,7 @@ mod client;
 mod command_processor;
 mod lex;
 mod literal_source;
+mod mailbox_name;
 mod server;
 mod syntax;
 

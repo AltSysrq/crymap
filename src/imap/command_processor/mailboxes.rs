@@ -24,6 +24,7 @@ use log::warn;
 
 use super::defs::*;
 use crate::account::model::*;
+use crate::imap::mailbox_name::MailboxName;
 use crate::support::error::Error;
 
 impl CommandProcessor {
@@ -52,7 +53,7 @@ impl CommandProcessor {
     ) -> CmdResult {
         let account = account!(self)?;
         let request = CreateRequest {
-            name: cmd.mailbox.into_owned(),
+            name: cmd.mailbox.get_utf8(self.unicode_aware).into_owned(),
             special_use: vec![],
         };
         account.create(request).map_err(map_error! {
@@ -73,7 +74,8 @@ impl CommandProcessor {
         _sender: SendResponse<'_>,
     ) -> CmdResult {
         let account = account!(self)?;
-        account.delete(&cmd.mailbox).map_err(map_error! {
+        let mailbox = cmd.mailbox.get_utf8(self.unicode_aware);
+        account.delete(&mailbox).map_err(map_error! {
             self,
             NxMailbox =>
                 (No, Some(s::RespTextCode::Nonexistent(()))),
@@ -98,9 +100,11 @@ impl CommandProcessor {
         cmd: s::ListCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
+        let reference = cmd.reference.get_utf8(self.unicode_aware);
+        let pattern = cmd.pattern.get_utf8(self.unicode_aware);
         let request = ListRequest {
-            reference: cmd.reference.into_owned(),
-            patterns: vec![cmd.pattern.into_owned()],
+            reference: reference.into_owned(),
+            patterns: vec![pattern.into_owned()],
             select_subscribed: false,
             select_special_use: false,
             recursive_match: false,
@@ -119,7 +123,7 @@ impl CommandProcessor {
                     .into_iter()
                     .map(|a| Cow::Borrowed(a.name()))
                     .collect(),
-                name: Cow::Owned(response.name),
+                name: MailboxName::of_utf8(Cow::Owned(response.name)),
             }));
         }
 
@@ -131,9 +135,11 @@ impl CommandProcessor {
         cmd: s::LsubCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
+        let reference = cmd.reference.get_utf8(self.unicode_aware);
+        let pattern = cmd.pattern.get_utf8(self.unicode_aware);
         let request = ListRequest {
-            reference: cmd.reference.into_owned(),
-            patterns: vec![cmd.pattern.into_owned()],
+            reference: reference.into_owned(),
+            patterns: vec![pattern.into_owned()],
             select_subscribed: true,
             select_special_use: false,
             recursive_match: true,
@@ -152,7 +158,7 @@ impl CommandProcessor {
                     .into_iter()
                     .map(|a| Cow::Borrowed(a.name()))
                     .collect(),
-                name: Cow::Owned(response.name),
+                name: MailboxName::of_utf8(Cow::Owned(response.name)),
             }));
         }
 
@@ -166,8 +172,8 @@ impl CommandProcessor {
     ) -> CmdResult {
         let account = account!(self)?;
         let request = RenameRequest {
-            existing_name: cmd.src.into_owned(),
-            new_name: cmd.dst.into_owned(),
+            existing_name: cmd.src.get_utf8(self.unicode_aware).into_owned(),
+            new_name: cmd.dst.get_utf8(self.unicode_aware).into_owned(),
         };
 
         account.rename(request).map_err(map_error! {
@@ -198,7 +204,7 @@ impl CommandProcessor {
     ) -> CmdResult {
         let account = account!(self)?;
         let request = StatusRequest {
-            name: cmd.mailbox.into_owned(),
+            name: cmd.mailbox.get_utf8(self.unicode_aware).into_owned(),
             messages: cmd.atts.contains(&s::StatusAtt::Messages),
             recent: cmd.atts.contains(&s::StatusAtt::Recent),
             uidnext: cmd.atts.contains(&s::StatusAtt::UidNext),
@@ -254,7 +260,7 @@ impl CommandProcessor {
             }
 
             sender(s::Response::Status(s::StatusResponse {
-                mailbox: Cow::Owned(response.name),
+                mailbox: MailboxName::of_utf8(Cow::Owned(response.name)),
                 atts,
             }));
         }
@@ -268,7 +274,7 @@ impl CommandProcessor {
         _sender: SendResponse<'_>,
     ) -> CmdResult {
         account!(self)?
-            .subscribe(&cmd.mailbox)
+            .subscribe(&cmd.mailbox.get_utf8(self.unicode_aware))
             .map_err(map_error! {
                 self,
                 NxMailbox => (No, Some(s::RespTextCode::Nonexistent(()))),
@@ -283,7 +289,7 @@ impl CommandProcessor {
         _sender: SendResponse<'_>,
     ) -> CmdResult {
         account!(self)?
-            .unsubscribe(&cmd.mailbox)
+            .unsubscribe(&cmd.mailbox.get_utf8(self.unicode_aware))
             .map_err(map_error! {
                 self,
                 NxMailbox => (No, Some(s::RespTextCode::Nonexistent(()))),
@@ -294,7 +300,7 @@ impl CommandProcessor {
 
     fn select(
         &mut self,
-        mailbox: &str,
+        mailbox: &MailboxName<'_>,
         sender: SendResponse,
         read_only: bool,
     ) -> CmdResult {
@@ -302,7 +308,8 @@ impl CommandProcessor {
         // whether they succeed.
         self.unselect();
 
-        let stateless = account!(self)?.mailbox(mailbox, read_only).map_err(
+        let mailbox = mailbox.get_utf8(self.unicode_aware);
+        let stateless = account!(self)?.mailbox(&mailbox, read_only).map_err(
             map_error! {
                 self,
                 NxMailbox | MailboxUnselectable =>

@@ -27,7 +27,7 @@ fn list_results_to_str(lines: Vec<s::ResponseLine<'_>>) -> String {
                 tag: None,
                 response: s::Response::List(s::MailboxList { flags, name }),
             } => {
-                ret.push_str(&name);
+                ret.push_str(&name.raw);
                 for flag in flags {
                     ret.push(' ');
                     ret.push_str(&flag);
@@ -50,7 +50,7 @@ fn lsub_results_to_str(lines: Vec<s::ResponseLine<'_>>) -> String {
                 tag: None,
                 response: s::Response::Lsub(s::MailboxList { flags, name }),
             } => {
-                ret.push_str(&name);
+                ret.push_str(&name.raw);
                 for flag in flags {
                     ret.push(' ');
                     ret.push_str(&flag);

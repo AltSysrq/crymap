@@ -24,6 +24,7 @@ use chrono::prelude::*;
 use super::defs::*;
 use crate::account::mailbox::{StatefulMailbox, StatelessMailbox};
 use crate::account::model::*;
+use crate::imap::mailbox_name::MailboxName;
 use crate::support::error::Error;
 
 impl CommandProcessor {
@@ -43,17 +44,19 @@ impl CommandProcessor {
         item_size: u32,
         item_data: impl Read,
     ) -> PartialResult<()> {
-        let dst = account!(self)?.mailbox(&cmd.mailbox, false).map_err(
-            map_error! {
-                self,
-                NxMailbox =>
-                    (No, Some(s::RespTextCode::TryCreate(()))),
-                MailboxUnselectable =>
-                    (No, Some(s::RespTextCode::Nonexistent(()))),
-                UnsafeName =>
-                    (No, Some(s::RespTextCode::Cannot(()))),
-            },
-        )?;
+        let mailbox = cmd.mailbox.get_utf8(self.unicode_aware);
+        let dst =
+            account!(self)?
+                .mailbox(&mailbox, false)
+                .map_err(map_error! {
+                    self,
+                    NxMailbox =>
+                        (No, Some(s::RespTextCode::TryCreate(()))),
+                    MailboxUnselectable =>
+                        (No, Some(s::RespTextCode::Nonexistent(()))),
+                    UnsafeName =>
+                        (No, Some(s::RespTextCode::Cannot(()))),
+                })?;
         self.multiappend = Some(Multiappend {
             dst,
             request: AppendRequest { items: vec![] },
@@ -217,7 +220,7 @@ impl CommandProcessor {
 
     fn copy<T>(
         &mut self,
-        dst: &str,
+        dst: &MailboxName<'_>,
         request: T,
         f: impl FnOnce(
             &StatefulMailbox,
@@ -227,6 +230,7 @@ impl CommandProcessor {
     ) -> CmdResult {
         let account = account!(self)?;
         let selected = selected!(self)?;
+        let dst = dst.get_utf8(self.unicode_aware);
         let dst = account.mailbox(&dst, false).map_err(map_error! {
             self,
             NxMailbox => (No, Some(s::RespTextCode::TryCreate(()))),

@@ -61,7 +61,9 @@ pub struct CommandProcessor {
 
     pub(super) account: Option<Account>,
     pub(super) selected: Option<StatefulMailbox>,
+    pub(super) unicode_aware: bool,
 
+    // TODO
     pub(super) caches_cleared: Option<Instant>,
 
     pub(super) multiappend: Option<Multiappend>,
@@ -99,6 +101,7 @@ impl CommandProcessor {
 
             account: None,
             selected: None,
+            unicode_aware: false,
 
             caches_cleared: None,
 
@@ -106,6 +109,10 @@ impl CommandProcessor {
 
             logged_out: false,
         }
+    }
+
+    pub fn unicode_aware(&self) -> bool {
+        self.unicode_aware
     }
 
     pub fn logged_out(&self) -> bool {

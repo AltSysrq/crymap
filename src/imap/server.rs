@@ -145,9 +145,13 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
                 } else if let Ok((b"", cmdline)) =
                     s::CommandLine::parse(&cmdline)
                 {
-                    let r = self
-                        .processor
-                        .handle_command(cmdline, &response_sender(&self.write));
+                    let r = self.processor.handle_command(
+                        cmdline,
+                        &response_sender(
+                            &self.write,
+                            self.processor.unicode_aware(),
+                        ),
+                    );
                     self.send_response(r)?;
                 } else if let Ok((_, frag)) =
                     s::UnknownCommandFragment::parse(&cmdline)
@@ -449,7 +453,10 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
             if cmdline.is_empty() {
                 let r = self.processor.cmd_append_commit(
                     Cow::Owned(tag),
-                    &response_sender(&self.write),
+                    &response_sender(
+                        &self.write,
+                        self.processor.unicode_aware(),
+                    ),
                 );
                 self.send_response(r)?;
                 break;
@@ -562,7 +569,8 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
 
         let mut w = self.write.lock().unwrap();
         {
-            let mut w = LexWriter::new(&mut *w, false, false);
+            let mut w =
+                LexWriter::new(&mut *w, false, self.processor.unicode_aware());
             r.write_to(&mut w)?;
             w.verbatim_bytes(b"\r\n")?;
         }
@@ -573,10 +581,11 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
 
 fn response_sender<'a>(
     w: &'a Arc<Mutex<impl Write + Send>>,
+    unicode_aware: bool,
 ) -> impl Fn(s::Response<'_>) + Send + Sync + 'a {
     move |r| {
         let mut w = w.lock().unwrap();
-        let mut w = LexWriter::new(&mut *w, false, false);
+        let mut w = LexWriter::new(&mut *w, false, unicode_aware);
         let _ = s::ResponseLine {
             tag: None,
             response: r,

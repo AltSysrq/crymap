@@ -33,6 +33,7 @@ use crate::account::model::Flag;
 use crate::crypt::master_key::MasterKey;
 use crate::imap::client::Client;
 use crate::imap::command_processor::CommandProcessor;
+use crate::imap::mailbox_name::MailboxName;
 use crate::imap::server::Server;
 use crate::support::error::Error;
 use crate::support::system_config::*;
@@ -160,7 +161,7 @@ pub fn quick_create(client: &mut PipeClient, mailbox: &str) {
     ok_command!(
         client,
         s::Command::Create(s::CreateCommand {
-            mailbox: Cow::Borrowed(mailbox),
+            mailbox: MailboxName::of_wire(Cow::Borrowed(mailbox)),
         })
     );
 }
@@ -193,7 +194,7 @@ pub fn quick_select(client: &mut PipeClient, mailbox: &str) {
     ok_command!(
         client,
         s::Command::Select(s::SelectCommand {
-            mailbox: Cow::Borrowed(mailbox),
+            mailbox: MailboxName::of_wire(Cow::Borrowed(mailbox)),
         })
     );
 }

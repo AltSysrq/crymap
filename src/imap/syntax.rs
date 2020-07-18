@@ -139,8 +139,8 @@ use nom::{
 
 use super::lex::LexWriter;
 use super::literal_source::LiteralSource;
+use super::mailbox_name::MailboxName;
 use crate::account::model::Flag;
-use crate::mime::utf7;
 
 include!("syntax-macros.rs");
 
@@ -331,7 +331,7 @@ syntax_rule! {
     struct StatusResponse<'a> {
         #[]
         #[primitive(mailbox, mailbox)]
-        mailbox: Cow<'a, str>,
+        mailbox: MailboxName<'a>,
         #[surrounded(" (", ")") 1*(" ")]
         #[delegate(StatusResponseAtt)]
         atts: Vec<StatusResponseAtt<'a>>,
@@ -635,10 +635,10 @@ syntax_rule! {
     struct ListCommand<'a> {
         #[suffix(" ")]
         #[primitive(mailbox, mailbox)]
-        reference: Cow<'a, str>,
+        reference: MailboxName<'a>,
         #[]
         #[primitive(mailbox, list_mailbox)]
-        pattern: Cow<'a, str>,
+        pattern: MailboxName<'a>,
     }
 }
 
@@ -647,10 +647,10 @@ syntax_rule! {
     struct LsubCommand<'a> {
         #[suffix(" ")]
         #[primitive(mailbox, mailbox)]
-        reference: Cow<'a, str>,
+        reference: MailboxName<'a>,
         #[]
         #[primitive(mailbox, list_mailbox)]
-        pattern: Cow<'a, str>,
+        pattern: MailboxName<'a>,
     }
 }
 
@@ -665,7 +665,7 @@ syntax_rule! {
         flags: Vec<Cow<'a, str>>,
         #[]
         #[primitive(mailbox, mailbox)]
-        name: Cow<'a, str>,
+        name: MailboxName<'a>,
     }
 }
 
@@ -1085,7 +1085,7 @@ syntax_rule! {
     struct CreateCommand<'a> {
         #[]
         #[primitive(mailbox, mailbox)]
-        mailbox: Cow<'a, str>,
+        mailbox: MailboxName<'a>,
     }
 }
 
@@ -1094,7 +1094,7 @@ syntax_rule! {
     struct DeleteCommand<'a> {
         #[]
         #[primitive(mailbox, mailbox)]
-        mailbox: Cow<'a, str>,
+        mailbox: MailboxName<'a>,
     }
 }
 
@@ -1103,7 +1103,7 @@ syntax_rule! {
     struct ExamineCommand<'a> {
         #[]
         #[primitive(mailbox, mailbox)]
-        mailbox: Cow<'a, str>,
+        mailbox: MailboxName<'a>,
     }
 }
 
@@ -1112,10 +1112,10 @@ syntax_rule! {
     struct RenameCommand<'a> {
         #[suffix(" ")]
         #[primitive(mailbox, mailbox)]
-        src: Cow<'a, str>,
+        src: MailboxName<'a>,
         #[]
         #[primitive(mailbox, mailbox)]
-        dst: Cow<'a, str>,
+        dst: MailboxName<'a>,
     }
 }
 
@@ -1124,7 +1124,7 @@ syntax_rule! {
     struct SelectCommand<'a> {
         #[]
         #[primitive(mailbox, mailbox)]
-        mailbox: Cow<'a, str>,
+        mailbox: MailboxName<'a>,
     }
 }
 
@@ -1133,7 +1133,7 @@ syntax_rule! {
     struct StatusCommand<'a> {
         #[suffix(" ")]
         #[primitive(mailbox, mailbox)]
-        mailbox: Cow<'a, str>,
+        mailbox: MailboxName<'a>,
         #[surrounded("(", ")") 1*(" ")]
         #[delegate(StatusAtt)]
         atts: Vec<StatusAtt>,
@@ -1155,7 +1155,7 @@ syntax_rule! {
     struct SubscribeCommand<'a> {
         #[]
         #[primitive(mailbox, mailbox)]
-        mailbox: Cow<'a, str>,
+        mailbox: MailboxName<'a>,
     }
 }
 
@@ -1164,7 +1164,7 @@ syntax_rule! {
     struct UnsubscribeCommand<'a> {
         #[]
         #[primitive(mailbox, mailbox)]
-        mailbox: Cow<'a, str>,
+        mailbox: MailboxName<'a>,
     }
 }
 
@@ -1176,7 +1176,7 @@ syntax_rule! {
         messages: Cow<'a, str>,
         #[]
         #[primitive(mailbox, mailbox)]
-        dst: Cow<'a, str>,
+        dst: MailboxName<'a>,
     }
 }
 
@@ -1355,7 +1355,7 @@ syntax_rule! {
         tag: Cow<'a, str>,
         #[prefix("APPEND ")]
         #[primitive(mailbox, mailbox)]
-        mailbox: Cow<'a, str>,
+        mailbox: MailboxName<'a>,
         #[]
         #[delegate]
         first_fragment: AppendFragment<'a>,
@@ -1552,65 +1552,12 @@ fn nstring(i: &[u8]) -> IResult<&[u8], Option<Cow<str>>> {
 // Read: "mailbox as used by LIST and LSUB"
 // Because naturally we need different syntax for that than other uses of
 // mailbox names.
-fn list_mailbox(i: &[u8]) -> IResult<&[u8], Cow<str>> {
-    map(alt((list_mailbox_atom, string)), |raw| match raw {
-        Cow::Owned(s) => Cow::Owned(utf7::IMAP.decode(&s).into_owned()),
-        Cow::Borrowed(s) => utf7::IMAP.decode(s),
-    })(i)
+fn list_mailbox(i: &[u8]) -> IResult<&[u8], MailboxName<'_>> {
+    map(alt((list_mailbox_atom, string)), MailboxName::of_wire)(i)
 }
 
-// TODO We should make this more sophisticated so that we don't butcher mailbox
-// names that happen to contain `&` but were submitted by Unicode-aware
-// clients. That probably means making a `MailboxName` struct that contains
-// both the raw and decoded form so that the higher level can decide which to
-// use.
-//
-// RFC 6855 is actually horribly vague on this point:
-//
-//   All IMAP servers that support "UTF8=ACCEPT" SHOULD accept UTF-8 in
-//   mailbox names, and those that also support the Mailbox International
-//   Naming Convention described in RFC 3501, Section 5.1.3, MUST accept
-//   UTF8-quoted mailbox names and convert them to the appropriate
-//   internal format.  Mailbox names MUST comply with the Net-Unicode
-//   Definition ([RFC5198], Section 2) with the specific exception that
-//   they MUST NOT contain control characters (U+0000-U+001F and U+0080-U+
-//   009F), a delete character (U+007F), a line separator (U+2028), or a
-//   paragraph separator (U+2029).
-//
-// We MUST support UTF-8 mailbox names, as expected, it doesn't say whether we
-// are expected to stop MUTF7 or keep doing it.
-//
-// The IMAP4rev2 draft doesn't provide guidance here either:
-//
-//   Support for the Mailbox International Naming Convention described in
-//   this section is not required for IMAP4rev2-only clients and servers.
-//
-//   By convention, international mailbox names in IMAP4rev1 are specified
-//   using a modified version of the UTF-7 encoding described in [UTF-7].
-//   Modified UTF-7 may also be usable in servers that implement an
-//   earlier version of this protocol.
-//
-// All that follows is a description of how MUTF7 works.
-//
-// Maybe the best solution is to just make MUTF7 handling much stricter
-// (require terminating '-', don't deal with bad base64) to minimise the
-// chances of a user accidentally typing in a mailbox name that gets handled as
-// MUTF7 into a UTF-8-only client that doesn't add its own layer of MUTF7.
-// Overall, this is a pretty bad situation, since clients have a choice of
-// turning `&` into `&-` and risking creating a different mailbox than the user
-// typed in, or leaving `&` alone and risking MUTF7.
-//
-// TODO The current approach of not encoding anything out the door for
-// Unicode-aware clients also has its problems, since we could, for example,
-// return an unencoded name that looks like an encoded name, and then when the
-// client tries to use that unencoded name, we "decode" it and try to access a
-// different mailbox. In other words, the resolution here is pretty clearly "no
-// MUTF7 at all for Unicode clients".
-fn mailbox(i: &[u8]) -> IResult<&[u8], Cow<str>> {
-    map(astring, |raw| match raw {
-        Cow::Owned(s) => Cow::Owned(utf7::IMAP.decode(&s).into_owned()),
-        Cow::Borrowed(s) => utf7::IMAP.decode(s),
-    })(i)
+fn mailbox(i: &[u8]) -> IResult<&[u8], MailboxName<'_>> {
+    map(astring, MailboxName::of_wire)(i)
 }
 
 fn sequence_set(i: &[u8]) -> IResult<&[u8], Cow<str>> {
@@ -1871,6 +1818,10 @@ mod test {
 
     fn ns(ns: &str) -> Option<Cow<'static, str>> {
         Some(s(ns))
+    }
+
+    fn mn(s: &str) -> MailboxName<'static> {
+        MailboxName::of_wire(Cow::Owned(s.to_owned()))
     }
 
     #[test]
@@ -2238,16 +2189,16 @@ mod test {
             ListCommand,
             r#"LIST "" INBOX"#,
             ListCommand {
-                reference: s(""),
-                pattern: s("INBOX"),
+                reference: mn(""),
+                pattern: mn("INBOX"),
             }
         );
         assert_reversible!(
             LsubCommand,
             r#"LSUB foo bar"#,
             LsubCommand {
-                reference: s("foo"),
-                pattern: s("bar"),
+                reference: mn("foo"),
+                pattern: mn("bar"),
             }
         );
 
@@ -2256,17 +2207,8 @@ mod test {
             ListCommand,
             r#"LIST "" "föö""#,
             ListCommand {
-                reference: s(""),
-                pattern: s("föö"),
-            }
-        );
-        assert_reversible!(
-            false,
-            ListCommand,
-            r#"LIST "" "~peter/mail/&U,BTFw-/&ZeVnLIqe-""#,
-            ListCommand {
-                reference: s(""),
-                pattern: s("~peter/mail/台北/日本語"),
+                reference: mn(""),
+                pattern: mn("föö"),
             }
         );
 
@@ -2276,7 +2218,7 @@ mod test {
             r#"() "/" "~peter/mail/台北/日本語""#,
             MailboxList {
                 flags: vec![],
-                name: s("~peter/mail/台北/日本語"),
+                name: mn("~peter/mail/台北/日本語"),
             }
         );
         assert_reversible!(
@@ -2285,7 +2227,7 @@ mod test {
             r#"(\Noinferiors) "/" "~peter/mail/台北/日本語""#,
             MailboxList {
                 flags: vec![s("\\Noinferiors")],
-                name: s("~peter/mail/台北/日本語"),
+                name: mn("~peter/mail/台北/日本語"),
             }
         );
         assert_reversible!(
@@ -2294,16 +2236,7 @@ mod test {
             r#"(\Noinferiors \Marked) "/" "~peter/mail/台北/日本語""#,
             MailboxList {
                 flags: vec![s("\\Noinferiors"), s("\\Marked")],
-                name: s("~peter/mail/台北/日本語"),
-            }
-        );
-        assert_reversible!(
-            false,
-            MailboxList,
-            r#"(\Noinferiors \Marked) "/" "~peter/mail/&U,BTFw-/&ZeVnLIqe-""#,
-            MailboxList {
-                flags: vec![s("\\Noinferiors"), s("\\Marked")],
-                name: s("~peter/mail/台北/日本語"),
+                name: mn("~peter/mail/台北/日本語"),
             }
         );
     }
@@ -3181,7 +3114,7 @@ mod test {
             CreateCommand,
             "CREATE mailbox",
             CreateCommand {
-                mailbox: s("mailbox"),
+                mailbox: mn("mailbox"),
             }
         );
         assert_reversible!(
@@ -3189,22 +3122,14 @@ mod test {
             CreateCommand,
             "CREATE \"föö\"",
             CreateCommand {
-                mailbox: s("föö")
-            }
-        );
-        assert_reversible!(
-            false,
-            CreateCommand,
-            "CREATE \"f&APYA9g-\"",
-            CreateCommand {
-                mailbox: s("föö")
+                mailbox: mn("föö")
             }
         );
         assert_reversible!(
             DeleteCommand,
             "DELETE mailbox",
             DeleteCommand {
-                mailbox: s("mailbox"),
+                mailbox: mn("mailbox"),
             }
         );
         assert_reversible!(
@@ -3212,22 +3137,14 @@ mod test {
             DeleteCommand,
             "DELETE \"föö\"",
             DeleteCommand {
-                mailbox: s("föö")
-            }
-        );
-        assert_reversible!(
-            false,
-            DeleteCommand,
-            "DELETE \"f&APYA9g-\"",
-            DeleteCommand {
-                mailbox: s("föö")
+                mailbox: mn("föö")
             }
         );
         assert_reversible!(
             ExamineCommand,
             "EXAMINE mailbox",
             ExamineCommand {
-                mailbox: s("mailbox"),
+                mailbox: mn("mailbox"),
             }
         );
         assert_reversible!(
@@ -3235,23 +3152,15 @@ mod test {
             ExamineCommand,
             "EXAMINE \"föö\"",
             ExamineCommand {
-                mailbox: s("föö")
-            }
-        );
-        assert_reversible!(
-            false,
-            ExamineCommand,
-            "EXAMINE \"f&APYA9g-\"",
-            ExamineCommand {
-                mailbox: s("föö")
+                mailbox: mn("föö")
             }
         );
         assert_reversible!(
             RenameCommand,
             "RENAME mailbox dst",
             RenameCommand {
-                src: s("mailbox"),
-                dst: s("dst"),
+                src: mn("mailbox"),
+                dst: mn("dst"),
             }
         );
         assert_reversible!(
@@ -3259,24 +3168,15 @@ mod test {
             RenameCommand,
             "RENAME \"föö\" dst",
             RenameCommand {
-                src: s("föö"),
-                dst: s("dst"),
-            }
-        );
-        assert_reversible!(
-            false,
-            RenameCommand,
-            "RENAME \"f&APYA9g-\" dst",
-            RenameCommand {
-                src: s("föö"),
-                dst: s("dst"),
+                src: mn("föö"),
+                dst: mn("dst"),
             }
         );
         assert_reversible!(
             SelectCommand,
             "SELECT mailbox",
             SelectCommand {
-                mailbox: s("mailbox"),
+                mailbox: mn("mailbox"),
             }
         );
         assert_reversible!(
@@ -3284,22 +3184,14 @@ mod test {
             SelectCommand,
             "SELECT \"föö\"",
             SelectCommand {
-                mailbox: s("föö")
-            }
-        );
-        assert_reversible!(
-            false,
-            SelectCommand,
-            "SELECT \"f&APYA9g-\"",
-            SelectCommand {
-                mailbox: s("föö")
+                mailbox: mn("föö")
             }
         );
         assert_reversible!(
             StatusCommand,
             "STATUS foo (MESSAGES)",
             StatusCommand {
-                mailbox: s("foo"),
+                mailbox: mn("foo"),
                 atts: vec![StatusAtt::Messages],
             }
         );
@@ -3307,7 +3199,7 @@ mod test {
             StatusCommand,
             "STATUS foo (MESSAGES RECENT UIDNEXT UIDVALIDITY UNSEEN)",
             StatusCommand {
-                mailbox: s("foo"),
+                mailbox: mn("foo"),
                 atts: vec![
                     StatusAtt::Messages,
                     StatusAtt::Recent,
@@ -3321,7 +3213,7 @@ mod test {
             SubscribeCommand,
             "SUBSCRIBE mailbox",
             SubscribeCommand {
-                mailbox: s("mailbox"),
+                mailbox: mn("mailbox"),
             }
         );
         assert_reversible!(
@@ -3329,22 +3221,14 @@ mod test {
             SubscribeCommand,
             "SUBSCRIBE \"föö\"",
             SubscribeCommand {
-                mailbox: s("föö")
-            }
-        );
-        assert_reversible!(
-            false,
-            SubscribeCommand,
-            "SUBSCRIBE \"f&APYA9g-\"",
-            SubscribeCommand {
-                mailbox: s("föö")
+                mailbox: mn("föö")
             }
         );
         assert_reversible!(
             UnsubscribeCommand,
             "UNSUBSCRIBE mailbox",
             UnsubscribeCommand {
-                mailbox: s("mailbox"),
+                mailbox: mn("mailbox"),
             }
         );
         assert_reversible!(
@@ -3352,15 +3236,7 @@ mod test {
             UnsubscribeCommand,
             "UNSUBSCRIBE \"föö\"",
             UnsubscribeCommand {
-                mailbox: s("föö")
-            }
-        );
-        assert_reversible!(
-            false,
-            UnsubscribeCommand,
-            "UNSUBSCRIBE \"f&APYA9g-\"",
-            UnsubscribeCommand {
-                mailbox: s("föö")
+                mailbox: mn("föö")
             }
         );
     }
@@ -3372,7 +3248,7 @@ mod test {
             "COPY 1:2,3:* foo",
             CopyCommand {
                 messages: s("1:2,3:*"),
-                dst: s("foo"),
+                dst: mn("foo"),
             }
         );
 
@@ -3521,64 +3397,64 @@ mod test {
         assert_reversible!(
             Command,
             "CREATE foo",
-            Command::Create(CreateCommand { mailbox: s("foo") })
+            Command::Create(CreateCommand { mailbox: mn("foo") })
         );
         assert_reversible!(
             Command,
             "DELETE foo",
-            Command::Delete(DeleteCommand { mailbox: s("foo") })
+            Command::Delete(DeleteCommand { mailbox: mn("foo") })
         );
         assert_reversible!(
             Command,
             "EXAMINE foo",
-            Command::Examine(ExamineCommand { mailbox: s("foo") })
+            Command::Examine(ExamineCommand { mailbox: mn("foo") })
         );
         assert_reversible!(
             Command,
             "LIST \"\" foo",
             Command::List(ListCommand {
-                reference: s(""),
-                pattern: s("foo"),
+                reference: mn(""),
+                pattern: mn("foo"),
             })
         );
         assert_reversible!(
             Command,
             "LSUB \"\" foo",
             Command::Lsub(LsubCommand {
-                reference: s(""),
-                pattern: s("foo"),
+                reference: mn(""),
+                pattern: mn("foo"),
             })
         );
         assert_reversible!(
             Command,
             "RENAME foo bar",
             Command::Rename(RenameCommand {
-                src: s("foo"),
-                dst: s("bar"),
+                src: mn("foo"),
+                dst: mn("bar"),
             })
         );
         assert_reversible!(
             Command,
             "SELECT foo",
-            Command::Select(SelectCommand { mailbox: s("foo") })
+            Command::Select(SelectCommand { mailbox: mn("foo") })
         );
         assert_reversible!(
             Command,
             "STATUS foo (RECENT)",
             Command::Status(StatusCommand {
-                mailbox: s("foo"),
+                mailbox: mn("foo"),
                 atts: vec![StatusAtt::Recent],
             })
         );
         assert_reversible!(
             Command,
             "SUBSCRIBE foo",
-            Command::Subscribe(SubscribeCommand { mailbox: s("foo") })
+            Command::Subscribe(SubscribeCommand { mailbox: mn("foo") })
         );
         assert_reversible!(
             Command,
             "UNSUBSCRIBE foo",
-            Command::Unsubscribe(UnsubscribeCommand { mailbox: s("foo") })
+            Command::Unsubscribe(UnsubscribeCommand { mailbox: mn("foo") })
         );
         assert_reversible!(
             Command,
@@ -3593,7 +3469,7 @@ mod test {
             "COPY 1 dst",
             Command::Copy(CopyCommand {
                 messages: s("1"),
-                dst: s("dst"),
+                dst: mn("dst"),
             })
         );
         assert_reversible!(
@@ -3635,7 +3511,7 @@ mod test {
             "UID COPY 1 dst",
             Command::Uid(UidCommand::Copy(CopyCommand {
                 messages: s("1"),
-                dst: s("dst"),
+                dst: mn("dst"),
             }))
         );
         assert_reversible!(
@@ -3689,7 +3565,7 @@ mod test {
                 tag: s("UID"),
                 cmd: Command::Copy(CopyCommand {
                     messages: s("1"),
-                    dst: s("dst"),
+                    dst: mn("dst"),
                 }),
             }
         );
@@ -3905,7 +3781,7 @@ mod test {
                 tag: None,
                 response: Response::List(MailboxList {
                     flags: vec![],
-                    name: s("INBOX"),
+                    name: mn("INBOX"),
                 }),
             }
         );
@@ -3916,7 +3792,7 @@ mod test {
                 tag: None,
                 response: Response::List(MailboxList {
                     flags: vec![s("\\Marked"), s("\\Subscribed")],
-                    name: s("INBOX"),
+                    name: mn("INBOX"),
                 }),
             }
         );
@@ -3927,7 +3803,7 @@ mod test {
                 tag: None,
                 response: Response::Lsub(MailboxList {
                     flags: vec![s("\\Noselect")],
-                    name: s("foo bar"),
+                    name: mn("foo bar"),
                 }),
             }
         );
@@ -3998,7 +3874,7 @@ mod test {
             ResponseLine {
                 tag: None,
                 response: Response::Status(StatusResponse {
-                    mailbox: s("foo"),
+                    mailbox: mn("foo"),
                     atts: vec![StatusResponseAtt {
                         att: StatusAtt::Recent,
                         value: 1,
@@ -4013,7 +3889,7 @@ mod test {
             ResponseLine {
                 tag: None,
                 response: Response::Status(StatusResponse {
-                    mailbox: s("foo"),
+                    mailbox: mn("foo"),
                     atts: vec![
                         StatusResponseAtt {
                             att: StatusAtt::Recent,
@@ -4048,7 +3924,7 @@ mod test {
             "1 APPEND dst ",
             AppendCommandStart {
                 tag: s("1"),
-                mailbox: s("dst"),
+                mailbox: mn("dst"),
                 first_fragment: AppendFragment {
                     flags: None,
                     internal_date: None,
@@ -4061,7 +3937,7 @@ mod test {
             "1 APPEND \"foo bar\" () ",
             AppendCommandStart {
                 tag: s("1"),
-                mailbox: s("foo bar"),
+                mailbox: mn("foo bar"),
                 first_fragment: AppendFragment {
                     flags: Some(vec![]),
                     internal_date: None,
@@ -4074,7 +3950,7 @@ mod test {
             "1 APPEND dst (\\Deleted) ",
             AppendCommandStart {
                 tag: s("1"),
-                mailbox: s("dst"),
+                mailbox: mn("dst"),
                 first_fragment: AppendFragment {
                     flags: Some(vec![Flag::Deleted]),
                     internal_date: None,
@@ -4087,7 +3963,7 @@ mod test {
             "1 APPEND dst (\\Deleted keyword) ",
             AppendCommandStart {
                 tag: s("1"),
-                mailbox: s("dst"),
+                mailbox: mn("dst"),
                 first_fragment: AppendFragment {
                     flags: Some(vec![
                         Flag::Deleted,
@@ -4103,7 +3979,7 @@ mod test {
             "1 APPEND dst \" 4-Jul-2020 16:31:00 +0100\" ",
             AppendCommandStart {
                 tag: s("1"),
-                mailbox: s("dst"),
+                mailbox: mn("dst"),
                 first_fragment: AppendFragment {
                     flags: None,
                     internal_date: Some(
@@ -4120,7 +3996,7 @@ mod test {
             "1 APPEND dst (\\Deleted) \" 4-Jul-2020 16:31:00 +0100\" ",
             AppendCommandStart {
                 tag: s("1"),
-                mailbox: s("dst"),
+                mailbox: mn("dst"),
                 first_fragment: AppendFragment {
                     flags: Some(vec![Flag::Deleted]),
                     internal_date: Some(

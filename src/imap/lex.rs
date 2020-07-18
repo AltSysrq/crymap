@@ -102,6 +102,7 @@ use std::io::{self, Read, Write};
 use chrono::prelude::*;
 
 use super::literal_source::LiteralSource;
+use super::mailbox_name::MailboxName;
 use crate::account::model::Flag;
 use crate::mime::utf7;
 
@@ -179,13 +180,17 @@ impl<W: Write> LexWriter<W> {
         self.string(&self.encode(s))
     }
 
-    pub fn mailbox(&mut self, s: &str) -> io::Result<()> {
-        if self.is_conservative_atom(s) {
-            write!(self.writer, "{}", s)?;
-        } else if self.unicode_aware {
-            self.string(s)?;
+    pub fn mailbox(&mut self, mn: &MailboxName<'_>) -> io::Result<()> {
+        if self.is_conservative_atom(&mn.raw) {
+            // Nothing to encode if it can just be an atom
+            write!(self.writer, "{}", mn.raw)?;
+        } else if self.unicode_aware || !mn.utf8 {
+            // Nothing to encode if wire format is UTF-8 or the name is already
+            // in wire format.
+            self.string(&mn.raw)?;
         } else {
-            self.string(&utf7::IMAP.encode(s))?;
+            // Else, we need to feed it through possible encoding.
+            self.string(&utf7::IMAP.encode(&mn.raw))?;
         }
 
         Ok(())
@@ -467,11 +472,16 @@ mod test {
     #[test]
     fn mailbox_non_unicode() {
         let mut l = LexWriter::new(Vec::<u8>::new(), false, false);
-        l.mailbox("INBOX").unwrap();
+        l.mailbox(&MailboxName::of_utf8(Cow::Borrowed("INBOX")))
+            .unwrap();
         l.verbatim(" ").unwrap();
-        l.mailbox("Lost & Found").unwrap();
+        l.mailbox(&MailboxName::of_utf8(Cow::Borrowed("Lost & Found")))
+            .unwrap();
         l.verbatim(" ").unwrap();
-        l.mailbox("~peter/mail/台北/日本語").unwrap();
+        l.mailbox(&MailboxName::of_utf8(Cow::Borrowed(
+            "~peter/mail/台北/日本語",
+        )))
+        .unwrap();
 
         assert_eq!(
             "INBOX \"Lost &- Found\" \"~peter/mail/&U,BTFw-/&ZeVnLIqe-\"",
@@ -482,11 +492,16 @@ mod test {
     #[test]
     fn mailbox_unicode() {
         let mut l = LexWriter::new(Vec::<u8>::new(), true, false);
-        l.mailbox("INBOX").unwrap();
+        l.mailbox(&MailboxName::of_utf8(Cow::Borrowed("INBOX")))
+            .unwrap();
         l.verbatim(" ").unwrap();
-        l.mailbox("Lost & Found").unwrap();
+        l.mailbox(&MailboxName::of_utf8(Cow::Borrowed("Lost & Found")))
+            .unwrap();
         l.verbatim(" ").unwrap();
-        l.mailbox("~peter/mail/台北/日本語").unwrap();
+        l.mailbox(&MailboxName::of_utf8(Cow::Borrowed(
+            "~peter/mail/台北/日本語",
+        )))
+        .unwrap();
 
         assert_eq!(
             "INBOX \"Lost & Found\" \"~peter/mail/台北/日本語\"",

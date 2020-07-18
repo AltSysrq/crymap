@@ -35,6 +35,7 @@ use regex::bytes::Regex;
 use thiserror::Error;
 
 use super::lex::LexWriter;
+use super::mailbox_name::MailboxName;
 use super::syntax as s;
 
 lazy_static! {
@@ -226,7 +227,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
 
         let mut command = s::AppendCommandStart {
             tag: Cow::Owned(format!("{}", tag)),
-            mailbox: Cow::Borrowed(mailbox),
+            mailbox: MailboxName::of_wire(Cow::Borrowed(mailbox)),
             first_fragment: frag,
         };
 
