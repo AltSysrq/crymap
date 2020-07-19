@@ -16,6 +16,14 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+macro_rules! die {
+    ($($stuff:tt)*) => {{
+        eprintln!($($stuff)*);
+        std::process::exit(1)
+    }}
+}
+
 pub mod main;
 
 mod imap_test;
+mod user;

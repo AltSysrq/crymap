@@ -299,7 +299,9 @@ impl CommandProcessor {
         ];
 
         for (name, value) in &self.system_config.identification {
-            id_info.push(Some(Cow::Owned(name.clone())));
+            // Silently replace _ with - since it's easy to accidentally use _
+            // in the config but _ is never used in these parameters.
+            id_info.push(Some(Cow::Owned(name.replace("_", "-"))));
             id_info.push(Some(Cow::Owned(value.clone())));
         }
 
