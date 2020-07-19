@@ -490,7 +490,7 @@ fn check_torture_test_body_structure(bs: &s::Body<'_>, extended: bool) {
     );
     assert_eq!(
         vec![s::Address::Real(s::RealAddress {
-            display_name: None,
+            display_name: Some(Cow::Borrowed("Nathaniel Borenstein")),
             routing: None,
             local_part: Cow::Borrowed("nsb"),
             domain: Cow::Borrowed("thumper.bellcore.com"),
