@@ -211,6 +211,7 @@ fn scan_fetch_properties(props: &mut FetchProperties, att: &s::FetchAtt<'_>) {
             props.set_seen = true;
         }
         s::FetchAtt::Rfc822(Some(s::FetchAttRfc822::Size)) => (),
+        s::FetchAtt::Rfc822(Some(s::FetchAttRfc822::Header)) => (),
         s::FetchAtt::Rfc822(_) => {
             props.set_seen = true;
         }

@@ -816,8 +816,10 @@ fn implicit_seen() {
     });
 
     ok_command!(client, c("SELECT 3501feis"));
-    // RFC822.SIZE and BODY.PEEK don't cause an implicit \Seen status
+    // RFC822.SIZE, RFC822.HEADER, and BODY.PEEK don't cause an implicit \Seen
+    // status
     ok_command!(client, c("FETCH 1 RFC822.SIZE"));
+    ok_command!(client, c("FETCH 1 RFC822.HEADER"));
     ok_command!(client, c("FETCH 1 BODY.PEEK[]"));
 
     fetch_single!(client, c("FETCH 1 FLAGS"), ref fr => {
