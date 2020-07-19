@@ -223,7 +223,11 @@ syntax_rule! {
         // don't have anything useful to put here, so making it optional
         // simplifies code and gets us an immediately obvious (to a human)
         // "server has nothing interesting to say here" "message".
-        #[nil]
+        //
+        // ... or so we thought, but the Dovecot IMAP compliance tester chokes
+        // if the response text is "NIL", so we use something else since that
+        // probably means other IMAP clients make the same mistake.
+        #[marked_opt("K")]
         #[primitive(verbatim, text)]
         quip: Option<Cow<'a, str>>,
     }
@@ -3674,7 +3678,7 @@ mod test {
         );
         assert_reversible!(
             ResponseLine,
-            "* NO [BADCHARSET (us-ascii utf-8)] NIL",
+            "* NO [BADCHARSET (us-ascii utf-8)] K",
             ResponseLine {
                 tag: None,
                 response: Response::Cond(CondResponse {
@@ -3689,7 +3693,7 @@ mod test {
         );
         assert_reversible!(
             ResponseLine,
-            "* OK [CAPABILITY IMAP4rev1 XYZZY] NIL",
+            "* OK [CAPABILITY IMAP4rev1 XYZZY] K",
             ResponseLine {
                 tag: None,
                 response: Response::Cond(CondResponse {
@@ -3703,7 +3707,7 @@ mod test {
         );
         assert_reversible!(
             ResponseLine,
-            "* BAD [PARSE] NIL",
+            "* BAD [PARSE] K",
             ResponseLine {
                 tag: None,
                 response: Response::Cond(CondResponse {
@@ -3715,7 +3719,7 @@ mod test {
         );
         assert_reversible!(
             ResponseLine,
-            "* OK [PERMANENTFLAGS (\\Flagged keyword \\*)] NIL",
+            "* OK [PERMANENTFLAGS (\\Flagged keyword \\*)] K",
             ResponseLine {
                 tag: None,
                 response: Response::Cond(CondResponse {
@@ -3730,7 +3734,7 @@ mod test {
         );
         assert_reversible!(
             ResponseLine,
-            "* OK [READ-ONLY] NIL",
+            "* OK [READ-ONLY] K",
             ResponseLine {
                 tag: None,
                 response: Response::Cond(CondResponse {
@@ -3742,7 +3746,7 @@ mod test {
         );
         assert_reversible!(
             ResponseLine,
-            "* OK [READ-WRITE] NIL",
+            "* OK [READ-WRITE] K",
             ResponseLine {
                 tag: None,
                 response: Response::Cond(CondResponse {
@@ -3754,7 +3758,7 @@ mod test {
         );
         assert_reversible!(
             ResponseLine,
-            "* NO [TRYCREATE] NIL",
+            "* NO [TRYCREATE] K",
             ResponseLine {
                 tag: None,
                 response: Response::Cond(CondResponse {
@@ -3766,7 +3770,7 @@ mod test {
         );
         assert_reversible!(
             ResponseLine,
-            "* OK [UIDNEXT 1234] NIL",
+            "* OK [UIDNEXT 1234] K",
             ResponseLine {
                 tag: None,
                 response: Response::Cond(CondResponse {
@@ -3778,7 +3782,7 @@ mod test {
         );
         assert_reversible!(
             ResponseLine,
-            "* OK [UIDVALIDITY 1234] NIL",
+            "* OK [UIDVALIDITY 1234] K",
             ResponseLine {
                 tag: None,
                 response: Response::Cond(CondResponse {
@@ -3790,7 +3794,7 @@ mod test {
         );
         assert_reversible!(
             ResponseLine,
-            "* OK [UNSEEN 42] NIL",
+            "* OK [UNSEEN 42] K",
             ResponseLine {
                 tag: None,
                 response: Response::Cond(CondResponse {
