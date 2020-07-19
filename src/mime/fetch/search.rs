@@ -86,6 +86,9 @@ pub struct SearchData {
     ///
     /// Whitespace is not collapsed; the search system should instead prepare
     /// the regex it uses to match the uncollapsed whitespace.
+    ///
+    /// If multiple values of the same header are found, they are concatenated,
+    /// separated with a NUL character.
     pub headers: Option<HashMap<String, String>>,
     /// The From header, in "normalised" format.
     ///
@@ -225,9 +228,15 @@ impl<F: FnMut(&SearchData) -> Option<bool>> Visitor for SearchFetcher<F> {
 
         if self.want.contains(OptionalSearchParts::HEADER_MAP) {
             let mut name = name.to_owned();
+            let value = decode_unstructured(Cow::Borrowed(value));
             name.make_ascii_lowercase();
             self.headers
-                .insert(name, decode_unstructured(Cow::Borrowed(value)));
+                .entry(name)
+                .and_modify(|v| {
+                    v.push('\0');
+                    v.push_str(&value);
+                })
+                .or_insert(value);
         }
 
         if "From".eq_ignore_ascii_case(name) {
@@ -485,6 +494,7 @@ cc: =?utf-8?q?Nobody_in_particular?= <nobody@example.com>
 bcc: Undisclosed Recipients:;
 subject: =?utf-8?q?Hello_world?=
 XYzzY: =?utf-8?b?bm90aGluZyBoYXBwZW5z?=
+xYzzY: plugh
 content-type: text/plain
 
 This is the content.
@@ -504,7 +514,7 @@ This is the content.
             result.metadata.as_ref().unwrap().internal_date.to_rfc3339()
         );
 
-        assert_eq!("nothing happens", result.headers.unwrap()["xyzzy"]);
+        assert_eq!("nothing happens\0plugh", result.headers.unwrap()["xyzzy"]);
 
         // The exact format of the from/cc/bcc/to fields isn't that sensitive
         assert_eq!(
