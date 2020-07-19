@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020 Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -16,13 +16,6 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-mod client;
-pub mod command_processor;
-mod lex;
-mod literal_source;
-mod mailbox_name;
-pub mod server;
-mod syntax;
+pub mod main;
 
-#[cfg(test)]
-mod integration_tests;
+mod imap_test;

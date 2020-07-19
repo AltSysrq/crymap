@@ -34,6 +34,7 @@ macro_rules! assert_matches {
 }
 
 mod account;
+mod cli;
 mod crypt;
 mod imap;
 mod mime;
@@ -43,7 +44,7 @@ mod support;
 mod test_data;
 
 fn main() {
-    println!("Hello, world!");
+    cli::main::main();
 }
 
 #[cfg(test)]
@@ -56,19 +57,23 @@ fn init_test_log() {
             return;
         }
 
-        fern::Dispatch::new()
-            .format(|out, message, record| {
-                out.finish(format_args!(
-                    "{} [{}][{}] {}",
-                    chrono::Local::now().format("%H:%M:%S%.3f"),
-                    record.level(),
-                    record.target(),
-                    message,
-                ))
-            })
-            .level(log::LevelFilter::Debug)
-            .chain(std::io::stderr())
-            .apply()
-            .unwrap();
+        init_simple_log();
     })
+}
+
+fn init_simple_log() {
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "{} [{}][{}] {}",
+                chrono::Local::now().format("%H:%M:%S%.3f"),
+                record.level(),
+                record.target(),
+                message,
+            ))
+        })
+        .level(log::LevelFilter::Debug)
+        .chain(std::io::stderr())
+        .apply()
+        .unwrap();
 }
