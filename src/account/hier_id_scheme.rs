@@ -104,6 +104,9 @@ impl<'a> HierIdScheme<'a> {
     ///
     /// On success, returns the id of the first item. Subsequent items have
     /// successive ids.
+    ///
+    /// This currently handles mapping most errors to semantic error values and
+    /// assumes it is used for emplacing messages.
     pub fn emplace_many(
         &self,
         srcs: &[&Path],
@@ -129,7 +132,18 @@ impl<'a> HierIdScheme<'a> {
 
         // Emplace everything into our isolated hierarchy with aligned ids
         for (ix, src) in srcs.iter().enumerate() {
-            isolated.emplace(src, BASE + (ix as u32))?;
+            if !isolated.emplace(src, BASE + (ix as u32))? {
+                match fs::metadata(src) {
+                    Ok(_) => return Err(Error::GaveUpInsertion),
+                    Err(e) if io::ErrorKind::NotFound == e.kind() => {
+                        return Err(Error::NxMessage);
+                    }
+                    Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
+                        return Err(Error::ExpungedMessage);
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
         }
 
         // Determine the first ID we'll be allocating, and the base ID for an

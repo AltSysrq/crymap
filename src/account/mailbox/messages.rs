@@ -237,6 +237,18 @@ impl StatelessMailbox {
                     );
                     return Ok(uid);
                 }
+
+                // We could have failed because `src` is invalid.
+                match fs::metadata(src[0]) {
+                    Ok(_) => (),
+                    Err(e) if io::ErrorKind::NotFound == e.kind() => {
+                        return Err(Error::NxMessage);
+                    }
+                    Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
+                        return Err(Error::ExpungedMessage);
+                    }
+                    Err(e) => return Err(e.into()),
+                }
             }
 
             Err(Error::GaveUpInsertion)
@@ -584,6 +596,40 @@ mod test {
 
         assert!(!mb2.state.test_flag_o(&Flag::Answered, uids3[1]));
         assert!(mb2.state.test_flag_o(&Flag::Draft, uids3[1]));
+    }
+
+    #[test]
+    fn copy_expunged() {
+        let setup = set_up();
+
+        let (mut mb1, _) = setup.stateless.clone().select().unwrap();
+        let (mut mb2, _) = setup.stateless.clone().select().unwrap();
+
+        let uid1 = simple_append(mb1.stateless());
+        let uid2 = simple_append(mb1.stateless());
+        mb1.poll().unwrap();
+        mb2.poll().unwrap();
+        mb2.vanquish(vec![uid1, uid2]).unwrap();
+        mb2.purge_all();
+
+        assert_matches!(
+            Err(Error::ExpungedMessage),
+            mb1.copy(
+                &CopyRequest {
+                    ids: SeqRange::just(uid1),
+                },
+                &setup.stateless
+            )
+        );
+        assert_matches!(
+            Err(Error::ExpungedMessage),
+            mb1.copy(
+                &CopyRequest {
+                    ids: SeqRange::range(uid1, uid2),
+                },
+                &setup.stateless
+            )
+        );
     }
 
     #[test]

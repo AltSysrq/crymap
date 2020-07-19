@@ -202,6 +202,37 @@ fn append_copy_nx_destination() {
 }
 
 #[test]
+fn copy_expunged() {
+    let setup = set_up();
+    let mut client = setup.connect("3501mecx");
+    quick_log_in(&mut client);
+    quick_create(&mut client, "3501mecx");
+    quick_append_enron(&mut client, "3501mecx", 2);
+    quick_select(&mut client, "3501mecx");
+
+    let mut client2 = setup.connect("3501mecx");
+    quick_log_in(&mut client2);
+    quick_select(&mut client2, "3501mecx");
+
+    ok_command!(client2, c("XVANQUISH 1:2"));
+    ok_command!(client2, c("XPURGE"));
+
+    command!([response] = client, c("COPY 1 3501mecx"));
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::ExpungeIssued(())),
+        Error::ExpungedMessage,
+    );
+
+    command!([response] = client, c("COPY 1:2 3501mecx"));
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::ExpungeIssued(())),
+        Error::ExpungedMessage,
+    );
+}
+
+#[test]
 fn error_conditions() {
     let setup = set_up();
     let mut client = setup.connect("3501meec");
