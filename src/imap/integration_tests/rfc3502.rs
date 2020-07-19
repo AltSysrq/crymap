@@ -83,7 +83,7 @@ fn happy_paths() {
 
     let mut buffer = Vec::new();
     let mut responses = client.finish_append(&mut buffer).unwrap();
-    assert_tagged_ok(responses.pop().unwrap());
+    assert_tagged_ok_any(responses.pop().unwrap());
     has_untagged_response_matching! {
         s::Response::Exists(3) in responses
     };
@@ -117,7 +117,7 @@ fn happy_paths() {
         .unwrap();
     let mut buffer = Vec::new();
     let mut responses = client.finish_append(&mut buffer).unwrap();
-    assert_tagged_ok(responses.pop().unwrap());
+    assert_tagged_ok_any(responses.pop().unwrap());
 
     has_untagged_response_matching! {
         s::Response::Exists(5) in responses
@@ -171,7 +171,7 @@ fn literal_plus_interaction() {
     let mut buffer = Vec::new();
     let mut responses =
         client.read_responses_until_tagged(&mut buffer).unwrap();
-    assert_tagged_ok(responses.pop().unwrap());
+    assert_tagged_ok_any(responses.pop().unwrap());
     has_untagged_response_matching! {
         s::Response::Exists(2) in responses
     };

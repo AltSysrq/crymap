@@ -186,7 +186,7 @@ pub fn quick_append_enron(
 
         let mut buffer = Vec::new();
         let mut responses = client.finish_append(&mut buffer).unwrap();
-        assert_tagged_ok(responses.pop().unwrap());
+        assert_tagged_ok_any(responses.pop().unwrap());
     }
 }
 
@@ -258,7 +258,7 @@ pub fn examine_shared(client: &mut PipeClient) {
                 .unwrap();
             let mut buffer = Vec::new();
             let mut responses = client.finish_append(&mut buffer).unwrap();
-            assert_tagged_ok(responses.pop().unwrap());
+            assert_tagged_ok_any(responses.pop().unwrap());
         }};
     };
 

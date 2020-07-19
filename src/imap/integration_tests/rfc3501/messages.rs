@@ -44,7 +44,7 @@ fn append_message() {
     let mut buffer = Vec::new();
     let mut responses = client.finish_append(&mut buffer).unwrap();
     assert!(responses.len() >= 1);
-    assert_tagged_ok(responses.pop().unwrap());
+    assert_tagged_ok_any(responses.pop().unwrap());
 
     command!(mut responses = client, c("EXAMINE 3501meam"));
     assert_tagged_ok_any(responses.pop().unwrap());
@@ -67,7 +67,7 @@ fn append_message() {
     let mut buffer = Vec::new();
     let mut responses = client.finish_append(&mut buffer).unwrap();
     assert!(responses.len() >= 1);
-    assert_tagged_ok(responses.pop().unwrap());
+    assert_tagged_ok_any(responses.pop().unwrap());
     has_untagged_response_matching! {
         s::Response::Exists(2) in responses
     };
@@ -95,7 +95,7 @@ fn append_with_new_flag() {
     let mut buffer = Vec::new();
     let mut responses = client.finish_append(&mut buffer).unwrap();
     assert!(responses.len() >= 2);
-    assert_tagged_ok(responses.pop().unwrap());
+    assert_tagged_ok_any(responses.pop().unwrap());
     has_untagged_response_matching! {
         s::Response::Flags(ref flags) in responses => {
             assert!(flags.contains(&Flag::Keyword("plugh".to_owned())));
@@ -146,18 +146,6 @@ fn expunge_messages() {
 
     ok_command!(client, c("STORE 2 +FLAGS (\\Deleted)"));
     command!(mut responses = client, c("EXPUNGE"));
-    assert_tagged_ok(responses.pop().unwrap());
-    assert_eq!(1, responses.len());
-    has_untagged_response_matching! {
-        s::Response::Expunge(2) in responses
-    };
-
-    ok_command!(client, c("UID STORE 3 +FLAGS (\\Deleted)"));
-
-    // TODO This is actually a UIDPLUS command, move to those tests once
-    // written.
-    command!(mut responses = client, c("UID EXPUNGE 3,4"));
-
     assert_tagged_ok(responses.pop().unwrap());
     assert_eq!(1, responses.len());
     has_untagged_response_matching! {
@@ -272,14 +260,6 @@ fn error_conditions() {
     ok_command!(client, c("EXAMINE INBOX"));
 
     command!([response] = client, c("EXPUNGE"));
-    assert_error_response(
-        response,
-        Some(s::RespTextCode::Cannot(())),
-        Error::MailboxReadOnly,
-    );
-
-    // TODO UIDPLUS command, move later
-    command!([response] = client, c("UID EXPUNGE 1:*"));
     assert_error_response(
         response,
         Some(s::RespTextCode::Cannot(())),

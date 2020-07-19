@@ -20,7 +20,6 @@ use std::convert::TryInto;
 use std::fs;
 use std::io::{self, BufRead, Read, Seek, Write};
 use std::path::Path;
-use std::sync::Arc;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::prelude::*;
@@ -29,7 +28,6 @@ use rand::{rngs::OsRng, Rng};
 use tempfile::{NamedTempFile, TempPath};
 
 use super::defs::*;
-use crate::account::mailbox_path::MailboxPath;
 use crate::account::model::*;
 use crate::crypt::data_stream;
 use crate::support::compression::{Compression, FinishWrite};
@@ -275,7 +273,7 @@ impl StatefulMailbox {
         &self,
         request: &CopyRequest<Seqnum>,
         dst: &StatelessMailbox,
-    ) -> Result<AppendResponse, Error> {
+    ) -> Result<CopyResponse, Error> {
         self.copy(
             &CopyRequest {
                 ids: self.state.seqnum_range_to_uid(&request.ids, false)?,
@@ -289,10 +287,11 @@ impl StatefulMailbox {
         &self,
         request: &CopyRequest<Uid>,
         dst: &StatelessMailbox,
-    ) -> Result<AppendResponse, Error> {
-        let mut response = AppendResponse {
-            uid_validity: self.s.uid_validity()?,
-            uids: SeqRange::new(),
+    ) -> Result<CopyResponse, Error> {
+        let mut response = CopyResponse {
+            uid_validity: dst.uid_validity()?,
+            from_uids: SeqRange::new(),
+            to_uids: SeqRange::new(),
         };
 
         let mut path_bufs = Vec::new();
@@ -305,6 +304,7 @@ impl StatefulMailbox {
                 None => continue,
             };
 
+            response.from_uids.append(uid);
             flags.push(
                 status
                     .flags()
@@ -331,7 +331,7 @@ impl StatefulMailbox {
                 .collect(),
         );
 
-        response.uids.insert(
+        response.to_uids.insert(
             base_uid,
             Uid::of(base_uid.0.get() + message_count - 1).unwrap(),
         );
@@ -342,11 +342,13 @@ impl StatefulMailbox {
 #[cfg(test)]
 mod test {
     use std::iter;
+    use std::sync::Arc;
 
     use chrono::prelude::*;
 
     use super::super::test_prelude::*;
     use super::*;
+    use crate::account::mailbox_path::MailboxPath;
 
     #[test]
     fn write_and_read_messages() {
@@ -411,7 +413,7 @@ mod test {
                 mb2.stateless(),
             )
             .unwrap()
-            .uids
+            .to_uids
             .items(u32::MAX)
             .collect::<Vec<_>>();
         assert_eq!(1, uids3.len());
@@ -437,7 +439,7 @@ mod test {
                 mb2.stateless(),
             )
             .unwrap()
-            .uids
+            .to_uids
             .items(u32::MAX)
             .collect::<Vec<_>>();
         assert_eq!(2, uids4.len());
@@ -505,7 +507,7 @@ mod test {
                 mb2.stateless(),
             )
             .unwrap()
-            .uids
+            .to_uids
             .items(u32::MAX)
             .collect::<Vec<_>>();
         assert_eq!(1, uids3.len());
@@ -525,7 +527,7 @@ mod test {
                 mb2.stateless(),
             )
             .unwrap()
-            .uids
+            .to_uids
             .items(u32::MAX)
             .collect::<Vec<_>>();
         assert_eq!(2, uids4.len());
@@ -582,7 +584,7 @@ mod test {
                 mb2.stateless(),
             )
             .unwrap()
-            .uids
+            .to_uids
             .items(u32::MAX)
             .collect::<Vec<_>>();
         assert_eq!(2, uids3.len());

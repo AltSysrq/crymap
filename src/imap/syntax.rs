@@ -321,8 +321,45 @@ syntax_rule! {
         #[]
         #[tag("NONEXISTENT")]
         Nonexistent(()),
+        // RFC 4315
+        #[]
+        #[tag("UIDNOTSTICKY")]
+        UidNotSticky(()),
+        #[prefix("APPENDUID ")]
+        #[delegate]
+        AppendUid(AppendUidData<'a>),
+        #[prefix("COPYUID ")]
+        #[delegate]
+        CopyUid(CopyUidData<'a>),
         // We don't handle unknown response codes, since the server never needs
         // to parse this. Unknown response codes just become part of the text.
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct AppendUidData<'a> {
+        #[suffix(" ")]
+        #[primitive(num_u32, number)]
+        uid_validity: u32,
+        #[]
+        #[primitive(verbatim, sequence_set)]
+        uids: Cow<'a, str>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct CopyUidData<'a> {
+        #[suffix(" ")]
+        #[primitive(num_u32, number)]
+        uid_validity: u32,
+        #[suffix(" ")]
+        #[primitive(verbatim, sequence_set)]
+        from_uids: Cow<'a, str>,
+        #[]
+        #[primitive(verbatim, sequence_set)]
+        to_uids: Cow<'a, str>,
     }
 }
 

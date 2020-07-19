@@ -149,4 +149,5 @@ mod defs;
 
 mod rfc3501;
 mod rfc3502;
+mod rfc4315;
 mod rfc7888;

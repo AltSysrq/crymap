@@ -227,7 +227,7 @@ fn fetch_envelope_with_obsolete_routes() {
 
     let mut buffer = Vec::new();
     let mut responses = client.finish_append(&mut buffer).unwrap();
-    assert_tagged_ok(responses.pop().unwrap());
+    assert_tagged_ok_any(responses.pop().unwrap());
 
     fetch_single!(client, c("FETCH 1 ENVELOPE"), ref fr => {
         has_msgatt_matching! {

@@ -120,30 +120,43 @@ impl CommandProcessor {
             .multiappend
             .take()
             .expect("cmd_append_commit with no append in progress");
-        match append.dst.multiappend(append.request).map_err(map_error! {
-            self,
-            MailboxFull => (No, Some(s::RespTextCode::Limit(()))),
-            GaveUpInsertion => (No, Some(s::RespTextCode::Unavailable(()))),
-            BatchTooBig => (No, Some(s::RespTextCode::Limit(()))),
-        }) {
-            Ok(_appended) => { /* TODO UIDPLUS */ }
-            Err(response) => {
-                return s::ResponseLine {
-                    tag: Some(tag),
-                    response,
-                };
-            }
-        }
+        let response =
+            match append.dst.multiappend(append.request).map_err(map_error! {
+                self,
+                MailboxFull => (No, Some(s::RespTextCode::Limit(()))),
+                GaveUpInsertion => (No, Some(s::RespTextCode::Unavailable(()))),
+                BatchTooBig => (No, Some(s::RespTextCode::Limit(()))),
+            }) {
+                Ok(appended) => appended,
+                Err(response) => {
+                    return s::ResponseLine {
+                        tag: Some(tag),
+                        response,
+                    };
+                }
+            };
 
         // Fall through to a NOOP to get the rest of the post-command
         // semantics.
         self.handle_command(
             s::CommandLine {
-                tag,
+                tag: tag.clone(),
                 cmd: s::Command::Simple(s::SimpleCommand::XAppendFinishedNoop),
             },
             sender,
-        )
+        );
+
+        s::ResponseLine {
+            tag: Some(tag),
+            response: s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Ok,
+                code: Some(s::RespTextCode::AppendUid(s::AppendUidData {
+                    uid_validity: response.uid_validity,
+                    uids: Cow::Owned(response.uids.to_string()),
+                })),
+                quip: None,
+            }),
+        }
     }
 
     pub fn cmd_append_abort(&mut self) {
@@ -236,7 +249,7 @@ impl CommandProcessor {
             &StatefulMailbox,
             &T,
             &StatelessMailbox,
-        ) -> Result<AppendResponse, Error>,
+        ) -> Result<CopyResponse, Error>,
     ) -> CmdResult {
         let account = account!(self)?;
         let selected = selected!(self)?;
@@ -250,7 +263,7 @@ impl CommandProcessor {
             MailboxUnselectable =>
                 (No, Some(s::RespTextCode::Nonexistent(()))),
         })?;
-        f(selected, &request, &dst).map_err(map_error! {
+        let response = f(selected, &request, &dst).map_err(map_error! {
             self,
             MailboxFull => (No, Some(s::RespTextCode::Limit(()))),
             NxMessage => (No, Some(s::RespTextCode::Nonexistent(()))),
@@ -259,6 +272,15 @@ impl CommandProcessor {
             UnaddressableMessage => (No, Some(s::RespTextCode::ClientBug(()))),
             BatchTooBig => (No, Some(s::RespTextCode::Limit(()))),
         })?;
-        success()
+
+        Ok(s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Ok,
+            code: Some(s::RespTextCode::CopyUid(s::CopyUidData {
+                uid_validity: response.uid_validity,
+                from_uids: Cow::Owned(response.from_uids.to_string()),
+                to_uids: Cow::Owned(response.to_uids.to_string()),
+            })),
+            quip: None,
+        }))
     }
 }

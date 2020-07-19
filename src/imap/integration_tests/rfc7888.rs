@@ -101,7 +101,7 @@ fn append_non_synchronising_literal() {
     let mut buffer = Vec::new();
     let mut responses =
         client.read_responses_until_tagged(&mut buffer).unwrap();
-    assert_tagged_ok(responses.pop().unwrap());
+    assert_tagged_ok_any(responses.pop().unwrap());
 
     // Ensure connection is still consistent
     ok_command!(client, c("NOOP"));

@@ -1423,7 +1423,7 @@ pub struct AppendItem {
     pub flags: Vec<Flag>,
 }
 
-/// The response for the `APPEND`, `COPY`, and `UID COPY` commands.
+/// The response for the `APPEND` command.
 ///
 /// All fields are from RFC 4315.
 #[derive(Debug, Clone)]
@@ -1434,7 +1434,7 @@ pub struct AppendResponse {
     pub uids: SeqRange<Uid>,
 }
 
-/// The `COPY` and `UID COPY` requests.
+/// The `COPY` and `UID COPY` commands.
 #[derive(Debug, Clone)]
 pub struct CopyRequest<ID>
 where
@@ -1442,6 +1442,17 @@ where
 {
     /// The IDs to copy.
     pub ids: SeqRange<ID>,
+}
+
+/// The response from the `COPY` and `UID COPY` commands.
+#[derive(Debug, Clone, Default)]
+pub struct CopyResponse {
+    /// The UID validity value of the destination mailbox.
+    pub uid_validity: u32,
+    /// The UID(s) of any copied message.
+    pub from_uids: SeqRange<Uid>,
+    /// The UID(s) of the new messages, parallel to `from_uids`.
+    pub to_uids: SeqRange<Uid>,
 }
 
 /// Holder for common paths used pervasively through a process.

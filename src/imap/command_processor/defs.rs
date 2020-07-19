@@ -37,6 +37,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "AUTH=PLAIN",
     "LITERAL+",
     "MULTIAPPEND",
+    "UIDPLUS",
     "XPURGE",
     "XVANQUISH",
     "XYZZY",
