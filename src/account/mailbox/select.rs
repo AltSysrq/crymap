@@ -148,6 +148,7 @@ impl StatefulMailbox {
             gc_in_progress: Arc::new(AtomicBool::new(false)),
             synchronous_gc: false,
         };
+        this.state.init_transient();
         this.poll()?;
         // If there's any rollups we can get rid of, schedule a GC, which will
         // also clean up the changes and messages trees. Even if no rollups are

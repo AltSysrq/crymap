@@ -167,6 +167,11 @@ impl MailboxState {
         Self::default()
     }
 
+    /// Restore implicit transient state after loading persistent state.
+    pub fn init_transient(&mut self) {
+        self.report_max_modseq = self.max_modseq;
+    }
+
     /// Notify the metadata tracker that the given UID has been observed.
     ///
     /// If this is a formerly unseen message, it is assumed to exist and is
