@@ -1669,8 +1669,8 @@ fn numeric_zone(i: &[u8]) -> IResult<&[u8], i32> {
 }
 
 static MONTH_NAMES: [&str; 12] = [
-    "jan", "fe", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov",
-    "dec",
+    "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct",
+    "nov", "dec",
 ];
 fn month(i: &[u8]) -> IResult<&[u8], u32> {
     map_opt(bytes::complete::take(3usize), |name| {
@@ -4049,6 +4049,13 @@ mod test {
                     _marker: PhantomData,
                 }
             }
+        );
+
+        assert_equivalent!(
+            false,
+            AppendCommandStart,
+            r#"483.10 APPEND INBOX " 2-Feb-2003 18:06:48 +0000" "#,
+            r#"483.10 APPEND "INBOX" "02-Feb-2003 18:06:48 +0000" "#
         );
     }
 
