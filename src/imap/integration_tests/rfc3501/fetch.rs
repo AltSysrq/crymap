@@ -25,46 +25,6 @@ use crate::account::model::Flag;
 use crate::imap::literal_source::LiteralSource;
 use crate::support::error::Error;
 
-macro_rules! has_msgatt_matching {
-    (move $pat:pat in $fetch_response:expr) => {
-        has_msgatt_matching! {
-            move $pat in $fetch_response => ()
-        }
-    };
-
-    (move $pat:pat in $fetch_response:expr => $result:expr) => {
-        $fetch_response
-            .atts
-            .atts
-            .into_iter()
-            .filter_map(|msgatt| match msgatt {
-                $pat => Some($result),
-                _ => None,
-            })
-            .next()
-            .expect("Expected FETCH attribute not found")
-    };
-
-    ($pat:pat in $fetch_response:expr) => {
-        has_msgatt_matching! {
-            $pat in $fetch_response => ()
-        }
-    };
-
-    ($pat:pat in $fetch_response:expr => $result:expr) => {
-        $fetch_response
-            .atts
-            .atts
-            .iter()
-            .filter_map(|msgatt| match *msgatt {
-                $pat => Some($result),
-                _ => None,
-            })
-            .next()
-            .expect("Expected FETCH attribute not found")
-    };
-}
-
 macro_rules! fetch_single {
     ($client:expr, $cmd:expr, $fr:pat => $result:expr) => {{
         command!(mut responses = $client, $cmd);

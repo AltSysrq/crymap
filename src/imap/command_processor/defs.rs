@@ -35,8 +35,9 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "IMAP4rev1",
     "AUTH=PLAIN",
     "LITERAL+",
-    "XVANQUISH",
+    "MULTIAPPEND",
     "XPURGE",
+    "XVANQUISH",
     "XYZZY",
 ];
 

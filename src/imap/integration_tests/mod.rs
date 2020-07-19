@@ -60,6 +60,12 @@ macro_rules! ok_command {
 }
 
 macro_rules! unpack_cond_response {
+    (($tag:pat, $cond:pat, $code:pat, $quip:pat) = $resp:expr) => {
+        unpack_cond_response! {
+            ($tag, $cond, $code, $quip) = $resp => ()
+        }
+    };
+
     (($tag:pat, $cond:pat, $code:pat, $quip:pat) = $resp:expr
      => $body:expr) => {
         match $resp {
@@ -99,7 +105,48 @@ macro_rules! has_untagged_response_matching {
     }};
 }
 
+macro_rules! has_msgatt_matching {
+    (move $pat:pat in $fetch_response:expr) => {
+        has_msgatt_matching! {
+            move $pat in $fetch_response => ()
+        }
+    };
+
+    (move $pat:pat in $fetch_response:expr => $result:expr) => {
+        $fetch_response
+            .atts
+            .atts
+            .into_iter()
+            .filter_map(|msgatt| match msgatt {
+                $pat => Some($result),
+                _ => None,
+            })
+            .next()
+            .expect("Expected FETCH attribute not found")
+    };
+
+    ($pat:pat in $fetch_response:expr) => {
+        has_msgatt_matching! {
+            $pat in $fetch_response => ()
+        }
+    };
+
+    ($pat:pat in $fetch_response:expr => $result:expr) => {
+        $fetch_response
+            .atts
+            .atts
+            .iter()
+            .filter_map(|msgatt| match *msgatt {
+                $pat => Some($result),
+                _ => None,
+            })
+            .next()
+            .expect("Expected FETCH attribute not found")
+    };
+}
+
 mod defs;
 
 mod rfc3501;
+mod rfc3502;
 mod rfc7888;

@@ -75,9 +75,9 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
                 if let Ok((b"", append)) =
                     s::AppendCommandStart::parse(before_literal)
                 {
-                    if length > APPEND_SIZE_LIMIT {
+                    if 0 == length || length > APPEND_SIZE_LIMIT {
                         let tag = append.tag.into_owned();
-                        self.append_limit_exceeded(
+                        self.reject_append(
                             &mut cmdline,
                             Cow::Owned(tag),
                             length,
@@ -465,8 +465,8 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
             if let Some((before_literal, length, literal_plus)) =
                 self.check_literal(cmdline, nread)
             {
-                if length > APPEND_SIZE_LIMIT {
-                    self.append_limit_exceeded(
+                if 0 == length || length > APPEND_SIZE_LIMIT {
+                    self.reject_append(
                         cmdline,
                         Cow::Owned(tag),
                         length,
@@ -506,7 +506,7 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
                         tag: Some(Cow::Owned(tag)),
                         response: s::Response::Cond(s::CondResponse {
                             cond: s::RespCondType::Bad,
-                            code: None,
+                            code: Some(s::RespTextCode::Parse(())),
                             quip: Some(Cow::Borrowed("Bad APPEND syntax")),
                         }),
                     })?;
@@ -524,11 +524,13 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
                 tag: Some(Cow::Owned(tag)),
                 response: s::Response::Cond(s::CondResponse {
                     cond: s::RespCondType::Bad,
-                    code: None,
+                    code: Some(s::RespTextCode::Parse(())),
                     quip: Some(Cow::Borrowed("Bad APPEND syntax (no literal)")),
                 }),
             })?;
-            self.discard_command(cmdline, None)?;
+            // We don't need to call `discard_command` because we know there's
+            // no literal; we can just clear the buffer on exit from the
+            // function.
             self.processor.cmd_append_abort();
             break;
         }
@@ -537,7 +539,7 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
         Ok(())
     }
 
-    fn append_limit_exceeded(
+    fn reject_append(
         &mut self,
         cmdline: &mut Vec<u8>,
         tag: Cow<'_, str>,
@@ -548,8 +550,16 @@ impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
             tag: Some(tag),
             response: s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::Bad,
-                code: None,
-                quip: Some(Cow::Borrowed("APPEND size limit exceeded")),
+                code: if 0 == length {
+                    None
+                } else {
+                    Some(s::RespTextCode::Limit(()))
+                },
+                quip: Some(Cow::Borrowed(if 0 == length {
+                    "APPEND aborted by 0-size literal"
+                } else {
+                    "APPEND size limit exceeded"
+                })),
             }),
         })?;
         self.discard_command(cmdline, Some((length, literal_plus)))?;
