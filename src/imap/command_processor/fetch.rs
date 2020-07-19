@@ -210,6 +210,10 @@ fn scan_fetch_properties(props: &mut FetchProperties, att: &s::FetchAtt<'_>) {
         s::FetchAtt::Body(ref body) if !body.peek => {
             props.set_seen = true;
         }
+        s::FetchAtt::Rfc822(Some(s::FetchAttRfc822::Size)) => (),
+        s::FetchAtt::Rfc822(_) => {
+            props.set_seen = true;
+        }
         _ => (),
     }
 }
