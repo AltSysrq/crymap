@@ -75,6 +75,9 @@ impl CommandProcessor {
             s::Command::Simple(s::SimpleCommand::LogOut) => {
                 self.cmd_log_out(sender)
             }
+            s::Command::Simple(s::SimpleCommand::Namespace) => {
+                self.cmd_namespace(sender)
+            }
             s::Command::Simple(s::SimpleCommand::Noop) => {
                 self.cmd_noop("NOOP OK", sender)
             }
@@ -195,6 +198,11 @@ impl CommandProcessor {
 
     fn cmd_capability(&mut self, sender: SendResponse<'_>) -> CmdResult {
         sender(s::Response::Capability(capability_data()));
+        success()
+    }
+
+    fn cmd_namespace(&mut self, sender: SendResponse<'_>) -> CmdResult {
+        sender(s::Response::Namespace(()));
         success()
     }
 

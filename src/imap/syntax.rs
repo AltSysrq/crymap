@@ -194,6 +194,12 @@ syntax_rule! {
         #[]
         #[delegate]
         Capability(CapabilityData<'a>),
+        // RFC 2342
+        // We don't have namespaces or shared mailboxes, so we can just return
+        // this single fixed response.
+        #[]
+        #[tag(r#"NAMESPACE (("" "/")) NIL NIL"#)]
+        Namespace(()),
     }
 }
 
@@ -1306,6 +1312,8 @@ simple_enum! {
         StartTls("STARTTLS"),
         XPurge("XPURGE"),
         Xyzzy("XYZZY"),
+        // RFC 2342
+        Namespace("NAMESPACE"),
         // Used internally, not expected to match anything
         XAppendFinishedNoop("\nXAppendFinishedNoop"),
     }
