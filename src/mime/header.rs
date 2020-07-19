@@ -617,6 +617,13 @@ fn two_digit(i: &[u8]) -> IResult<&[u8], u32> {
     )(i)
 }
 
+fn one_two_digit(i: &[u8]) -> IResult<&[u8], u32> {
+    combinator::map(
+        bytes::complete::take_while_m_n(1, 2, character::is_digit),
+        parse_u32_infallible,
+    )(i)
+}
+
 fn time_colon(i: &[u8]) -> IResult<&[u8], ()> {
     let (i, _) = sequence::tuple((ocfws, tag(b":"), ocfws))(i)?;
     Ok((i, ()))
@@ -625,12 +632,14 @@ fn time_colon(i: &[u8]) -> IResult<&[u8], ()> {
 fn time_of_day(i: &[u8]) -> IResult<&[u8], (u32, u32, u32)> {
     sequence::terminated(
         sequence::tuple((
-            two_digit,
-            sequence::preceded(time_colon, two_digit),
+            // RFC 3522 does not permit the time elements to be single-digit,
+            // but there are examples of that in the wild.
+            one_two_digit,
+            sequence::preceded(time_colon, one_two_digit),
             // RFC 5322 does not describe optional seconds in the obsolete
             // syntax, but does have it in an example.
             combinator::map(
-                combinator::opt(sequence::preceded(time_colon, two_digit)),
+                combinator::opt(sequence::preceded(time_colon, one_two_digit)),
                 |sec| sec.unwrap_or(0),
             ),
         )),
@@ -1105,6 +1114,10 @@ mod test {
         assert_eq!(
             "2011-03-21T03:12:57+00:00",
             dt("Mon, 21 Mar 2011 03:12:57")
+        );
+        assert_eq!(
+            "2002-08-06T00:29:18+08:00",
+            dt("Tue, 6 Aug 2002 0:29:18 +0800")
         );
     }
 
