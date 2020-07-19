@@ -64,3 +64,7 @@ pub static TORTURE_TEST: &[u8] = include_bytes!("torture-test.eml");
 
 /// A syntactically simple message with every interesting header field set.
 pub static CHRISTMAS_TREE: &[u8] = include_bytes!("christmas-tree.eml");
+
+/// A message with various obsolete route syntax included.
+pub static WITH_OBSOLETE_ROUTING: &[u8] =
+    include_bytes!("with-obsolete-routing.eml");

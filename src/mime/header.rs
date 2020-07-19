@@ -155,6 +155,7 @@ pub fn parse_message_id(i: &[u8]) -> Option<&str> {
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct AddrSpec<'a> {
+    pub routing: Vec<Vec<Cow<'a, [u8]>>>,
     pub local: Vec<Cow<'a, [u8]>>,
     pub domain: Vec<Cow<'a, [u8]>>,
 }
@@ -162,6 +163,15 @@ pub struct AddrSpec<'a> {
 impl<'a> fmt::Debug for AddrSpec<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "<")?;
+        if !self.routing.is_empty() {
+            for route in &self.routing {
+                write!(f, "@")?;
+                for part in route {
+                    write!(f, "({})", String::from_utf8_lossy(part))?;
+                }
+            }
+            write!(f, ":")?;
+        }
         for part in &self.local {
             write!(f, "({})", String::from_utf8_lossy(part))?;
         }
@@ -824,36 +834,37 @@ fn domain(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
 fn addr_spec(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
     let (i, local) = local_part(i)?;
     let (i, domain) = sequence::preceded(tag(b"@"), domain)(i)?;
-    Ok((i, AddrSpec { local, domain }))
+    Ok((
+        i,
+        AddrSpec {
+            local,
+            domain,
+            routing: vec![],
+        },
+    ))
 }
 
 // RFC 5322 4.4 obsolete routing information
-// We just discard all this
-fn obs_domain_list(i: &[u8]) -> IResult<&[u8], ()> {
-    let (i, _) = sequence::tuple((
-        tag(b"@"),
-        domain,
-        multi::many0_count(sequence::tuple((
-            multi::many0_count(branch::alt((
-                cfws,
-                combinator::map(tag(b","), |_| ()),
-            ))),
-            ocfws,
-            tag(b"@"),
-            domain,
+// We could probably just discard all this, but the author of Dovecot
+// apparently felt --- even in 2007 --- that this is still important enough to
+// put in the IMAP compliance tester.
+fn obs_domain_list(i: &[u8]) -> IResult<&[u8], Vec<Vec<Cow<'_, [u8]>>>> {
+    multi::separated_nonempty_list(
+        multi::many1_count(branch::alt((
+            cfws,
+            combinator::map(tag(b","), |_| ()),
         ))),
-    ))(i)?;
-    Ok((i, ()))
+        sequence::preceded(tag(b"@"), domain),
+    )(i)
 }
 
 // RFC 5322 3.4 angle-delimited address, including the 4.4 obsolete routing
 // information.
 fn angle_addr(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
-    sequence::delimited(
-        sequence::tuple((
-            ocfws,
-            tag(b"<"),
-            combinator::opt(sequence::pair(obs_domain_list, tag(b":"))),
+    let (i, routing) = sequence::delimited(
+        sequence::pair(ocfws, tag(b"<")),
+        combinator::opt(sequence::terminated(obs_domain_list, tag(b":"))),
+        sequence::pair(
             // Older versions of Outlook stick a spurious apostrophe before the
             // local part. We can generally take a GIGO approach to this, but
             // parsing would fail if we didn't handle the case where the local
@@ -865,26 +876,36 @@ fn angle_addr(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
             // Another agent would put empty double quotes immediately abutting
             // the local part.
             combinator::opt(tag(b"\"\"")),
-        )),
-        // Though not described by RFC 5322, some agents will include a totally
-        // empty <> pair. Some will also include only a local part.
-        combinator::map(
-            combinator::opt(branch::alt((
-                addr_spec,
-                combinator::map(local_part, |l| AddrSpec {
-                    local: l,
-                    domain: vec![],
-                }),
-            ))),
-            |a| {
-                a.unwrap_or_else(|| AddrSpec {
-                    local: vec![],
-                    domain: vec![],
-                })
-            },
         ),
-        sequence::pair(tag(b">"), ocfws),
-    )(i)
+    )(i)?;
+
+    // Though not described by RFC 5322, some agents will include a totally
+    // empty <> pair. Some will also include only a local part.
+    let (i, mut addrspec) = combinator::map(
+        combinator::opt(branch::alt((
+            addr_spec,
+            combinator::map(local_part, |l| AddrSpec {
+                local: l,
+                domain: vec![],
+                routing: vec![],
+            }),
+        ))),
+        |a| {
+            a.unwrap_or_else(|| AddrSpec {
+                local: vec![],
+                domain: vec![],
+                routing: vec![],
+            })
+        },
+    )(i)?;
+
+    let (i, _) = sequence::pair(tag(b">"), ocfws)(i)?;
+
+    if let Some(routing) = routing {
+        addrspec.routing = routing;
+    }
+
+    Ok((i, addrspec))
 }
 
 // RFC 5322 3.4 mailbox
@@ -1139,7 +1160,7 @@ mod test {
             ))
         );
         assert_eq!(
-            "(Mary)(Smith)<(mary)@(example)(net)>",
+            "(Mary)(Smith)<@(machine)(tld):(mary)@(example)(net)>",
             mbox("Mary Smith <@machine.tld:mary@example.net>")
         );
         assert_eq!(

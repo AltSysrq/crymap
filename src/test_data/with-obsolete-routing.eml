@@ -1,0 +1,4 @@
+From: <@route1.tld:foo@bar.com>
+To: <@route2.tld,@route3:baz@quux.com>
+
+hello

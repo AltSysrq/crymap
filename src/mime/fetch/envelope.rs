@@ -96,10 +96,8 @@ bitflags! {
 pub struct EnvelopeAddress {
     /// The display name if present, decoded.
     pub name: Option<String>,
-    /// RFC 3501 includes the RFC 822 routing information, but per RFC 2822 and
-    /// later, we discard that unconditionally, so the field must always be
-    /// NIL. The () is here as a token reminder.
-    pub routing: (),
+    /// Routing. This is long since obsolete, but IMAP4rev1 still requires it.
+    pub routing: Option<String>,
     /// The local part of the email (RFC 3501 calls it "mailbox name", despite
     /// "mailbox" referring to things like "INBOX" in the same document),
     /// decoded.
@@ -201,7 +199,7 @@ impl EnvelopeFetcher {
                 header::Address::Group(group) => {
                     field.push(EnvelopeAddress {
                         name: None,
-                        routing: (),
+                        routing: None,
                         // Bizarrely, despite there being a field for the
                         // display name, RFC 3501 has us put the display name
                         // of groups into the local part...
@@ -213,7 +211,7 @@ impl EnvelopeFetcher {
                     }
                     field.push(EnvelopeAddress {
                         name: None,
-                        routing: (),
+                        routing: None,
                         local: None,
                         domain: None,
                     });
@@ -259,7 +257,11 @@ impl EnvelopeFetcher {
 fn to_envelope_address(mbox: header::Mailbox) -> EnvelopeAddress {
     EnvelopeAddress {
         name: Some(decode_phrase(mbox.name)).filter(|s| !s.is_empty()),
-        routing: (),
+        routing: if mbox.addr.routing.is_empty() {
+            None
+        } else {
+            Some(decode_routing(mbox.addr.routing))
+        },
         local: Some(decode_dotted(mbox.addr.local)),
         domain: Some(decode_dotted(mbox.addr.domain)),
     }
@@ -313,7 +315,7 @@ X-FileName: Lay, Kenneth.pst
         assert_eq!(
             vec![EnvelopeAddress {
                 name: None,
-                routing: (),
+                routing: None,
                 local: Some("vmartinez".to_owned()),
                 domain: Some("winstead.com".to_owned()),
             }],
@@ -322,7 +324,7 @@ X-FileName: Lay, Kenneth.pst
         assert_eq!(
             vec![EnvelopeAddress {
                 name: None,
-                routing: (),
+                routing: None,
                 local: Some("kenneth.lay".to_owned()),
                 domain: Some("enron.com".to_owned()),
             }],
@@ -355,7 +357,7 @@ Subject: =?ISO-8859-1?B?SWYgeW91IGNhbiByZWFkIHRoaXMgeW8=?=
         assert_eq!(
             vec![EnvelopeAddress {
                 name: Some("Keith Moore".to_owned()),
-                routing: (),
+                routing: None,
                 local: Some("moore".to_owned()),
                 domain: Some("cs.utk.edu".to_owned()),
             }],
@@ -364,7 +366,7 @@ Subject: =?ISO-8859-1?B?SWYgeW91IGNhbiByZWFkIHRoaXMgeW8=?=
         assert_eq!(
             vec![EnvelopeAddress {
                 name: Some("Keld Jørn Simonsen".to_owned()),
-                routing: (),
+                routing: None,
                 local: Some("keld".to_owned()),
                 domain: Some("dkuug.dk".to_owned()),
             }],
@@ -373,7 +375,7 @@ Subject: =?ISO-8859-1?B?SWYgeW91IGNhbiByZWFkIHRoaXMgeW8=?=
         assert_eq!(
             vec![EnvelopeAddress {
                 name: Some("André Pirard".to_owned()),
-                routing: (),
+                routing: None,
                 local: Some("PIRARD".to_owned()),
                 domain: Some("vm1.ulg.ac.be".to_owned()),
             }],
@@ -400,31 +402,31 @@ Message-ID: <testabcd.1234@silly.example>
             vec![
                 EnvelopeAddress {
                     name: None,
-                    routing: (),
+                    routing: None,
                     local: Some("A Group".to_owned()),
                     domain: None,
                 },
                 EnvelopeAddress {
                     name: Some("Ed Jones".to_owned()),
-                    routing: (),
+                    routing: None,
                     local: Some("c".to_owned()),
                     domain: Some("a.test".to_owned()),
                 },
                 EnvelopeAddress {
                     name: None,
-                    routing: (),
+                    routing: None,
                     local: Some("joe".to_owned()),
                     domain: Some("where.test".to_owned()),
                 },
                 EnvelopeAddress {
                     name: Some("John".to_owned()),
-                    routing: (),
+                    routing: None,
                     local: Some("jdoe".to_owned()),
                     domain: Some("one.test".to_owned()),
                 },
                 EnvelopeAddress {
                     name: None,
-                    routing: (),
+                    routing: None,
                     local: None,
                     domain: None,
                 }
@@ -436,13 +438,13 @@ Message-ID: <testabcd.1234@silly.example>
             vec![
                 EnvelopeAddress {
                     name: None,
-                    routing: (),
+                    routing: None,
                     local: Some("Undisclosed recipients".to_owned()),
                     domain: None,
                 },
                 EnvelopeAddress {
                     name: None,
-                    routing: (),
+                    routing: None,
                     local: None,
                     domain: None,
                 }
@@ -455,7 +457,7 @@ Message-ID: <testabcd.1234@silly.example>
     fn parse_all_fields() {
         let envelope = parse(
             "\
-from: Mary Smith <mary@example.net>
+from: Mary Smith <@some.tld,@another.tld:mary@example.net>
 sender: Jane Doe <jane@machine.example>
 to: John Doe <jdoe@machine.example>
 cc: foo@bar.cc
@@ -474,7 +476,7 @@ references: <1234@local.machine.example>
         assert_eq!(
             vec![EnvelopeAddress {
                 name: Some("Mary Smith".to_owned()),
-                routing: (),
+                routing: Some("@some.tld,@another.tld".to_owned()),
                 local: Some("mary".to_owned()),
                 domain: Some("example.net".to_owned()),
             }],
@@ -483,7 +485,7 @@ references: <1234@local.machine.example>
         assert_eq!(
             vec![EnvelopeAddress {
                 name: Some("Jane Doe".to_owned()),
-                routing: (),
+                routing: None,
                 local: Some("jane".to_owned()),
                 domain: Some("machine.example".to_owned()),
             }],
@@ -492,7 +494,7 @@ references: <1234@local.machine.example>
         assert_eq!(
             vec![EnvelopeAddress {
                 name: Some("Mary Smith: Personal Account".to_owned()),
-                routing: (),
+                routing: None,
                 local: Some("smith".to_owned()),
                 domain: Some("home.example".to_owned()),
             }],
@@ -501,7 +503,7 @@ references: <1234@local.machine.example>
         assert_eq!(
             vec![EnvelopeAddress {
                 name: Some("John Doe".to_owned()),
-                routing: (),
+                routing: None,
                 local: Some("jdoe".to_owned()),
                 domain: Some("machine.example".to_owned()),
             }],
@@ -510,7 +512,7 @@ references: <1234@local.machine.example>
         assert_eq!(
             vec![EnvelopeAddress {
                 name: None,
-                routing: (),
+                routing: None,
                 local: Some("foo".to_owned()),
                 domain: Some("bar.cc".to_owned()),
             }],
@@ -519,7 +521,7 @@ references: <1234@local.machine.example>
         assert_eq!(
             vec![EnvelopeAddress {
                 name: None,
-                routing: (),
+                routing: None,
                 local: Some("foo".to_owned()),
                 domain: Some("plugh.cc".to_owned()),
             }],

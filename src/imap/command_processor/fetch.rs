@@ -503,7 +503,7 @@ fn envelope_to_ast(env: fetch::envelope::Envelope) -> s::Envelope<'static> {
                 if a.domain.is_some() {
                     s::Address::Real(s::RealAddress {
                         display_name: a.name.map(Cow::Owned),
-                        routing: None,
+                        routing: a.routing.map(Cow::Owned),
                         local_part: Cow::Owned(
                             a.local.expect("No local part on real address"),
                         ),

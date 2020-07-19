@@ -42,6 +42,20 @@ pub fn decode_dotted(phrase: Vec<Cow<[u8]>>) -> String {
     decode_sequence(phrase, b'.')
 }
 
+pub fn decode_routing(routing: Vec<Vec<Cow<[u8]>>>) -> String {
+    let mut s = String::new();
+    for route in routing {
+        if !s.is_empty() {
+            s.push(',');
+        }
+
+        s.push('@');
+        s.push_str(&decode_dotted(route));
+    }
+
+    s
+}
+
 fn decode_sequence(phrase: Vec<Cow<[u8]>>, delim: u8) -> String {
     if 1 == phrase.len() {
         decode_atom(phrase.into_iter().next().unwrap())

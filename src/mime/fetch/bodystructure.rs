@@ -314,7 +314,7 @@ hello world
         assert_eq!(
             vec![EnvelopeAddress {
                 name: None,
-                routing: (),
+                routing: None,
                 local: Some("foo".to_owned()),
                 domain: Some("bar.com".to_owned()),
             }],
@@ -426,7 +426,7 @@ hello world
         assert_eq!(
             vec![EnvelopeAddress {
                 name: None,
-                routing: (),
+                routing: None,
                 local: Some("bar".to_owned()),
                 domain: Some("foo.com".to_owned()),
             }],
@@ -615,7 +615,7 @@ Content B
         assert_eq!(
             vec![EnvelopeAddress {
                 name: None,
-                routing: (),
+                routing: None,
                 local: Some("foo".to_owned()),
                 domain: Some("bar.com".to_owned()),
             }],
@@ -634,7 +634,7 @@ Content B
         assert_eq!(
             vec![EnvelopeAddress {
                 name: None,
-                routing: (),
+                routing: None,
                 local: Some("bar".to_owned()),
                 domain: Some("foo.com".to_owned()),
             }],

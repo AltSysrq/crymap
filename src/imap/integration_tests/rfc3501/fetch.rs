@@ -17,6 +17,7 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
+use std::marker::PhantomData;
 
 use chrono::prelude::*;
 
@@ -24,6 +25,7 @@ use super::super::defs::*;
 use crate::account::model::Flag;
 use crate::imap::literal_source::LiteralSource;
 use crate::support::error::Error;
+use crate::test_data::*;
 
 macro_rules! fetch_single {
     ($client:expr, $cmd:expr, $fr:pat => $result:expr) => {{
@@ -198,6 +200,54 @@ fn fetch_envelope() {
         has_msgatt_matching! {
             s::MsgAtt::Envelope(ref envelope) in fr => {
                 assert_eq!(&expected_envelope, envelope);
+            }
+        };
+    });
+}
+
+#[test]
+fn fetch_envelope_with_obsolete_routes() {
+    let setup = set_up();
+    let mut client = setup.connect("3501feor");
+    quick_log_in(&mut client);
+    quick_create(&mut client, "3501feor");
+    quick_select(&mut client, "3501feor");
+
+    client
+        .start_append(
+            "3501feor",
+            s::AppendFragment {
+                flags: None,
+                internal_date: None,
+                _marker: PhantomData,
+            },
+            WITH_OBSOLETE_ROUTING,
+        )
+        .unwrap();
+
+    let mut buffer = Vec::new();
+    let mut responses = client.finish_append(&mut buffer).unwrap();
+    assert_tagged_ok(responses.pop().unwrap());
+
+    fetch_single!(client, c("FETCH 1 ENVELOPE"), ref fr => {
+        has_msgatt_matching! {
+            s::MsgAtt::Envelope(ref envelope) in fr => {
+                assert_eq!(vec![
+                    s::Address::Real(s::RealAddress {
+                        display_name: None,
+                        routing: Some(Cow::Borrowed("@route1.tld")),
+                        local_part: Cow::Borrowed("foo"),
+                        domain: Cow::Borrowed("bar.com"),
+                    }),
+                ], envelope.from);
+                assert_eq!(vec![
+                    s::Address::Real(s::RealAddress {
+                        display_name: None,
+                        routing: Some(Cow::Borrowed("@route2.tld,@route3")),
+                        local_part: Cow::Borrowed("baz"),
+                        domain: Cow::Borrowed("quux.com"),
+                    }),
+                ], envelope.to);
             }
         };
     });
