@@ -204,6 +204,10 @@ syntax_rule! {
         #[prefix("ID ") nil_if_empty surrounded("(", ")") 0*(" ")]
         #[primitive(censored_nstring, nstring)]
         Id(Vec<Option<Cow<'a, str>>>),
+        // RFC 5161
+        #[prefix("ENABLED") 0* prefix(" ")]
+        #[primitive(verbatim, normal_atom)]
+        Enabled(Vec<Cow<'a, str>>),
     }
 }
 
@@ -1396,6 +1400,10 @@ syntax_rule! {
         #[prefix("ID ") nil_if_empty surrounded("(", ")") 0*(" ")]
         #[primitive(censored_nstring, nstring)]
         Id(Vec<Option<Cow<'a, str>>>),
+        // RFC 5161
+        #[prefix("ENABLE ") 1*(" ")]
+        #[primitive(verbatim, normal_atom)]
+        Enable(Vec<Cow<'a, str>>),
     }
 }
 

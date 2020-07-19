@@ -126,6 +126,8 @@ impl CommandProcessor {
             }
 
             s::Command::Id(parms) => self.cmd_id(parms, sender),
+
+            s::Command::Enable(exts) => self.cmd_enable(exts, sender),
         };
 
         if res.is_ok() {
@@ -201,6 +203,34 @@ impl CommandProcessor {
     fn cmd_capability(&mut self, sender: SendResponse<'_>) -> CmdResult {
         sender(s::Response::Capability(capability_data()));
         success()
+    }
+
+    fn cmd_enable(
+        &mut self,
+        exts: Vec<Cow<'_, str>>,
+        sender: SendResponse<'_>,
+    ) -> CmdResult {
+        let mut enabled = Vec::new();
+        // Per RFC 5161, we silently ignore any extension which isn't
+        // ENABLE-able or known.
+        for ext in exts {
+            if "XYZZY".eq_ignore_ascii_case(&ext) {
+                enabled.push(ext);
+            }
+        }
+
+        let quip = if enabled.is_empty() {
+            "Nothing enabled"
+        } else {
+            "The future is now"
+        };
+
+        sender(s::Response::Enabled(enabled));
+        Ok(s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Ok,
+            code: None,
+            quip: Some(Cow::Borrowed(quip)),
+        }))
     }
 
     fn cmd_id(

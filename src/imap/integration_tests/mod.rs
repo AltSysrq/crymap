@@ -152,4 +152,5 @@ mod rfc2971;
 mod rfc3501;
 mod rfc3502;
 mod rfc4315;
+mod rfc5161;
 mod rfc7888;
