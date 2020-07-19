@@ -213,6 +213,9 @@ impl CommandProcessor {
     }
 
     fn cmd_log_out(&mut self, sender: SendResponse<'_>) -> CmdResult {
+        self.selected = None;
+        self.account = None;
+
         // LOGOUT is a bit weird because RFC 3501 requires sending an OK
         // response *AFTER* the BYE.
         self.logged_out = true;
