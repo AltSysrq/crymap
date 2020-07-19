@@ -853,6 +853,44 @@ fn addr_spec(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
     ))
 }
 
+// A subset of the RFC5322 3.4.1 address specification which doesn't gobble
+// subsequent comments, used for parsing the ancient "foo@bar (Foo Bar)"
+// syntax.
+fn conservative_addr_spec(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
+    let (i, local) = sequence::preceded(
+        ocfws,
+        multi::separated_nonempty_list(
+            tag(b"."),
+            combinator::map(atext, Cow::Borrowed),
+        ),
+    )(i)?;
+    let (i, domain) = sequence::preceded(
+        tag(b"@"),
+        multi::separated_nonempty_list(
+            tag(b"."),
+            combinator::map(atext, Cow::Borrowed),
+        ),
+    )(i)?;
+
+    Ok((
+        i,
+        AddrSpec {
+            local,
+            domain,
+            routing: vec![],
+        },
+    ))
+}
+
+// Obsolete way of specifying the display name
+fn obs_display_name(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
+    sequence::delimited(
+        tag(b"("),
+        phrase,
+        sequence::pair(combinator::opt(fws), tag(b")")),
+    )(i)
+}
+
 // RFC 5322 4.4 obsolete routing information
 // We could probably just discard all this, but the author of Dovecot
 // apparently felt --- even in 2007 --- that this is still important enough to
@@ -921,6 +959,13 @@ fn angle_addr(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
 fn mailbox(i: &[u8]) -> IResult<&[u8], Mailbox<'_>> {
     combinator::map(
         branch::alt((
+            combinator::map(
+                sequence::pair(
+                    conservative_addr_spec,
+                    sequence::preceded(fws, obs_display_name),
+                ),
+                |(addr, name)| (name, addr),
+            ),
             sequence::pair(
                 combinator::map(combinator::opt(phrase), |o| {
                     o.unwrap_or(vec![])
@@ -1229,6 +1274,13 @@ mod test {
                 "=?US-ASCII?Q?Keith?= ",
                 "=?US-ASCII?Q?Moore?= <moore@cs.utk.edu>"
             ))
+        );
+
+        // Ancient put-the-display-name-in-a-comment syntax
+        // From the Dovecot compliance tests
+        assert_eq!(
+            "(Real)(Name)<(user)@(domain)>",
+            mbox("user@domain (Real Name)")
         );
     }
 
