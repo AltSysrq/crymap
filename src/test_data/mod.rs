@@ -68,3 +68,7 @@ pub static CHRISTMAS_TREE: &[u8] = include_bytes!("christmas-tree.eml");
 /// A message with various obsolete route syntax included.
 pub static WITH_OBSOLETE_ROUTING: &[u8] =
     include_bytes!("with-obsolete-routing.eml");
+
+/// This message exposed a bug in the way header wrapping is handled.
+pub static DOVECOT_PREFER_STANDALONE_DAEMONS: &[u8] =
+    include_bytes!("dovecot-prefer-standalone-daemons.eml");

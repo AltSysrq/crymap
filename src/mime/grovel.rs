@@ -494,7 +494,10 @@ impl<V> Groveller<V> {
                 buf.pop();
             }
 
-            let could_be_continuation = could_be_continuation(r.fill_buf()?);
+            let next_buf = r.fill_buf()?;
+            let could_be_continuation =
+                // We know there's no continuation if we hit EOF
+                !next_buf.is_empty() && could_be_continuation(next_buf);
             if let Err(output) =
                 self.push_line_and_content(&buf, could_be_continuation)
             {
@@ -783,7 +786,7 @@ impl<V> Groveller<V> {
 }
 
 fn could_be_continuation(tail: &[u8]) -> bool {
-    !tail.is_empty() && (tail.starts_with(b" ") || tail.starts_with(b"\t"))
+    tail.is_empty() || tail.starts_with(b" ") || tail.starts_with(b"\t")
 }
 
 /// Maps one `Visitor` type into another.

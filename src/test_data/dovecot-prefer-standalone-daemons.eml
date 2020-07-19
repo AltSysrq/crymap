@@ -1,0 +1,74 @@
+Received: with ECARTIS (v1.0.0; list dovecot); Wed, 26 Feb 2003 10:58:31 +0200 (EET)
+Return-Path: <lfarkas@bnap.hu>
+X-Original-To: dovecot@procontrol.fi
+Delivered-To: dovecot@procontrol.fi
+Received: from mail1.bppiac.hu (blue.bppiac.hu [212.108.197.67])
+	by danu.procontrol.fi (Postfix) with ESMTP id 75EC32384D
+	for <dovecot@procontrol.fi>; Wed, 26 Feb 2003 10:58:31 +0200 (EET)
+Received: from mail2.bppiac.hu (portal.bppiac.hu [194.143.224.170])
+	by mail1.bppiac.hu (Postfix) with ESMTP id 4E3AA75401D
+	for <dovecot@procontrol.fi>; Wed, 26 Feb 2003 09:59:03 +0100 (CET)
+Received: from portal.bppiac.hu (localhost [127.0.0.1])
+	by portal.bppiac.hu (Postfix) with SMTP id 4B1A63EF2
+	for <dovecot@procontrol.fi>; Wed, 26 Feb 2003 09:58:29 +0100 (CET)
+Message-ID: <3E5C81BC.6090100@bnap.hu>
+Date: Wed, 26 Feb 2003 09:58:36 +0100
+From: Farkas Levente <lfarkas@bnap.hu>
+User-Agent: Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.2) Gecko/20021202
+X-Accept-Language: en-us, en
+MIME-Version: 1.0
+To: dovecot@procontrol.fi
+Subject: [dovecot] Re: inetd/xinetd/tcpserver support
+References: <1046224359.30815.36.camel@hurina>
+In-Reply-To: <1046224359.30815.36.camel@hurina>
+Content-Type: text/plain; charset=us-ascii; format=flowed
+Content-Transfer-Encoding: 7bit
+X-archive-position: 325
+X-ecartis-version: Ecartis v1.0.0
+Sender: dovecot-bounce@procontrol.fi
+Errors-to: dovecot-bounce@procontrol.fi
+X-original-sender: lfarkas@bnap.hu
+Precedence: bulk
+X-list: dovecot
+X-UID: 325
+Status: O
+Content-Length: 1392
+
+I always prefer standalone daemons, and as we see the tendency is that
+most server run as standalone (apache, vsftpd, ssh...). at the begining
+they has (x)inetd version later remove it...
+IMHO ip/tcp filtering should have done in a firewall or some fitering
+can be implemented in the standalone server too..
+but this is just my 2c:-)
+
+Timo Sirainen wrote:
+> I was just thinking how they could be easily supported. This would work,
+> right? :
+>
+> imap stream tcp nowait root /usr/sbin/tcpd /usr/local/libexec/dovecot/imap-login
+> imaps stream tcp nowait root /usr/sbin/tcpd /usr/local/libexec/dovecot/imap-login --ssl
+>
+> imap-login would try to connect to master process using some named
+> socket. If it couldn't, it would create the master process itself.
+> Master process would work as usual (executes auth and imap processes),
+> except it wouldn't be executing login processes.
+>
+> This wouldn't require much code changing, and it would still be using
+> all the same privilege separations as the standalone version so it would
+> be just a secure.
+>
+> Only thing I'm wondering is if any of the TCP wrappers care about the
+> created child processes? The master process would have to stay alive
+> after the connection that created it dies.
+>
+> I guess I'll implement this soon and try if it works.
+>
+>
+>
+
+
+--
+   Levente                               "Si vis pacem para bellum!"
+
+
+

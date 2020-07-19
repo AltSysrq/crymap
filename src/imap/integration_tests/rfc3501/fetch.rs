@@ -930,3 +930,46 @@ fn error_conditions() {
     assert_eq!(3, responses.len());
     assert_tagged_ok(responses.pop().unwrap());
 }
+
+#[test]
+fn wrapped_headers_not_mangled() {
+    let setup = set_up();
+    let mut client = setup.connect("3501fehm");
+    quick_log_in(&mut client);
+    quick_create(&mut client, "3501fehm");
+    quick_select(&mut client, "3501fehm");
+
+    client
+        .start_append(
+            "3501fehm",
+            s::AppendFragment {
+                flags: None,
+                // This particular date (or something around it) is required to
+                // get the bytes to line up in the right way to trigger the
+                // bug.
+                internal_date: Some(
+                    FixedOffset::east(0).ymd(2003, 2, 26).and_hms(10, 58, 31),
+                ),
+                _marker: PhantomData,
+            },
+            DOVECOT_PREFER_STANDALONE_DAEMONS,
+        )
+        .unwrap();
+
+    let mut buffer = Vec::new();
+    let mut responses = client.finish_append(&mut buffer).unwrap();
+    assert_tagged_ok_any(responses.pop().unwrap());
+
+    fetch_single!(client, c("FETCH 1 BODY.PEEK[]"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Body(s::MsgAttBody {
+                section: None,
+                slice_origin: None,
+                data: lit,
+            }) in fr => {
+                assert_literal_like(
+                    b"Received:", b"\r\n", 2954, false, lit);
+            }
+        };
+    });
+}
