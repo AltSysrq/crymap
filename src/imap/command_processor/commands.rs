@@ -19,7 +19,7 @@
 use std::borrow::Cow;
 use std::convert::TryInto;
 
-use log::error;
+use log::{error, info};
 
 use super::defs::*;
 use crate::support::error::Error;
@@ -124,6 +124,8 @@ impl CommandProcessor {
             s::Command::Uid(s::UidCommand::Expunge(uids)) => {
                 self.cmd_uid_expunge(uids, sender)
             }
+
+            s::Command::Id(parms) => self.cmd_id(parms, sender),
         };
 
         if res.is_ok() {
@@ -198,6 +200,80 @@ impl CommandProcessor {
 
     fn cmd_capability(&mut self, sender: SendResponse<'_>) -> CmdResult {
         sender(s::Response::Capability(capability_data()));
+        success()
+    }
+
+    fn cmd_id(
+        &mut self,
+        ids: Vec<Option<Cow<'_, str>>>,
+        sender: SendResponse<'_>,
+    ) -> CmdResult {
+        // Only take action on the first ID exchange so we don't keep
+        // accumulating stuff in the log prefix.
+        if !self.id_exchanged {
+            let mut user_agent_name = String::new();
+            let mut user_agent_version = String::new();
+            let mut message = String::new();
+
+            for pair in ids.chunks(2) {
+                if 2 != pair.len() {
+                    continue;
+                }
+
+                if let (&Some(ref name), &Some(ref value)) =
+                    (&pair[0], &pair[1])
+                {
+                    if name.eq_ignore_ascii_case("name") {
+                        user_agent_name = value.to_string();
+                    }
+                    if name.eq_ignore_ascii_case("version") {
+                        user_agent_version = value.to_string();
+                    }
+
+                    message.push_str(" \"");
+                    message.push_str(&name);
+                    message.push_str("\" = \"");
+                    message.push_str(&value);
+                    message.push_str("\";");
+                }
+            }
+
+            if !user_agent_name.is_empty() {
+                self.log_prefix.push('(');
+                self.log_prefix.push_str(&user_agent_name);
+                if !user_agent_version.is_empty() {
+                    self.log_prefix.push('/');
+                    self.log_prefix.push_str(&user_agent_version);
+                }
+                self.log_prefix.push(')');
+            }
+
+            info!(
+                "{} ID exchanged; client says it is{}",
+                self.log_prefix, message
+            );
+            self.id_exchanged = true;
+        }
+
+        let mut id_info = vec![
+            Some(Cow::Borrowed("name")),
+            Some(Cow::Borrowed(env!("CARGO_PKG_NAME"))),
+            Some(Cow::Borrowed("version")),
+            Some(Cow::Borrowed(concat!(
+                env!("CARGO_PKG_VERSION_MAJOR"),
+                ".",
+                env!("CARGO_PKG_VERSION_MINOR"),
+                ".",
+                env!("CARGO_PKG_VERSION_PATCH")
+            ))),
+        ];
+
+        for (name, value) in &self.system_config.identification {
+            id_info.push(Some(Cow::Owned(name.clone())));
+            id_info.push(Some(Cow::Owned(value.clone())));
+        }
+
+        sender(s::Response::Id(id_info));
         success()
     }
 

@@ -148,6 +148,7 @@ macro_rules! has_msgatt_matching {
 mod defs;
 
 mod rfc2342;
+mod rfc2971;
 mod rfc3501;
 mod rfc3502;
 mod rfc4315;

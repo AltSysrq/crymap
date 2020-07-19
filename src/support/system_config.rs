@@ -16,6 +16,7 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -29,8 +30,14 @@ pub struct SystemConfig {
     /// Options relating to operational security of Crymap.
     #[serde(default)]
     pub security: SecurityConfig,
+
     /// Configuration for TLS.
     pub tls: TlsConfig,
+
+    /// Extra values to report in the ID command.
+    /// The main useful value here is `support-url`.
+    #[serde(default)]
+    pub identification: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]

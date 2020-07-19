@@ -96,6 +96,7 @@ impl Setup {
                         private_key: PathBuf::new(),
                         certificate_chain: PathBuf::new(),
                     },
+                    identification: std::collections::BTreeMap::new(),
                 }),
                 data_root,
             );

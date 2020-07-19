@@ -35,6 +35,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "IMAP4rev1",
     "APPENDLIMIT=67108864",
     "AUTH=PLAIN",
+    "ID",
     "LITERAL+",
     "MULTIAPPEND",
     "NAMESPACE",
@@ -75,6 +76,8 @@ pub struct CommandProcessor {
     pub(super) multiappend: Option<Multiappend>,
 
     pub(super) logged_out: bool,
+
+    pub(super) id_exchanged: bool,
 }
 
 pub(super) struct Multiappend {
@@ -112,6 +115,8 @@ impl CommandProcessor {
             multiappend: None,
 
             logged_out: false,
+
+            id_exchanged: false,
         }
     }
 

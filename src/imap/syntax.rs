@@ -200,6 +200,10 @@ syntax_rule! {
         #[]
         #[tag(r#"NAMESPACE (("" "/")) NIL NIL"#)]
         Namespace(()),
+        // RFC 2971
+        #[prefix("ID ") nil_if_empty surrounded("(", ")") 0*(" ")]
+        #[primitive(censored_nstring, nstring)]
+        Id(Vec<Option<Cow<'a, str>>>),
     }
 }
 
@@ -1388,6 +1392,10 @@ syntax_rule! {
         #[prefix("XVANQUISH ")]
         #[primitive(verbatim, sequence_set)]
         XVanquish(Cow<'a, str>),
+        // RFC 2971
+        #[prefix("ID ") nil_if_empty surrounded("(", ")") 0*(" ")]
+        #[primitive(censored_nstring, nstring)]
+        Id(Vec<Option<Cow<'a, str>>>),
     }
 }
 

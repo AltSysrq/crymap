@@ -44,6 +44,7 @@ pub fn imap_test() {
             private_key: PathBuf::new(),
             certificate_chain: PathBuf::new(),
         },
+        identification: std::collections::BTreeMap::new(),
     });
 
     fs::DirBuilder::new()
