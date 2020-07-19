@@ -124,6 +124,11 @@ fn mailbox_management() {
          3501mbmm/parent/foo\n",
         list_results_to_str(responses)
     );
+
+    command!(mut responses = client,
+             c("LIST \"\" \"\""));
+    assert_tagged_ok(responses.pop().unwrap());
+    assert_eq!(" \\Noselect\n", list_results_to_str(responses));
 }
 
 #[test]

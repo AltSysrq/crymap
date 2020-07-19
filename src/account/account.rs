@@ -368,7 +368,11 @@ impl Account {
         // special case if there's exactly one pattern, and in other cases the
         // pattern is interpreted literally, i.e., matching an empty mailbox name.
         if 1 == request.patterns.len() && "" == &request.patterns[0] {
-            return Ok(vec![ListResponse::default()]);
+            return Ok(vec![ListResponse {
+                name: String::new(),
+                attributes: vec![MailboxAttribute::Noselect],
+                child_info: vec![],
+            }]);
         }
 
         let mut pattern_prefix = request.reference.clone();
