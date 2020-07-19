@@ -33,6 +33,7 @@ pub(super) use crate::imap::syntax as s;
 
 pub(super) static CAPABILITIES: &[&str] = &[
     "IMAP4rev1",
+    "APPENDLIMIT=67108864",
     "AUTH=PLAIN",
     "LITERAL+",
     "MULTIAPPEND",

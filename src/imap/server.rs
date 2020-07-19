@@ -30,6 +30,7 @@ use super::syntax as s;
 use crate::support::error::Error;
 
 const MAX_CMDLINE: usize = 65536;
+// If this is changed, the APPENDLIMIT= capability must also be updated.
 const APPEND_SIZE_LIMIT: u32 = 64 * 1024 * 1024;
 
 lazy_static! {
