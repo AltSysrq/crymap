@@ -19,6 +19,7 @@
 use std::marker::PhantomData;
 
 use super::super::defs::*;
+use crate::account::model::Flag;
 use crate::support::error::Error;
 use crate::test_data::*;
 
@@ -69,6 +70,36 @@ fn append_message() {
     assert_tagged_ok(responses.pop().unwrap());
     has_untagged_response_matching! {
         s::Response::Exists(2) in responses
+    };
+}
+
+#[test]
+fn append_with_new_flag() {
+    let setup = set_up();
+    let mut client = setup.connect("3501meaf");
+    quick_log_in(&mut client);
+    quick_create(&mut client, "3501meaf");
+    quick_select(&mut client, "3501meaf");
+
+    client
+        .start_append(
+            "3501meaf",
+            s::AppendFragment {
+                flags: Some(vec![Flag::Keyword("plugh".to_owned())]),
+                internal_date: None,
+                _marker: PhantomData,
+            },
+            ENRON_SMALL_MULTIPARTS[0],
+        )
+        .unwrap();
+    let mut buffer = Vec::new();
+    let mut responses = client.finish_append(&mut buffer).unwrap();
+    assert!(responses.len() >= 2);
+    assert_tagged_ok(responses.pop().unwrap());
+    has_untagged_response_matching! {
+        s::Response::Flags(ref flags) in responses => {
+            assert!(flags.contains(&Flag::Keyword("plugh".to_owned())));
+        }
     };
 }
 
