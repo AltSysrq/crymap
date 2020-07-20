@@ -311,9 +311,7 @@ impl CommandProcessor {
             return auth_misconfiguration();
         }
 
-        // Chroot successful, adjust the log prefix and path to reflect that
-        self.log_prefix
-            .push_str(&format!(":[chroot {}]", user_dir.display()));
+        // Chroot successful, adjust the path to reflect that
         user_dir.push("/"); // Clears everything but '/'
 
         // Now we can finish dropping privileges
