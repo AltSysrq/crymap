@@ -45,7 +45,7 @@ pub struct Server<R, W> {
     sent_bye: bool,
 }
 
-impl<R: BufRead + Send + Sync, W: Write + Send> Server<R, W> {
+impl<R: BufRead, W: Write + Send> Server<R, W> {
     pub fn new(read: R, write: W, processor: CommandProcessor) -> Self {
         Server {
             read,

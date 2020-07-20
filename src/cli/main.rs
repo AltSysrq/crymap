@@ -168,6 +168,8 @@ fn server(cmd: ServerCommand) {
         ServerSubcommand::User(ServerUserSubcommand::Add(cmd)) => {
             super::user::add(cmd, users_root);
         }
-        ServerSubcommand::ServeImaps => unimplemented!(),
+        ServerSubcommand::ServeImaps => {
+            super::serve::serve(system_config, root, users_root);
+        }
     }
 }

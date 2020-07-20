@@ -26,4 +26,5 @@ macro_rules! die {
 pub mod main;
 
 mod imap_test;
+mod serve;
 mod user;
