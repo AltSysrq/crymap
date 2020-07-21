@@ -33,9 +33,17 @@ fn return_options_honoured() {
     quick_create(&mut client, "5258retn/single");
     ok_command!(client, c("SUBSCRIBE 5258retn/subscribed"));
 
-    // RETURN doesn't allow specifying nothing, so we exercise the extended
-    // syntax by sending a list of one pattern instead.
+    // Syntax by sending a list of one pattern counts as using extended syntax.
     command!(mut responses = client, c("LIST \"\" (5258retn/%)"));
+    assert_tagged_ok(responses.pop().unwrap());
+    assert_eq!(
+        "5258retn/parent\n\
+         5258retn/single\n\
+         5258retn/subscribed\n",
+        list_results_to_str(responses)
+    );
+
+    command!(mut responses = client, c("LIST \"\" 5258retn/% RETURN ()"));
     assert_tagged_ok(responses.pop().unwrap());
     assert_eq!(
         "5258retn/parent\n\

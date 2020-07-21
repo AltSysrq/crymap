@@ -697,7 +697,7 @@ syntax_rule! {
         #[]
         #[delegate]
         pattern: MboxOrPat<'a>,
-        #[opt surrounded(" RETURN (", ")") 1*(" ")]
+        #[opt surrounded(" RETURN (", ")") 0*(" ")]
         #[delegate(ListReturnOpt)]
         return_opts: Option<Vec<ListReturnOpt>>,
     }
