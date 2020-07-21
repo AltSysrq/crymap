@@ -369,14 +369,23 @@ pub fn list_results_to_str(lines: Vec<s::ResponseLine<'_>>) -> String {
         match line {
             s::ResponseLine {
                 tag: None,
-                response: s::Response::List(s::MailboxList { mut flags, name }),
+                response: s::Response::List(mut ml),
             } => {
-                flags.sort();
-                ret.push_str(&name.raw);
-                for flag in flags {
+                ml.flags.sort();
+                ret.push_str(&ml.name.raw);
+                for flag in ml.flags {
                     ret.push(' ');
                     ret.push_str(&flag);
                 }
+
+                if let Some(child_info) = ml.child_info {
+                    ret.push_str(" CHILDINFO");
+                    for info in child_info {
+                        ret.push(' ');
+                        ret.push_str(&info);
+                    }
+                }
+
                 ret.push('\n');
             }
 
@@ -393,7 +402,10 @@ pub fn lsub_results_to_str(lines: Vec<s::ResponseLine<'_>>) -> String {
         match line {
             s::ResponseLine {
                 tag: None,
-                response: s::Response::Lsub(s::MailboxList { mut flags, name }),
+                response:
+                    s::Response::Lsub(s::MailboxList {
+                        mut flags, name, ..
+                    }),
             } => {
                 flags.sort();
                 ret.push_str(&name.raw);

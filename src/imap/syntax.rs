@@ -688,12 +688,50 @@ syntax_rule! {
 syntax_rule! {
     #[prefix("LIST ")]
     struct ListCommand<'a> {
+        #[opt surrounded("(", ") ") 0*(" ")]
+        #[delegate(ListSelectOpt)]
+        select_opts: Option<Vec<ListSelectOpt>>,
         #[suffix(" ")]
         #[primitive(mailbox, mailbox)]
         reference: MailboxName<'a>,
         #[]
+        #[delegate]
+        pattern: MboxOrPat<'a>,
+        #[opt surrounded(" RETURN (", ")") 1*(" ")]
+        #[delegate(ListReturnOpt)]
+        return_opts: Option<Vec<ListReturnOpt>>,
+    }
+}
+
+// For this and ListReturnOpt, RFC 5258 describes formal syntax which would
+// have us recognise atoms for as-yet-unknown items. However, in the semantics,
+// it describes that encountering such an unknown item should be rejected with
+// a BAD, which means that that whole part of the syntax is a waste of time for
+// everyone and we can just use simple enum item matching.
+simple_enum! {
+    enum ListSelectOpt {
+        RecursiveMatch("RECURSIVEMATCH"),
+        Remote("REMOTE"),
+        Subscribed("SUBSCRIBED"),
+    }
+}
+
+syntax_rule! {
+    #[]
+    enum MboxOrPat<'a> {
+        #[]
         #[primitive(mailbox, list_mailbox)]
-        pattern: MailboxName<'a>,
+        Single(MailboxName<'a>),
+        #[surrounded("(", ")") 1*(" ")]
+        #[primitive(mailbox, list_mailbox)]
+        Multi(Vec<MailboxName<'a>>),
+    }
+}
+
+simple_enum! {
+    enum ListReturnOpt {
+        Children("CHILDREN"),
+        Subscribed("SUBSCRIBED"),
     }
 }
 
@@ -721,6 +759,15 @@ syntax_rule! {
         #[]
         #[primitive(mailbox, mailbox)]
         name: MailboxName<'a>,
+        // The formal grammar for the RFC 5258 extended data is appallingly
+        // complex and is even infinitely recursive.
+        // The only thing we ever need it for is CHILDINFO, so we just
+        // hard-code that grammar.
+        // It's unclear why these all need to be quoted strings when all
+        // possible values are simple atoms.
+        #[opt surrounded(r#" ("CHILDINFO" ("#, "))") 1*(" ")]
+        #[primitive(censored_string, string)]
+        child_info: Option<Vec<Cow<'a, str>>>,
     }
 }
 
@@ -2269,8 +2316,10 @@ mod test {
             ListCommand,
             r#"LIST "" INBOX"#,
             ListCommand {
+                select_opts: None,
                 reference: mn(""),
-                pattern: mn("INBOX"),
+                pattern: MboxOrPat::Single(mn("INBOX")),
+                return_opts: None,
             }
         );
         assert_reversible!(
@@ -2287,8 +2336,10 @@ mod test {
             ListCommand,
             r#"LIST "" "föö""#,
             ListCommand {
+                select_opts: None,
                 reference: mn(""),
-                pattern: mn("föö"),
+                pattern: MboxOrPat::Single(mn("föö")),
+                return_opts: None,
             }
         );
 
@@ -2299,6 +2350,7 @@ mod test {
             MailboxList {
                 flags: vec![],
                 name: mn("~peter/mail/台北/日本語"),
+                child_info: None,
             }
         );
         assert_reversible!(
@@ -2308,6 +2360,7 @@ mod test {
             MailboxList {
                 flags: vec![s("\\Noinferiors")],
                 name: mn("~peter/mail/台北/日本語"),
+                child_info: None,
             }
         );
         assert_reversible!(
@@ -2317,6 +2370,7 @@ mod test {
             MailboxList {
                 flags: vec![s("\\Noinferiors"), s("\\Marked")],
                 name: mn("~peter/mail/台北/日本語"),
+                child_info: None,
             }
         );
     }
@@ -3493,8 +3547,10 @@ mod test {
             Command,
             "LIST \"\" foo",
             Command::List(ListCommand {
+                select_opts: None,
                 reference: mn(""),
-                pattern: mn("foo"),
+                pattern: MboxOrPat::Single(mn("foo")),
+                return_opts: None,
             })
         );
         assert_reversible!(
@@ -3862,6 +3918,7 @@ mod test {
                 response: Response::List(MailboxList {
                     flags: vec![],
                     name: mn("INBOX"),
+                    child_info: None,
                 }),
             }
         );
@@ -3873,6 +3930,7 @@ mod test {
                 response: Response::List(MailboxList {
                     flags: vec![s("\\Marked"), s("\\Subscribed")],
                     name: mn("INBOX"),
+                    child_info: None,
                 }),
             }
         );
@@ -3884,6 +3942,7 @@ mod test {
                 response: Response::Lsub(MailboxList {
                     flags: vec![s("\\Noselect")],
                     name: mn("foo bar"),
+                    child_info: None,
                 }),
             }
         );

@@ -100,18 +100,56 @@ impl CommandProcessor {
         cmd: s::ListCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
+        let is_extended = cmd.select_opts.is_some()
+            || cmd.return_opts.is_some()
+            || matches!(cmd.pattern, s::MboxOrPat::Multi(_));
+
         let reference = cmd.reference.get_utf8(self.unicode_aware);
-        let pattern = cmd.pattern.get_utf8(self.unicode_aware);
+        let patterns = match cmd.pattern {
+            s::MboxOrPat::Single(pat) => {
+                vec![pat.get_utf8(self.unicode_aware).into_owned()]
+            }
+            s::MboxOrPat::Multi(pats) => pats
+                .into_iter()
+                .map(|pat| pat.get_utf8(self.unicode_aware).into_owned())
+                .collect::<Vec<_>>(),
+        };
+
+        let select_opts = cmd.select_opts.unwrap_or_default();
+        let return_opts = cmd.return_opts.unwrap_or_default();
+
+        // If select_opts contains RECURSIVEMATCH, it must also contain some
+        // item which implies filtering.
+        if select_opts.contains(&s::ListSelectOpt::RecursiveMatch)
+            && !select_opts.contains(&s::ListSelectOpt::Subscribed)
+        {
+            return Err(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Bad,
+                code: None,
+                quip: Some(Cow::Borrowed(
+                    "RECURSIVEMATCH may not be used without a filtering term",
+                )),
+            }));
+        }
+
+        // NB We can ignore REMOTE in return_opts because it is additive, and
+        // we don't have such a concept.
+
         let request = ListRequest {
             reference: reference.into_owned(),
-            patterns: vec![pattern.into_owned()],
-            select_subscribed: false,
+            patterns,
+            select_subscribed: select_opts
+                .contains(&s::ListSelectOpt::Subscribed),
             select_special_use: false,
-            recursive_match: false,
-            return_subscribed: false,
+            recursive_match: select_opts
+                .contains(&s::ListSelectOpt::RecursiveMatch),
+            return_subscribed: select_opts
+                .contains(&s::ListSelectOpt::Subscribed)
+                || return_opts.contains(&s::ListReturnOpt::Subscribed),
             // For non-extended LIST, we return \HasChildren and
             // \HasNoChildren. For extended LIST, we'll let the client decide.
-            return_children: true,
+            return_children: !is_extended
+                || return_opts.contains(&s::ListReturnOpt::Children),
             return_special_use: false,
             lsub_style: false,
         };
@@ -126,6 +164,17 @@ impl CommandProcessor {
                     .map(|a| Cow::Borrowed(a.name()))
                     .collect(),
                 name: MailboxName::of_utf8(Cow::Owned(response.name)),
+                child_info: if response.child_info.is_empty() {
+                    None
+                } else {
+                    Some(
+                        response
+                            .child_info
+                            .into_iter()
+                            .map(Cow::Borrowed)
+                            .collect(),
+                    )
+                },
             }));
         }
 
@@ -161,6 +210,7 @@ impl CommandProcessor {
                     .map(|a| Cow::Borrowed(a.name()))
                     .collect(),
                 name: MailboxName::of_utf8(Cow::Owned(response.name)),
+                child_info: None,
             }));
         }
 

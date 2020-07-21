@@ -38,6 +38,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "CHILDREN",
     "ENABLE",
     "ID",
+    "LIST-EXTENDED",
     "LITERAL+",
     "MULTIAPPEND",
     "NAMESPACE",
