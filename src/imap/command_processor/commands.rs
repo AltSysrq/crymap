@@ -216,6 +216,10 @@ impl CommandProcessor {
         for ext in exts {
             if "XYZZY".eq_ignore_ascii_case(&ext) {
                 enabled.push(ext);
+            } else if "UTF8=ACCEPT".eq_ignore_ascii_case(&ext) {
+                self.unicode_aware = true;
+                self.utf8_enabled = true;
+                enabled.push(ext);
             }
         }
 

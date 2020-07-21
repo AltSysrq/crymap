@@ -17,7 +17,6 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
-use std::marker::PhantomData;
 
 use chrono::prelude::*;
 
@@ -216,11 +215,7 @@ fn fetch_envelope_with_obsolete_routes() {
     client
         .start_append(
             "3501feor",
-            s::AppendFragment {
-                flags: None,
-                internal_date: None,
-                _marker: PhantomData,
-            },
+            s::AppendFragment::default(),
             WITH_OBSOLETE_ROUTING,
         )
         .unwrap();
@@ -945,14 +940,13 @@ fn wrapped_headers_not_mangled() {
         .start_append(
             "3501fehm",
             s::AppendFragment {
-                flags: None,
                 // This particular date (or something around it) is required to
                 // get the bytes to line up in the right way to trigger the
                 // bug.
                 internal_date: Some(
                     FixedOffset::east(0).ymd(2003, 2, 26).and_hms(10, 58, 31),
                 ),
-                _marker: PhantomData,
+                ..s::AppendFragment::default()
             },
             DOVECOT_PREFER_STANDALONE_DAEMONS,
         )

@@ -1444,8 +1444,22 @@ syntax_rule! {
         #[primitive(datetime, datetime)]
         internal_date: Option<DateTime<FixedOffset>>,
         #[]
+        #[cond("UTF8 (")]
+        utf8: bool,
+        #[]
         #[phantom]
         _marker: PhantomData<&'a ()>,
+    }
+}
+
+impl<'a> Default for AppendFragment<'a> {
+    fn default() -> Self {
+        AppendFragment {
+            flags: None,
+            internal_date: None,
+            utf8: false,
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -3994,6 +4008,21 @@ mod test {
                 first_fragment: AppendFragment {
                     flags: None,
                     internal_date: None,
+                    utf8: false,
+                    _marker: PhantomData,
+                },
+            }
+        );
+        assert_reversible!(
+            AppendCommandStart,
+            "1 APPEND dst UTF8 (",
+            AppendCommandStart {
+                tag: s("1"),
+                mailbox: mn("dst"),
+                first_fragment: AppendFragment {
+                    flags: None,
+                    internal_date: None,
+                    utf8: true,
                     _marker: PhantomData,
                 },
             }
@@ -4007,6 +4036,7 @@ mod test {
                 first_fragment: AppendFragment {
                     flags: Some(vec![]),
                     internal_date: None,
+                    utf8: false,
                     _marker: PhantomData,
                 },
             }
@@ -4020,6 +4050,7 @@ mod test {
                 first_fragment: AppendFragment {
                     flags: Some(vec![Flag::Deleted]),
                     internal_date: None,
+                    utf8: false,
                     _marker: PhantomData,
                 },
             }
@@ -4036,6 +4067,7 @@ mod test {
                         Flag::Keyword("keyword".to_owned())
                     ]),
                     internal_date: None,
+                    utf8: false,
                     _marker: PhantomData,
                 },
             }
@@ -4053,6 +4085,7 @@ mod test {
                             .ymd(2020, 7, 4)
                             .and_hms(16, 31, 0)
                     ),
+                    utf8: false,
                     _marker: PhantomData,
                 }
             }
@@ -4070,6 +4103,7 @@ mod test {
                             .ymd(2020, 7, 4)
                             .and_hms(16, 31, 0)
                     ),
+                    utf8: false,
                     _marker: PhantomData,
                 }
             }

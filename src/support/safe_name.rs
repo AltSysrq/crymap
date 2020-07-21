@@ -33,18 +33,31 @@ pub fn is_safe_name(name: &str) -> bool {
     !name.is_empty() &&
         // Block directory traversal through .. and creation of hidden files on
         // UNIX
-        name.chars().next() != Some('.') &&
-        name.find('/').is_none() &&
+        !name.starts_with(".") &&
+        // Names beginning with # have special meaning in IMAP
+        !name.starts_with("#") &&
+        !name.chars().any(is_forbidden_char)
+}
+
+fn is_forbidden_char(ch: char) -> bool {
+    match ch {
+        // '/' is the hierarchy delimiter
+        '/' |
         // Only a path separator on Windows, but always block since it has high
         // potential of causing problems
-        name.find('\\').is_none() &&
-        // Names beginning with # have special meaning in IMAP
-        name.chars().next() != Some('#') &&
+        '\\' |
         // Don't allow any ASCII control characters
-        name.find(|c| c < ' ' || c == '\x7F').is_none() &&
+        '\0'..='\x1F' | '\x7F' |
         // * and % are very special in *some* IMAP contexts, so forbid
         // everywhere
-        name.find(|c| c == '*' || c == '%').is_none()
+        '*' | '%' |
+        // RFC 5198 forbids C1 control characters
+        '\u{80}'..='\u{9F}' |
+        // RFC 6855 forbids the Unicode LINE SEPARATOR and PARAGRAPH SEPARATOR
+        // characters
+        '\u{2028}' | '\u{2029}' => true,
+        _ => false,
+    }
 }
 
 #[cfg(test)]

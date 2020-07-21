@@ -78,6 +78,19 @@ impl CommandProcessor {
             }));
         }
 
+        // UTF8 literals are nothing but syntax salt and a waste of everyone's
+        // time, but we enforce the requirement that they can't be used without
+        // ENABLE UTF8=ACCEPT anyway.
+        if cmd.utf8 && !self.utf8_enabled {
+            return Err(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::No,
+                code: None,
+                quip: Some(Cow::Borrowed(
+                    "UTF8 literal not allowed until ENABLE UTF8=ACCEPT",
+                )),
+            }));
+        }
+
         let append = self
             .multiappend
             .as_mut()

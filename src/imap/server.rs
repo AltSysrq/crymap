@@ -90,6 +90,7 @@ impl<R: BufRead, W: Write + Send> Server<R, W> {
                     self.accept_literal(literal_plus)?;
 
                     let tag = (*append.tag).to_owned();
+                    let utf8 = append.first_fragment.utf8;
                     let mut literal_reader =
                         self.read.by_ref().take(length.into());
                     if let Err(resp) = self.processor.cmd_append_start(
@@ -109,7 +110,7 @@ impl<R: BufRead, W: Write + Send> Server<R, W> {
                         continue;
                     }
 
-                    self.handle_append(&mut cmdline, tag)?;
+                    self.handle_append(&mut cmdline, tag, utf8)?;
                 } else {
                     // Not an append; just add the literal to the command line.
 
@@ -434,21 +435,49 @@ impl<R: BufRead, W: Write + Send> Server<R, W> {
     ///
     /// This must be called immediately after the literal of the first item has
     /// been fully read.
+    ///
+    /// The `utf8` flag indicates whether we need to expect the end of a UTF8
+    /// literal.
     fn handle_append(
         &mut self,
         cmdline: &mut Vec<u8>,
         tag: String,
+        mut utf8: bool,
     ) -> Result<(), Error> {
         loop {
             cmdline.clear();
             let nread = self.buffer_next_line(cmdline, false)?;
-            let nread = match nread {
+            let mut nread = match nread {
                 Some(n) => n,
                 None => {
                     self.processor.cmd_append_abort();
                     break;
                 }
             };
+
+            // If we just ended a UTF8 append item, check for the closing
+            // parenthesis
+            if utf8 {
+                if Some(&b')') != cmdline.get(0) {
+                    // Recovering from the unmatched parenthesis is awkward and not
+                    // that important to do, so just give up.
+                    self.send_response(s::ResponseLine {
+                        tag: None,
+                        response: s::Response::Cond(s::CondResponse {
+                            cond: s::RespCondType::Bye,
+                            code: Some(s::RespTextCode::Parse(())),
+                            quip: Some(Cow::Borrowed(
+                                "Missing ')' after UTF8 literal",
+                            )),
+                        }),
+                    })?;
+                    self.processor.cmd_append_abort();
+                    return Ok(());
+                } else {
+                    cmdline.remove(0);
+                    nread -= 1;
+                }
+            }
 
             // End of append if the command line is empty
             if cmdline.is_empty() {
@@ -480,6 +509,7 @@ impl<R: BufRead, W: Write + Send> Server<R, W> {
                 if let Ok((b"", frag)) =
                     s::AppendFragment::parse(before_literal)
                 {
+                    utf8 = frag.utf8;
                     self.accept_literal(literal_plus)?;
 
                     let mut literal_reader =
@@ -581,7 +611,7 @@ impl<R: BufRead, W: Write + Send> Server<R, W> {
         let mut w = self.write.lock().unwrap();
         {
             let mut w =
-                LexWriter::new(&mut *w, false, self.processor.unicode_aware());
+                LexWriter::new(&mut *w, self.processor.unicode_aware(), false);
             r.write_to(&mut w)?;
             w.verbatim_bytes(b"\r\n")?;
         }
@@ -596,7 +626,7 @@ fn response_sender<'a>(
 ) -> impl Fn(s::Response<'_>) + Send + Sync + 'a {
     move |r| {
         let mut w = w.lock().unwrap();
-        let mut w = LexWriter::new(&mut *w, false, unicode_aware);
+        let mut w = LexWriter::new(&mut *w, unicode_aware, false);
         let _ = s::ResponseLine {
             tag: None,
             response: r,

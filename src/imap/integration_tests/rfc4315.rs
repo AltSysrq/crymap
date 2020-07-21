@@ -17,7 +17,6 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
-use std::marker::PhantomData;
 
 use super::defs::*;
 use crate::support::error::Error;
@@ -79,23 +78,12 @@ fn append_uid() {
     client
         .start_append(
             "4315appu",
-            s::AppendFragment {
-                flags: None,
-                internal_date: None,
-                _marker: PhantomData,
-            },
+            s::AppendFragment::default(),
             ENRON_SMALL_MULTIPARTS[0],
         )
         .unwrap();
     client
-        .append_item(
-            s::AppendFragment {
-                flags: None,
-                internal_date: None,
-                _marker: PhantomData,
-            },
-            ENRON_SMALL_MULTIPARTS[1],
-        )
+        .append_item(s::AppendFragment::default(), ENRON_SMALL_MULTIPARTS[1])
         .unwrap();
 
     let mut buffer = Vec::new();

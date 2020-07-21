@@ -252,6 +252,12 @@ impl<R: BufRead, W: Write> Client<R, W> {
 
         self.trace(true, ">>[lit]", data);
         self.write.write_all(data)?;
+
+        if command.first_fragment.utf8 {
+            self.trace(true, ">>[app]", b")");
+            self.write.write_all(b")")?;
+        }
+
         Ok(())
     }
 
@@ -277,6 +283,12 @@ impl<R: BufRead, W: Write> Client<R, W> {
 
         self.trace(true, ">>[lit]", data);
         self.write.write_all(data)?;
+
+        if frag.utf8 {
+            self.trace(true, ">>[app] ", b")");
+            self.write.write_all(b")")?;
+        }
+
         Ok(())
     }
 

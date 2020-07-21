@@ -41,6 +41,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "MULTIAPPEND",
     "NAMESPACE",
     "UIDPLUS",
+    "UTF8=ACCEPT",
     "XPURGE",
     "XVANQUISH",
     "XYZZY",
@@ -73,6 +74,7 @@ pub struct CommandProcessor {
     pub(super) account: Option<Account>,
     pub(super) selected: Option<StatefulMailbox>,
     pub(super) unicode_aware: bool,
+    pub(super) utf8_enabled: bool,
 
     pub(super) multiappend: Option<Multiappend>,
 
@@ -112,6 +114,7 @@ impl CommandProcessor {
             account: None,
             selected: None,
             unicode_aware: false,
+            utf8_enabled: false,
 
             multiappend: None,
 

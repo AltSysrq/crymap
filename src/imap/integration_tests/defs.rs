@@ -19,7 +19,6 @@
 use std::borrow::Cow;
 use std::fs;
 use std::io;
-use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
 
@@ -174,15 +173,7 @@ pub fn quick_append_enron(
 ) {
     for &message in &ENRON_SMALL_MULTIPARTS[..num_messages] {
         client
-            .start_append(
-                mailbox,
-                s::AppendFragment {
-                    flags: None,
-                    internal_date: None,
-                    _marker: PhantomData,
-                },
-                message,
-            )
+            .start_append(mailbox, s::AppendFragment::default(), message)
             .unwrap();
 
         let mut buffer = Vec::new();
@@ -252,7 +243,7 @@ pub fn examine_shared(client: &mut PipeClient) {
                     s::AppendFragment {
                         flags: $flags,
                         internal_date: internal_date_for_uid($uid),
-                        _marker: PhantomData,
+                        ..s::AppendFragment::default()
                     },
                     $message,
                 )

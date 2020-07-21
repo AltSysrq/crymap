@@ -16,8 +16,6 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-use std::marker::PhantomData;
-
 use super::super::defs::*;
 use crate::account::model::Flag;
 use crate::support::error::Error;
@@ -33,11 +31,7 @@ fn append_message() {
     client
         .start_append(
             "3501meam",
-            s::AppendFragment {
-                flags: None,
-                internal_date: None,
-                _marker: PhantomData,
-            },
+            s::AppendFragment::default(),
             ENRON_SMALL_MULTIPARTS[0],
         )
         .unwrap();
@@ -55,11 +49,7 @@ fn append_message() {
     client
         .start_append(
             "3501meam",
-            s::AppendFragment {
-                flags: None,
-                internal_date: None,
-                _marker: PhantomData,
-            },
+            s::AppendFragment::default(),
             ENRON_SMALL_MULTIPARTS[1],
         )
         .unwrap();
@@ -86,8 +76,7 @@ fn append_with_new_flag() {
             "3501meaf",
             s::AppendFragment {
                 flags: Some(vec![Flag::Keyword("plugh".to_owned())]),
-                internal_date: None,
-                _marker: PhantomData,
+                ..s::AppendFragment::default()
             },
             ENRON_SMALL_MULTIPARTS[0],
         )

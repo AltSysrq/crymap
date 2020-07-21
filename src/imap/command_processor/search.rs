@@ -59,6 +59,10 @@ impl CommandProcessor {
         cmd: s::SearchCommand<'_>,
     ) -> PartialResult<SearchRequest> {
         if let Some(charset) = cmd.charset {
+            // RFC 6855 says we SHOULD reject SEARCH commands with a charset
+            // specification. We don't, since that's a landmine for clients,
+            // and the only thing we accept is UTF-8 either way, so there's no
+            // possibility for conflicting charsets.
             if !charset.eq_ignore_ascii_case("us-ascii")
                 && !charset.eq_ignore_ascii_case("utf-8")
             {

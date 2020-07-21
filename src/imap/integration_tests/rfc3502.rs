@@ -17,7 +17,6 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
-use std::marker::PhantomData;
 
 use chrono::prelude::*;
 
@@ -50,35 +49,13 @@ fn happy_paths() {
     quick_select(&mut client, "3502hapy");
 
     client
-        .start_append(
-            "3502hapy",
-            s::AppendFragment {
-                flags: None,
-                internal_date: None,
-                _marker: PhantomData,
-            },
-            CHRISTMAS_TREE,
-        )
+        .start_append("3502hapy", s::AppendFragment::default(), CHRISTMAS_TREE)
         .unwrap();
     client
-        .append_item(
-            s::AppendFragment {
-                flags: None,
-                internal_date: None,
-                _marker: PhantomData,
-            },
-            ENRON_SMALL_MULTIPARTS[0],
-        )
+        .append_item(s::AppendFragment::default(), ENRON_SMALL_MULTIPARTS[0])
         .unwrap();
     client
-        .append_item(
-            s::AppendFragment {
-                flags: None,
-                internal_date: None,
-                _marker: PhantomData,
-            },
-            ENRON_SMALL_MULTIPARTS[1],
-        )
+        .append_item(s::AppendFragment::default(), ENRON_SMALL_MULTIPARTS[1])
         .unwrap();
 
     let mut buffer = Vec::new();
@@ -96,8 +73,7 @@ fn happy_paths() {
             "3502hapy",
             s::AppendFragment {
                 flags: Some(vec![Flag::Draft, Flag::Seen]),
-                internal_date: None,
-                _marker: PhantomData,
+                ..s::AppendFragment::default()
             },
             ENRON_SMALL_MULTIPARTS[2],
         )
@@ -110,7 +86,7 @@ fn happy_paths() {
                     FixedOffset::east(0)
                         .from_utc_datetime(&Utc::now().naive_local()),
                 ),
-                _marker: PhantomData,
+                ..s::AppendFragment::default()
             },
             ENRON_SMALL_MULTIPARTS[3],
         )
