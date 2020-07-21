@@ -162,6 +162,7 @@ pub fn quick_create(client: &mut PipeClient, mailbox: &str) {
         client,
         s::Command::Create(s::CreateCommand {
             mailbox: MailboxName::of_wire(Cow::Borrowed(mailbox)),
+            special_use: None,
         })
     );
 }

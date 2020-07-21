@@ -349,6 +349,10 @@ syntax_rule! {
         #[prefix("COPYUID ")]
         #[delegate]
         CopyUid(CopyUidData<'a>),
+        // RFC 6154
+        #[]
+        #[tag("USEATTR")]
+        UseAttr(()),
         // We don't handle unknown response codes, since the server never needs
         // to parse this. Unknown response codes just become part of the text.
     }
@@ -1194,6 +1198,9 @@ syntax_rule! {
         #[]
         #[primitive(mailbox, mailbox)]
         mailbox: MailboxName<'a>,
+        #[opt surrounded(" USE (", ")") 0*(" ")]
+        #[primitive(verbatim, backslash_atom)]
+        special_use: Option<Vec<Cow<'a, str>>>,
     }
 }
 
@@ -3255,6 +3262,7 @@ mod test {
             "CREATE mailbox",
             CreateCommand {
                 mailbox: mn("mailbox"),
+                special_use: None,
             }
         );
         assert_reversible!(
@@ -3262,9 +3270,27 @@ mod test {
             CreateCommand,
             "CREATE \"föö\"",
             CreateCommand {
-                mailbox: mn("föö")
+                mailbox: mn("föö"),
+                special_use: None,
             }
         );
+        assert_reversible!(
+            CreateCommand,
+            "CREATE mailbox USE (\\Trash)",
+            CreateCommand {
+                mailbox: mn("mailbox"),
+                special_use: Some(vec![s("\\Trash")]),
+            }
+        );
+        assert_reversible!(
+            CreateCommand,
+            "CREATE mailbox USE (\\Trash \\Sent)",
+            CreateCommand {
+                mailbox: mn("mailbox"),
+                special_use: Some(vec![s("\\Trash"), s("\\Sent")]),
+            }
+        );
+
         assert_reversible!(
             DeleteCommand,
             "DELETE mailbox",
@@ -3537,7 +3563,10 @@ mod test {
         assert_reversible!(
             Command,
             "CREATE foo",
-            Command::Create(CreateCommand { mailbox: mn("foo") })
+            Command::Create(CreateCommand {
+                mailbox: mn("foo"),
+                special_use: None,
+            })
         );
         assert_reversible!(
             Command,

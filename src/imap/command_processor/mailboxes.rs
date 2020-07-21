@@ -54,7 +54,12 @@ impl CommandProcessor {
         let account = account!(self)?;
         let request = CreateRequest {
             name: cmd.mailbox.get_utf8(self.unicode_aware).into_owned(),
-            special_use: vec![],
+            special_use: cmd
+                .special_use
+                .unwrap_or_default()
+                .into_iter()
+                .map(|u| u.into_owned())
+                .collect(),
         };
         account.create(request).map_err(map_error! {
             self,
@@ -62,8 +67,8 @@ impl CommandProcessor {
                 (No, Some(s::RespTextCode::AlreadyExists(()))),
             UnsafeName | BadOperationOnInbox =>
                 (No, Some(s::RespTextCode::Cannot(()))),
-            // TODO This has its own code
-            UnsupportedSpecialUse => (No, None),
+            UnsupportedSpecialUse =>
+                (No, Some(s::RespTextCode::UseAttr(()))),
         })?;
         success()
     }
@@ -122,6 +127,7 @@ impl CommandProcessor {
         // item which implies filtering.
         if select_opts.contains(&s::ListSelectOpt::RecursiveMatch)
             && !select_opts.contains(&s::ListSelectOpt::Subscribed)
+            && !select_opts.contains(&s::ListSelectOpt::SpecialUse)
         {
             return Err(s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::Bad,

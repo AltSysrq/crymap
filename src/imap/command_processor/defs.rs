@@ -36,6 +36,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "APPENDLIMIT=67108864",
     "AUTH=PLAIN",
     "CHILDREN",
+    "CREATE-SPECIAL-USE",
     "ENABLE",
     "ID",
     "LIST-EXTENDED",
