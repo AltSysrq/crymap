@@ -37,25 +37,12 @@
 //! don't have to do that, and clients are (should) already be designed to
 //! tolerate MIME data with 8-bit values in the headers.
 
-use std::borrow::Cow;
-
 use super::defs::*;
 use crate::test_data::*;
 
 #[test]
 fn capability_declared() {
-    let setup = set_up();
-    let mut client = setup.connect("6855capa");
-
-    let mut buffer = Vec::new();
-    let response = client.read_one_response(&mut buffer).unwrap();
-    unpack_cond_response! {
-        (None, s::RespCondType::Ok, Some(s::RespTextCode::Capability(caps)), _)
-            = response
-        => {
-            assert!(caps.capabilities.contains(&Cow::Borrowed("UTF8=ACCEPT")));
-        }
-    }
+    test_require_capability("6855capa", "UTF8=ACCEPT");
 }
 
 #[test]

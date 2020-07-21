@@ -21,25 +21,12 @@
 //! Note that some tests involving LITERAL+ handling in unusual situations is
 //! handled by `rfc3501::bad_commands` due to its lower-level nature.
 
-use std::borrow::Cow;
-
 use super::defs::*;
 use crate::test_data;
 
 #[test]
 fn capability_declared() {
-    let setup = set_up();
-    let mut client = setup.connect("7888capa");
-
-    let mut buffer = Vec::new();
-    let response = client.read_one_response(&mut buffer).unwrap();
-    unpack_cond_response! {
-        (None, s::RespCondType::Ok, Some(s::RespTextCode::Capability(caps)), _)
-            = response
-        => {
-            assert!(caps.capabilities.contains(&Cow::Borrowed("LITERAL+")));
-        }
-    }
+    test_require_capability("7888capa", "LITERAL+");
 }
 
 #[test]

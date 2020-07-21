@@ -19,52 +19,6 @@
 use super::super::defs::*;
 use crate::support::error::Error;
 
-fn list_results_to_str(lines: Vec<s::ResponseLine<'_>>) -> String {
-    let mut ret = String::new();
-    for line in lines {
-        match line {
-            s::ResponseLine {
-                tag: None,
-                response: s::Response::List(s::MailboxList { flags, name }),
-            } => {
-                ret.push_str(&name.raw);
-                for flag in flags {
-                    ret.push(' ');
-                    ret.push_str(&flag);
-                }
-                ret.push('\n');
-            }
-
-            line => panic!("Unexpected response line: {:?}", line),
-        }
-    }
-
-    ret
-}
-
-fn lsub_results_to_str(lines: Vec<s::ResponseLine<'_>>) -> String {
-    let mut ret = String::new();
-    for line in lines {
-        match line {
-            s::ResponseLine {
-                tag: None,
-                response: s::Response::Lsub(s::MailboxList { flags, name }),
-            } => {
-                ret.push_str(&name.raw);
-                for flag in flags {
-                    ret.push(' ');
-                    ret.push_str(&flag);
-                }
-                ret.push('\n');
-            }
-
-            line => panic!("Unexpected response line: {:?}", line),
-        }
-    }
-
-    ret
-}
-
 #[test]
 fn mailbox_management() {
     let setup = set_up();
@@ -78,11 +32,13 @@ fn mailbox_management() {
              c("LIST \"\" 3501mbmm/*"));
     assert_tagged_ok(responses.pop().unwrap());
 
+    // \HasChildren and \HasNoChildren are from the RFC 3348 CHILDREN
+    // extension, which adds these implicitly.
     assert_eq!(
-        "3501mbmm/noselect\n\
-         3501mbmm/noselect/foo\n\
-         3501mbmm/parent\n\
-         3501mbmm/parent/bar\n",
+        "3501mbmm/noselect \\HasChildren\n\
+         3501mbmm/noselect/foo \\HasNoChildren\n\
+         3501mbmm/parent \\HasChildren\n\
+         3501mbmm/parent/bar \\HasNoChildren\n",
         list_results_to_str(responses)
     );
 
@@ -106,10 +62,10 @@ fn mailbox_management() {
     assert_tagged_ok(responses.pop().unwrap());
 
     assert_eq!(
-        "3501mbmm/noselect \\Noselect\n\
-         3501mbmm/parent\n\
-         3501mbmm/parent/bar\n\
-         3501mbmm/parent/foo\n",
+        "3501mbmm/noselect \\HasNoChildren \\Noselect\n\
+         3501mbmm/parent \\HasChildren\n\
+         3501mbmm/parent/bar \\HasNoChildren\n\
+         3501mbmm/parent/foo \\HasNoChildren\n",
         list_results_to_str(responses)
     );
 
@@ -119,9 +75,9 @@ fn mailbox_management() {
              c("LIST 3501mbmm/ *"));
     assert_tagged_ok(responses.pop().unwrap());
     assert_eq!(
-        "3501mbmm/parent\n\
-         3501mbmm/parent/bar\n\
-         3501mbmm/parent/foo\n",
+        "3501mbmm/parent \\HasChildren\n\
+         3501mbmm/parent/bar \\HasNoChildren\n\
+         3501mbmm/parent/foo \\HasNoChildren\n",
         list_results_to_str(responses)
     );
 

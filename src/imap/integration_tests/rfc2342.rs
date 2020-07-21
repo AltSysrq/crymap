@@ -16,24 +16,11 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-use std::borrow::Cow;
-
 use super::defs::*;
 
 #[test]
 fn capability_declared() {
-    let setup = set_up();
-    let mut client = setup.connect("2342capa");
-
-    let mut buffer = Vec::new();
-    let response = client.read_one_response(&mut buffer).unwrap();
-    unpack_cond_response! {
-        (None, s::RespCondType::Ok, Some(s::RespTextCode::Capability(caps)), _)
-            = response
-        => {
-            assert!(caps.capabilities.contains(&Cow::Borrowed("NAMESPACE")));
-        }
-    }
+    test_require_capability("2342capa", "NAMESPACE");
 }
 
 #[test]

@@ -109,7 +109,9 @@ impl CommandProcessor {
             select_special_use: false,
             recursive_match: false,
             return_subscribed: false,
-            return_children: false,
+            // For non-extended LIST, we return \HasChildren and
+            // \HasNoChildren. For extended LIST, we'll let the client decide.
+            return_children: true,
             return_special_use: false,
             lsub_style: false,
         };

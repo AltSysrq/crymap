@@ -22,18 +22,7 @@ use super::defs::*;
 
 #[test]
 fn capability_declared() {
-    let setup = set_up();
-    let mut client = setup.connect("5161capa");
-
-    let mut buffer = Vec::new();
-    let response = client.read_one_response(&mut buffer).unwrap();
-    unpack_cond_response! {
-        (None, s::RespCondType::Ok, Some(s::RespTextCode::Capability(caps)), _)
-            = response
-        => {
-            assert!(caps.capabilities.contains(&Cow::Borrowed("ENABLE")));
-        }
-    }
+    test_require_capability("5161capa", "ENABLE");
 }
 
 #[test]

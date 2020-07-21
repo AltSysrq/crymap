@@ -16,8 +16,6 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-use std::borrow::Cow;
-
 use chrono::prelude::*;
 
 use super::defs::*;
@@ -26,18 +24,7 @@ use crate::test_data::*;
 
 #[test]
 fn capability_declared() {
-    let setup = set_up();
-    let mut client = setup.connect("3502capa");
-
-    let mut buffer = Vec::new();
-    let response = client.read_one_response(&mut buffer).unwrap();
-    unpack_cond_response! {
-        (None, s::RespCondType::Ok, Some(s::RespTextCode::Capability(caps)), _)
-            = response
-        => {
-            assert!(caps.capabilities.contains(&Cow::Borrowed("MULTIAPPEND")));
-        }
-    }
+    test_require_capability("3502capa", "MULTIAPPEND");
 }
 
 #[test]

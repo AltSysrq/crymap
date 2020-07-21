@@ -347,3 +347,66 @@ pub fn r(s: &'static str) -> s::Response<'static> {
         _ => panic!("Bad response: {}", s),
     }
 }
+
+pub fn test_require_capability(client_name: &'static str, capability: &str) {
+    let setup = set_up();
+    let mut client = setup.connect(client_name);
+
+    let mut buffer = Vec::new();
+    let response = client.read_one_response(&mut buffer).unwrap();
+    unpack_cond_response! {
+        (None, s::RespCondType::Ok, Some(s::RespTextCode::Capability(caps)), _)
+            = response
+        => {
+            assert!(caps.capabilities.contains(&Cow::Borrowed(capability)));
+        }
+    }
+}
+
+pub fn list_results_to_str(lines: Vec<s::ResponseLine<'_>>) -> String {
+    let mut ret = String::new();
+    for line in lines {
+        match line {
+            s::ResponseLine {
+                tag: None,
+                response: s::Response::List(s::MailboxList { mut flags, name }),
+            } => {
+                flags.sort();
+                ret.push_str(&name.raw);
+                for flag in flags {
+                    ret.push(' ');
+                    ret.push_str(&flag);
+                }
+                ret.push('\n');
+            }
+
+            line => panic!("Unexpected response line: {:?}", line),
+        }
+    }
+
+    ret
+}
+
+pub fn lsub_results_to_str(lines: Vec<s::ResponseLine<'_>>) -> String {
+    let mut ret = String::new();
+    for line in lines {
+        match line {
+            s::ResponseLine {
+                tag: None,
+                response: s::Response::Lsub(s::MailboxList { mut flags, name }),
+            } => {
+                flags.sort();
+                ret.push_str(&name.raw);
+                for flag in flags {
+                    ret.push(' ');
+                    ret.push_str(&flag);
+                }
+                ret.push('\n');
+            }
+
+            line => panic!("Unexpected response line: {:?}", line),
+        }
+    }
+
+    ret
+}
