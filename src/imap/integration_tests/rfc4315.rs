@@ -125,10 +125,6 @@ fn copy_uid() {
     let mut client = setup.connect("4315copu");
     quick_log_in(&mut client);
     quick_create(&mut client, "4315copu/src");
-
-    // Sleep a bit so that the other mailbox gets a different UID validity
-    std::thread::sleep(std::time::Duration::from_millis(2000));
-
     quick_create(&mut client, "4315copu/dst");
     quick_select(&mut client, "4315copu/src");
 

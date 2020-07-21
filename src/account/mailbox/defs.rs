@@ -205,14 +205,13 @@ mod test {
             Err(Error::NxMailbox)
         ));
 
-        // Ensure we get a distinct UID validity
-        std::thread::sleep(std::time::Duration::from_millis(2000));
-
         setup
             .stateless
             .path()
             .create(setup.root.path(), None)
             .unwrap();
+        // Even though these were probably created within the same second, they
+        // should have different UID validity values
         assert_ne!(
             setup.stateless.uid_validity().unwrap(),
             setup.stateless.path().current_uid_validity().unwrap()

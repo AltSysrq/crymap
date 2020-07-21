@@ -213,7 +213,36 @@ impl MailboxPath {
         // being equality. To maximise the time until we risk violating that
         // constraint, adjust the "zero epoch" to 2020-01-01. This gives until
         // 2156 before wrapping. We also need to avoid generating 0.
-        let uid_validity = uid_validity.wrapping_sub(1577836800).max(1);
+        let mut uid_validity = uid_validity.wrapping_sub(1577836800).max(1);
+
+        // We need to avoid generating duplicate UID validity values when
+        // mailboxes are created in quick succession, since otherwise the
+        // identity requirements could be invalidated by renaming one mailbox,
+        // then another to the former's old name.
+        //
+        // To do this, we simply try to create a token file in the temp
+        // directory. If the UV is already taken, increment and try again
+        // ("time creep"). We give up after 1000 tries, which ensures we don't
+        // fail forever and also don't creep so far forward that markers needed
+        // for correctness get cleaned up.
+        for trie in 0.. {
+            match fs::OpenOptions::new()
+                .mode(0o600)
+                .create_new(true)
+                .write(true)
+                .open(tmp.join(format!("uv-{:x}", uid_validity)))
+            {
+                Ok(_) => break,
+                Err(e) if io::ErrorKind::AlreadyExists == e.kind() => {
+                    if trie < 1000 {
+                        uid_validity = uid_validity.wrapping_add(1).max(1);
+                    } else {
+                        return Err(Error::GaveUpInsertion);
+                    }
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
 
         // Stage the new mailbox hierarchy inside tmp, then move the whole
         // thing in when done.
