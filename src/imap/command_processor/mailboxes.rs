@@ -140,7 +140,8 @@ impl CommandProcessor {
             patterns,
             select_subscribed: select_opts
                 .contains(&s::ListSelectOpt::Subscribed),
-            select_special_use: false,
+            select_special_use: select_opts
+                .contains(&s::ListSelectOpt::SpecialUse),
             recursive_match: select_opts
                 .contains(&s::ListSelectOpt::RecursiveMatch),
             return_subscribed: select_opts
@@ -150,7 +151,9 @@ impl CommandProcessor {
             // \HasNoChildren. For extended LIST, we'll let the client decide.
             return_children: !is_extended
                 || return_opts.contains(&s::ListReturnOpt::Children),
-            return_special_use: false,
+            return_special_use: select_opts
+                .contains(&s::ListSelectOpt::SpecialUse)
+                || return_opts.contains(&s::ListReturnOpt::SpecialUse),
             lsub_style: false,
         };
 

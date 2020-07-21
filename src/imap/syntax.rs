@@ -710,9 +710,12 @@ syntax_rule! {
 // everyone and we can just use simple enum item matching.
 simple_enum! {
     enum ListSelectOpt {
+        // RFC 5258
         RecursiveMatch("RECURSIVEMATCH"),
         Remote("REMOTE"),
         Subscribed("SUBSCRIBED"),
+        // RFC 6154
+        SpecialUse("SPECIAL-USE"),
     }
 }
 
@@ -730,8 +733,11 @@ syntax_rule! {
 
 simple_enum! {
     enum ListReturnOpt {
+        // RFC 5258
         Children("CHILDREN"),
         Subscribed("SUBSCRIBED"),
+        // RFC 6154
+        SpecialUse("SPECIAL-USE"),
     }
 }
 
