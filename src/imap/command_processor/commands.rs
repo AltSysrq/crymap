@@ -97,6 +97,7 @@ impl CommandProcessor {
             s::Command::Examine(cmd) => self.cmd_examine(cmd, sender),
             s::Command::List(cmd) => self.cmd_list(cmd, sender),
             s::Command::Lsub(cmd) => self.cmd_lsub(cmd, sender),
+            s::Command::Xlist(cmd) => self.cmd_xlist(cmd, sender),
             s::Command::Rename(cmd) => self.cmd_rename(cmd, sender),
             s::Command::Select(cmd) => self.cmd_select(cmd, sender),
             s::Command::Status(cmd) => self.cmd_status(cmd, sender),

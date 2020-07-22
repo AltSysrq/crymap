@@ -226,6 +226,42 @@ impl CommandProcessor {
         success()
     }
 
+    pub(crate) fn cmd_xlist(
+        &mut self,
+        cmd: s::XlistCommand<'_>,
+        sender: SendResponse<'_>,
+    ) -> CmdResult {
+        let reference = cmd.reference.get_utf8(self.unicode_aware);
+        let pattern = cmd.pattern.get_utf8(self.unicode_aware);
+        let request = ListRequest {
+            reference: reference.into_owned(),
+            patterns: vec![pattern.into_owned()],
+            select_subscribed: false,
+            select_special_use: false,
+            recursive_match: false,
+            return_subscribed: false,
+            return_children: true,
+            return_special_use: true,
+            lsub_style: false,
+        };
+
+        let responses =
+            account!(self)?.list(&request).map_err(map_error!(self))?;
+        for response in responses {
+            sender(s::Response::Xlist(s::MailboxList {
+                flags: response
+                    .attributes
+                    .into_iter()
+                    .map(|a| Cow::Borrowed(a.name()))
+                    .collect(),
+                name: MailboxName::of_utf8(Cow::Owned(response.name)),
+                child_info: None,
+            }));
+        }
+
+        success()
+    }
+
     pub(crate) fn cmd_rename(
         &mut self,
         cmd: s::RenameCommand<'_>,

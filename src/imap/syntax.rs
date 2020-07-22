@@ -173,6 +173,9 @@ syntax_rule! {
         #[prefix("LSUB ")]
         #[delegate]
         Lsub(MailboxList<'a>),
+        #[prefix("XLIST ")]
+        #[delegate]
+        Xlist(MailboxList<'a>),
         #[prefix("SEARCH") 0* prefix(" ")]
         #[primitive(num_u32, number)]
         Search(Vec<u32>),
@@ -748,6 +751,18 @@ simple_enum! {
 syntax_rule! {
     #[prefix("LSUB ")]
     struct LsubCommand<'a> {
+        #[suffix(" ")]
+        #[primitive(mailbox, mailbox)]
+        reference: MailboxName<'a>,
+        #[]
+        #[primitive(mailbox, list_mailbox)]
+        pattern: MailboxName<'a>,
+    }
+}
+
+syntax_rule! {
+    #[prefix("XLIST ")]
+    struct XlistCommand<'a> {
         #[suffix(" ")]
         #[primitive(mailbox, mailbox)]
         reference: MailboxName<'a>,
@@ -1420,6 +1435,9 @@ syntax_rule! {
         #[]
         #[delegate]
         Lsub(LsubCommand<'a>),
+        #[]
+        #[delegate]
+        Xlist(XlistCommand<'a>),
         #[]
         #[delegate]
         Rename(RenameCommand<'a>),

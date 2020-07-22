@@ -46,6 +46,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "SPECIAL-USE",
     "UIDPLUS",
     "UTF8=ACCEPT",
+    "XLIST",
     "XPURGE",
     "XVANQUISH",
     "XYZZY",
