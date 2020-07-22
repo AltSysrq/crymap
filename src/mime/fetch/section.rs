@@ -400,6 +400,7 @@ impl SectionLocator {
 struct SectionFetcher {
     target: Option<BodySection>,
     buffer: Option<io::BufWriter<BufferWriter>>,
+    in_headers: bool,
     contains_nul: bool,
     skipped: u64,
     processed: u64,
@@ -412,6 +413,7 @@ impl fmt::Debug for SectionFetcher {
         f.debug_struct("SectionFetcher")
             .field("target", &self.target)
             .field("buffer", &"BufferWriter")
+            .field("in_headers", &self.in_headers)
             .field("contains_nul", &self.contains_nul)
             .field("skipped", &self.skipped)
             .field("processed", &self.processed)
@@ -424,6 +426,7 @@ impl fmt::Debug for SectionFetcher {
 impl SectionFetcher {
     fn new(target: BodySection, common_paths: Arc<CommonPaths>) -> Self {
         SectionFetcher {
+            in_headers: true,
             contains_nul: false,
             skipped: 0,
             processed: 0,
@@ -480,13 +483,37 @@ impl SectionFetcher {
 impl Visitor for SectionFetcher {
     type Output = Output;
 
+    fn raw_line(&mut self, raw: &[u8]) -> Result<(), Output> {
+        // When fetching headers and not doing filtering, we use the raw lines
+        // so that even garbage data gets passed through verbatim. This ensures
+        // that the binary content returned by `BODY[]` and similar is always a
+        // 1:1 match with the underlying data.
+        if self.leaf_type.include_headers()
+            && self
+                .target
+                .as_ref()
+                .map_or(false, |t| t.header_filter.is_empty())
+            && self.in_headers
+        {
+            self.write(raw)
+        } else {
+            Ok(())
+        }
+    }
+
     fn header(
         &mut self,
         raw: &[u8],
         name: &str,
         _value: &[u8],
     ) -> Result<(), Output> {
-        if !self.leaf_type.include_headers() {
+        // Only act on header lines when filtering.
+        if !self.leaf_type.include_headers()
+            || self
+                .target
+                .as_ref()
+                .map_or(false, |t| t.header_filter.is_empty())
+        {
             return Ok(());
         }
 
@@ -500,9 +527,7 @@ impl Visitor for SectionFetcher {
                 .iter()
                 .any(|h| name.eq_ignore_ascii_case(h));
 
-            if !target.header_filter.is_empty()
-                && matches_filter == target.discard_matching_headers
-            {
+            if matches_filter == target.discard_matching_headers {
                 return Ok(());
             }
         }
@@ -521,7 +546,14 @@ impl Visitor for SectionFetcher {
     }
 
     fn start_content(&mut self) -> Result<(), Output> {
-        if self.leaf_type.include_headers() {
+        self.in_headers = false;
+
+        if self.leaf_type.include_headers()
+            && !self
+                .target
+                .as_ref()
+                .map_or(false, |t| t.header_filter.is_empty())
+        {
             self.write(b"\r\n")?;
         }
 
@@ -546,6 +578,9 @@ impl Visitor for SectionFetcher {
 #[cfg(test)]
 mod test {
     use std::io::Read;
+    use std::str;
+
+    use proptest::prelude::*;
 
     use super::*;
     use crate::mime::grovel;
@@ -840,7 +875,7 @@ mod test {
         );
         // Not having a trailing blank line is correct --- RFC 3501 specifies
         // that the line is omitted if the source also lacks it.
-        assert_eq!("Foo: bar\r\n", fetched);
+        assert_eq!("Foo: bar", fetched);
     }
 
     #[test]
@@ -852,7 +887,70 @@ mod test {
                 ..BodySection::default()
             },
         );
+        assert_eq!("Foo: bar\r", fetched);
+    }
+
+    #[test]
+    fn header_incomplete_line_filtered() {
+        let fetched = do_fetch(
+            "Foo: bar",
+            BodySection {
+                leaf_type: LeafType::Headers,
+                header_filter: vec!["Foo".to_owned()],
+                discard_matching_headers: false,
+                ..BodySection::default()
+            },
+        );
+        // Not having a trailing blank line is correct --- RFC 3501 specifies
+        // that the line is omitted if the source also lacks it.
         assert_eq!("Foo: bar\r\n", fetched);
+    }
+
+    #[test]
+    fn header_incomplete_line_cr_filtered() {
+        let fetched = do_fetch(
+            "Foo: bar\r",
+            BodySection {
+                leaf_type: LeafType::Headers,
+                header_filter: vec!["Foo".to_owned()],
+                discard_matching_headers: false,
+                ..BodySection::default()
+            },
+        );
+        assert_eq!("Foo: bar\r\n", fetched);
+    }
+
+    #[test]
+    fn header_corrupt_line() {
+        let fetched = do_fetch(
+            "Foo\n\n",
+            BodySection {
+                leaf_type: LeafType::Headers,
+                ..BodySection::default()
+            },
+        );
+        assert_eq!("Foo\r\n\r\n", fetched);
+    }
+
+    #[test]
+    fn nested_header_corrupt_line() {
+        let fetched = do_fetch(
+            "\
+Content-Type: multipart/mixed; boundary=bound
+
+--bound
+Foo
+
+
+--bound--
+",
+            BodySection {
+                subscripts: vec![1],
+                leaf_type: LeafType::Mime,
+                ..BodySection::default()
+            },
+        );
+        assert_eq!("Foo\r\n\r\n", fetched);
     }
 
     #[test]
@@ -923,5 +1021,22 @@ mod test {
             },
         );
         assert_eq!("", fetched);
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 16384,
+            ..ProptestConfig::default()
+        })]
+
+        #[test]
+        fn whole_body_fetch_is_always_verbatim(
+            message in "[x: \t\r\n\"]*"
+        ) {
+           let fetched = do_fetch_bytes(
+               message.as_bytes().to_vec(),
+               BodySection::default());
+            assert_eq!(message, fetched);
+        }
     }
 }
