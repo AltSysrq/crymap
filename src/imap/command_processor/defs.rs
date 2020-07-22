@@ -43,6 +43,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "LITERAL+",
     "MULTIAPPEND",
     "NAMESPACE",
+    "SASL-IR",
     "SPECIAL-USE",
     "UIDPLUS",
     "UNSELECT",

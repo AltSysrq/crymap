@@ -45,7 +45,9 @@ impl CommandProcessor {
         cmd: &'a s::AuthenticateCommandStart<'a>,
     ) -> Option<s::ResponseLine<'a>> {
         if "plain".eq_ignore_ascii_case(&cmd.auth_type) {
-            None
+            cmd.initial_response.as_ref().map(|ir| {
+                self.authenticate_finish(cmd.to_owned(), ir.as_bytes())
+            })
         } else {
             Some(s::ResponseLine {
                 tag: Some(Cow::Borrowed(&cmd.tag)),

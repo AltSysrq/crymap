@@ -1348,6 +1348,9 @@ syntax_rule! {
         #[]
         #[primitive(verbatim, normal_atom)]
         auth_type: Cow<'a, str>,
+        #[opt prefix(" ")]
+        #[primitive(verbatim, normal_atom)]
+        initial_response: Option<Cow<'a, str>>,
     }
 }
 
@@ -3516,6 +3519,17 @@ mod test {
             AuthenticateCommandStart {
                 tag: s("A1"),
                 auth_type: s("plain"),
+                initial_response: None,
+            }
+        );
+
+        assert_reversible!(
+            AuthenticateCommandStart,
+            "A1 AUTHENTICATE plain AGF6dXJlAGh1bnRlc+/=",
+            AuthenticateCommandStart {
+                tag: s("A1"),
+                auth_type: s("plain"),
+                initial_response: Some(s("AGF6dXJlAGh1bnRlc+/=")),
             }
         );
 
