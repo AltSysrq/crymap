@@ -260,6 +260,19 @@ impl Visitor for MultiFetcher {
         self.on_fetchers(|fetcher| fetcher.content_type(ct))
     }
 
+    fn leaf_section(
+        &mut self,
+    ) -> Option<Box<dyn Visitor<Output = Self::Output>>> {
+        for fetcher in &mut self.fetchers {
+            if let Some(ref mut fetcher) = fetcher {
+                if let Some(new) = fetcher.leaf_section() {
+                    *fetcher = new;
+                }
+            }
+        }
+        None
+    }
+
     fn start_content(&mut self) -> Result<(), Self::Output> {
         self.on_fetchers(|fetcher| fetcher.start_content())
     }

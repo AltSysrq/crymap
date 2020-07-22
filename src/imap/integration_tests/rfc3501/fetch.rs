@@ -628,6 +628,25 @@ fn fetch_body_parts() {
         };
     });
 
+    fetch_single!(client, c("FETCH 1 BODY[1]"), fr => {
+        has_msgatt_matching! {
+            move s::MsgAtt::Body(s::MsgAttBody {
+                section: Some(s::SectionSpec::Sub(s::SubSectionSpec {
+                    subscripts,
+                    text: None,
+                })),
+                slice_origin: None,
+                data: lit,
+            }) in fr => {
+                assert_eq!(vec![1], subscripts);
+                assert_literal_like(
+                    b"That is not dead which can eternal lie.\r\n",
+                    "And with strange æons even death may die.\r\n".as_bytes(),
+                    0, false, lit);
+            }
+        };
+    });
+
     fetch_single!(client, c("FETCH 2 BODY[1]"), fr => {
         has_msgatt_matching! {
             move s::MsgAtt::Body(s::MsgAttBody {

@@ -613,6 +613,7 @@ mod test {
 
         let mut ret = String::new();
         result.buffer.read_to_string(&mut ret).unwrap();
+        assert_eq!(result.buffer.len() as usize, ret.len());
         ret
     }
 
@@ -832,6 +833,21 @@ mod test {
             ..BodySection::default()
         });
         assert_eq!("", fetched);
+    }
+
+    #[test]
+    fn fetch_part_1_of_non_multipart() {
+        let fetched = do_fetch(
+            "Content-Type: text/plain\n\
+             \n\
+             foo\n",
+            BodySection {
+                subscripts: vec![1],
+                leaf_type: LeafType::Content,
+                ..BodySection::default()
+            },
+        );
+        assert_eq!("foo\r\n", fetched);
     }
 
     #[test]
