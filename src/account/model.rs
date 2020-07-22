@@ -762,9 +762,6 @@ pub struct RenameRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StatusRequest {
     /// The mailbox to query.
-    ///
-    /// TODO One of the extensions turns this into a pattern, see if that
-    /// changes things
     pub name: String,
 
     // ==================== RFC 3501 ====================
