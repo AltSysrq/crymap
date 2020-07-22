@@ -146,8 +146,7 @@ impl CommandProcessor {
                     flags: &[Flag::Seen],
                     remove_listed: false,
                     remove_unlisted: false,
-                    // We must ensure that the client sees the updates this causes.
-                    loud: true,
+                    loud: false,
                     unchanged_since: None,
                 },
             );
