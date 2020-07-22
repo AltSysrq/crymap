@@ -1397,6 +1397,8 @@ simple_enum! {
         Xyzzy("XYZZY"),
         // RFC 2342
         Namespace("NAMESPACE"),
+        // RFC 3691
+        Unselect("UNSELECT"),
         // Used internally, not expected to match anything
         XAppendFinishedNoop("\nXAppendFinishedNoop"),
     }

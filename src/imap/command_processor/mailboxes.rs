@@ -46,6 +46,15 @@ impl CommandProcessor {
         success()
     }
 
+    pub(super) fn cmd_unselect(
+        &mut self,
+        _sender: SendResponse<'_>,
+    ) -> CmdResult {
+        selected!(self)?;
+        self.selected = None;
+        success()
+    }
+
     pub(crate) fn cmd_create(
         &mut self,
         cmd: s::CreateCommand<'_>,

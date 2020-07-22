@@ -45,6 +45,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "NAMESPACE",
     "SPECIAL-USE",
     "UIDPLUS",
+    "UNSELECT",
     "UTF8=ACCEPT",
     "XLIST",
     "XPURGE",
