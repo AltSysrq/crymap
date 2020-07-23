@@ -36,6 +36,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "APPENDLIMIT=67108864",
     "AUTH=PLAIN",
     "CHILDREN",
+    "COMPRESS=DEFLATE",
     "CREATE-SPECIAL-USE",
     "ENABLE",
     "ID",
@@ -137,6 +138,10 @@ impl CommandProcessor {
 
     pub fn logged_out(&self) -> bool {
         self.logged_out
+    }
+
+    pub fn log_prefix(&self) -> &str {
+        &self.log_prefix
     }
 
     pub(super) fn parse_seqnum_range(

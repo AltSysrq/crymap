@@ -155,6 +155,7 @@ mod rfc3502;
 mod rfc3691;
 mod rfc4315;
 mod rfc4959;
+mod rfc4978;
 mod rfc5161;
 mod rfc5258;
 mod rfc6154;

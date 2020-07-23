@@ -356,6 +356,10 @@ syntax_rule! {
         #[]
         #[tag("USEATTR")]
         UseAttr(()),
+        // RFC 4978
+        #[]
+        #[tag("COMPRESSIONACTIVE")]
+        CompressionActive(()),
         // We don't handle unknown response codes, since the server never needs
         // to parse this. Unknown response codes just become part of the text.
     }
@@ -1402,6 +1406,8 @@ simple_enum! {
         Namespace("NAMESPACE"),
         // RFC 3691
         Unselect("UNSELECT"),
+        // RFC 4978
+        Compress("COMPRESS DEFLATE"),
         // Used internally, not expected to match anything
         XAppendFinishedNoop("\nXAppendFinishedNoop"),
     }

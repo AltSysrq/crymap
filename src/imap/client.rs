@@ -72,9 +72,33 @@ impl<R: BufRead, W: Write> Client<R, W> {
         }
     }
 
+    pub fn compress(
+        self,
+    ) -> Client<
+        io::BufReader<flate2::read::DeflateDecoder<R>>,
+        flate2::write::DeflateEncoder<W>,
+    > {
+        if let Some(prefix) = self.trace_stderr {
+            eprintln!("{:10} WIRE <start deflate>", prefix);
+        }
+
+        Client {
+            read: io::BufReader::new(flate2::read::DeflateDecoder::new(
+                self.read,
+            )),
+            write: flate2::write::DeflateEncoder::new(
+                self.write,
+                flate2::Compression::best(),
+            ),
+            trace_stderr: self.trace_stderr,
+            next_tag: self.next_tag,
+        }
+    }
+
     pub fn write_raw(&mut self, bytes: &[u8]) -> Result<(), Error> {
         self.trace(true, ">>[raw]", bytes);
         self.write.write_all(bytes)?;
+        self.write.flush()?;
         Ok(())
     }
 
@@ -213,6 +237,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
         command_buffer.extend_from_slice(b"\r\n");
         self.trace(false, ">>[cmd]", &command_buffer);
         self.write.write_all(&command_buffer)?;
+        self.write.flush()?;
         self.read_responses_until_tagged(response_buffer)
     }
 
@@ -258,6 +283,8 @@ impl<R: BufRead, W: Write> Client<R, W> {
             self.write.write_all(b")")?;
         }
 
+        self.write.flush()?;
+
         Ok(())
     }
 
@@ -289,6 +316,8 @@ impl<R: BufRead, W: Write> Client<R, W> {
             self.write.write_all(b")")?;
         }
 
+        self.write.flush()?;
+
         Ok(())
     }
 
@@ -298,6 +327,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
     ) -> Result<Vec<s::ResponseLine<'a>>, Error> {
         self.trace(false, ">>[app]", b"\r\n");
         self.write.write_all(b"\r\n")?;
+        self.write.flush()?;
         self.read_responses_until_tagged(response_buffer)
     }
 

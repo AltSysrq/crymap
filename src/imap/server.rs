@@ -18,10 +18,12 @@
 
 use std::borrow::Cow;
 use std::io::{self, BufRead, Read, Write};
+use std::mem;
 use std::str;
 use std::sync::{Arc, Mutex};
 
 use lazy_static::lazy_static;
+use log::info;
 use regex::bytes::Regex;
 
 use super::command_processor::CommandProcessor;
@@ -38,20 +40,26 @@ lazy_static! {
         Regex::new(r#"~?\{([0-9]+)\+?\}$"#).unwrap();
 }
 
-pub struct Server<R, W> {
-    read: R,
-    write: Arc<Mutex<W>>,
+pub struct Server {
+    read: Box<dyn BufRead + Send>,
+    write: Arc<Mutex<Box<dyn Write + Send>>>,
     processor: CommandProcessor,
     sent_bye: bool,
+    compressing: bool,
 }
 
-impl<R: BufRead, W: Write + Send> Server<R, W> {
-    pub fn new(read: R, write: W, processor: CommandProcessor) -> Self {
+impl Server {
+    pub fn new<R: BufRead + Send + 'static, W: Write + Send + 'static>(
+        read: R,
+        write: W,
+        processor: CommandProcessor,
+    ) -> Self {
         Server {
-            read,
-            write: Arc::new(Mutex::new(write)),
+            read: Box::new(read),
+            write: Arc::new(Mutex::new(Box::new(write))),
             processor,
             sent_bye: false,
+            compressing: false,
         }
     }
 
@@ -70,6 +78,7 @@ impl<R: BufRead, W: Write + Send> Server<R, W> {
                 None => continue,
             };
 
+            // TODO Refactor this rightwards drift
             if let Some((before_literal, length, literal_plus)) =
                 self.check_literal(&cmdline, nread)
             {
@@ -147,14 +156,23 @@ impl<R: BufRead, W: Write + Send> Server<R, W> {
                 } else if let Ok((b"", cmdline)) =
                     s::CommandLine::parse(&cmdline)
                 {
-                    let r = self.processor.handle_command(
-                        cmdline,
-                        &response_sender(
-                            &self.write,
-                            self.processor.unicode_aware(),
-                        ),
-                    );
-                    self.send_response(r)?;
+                    match cmdline {
+                        s::CommandLine {
+                            tag,
+                            cmd: s::Command::Simple(s::SimpleCommand::Compress),
+                        } => self.handle_compress(tag)?,
+
+                        cmdline => {
+                            let r = self.processor.handle_command(
+                                cmdline,
+                                &response_sender(
+                                    &self.write,
+                                    self.processor.unicode_aware(),
+                                ),
+                            );
+                            self.send_response(r)?;
+                        }
+                    }
                 } else if let Ok((_, frag)) =
                     s::UnknownCommandFragment::parse(&cmdline)
                 {
@@ -598,6 +616,60 @@ impl<R: BufRead, W: Write + Send> Server<R, W> {
         Ok(())
     }
 
+    fn handle_compress(&mut self, tag: Cow<'_, str>) -> Result<(), Error> {
+        if self.compressing {
+            self.send_response(s::ResponseLine {
+                tag: Some(tag),
+                response: s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::No,
+                    code: Some(s::RespTextCode::CompressionActive(())),
+                    quip: Some(Cow::Borrowed("Already compressing")),
+                }),
+            })?;
+            return Ok(());
+        }
+
+        let mut write = self.write.lock().unwrap();
+        let mut write: &mut Box<dyn Write + Send> = &mut write;
+        self.compressing = true;
+
+        // Send the OK before applying compression
+        // We do this with the lock held to ensure any sources of async
+        // notifications (e.g. NOTIFY) don't come between the OK and
+        // compression taking effect.
+        {
+            let mut response = s::ResponseLine {
+                tag: Some(tag),
+                response: s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Ok,
+                    code: None,
+                    quip: Some(Cow::Borrowed("Oo.")),
+                }),
+            };
+            let mut w = LexWriter::new(
+                &mut write,
+                self.processor.unicode_aware(),
+                false,
+            );
+            response.write_to(&mut w)?;
+            w.verbatim_bytes(b"\r\n")?;
+        }
+        write.flush()?;
+
+        self.read =
+            Box::new(io::BufReader::new(flate2::read::DeflateDecoder::new(
+                mem::replace(&mut self.read, Box::new(&[] as &[u8])),
+            )));
+        *write = Box::new(flate2::write::DeflateEncoder::new(
+            mem::replace(write, Box::new(Vec::new())),
+            flate2::Compression::new(3),
+        ));
+
+        info!("{} Compression started", self.processor.log_prefix());
+
+        Ok(())
+    }
+
     fn send_response(
         &mut self,
         mut r: s::ResponseLine<'_>,
@@ -621,7 +693,7 @@ impl<R: BufRead, W: Write + Send> Server<R, W> {
 }
 
 fn response_sender<'a>(
-    w: &'a Arc<Mutex<impl Write + Send>>,
+    w: &'a Arc<Mutex<Box<dyn Write + Send>>>,
     unicode_aware: bool,
 ) -> impl Fn(s::Response<'_>) + Send + Sync + 'a {
     move |r| {

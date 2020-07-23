@@ -13,6 +13,7 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "2.33", default-features = false }
 encoding_rs = "0.8"
 fern = "0.6"
+flate2 = "1.0"
 lazy_static = "1.4"
 log = "0.4.8"
 memchr = "2.3"

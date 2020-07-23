@@ -69,6 +69,9 @@ impl CommandProcessor {
             s::Command::Simple(s::SimpleCommand::Close) => {
                 self.cmd_close(sender)
             }
+            s::Command::Simple(s::SimpleCommand::Compress) => {
+                panic!("COMPRESS DEFLATE should be handled by server.rs")
+            }
             s::Command::Simple(s::SimpleCommand::Expunge) => {
                 self.cmd_expunge(sender)
             }
