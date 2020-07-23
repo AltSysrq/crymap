@@ -78,7 +78,6 @@ impl Server {
                 None => continue,
             };
 
-            // TODO Refactor this rightwards drift
             if let Some((before_literal, length, literal_plus)) =
                 self.check_literal(&cmdline, nread)
             {
@@ -149,57 +148,7 @@ impl Server {
                 }
             } else {
                 // No ending literal; this should be a complete command
-                if let Ok((b"", auth_start)) =
-                    s::AuthenticateCommandStart::parse(&cmdline)
-                {
-                    self.handle_authenticate(auth_start)?;
-                } else if let Ok((b"", cmdline)) =
-                    s::CommandLine::parse(&cmdline)
-                {
-                    match cmdline {
-                        s::CommandLine {
-                            tag,
-                            cmd: s::Command::Simple(s::SimpleCommand::Compress),
-                        } => self.handle_compress(tag)?,
-
-                        cmdline => {
-                            let r = self.processor.handle_command(
-                                cmdline,
-                                &response_sender(
-                                    &self.write,
-                                    self.processor.unicode_aware(),
-                                ),
-                            );
-                            self.send_response(r)?;
-                        }
-                    }
-                } else if let Ok((_, frag)) =
-                    s::UnknownCommandFragment::parse(&cmdline)
-                {
-                    self.send_response(s::ResponseLine {
-                        tag: Some(frag.tag),
-                        response: s::Response::Cond(s::CondResponse {
-                            cond: s::RespCondType::Bad,
-                            code: Some(s::RespTextCode::Parse(())),
-                            quip: Some(Cow::Borrowed(
-                                "Unrecognised command syntax",
-                            )),
-                        }),
-                    })?;
-                } else {
-                    self.send_response(s::ResponseLine {
-                        tag: None,
-                        response: s::Response::Cond(s::CondResponse {
-                            cond: s::RespCondType::Bye,
-                            code: Some(s::RespTextCode::Parse(())),
-                            quip: Some(Cow::Borrowed(
-                                "That doesn't look anything like \
-                                 an IMAP command!",
-                            )),
-                        }),
-                    })?;
-                }
-
+                self.handle_complete_command(&cmdline)?;
                 cmdline.clear();
             }
         }
@@ -398,6 +347,55 @@ impl Server {
         }
 
         cmdline.clear();
+        Ok(())
+    }
+
+    fn handle_complete_command(&mut self, cmdline: &[u8]) -> Result<(), Error> {
+        if let Ok((b"", auth_start)) =
+            s::AuthenticateCommandStart::parse(&cmdline)
+        {
+            self.handle_authenticate(auth_start)?;
+        } else if let Ok((b"", cmdline)) = s::CommandLine::parse(&cmdline) {
+            match cmdline {
+                s::CommandLine {
+                    tag,
+                    cmd: s::Command::Simple(s::SimpleCommand::Compress),
+                } => self.handle_compress(tag)?,
+
+                cmdline => {
+                    let r = self.processor.handle_command(
+                        cmdline,
+                        &response_sender(
+                            &self.write,
+                            self.processor.unicode_aware(),
+                        ),
+                    );
+                    self.send_response(r)?;
+                }
+            }
+        } else if let Ok((_, frag)) = s::UnknownCommandFragment::parse(&cmdline)
+        {
+            self.send_response(s::ResponseLine {
+                tag: Some(frag.tag),
+                response: s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Bad,
+                    code: Some(s::RespTextCode::Parse(())),
+                    quip: Some(Cow::Borrowed("Unrecognised command syntax")),
+                }),
+            })?;
+        } else {
+            self.send_response(s::ResponseLine {
+                tag: None,
+                response: s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Bye,
+                    code: Some(s::RespTextCode::Parse(())),
+                    quip: Some(Cow::Borrowed(
+                        "That doesn't look anything like an IMAP command!",
+                    )),
+                }),
+            })?;
+        }
+
         Ok(())
     }
 
