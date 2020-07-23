@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 
 use log::{error, info, warn};
 use nix::sys::time::TimeValLike;
-use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
+use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
 
 use crate::imap::command_processor::CommandProcessor;
 use crate::imap::server::Server;
@@ -199,6 +199,22 @@ pub fn serve(
         processor,
     );
 
+    if let Err(e) =
+        nix::fcntl::fcntl(0, nix::fcntl::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK))
+            .and_then(|_| {
+                nix::fcntl::fcntl(
+                    1,
+                    nix::fcntl::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
+                )
+            })
+    {
+        fatal!(
+            "{} Unable to put input/output into non-blocking mode: {}",
+            peer_name,
+            e
+        );
+    }
+
     match server.run() {
         Ok(_) => info!("{} Normal client disconnect", peer_name),
         Err(e) => warn!("{} Abnormal client disconnect: {}", peer_name, e),
@@ -229,23 +245,86 @@ impl Write for Stdio {
     }
 }
 
-struct WrappedIo<T>(Arc<Mutex<T>>);
+/// Wraps SslStream to implement Read and Write over this structure in the
+/// mutex, and also to deal with non-blocking IO.
+///
+/// We need to use non-blocking IO to allow writes to proceed even when read is
+/// blocking on getting data from the client, as when doing IDLE.
+struct WrappedIo(Arc<Mutex<SslStream<Stdio>>>);
 
-impl<T: Read> Read for WrappedIo<T> {
+impl Read for WrappedIo {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let mut lock = self.0.lock().unwrap();
-        lock.read(buf)
+        loop {
+            let res = {
+                let mut lock = self.0.lock().unwrap();
+                lock.ssl_read(buf)
+            };
+
+            match res {
+                Ok(n) => return Ok(n),
+                Err(e) => self.on_error(e)?,
+            }
+        }
     }
 }
 
-impl<T: Write> Write for WrappedIo<T> {
+impl Write for WrappedIo {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let mut lock = self.0.lock().unwrap();
-        lock.write(buf)
+        loop {
+            let res = {
+                let mut lock = self.0.lock().unwrap();
+                lock.ssl_write(buf)
+            };
+
+            match res {
+                Ok(n) => return Ok(n),
+                Err(e) => self.on_error(e)?,
+            };
+        }
     }
 
     fn flush(&mut self) -> io::Result<()> {
         let mut lock = self.0.lock().unwrap();
         lock.flush()
     }
+}
+
+impl WrappedIo {
+    fn on_error(&mut self, e: openssl::ssl::Error) -> io::Result<()> {
+        match e.code() {
+            openssl::ssl::ErrorCode::WANT_READ => {
+                let mut stdin = nix::sys::select::FdSet::new();
+                stdin.insert(0);
+                nix::sys::select::select(
+                    None,
+                    Some(&mut stdin.clone()),
+                    None,
+                    Some(&mut stdin),
+                    Some(&mut nix::sys::time::TimeVal::minutes(30)),
+                )
+                .map_err(nix_to_io)?;
+                Ok(())
+            }
+            openssl::ssl::ErrorCode::WANT_WRITE => {
+                let mut stdout = nix::sys::select::FdSet::new();
+                stdout.insert(1);
+                nix::sys::select::select(
+                    None,
+                    None,
+                    Some(&mut stdout.clone()),
+                    Some(&mut stdout.clone()),
+                    Some(&mut nix::sys::time::TimeVal::minutes(30)),
+                )
+                .map_err(nix_to_io)?;
+                Ok(())
+            }
+            _ => Err(e
+                .into_io_error()
+                .unwrap_or_else(|e| io::Error::new(io::ErrorKind::Other, e))),
+        }
+    }
+}
+
+fn nix_to_io(e: nix::Error) -> io::Error {
+    io::Error::from_raw_os_error(e.as_errno().unwrap() as i32)
 }
