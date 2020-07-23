@@ -233,6 +233,7 @@ impl StatelessMailbox {
                         self.log_prefix,
                         uid.0.get()
                     );
+                    self.notify_all_best_effort();
                     return Ok(uid);
                 }
 
@@ -262,6 +263,7 @@ impl StatelessMailbox {
                 base_id,
                 base_id + src.len() as u32
             );
+            self.notify_all_best_effort();
             Ok(Uid::of(base_id).unwrap())
         }
     }

@@ -44,6 +44,7 @@ pub struct MailboxPath {
     pub(super) base_path: PathBuf,
     pub(super) data_path: PathBuf,
     pub(super) metadata_path: PathBuf,
+    pub(super) socks_path: PathBuf,
     pub(super) shadow_path: PathBuf,
     pub(super) sub_path: PathBuf,
 }
@@ -58,6 +59,7 @@ impl MailboxPath {
         MailboxPath {
             metadata_path: data_path.join("mailbox.toml"),
             sub_path: shadow_path.join("%subscribe"),
+            socks_path: data_path.join("socks"),
             name,
             base_path,
             data_path,

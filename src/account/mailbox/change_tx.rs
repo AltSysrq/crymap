@@ -115,6 +115,7 @@ impl StatefulMailbox {
                 // poll/read/decrypt dance
                 self.state.commit(cid, tx);
                 self.see_cid(cid);
+                self.s.notify_all_best_effort();
                 return Ok(res);
             }
 

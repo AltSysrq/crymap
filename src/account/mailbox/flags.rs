@@ -63,6 +63,7 @@ impl StatelessMailbox {
             }
 
             if scheme.emplace(buffer_file.path(), next_cid.0)? {
+                self.notify_all_best_effort();
                 return Ok(Some(next_cid));
             }
         }

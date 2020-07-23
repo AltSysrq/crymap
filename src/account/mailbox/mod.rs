@@ -238,9 +238,10 @@ mod search_backend;
 mod expunge; // EXPUNGE, UID EXPUNGE
 mod fetch; // FETCH, UID FETCH
 mod flags; // STORE, UID STORE
+mod idle; // IDLE, notifications
 mod poll; // NOOP, CHECK, during IDLE, after commands
-mod search;
-mod select; // SELECT, EXAMINE, STATUS, also garbage collection // SEARCH, UID SEARCH
+mod search; // SEARCH, UID SEARCH
+mod select; // SELECT, EXAMINE, STATUS, also garbage collection
 
 pub use defs::{StatefulMailbox, StatelessMailbox};
 pub use fetch::{FetchReceiver, MailboxMessageAccessor};
