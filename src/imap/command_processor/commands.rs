@@ -22,6 +22,7 @@ use std::convert::TryInto;
 use log::{error, info};
 
 use super::defs::*;
+use crate::account::mailbox::IdleListener;
 use crate::support::error::Error;
 
 impl CommandProcessor {
@@ -74,6 +75,9 @@ impl CommandProcessor {
             }
             s::Command::Simple(s::SimpleCommand::Expunge) => {
                 self.cmd_expunge(sender)
+            }
+            s::Command::Simple(s::SimpleCommand::Idle) => {
+                panic!("IDLE should be dispatched by server.rs")
             }
             s::Command::Simple(s::SimpleCommand::LogOut) => {
                 self.cmd_log_out(sender)
@@ -392,6 +396,100 @@ impl CommandProcessor {
 
         self.fetch_for_background_update(sender, uids);
         Ok(())
+    }
+
+    /// The IDLE command.
+    ///
+    /// This needs to be dispatched directly by server.rs since it interacts
+    /// with the protocol flow.
+    ///
+    /// `before_first_idle` is invoked after the first idle operation is
+    /// prepared but before any waiting happens. This is used to send the
+    /// continuation line back to the client.
+    ///
+    /// `keep_idling` is invoked each time immediately before idling is
+    /// performed on the given listener. If it returns `false`, the idle
+    /// command ends.
+    ///
+    /// `after_poll` is invoked each time immediately after sending poll
+    /// responses. It is used to flush the output stream.
+    pub fn cmd_idle<'a>(
+        &mut self,
+        before_first_idle: impl FnOnce() -> Result<(), Error>,
+        mut keep_idling: impl FnMut(&IdleListener) -> bool,
+        mut after_poll: impl FnMut() -> Result<(), Error>,
+        tag: Cow<'a, str>,
+        sender: SendResponse<'_>,
+    ) -> s::ResponseLine<'a> {
+        let mut before_first_idle = Some(before_first_idle);
+
+        let result = loop {
+            let selected = match selected!(self) {
+                Ok(s) => s,
+                Err(e) => break Err(e),
+            };
+
+            let listener = match selected
+                .stateless()
+                .prepare_idle()
+                .map_err(map_error!(self))
+            {
+                Ok(l) => l,
+                Err(e) => break Err(e),
+            };
+
+            if let Err(e) = self.full_poll(sender).map_err(map_error!(self)) {
+                break Err(e);
+            }
+
+            if let Err(e) = after_poll().map_err(map_error!(self)) {
+                break Err(e);
+            }
+
+            if let Some(before_first_idle) = before_first_idle.take() {
+                if let Err(e) = before_first_idle().map_err(map_error!(self)) {
+                    break Err(e);
+                }
+            }
+
+            if !keep_idling(&listener) {
+                break Ok(());
+            }
+
+            if let Err(e) = listener
+                .idle()
+                .map_err(Error::from)
+                .map_err(map_error!(self))
+            {
+                break Err(e);
+            }
+        };
+
+        if let Err(response) = result {
+            if before_first_idle.is_some() {
+                // We never sent the continuation line, so we're ok to return NO
+                s::ResponseLine {
+                    tag: Some(tag),
+                    response,
+                }
+            } else {
+                // We sent a continuation line. We're not allowed to return any
+                // tagged response, so die instead.
+                s::ResponseLine {
+                    tag: None,
+                    response,
+                }
+            }
+        } else {
+            s::ResponseLine {
+                tag: Some(tag),
+                response: s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Ok,
+                    code: None,
+                    quip: Some(Cow::Borrowed("IDLE done")),
+                }),
+            }
+        }
     }
 }
 

@@ -36,12 +36,8 @@
 //! while idling {
 //!   let listener = mailbox.stateless().prepare_idle()?;
 //!   let poll = mailbox.poll()?;
-//!   if has_changes(poll) {
-//!     send_poll_results(poll);
-//!   } else {
-//!     listener.idle()?;
-//!     send_poll_results(mailbox.poll());
-//!   }
+//!   send_poll_results(poll);
+//!   listener.idle()?;
 //! }
 //! ```
 

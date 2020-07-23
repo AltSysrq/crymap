@@ -23,12 +23,13 @@ use std::str;
 use std::sync::{Arc, Mutex};
 
 use lazy_static::lazy_static;
-use log::info;
+use log::{error, info};
 use regex::bytes::Regex;
 
 use super::command_processor::CommandProcessor;
 use super::lex::LexWriter;
 use super::syntax as s;
+use crate::account::mailbox::IdleNotifier;
 use crate::support::error::Error;
 
 const MAX_CMDLINE: usize = 65536;
@@ -362,6 +363,11 @@ impl Server {
                     cmd: s::Command::Simple(s::SimpleCommand::Compress),
                 } => self.handle_compress(tag)?,
 
+                s::CommandLine {
+                    tag,
+                    cmd: s::Command::Simple(s::SimpleCommand::Idle),
+                } => self.handle_idle(tag)?,
+
                 cmdline => {
                     let r = self.processor.handle_command(
                         cmdline,
@@ -665,6 +671,105 @@ impl Server {
 
         info!("{} Compression started", self.processor.log_prefix());
 
+        Ok(())
+    }
+
+    fn handle_idle(&mut self, tag: Cow<'_, str>) -> Result<(), Error> {
+        // This is a bit complicated so it needs some explanation.
+        //
+        // When we start the IDLE command, we first let cmd_idle() check
+        // whether that's even possible. If not, the first lambda never gets
+        // called. In this case, `started_idle` remains `false`, and we just
+        // finish by sending the response over the wire.
+        //
+        // If we *do* start the IDLE, things are more difficult. The first
+        // lambda takes care of sending the continuation line over the wire,
+        // sets `started_idle` to true, and moves our reader out of `read`. A
+        // separate thread is then spawned which waits for the read to yield a
+        // complete line or fail. Once that happens, it flags the IDLE as done
+        // (by setting `keep_idling` in the context to `false`), notifies any
+        // pending listener, and sends the reader back to the original thread
+        // over a channel.
+
+        struct IdleContext {
+            keep_idling: bool,
+            notifier: Option<IdleNotifier>,
+        }
+
+        let (send_read, recv_read) =
+            std::sync::mpsc::sync_channel::<Box<dyn BufRead + Send>>(1);
+        let context: Arc<Mutex<IdleContext>> =
+            Arc::new(Mutex::new(IdleContext {
+                keep_idling: true,
+                notifier: None,
+            }));
+        let mut started_idle = false;
+
+        let sender =
+            response_sender(&self.write, self.processor.unicode_aware());
+
+        let read_ref = &mut self.read;
+        let write_ref = &self.write;
+        let log_prefix = self.processor.log_prefix().to_owned();
+
+        let response = self.processor.cmd_idle(
+            || {
+                let mut w = write_ref.lock().unwrap();
+                w.write_all(b"+ idling\r\n")?;
+                w.flush()?;
+                started_idle = true;
+
+                let cxt = Arc::clone(&context);
+
+                let mut read = mem::replace(read_ref, Box::new(&[] as &[u8]));
+                std::thread::spawn(move || {
+                    let _ = read
+                        .by_ref()
+                        .take(256)
+                        .read_until(b'\n', &mut Vec::new());
+                    // Either we got DONE\r\n (or some other line that fits in
+                    // the buffer, we don't really care), or something's gone
+                    // very wrong. Either way, we just end the idle and let the
+                    // normal command flow detect any error conditions.
+                    {
+                        let mut cxt = cxt.lock().unwrap();
+                        cxt.keep_idling = false;
+                        if let Some(notifier) = cxt.notifier.take() {
+                            if let Err(e) = notifier.notify() {
+                                error!(
+                                    "{} Failed to end IDLE: {}",
+                                    log_prefix, e
+                                );
+                            }
+                        }
+                    }
+
+                    send_read.send(read).unwrap();
+                });
+
+                Ok(())
+            },
+            |listener| {
+                let mut context = context.lock().unwrap();
+                context.notifier = Some(listener.notifier());
+                context.keep_idling
+            },
+            || {
+                let mut w = write_ref.lock().unwrap();
+                w.flush()?;
+                Ok(())
+            },
+            tag,
+            &sender,
+        );
+
+        drop(sender);
+
+        if started_idle {
+            self.read = recv_read.recv().unwrap();
+        }
+
+        self.send_response(response)?;
         Ok(())
     }
 

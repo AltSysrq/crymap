@@ -40,6 +40,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "CREATE-SPECIAL-USE",
     "ENABLE",
     "ID",
+    "IDLE",
     "LIST-EXTENDED",
     "LITERAL+",
     "MULTIAPPEND",

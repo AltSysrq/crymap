@@ -245,6 +245,7 @@ mod select; // SELECT, EXAMINE, STATUS, also garbage collection
 
 pub use defs::{StatefulMailbox, StatelessMailbox};
 pub use fetch::{FetchReceiver, MailboxMessageAccessor};
+pub use idle::{IdleListener, IdleNotifier};
 pub use messages::BufferedMessage;
 
 #[cfg(test)]

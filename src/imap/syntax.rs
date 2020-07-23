@@ -1408,6 +1408,8 @@ simple_enum! {
         Unselect("UNSELECT"),
         // RFC 4978
         Compress("COMPRESS DEFLATE"),
+        // RFC 2177
+        Idle("IDLE"),
         // Used internally, not expected to match anything
         XAppendFinishedNoop("\nXAppendFinishedNoop"),
     }
