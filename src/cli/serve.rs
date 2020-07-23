@@ -163,6 +163,17 @@ pub fn serve(
         warn!("{} Unable to configure timeouts: {}", peer_name, e);
     }
 
+    if let Err(e) = nix::sys::socket::setsockopt(
+        1,
+        nix::sys::socket::sockopt::TcpNoDelay,
+        &true,
+    ) {
+        warn!(
+            "{} Unable to configure TCP NODELAY on stdout: {}",
+            peer_name, e
+        );
+    }
+
     info!("{} Connection established", peer_name);
 
     let ssl_stream = match acceptor.build().accept(Stdio) {
