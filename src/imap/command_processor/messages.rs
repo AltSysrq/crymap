@@ -265,7 +265,9 @@ impl CommandProcessor {
         ) -> Result<CopyResponse, Error>,
     ) -> CmdResult {
         let account = account!(self)?;
-        let selected = selected!(self)?;
+        // Fail fast if nothing is selected
+        let _ = selected!(self)?;
+
         let dst = dst.get_utf8(self.unicode_aware);
         let dst = account.mailbox(&dst, false).map_err(map_error! {
             self,
@@ -276,6 +278,8 @@ impl CommandProcessor {
             MailboxUnselectable =>
                 (No, Some(s::RespTextCode::Nonexistent(()))),
         })?;
+
+        let selected = selected!(self)?;
         let response = f(selected, &request, &dst).map_err(map_error! {
             self,
             MailboxFull => (No, Some(s::RespTextCode::Limit(()))),

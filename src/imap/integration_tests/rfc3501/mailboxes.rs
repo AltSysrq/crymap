@@ -265,3 +265,30 @@ fn error_cases() {
         Error::UnsafeName,
     );
 }
+
+#[test]
+fn delete_mailbox_in_use() {
+    let setup = set_up();
+    let mut client = setup.connect("3501mbdi");
+    quick_log_in(&mut client);
+    quick_create(&mut client, "3501mbdi");
+    quick_append_enron(&mut client, "3501mbdi", 1);
+    quick_select(&mut client, "3501mbdi");
+
+    let mut client2 = setup.connect("3501mbdi");
+    quick_log_in(&mut client2);
+
+    // client2 deletes the mailbox while client still has it selected
+    ok_command!(client2, c("DELETE 3501mbdi"));
+
+    // client takes an action that causes it to notice that.
+    // We use XVANQUISH here because it won't produce any intermediate
+    // responses.
+    client.write_raw(b"X XVANQUISH 1\r\n").unwrap();
+    let mut buffer = Vec::new();
+    let response = client.read_one_response(&mut buffer).unwrap();
+
+    unpack_cond_response! {
+        (None, s::RespCondType::Bye, None, _) = response
+    };
+}

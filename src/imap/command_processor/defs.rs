@@ -205,10 +205,16 @@ pub(super) fn success() -> CmdResult {
 
 #[cfg(not(test))]
 pub(super) fn catch_all_error_handling(
+    selected_ok: bool,
     log_prefix: &str,
     e: Error,
 ) -> s::Response<'static> {
-    error!("{} Unhandled internal error: {}", log_prefix, e);
+    // Don't log if the selected mailbox is gone; it's probably a result of
+    // that.
+    if selected_ok {
+        error!("{} Unhandled internal error: {}", log_prefix, e);
+    }
+
     s::Response::Cond(s::CondResponse {
         cond: s::RespCondType::No,
         code: Some(s::RespTextCode::ServerBug(())),
@@ -220,9 +226,20 @@ pub(super) fn catch_all_error_handling(
 
 #[cfg(test)]
 pub(super) fn catch_all_error_handling(
+    selected_ok: bool,
     log_prefix: &str,
     e: Error,
 ) -> s::Response<'static> {
-    error!("{} Unhandled internal error: {}", log_prefix, e);
-    panic!("{} Unhandled internal error: {}", log_prefix, e);
+    if !selected_ok {
+        s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::No,
+            code: Some(s::RespTextCode::ServerBug(())),
+            quip: Some(Cow::Borrowed(
+                "Unexpected error; check server logs for details",
+            )),
+        })
+    } else {
+        error!("{} Unhandled internal error: {}", log_prefix, e);
+        panic!("{} Unhandled internal error: {}", log_prefix, e);
+    }
 }

@@ -115,3 +115,30 @@ fn test_idle() {
 
     ok_command!(idler, c("NOOP"));
 }
+
+#[test]
+fn delete_mailbox_during_idle() {
+    let setup = set_up();
+    let mut client = setup.connect("2177dmdi");
+    quick_log_in(&mut client);
+    quick_create(&mut client, "2177dmdi");
+
+    let mut victim = setup.connect("2177dmdiV");
+    quick_log_in(&mut victim);
+    quick_select(&mut victim, "2177dmdi");
+
+    victim.write_raw(b"I1 IDLE\r\n").unwrap();
+    let mut buffer = Vec::new();
+    victim.read_logical_line(&mut buffer).unwrap();
+    assert!(buffer.starts_with(b"+ "));
+
+    ok_command!(client, c("DELETE 2177dmdi"));
+
+    victim.write_raw(b"DONE\r\n").unwrap();
+
+    buffer.clear();
+    let response = victim.read_one_response(&mut buffer).unwrap();
+    unpack_cond_response! {
+        (None, s::RespCondType::Bye, None, _) = response
+    };
+}

@@ -467,7 +467,8 @@ impl CommandProcessor {
 
         if let Err(response) = result {
             if before_first_idle.is_some() {
-                // We never sent the continuation line, so we're ok to return NO
+                // We never sent the continuation line, so we're ok to return
+                // the response
                 s::ResponseLine {
                     tag: Some(tag),
                     response,
@@ -475,6 +476,24 @@ impl CommandProcessor {
             } else {
                 // We sent a continuation line. We're not allowed to return any
                 // tagged response, so die instead.
+                let response = if self
+                    .selected
+                    .as_ref()
+                    .map_or(true, |s| s.stateless().is_ok())
+                {
+                    s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Bye,
+                        code: Some(s::RespTextCode::ServerBug(())),
+                        quip: Some(Cow::Borrowed("Unexpected internal error")),
+                    })
+                } else {
+                    s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Bye,
+                        code: None,
+                        quip: Some(Cow::Borrowed("Mailbox deleted or renamed")),
+                    })
+                };
+
                 s::ResponseLine {
                     tag: None,
                     response,

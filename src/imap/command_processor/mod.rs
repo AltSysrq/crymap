@@ -25,18 +25,27 @@
 macro_rules! map_error {
     ($this:expr) => {{
         let log_prefix = &$this.log_prefix;
-        move |e| catch_all_error_handling(log_prefix, e)
+        let selected = $this.selected.as_ref();
+        move |e| {
+            let selected_ok = selected.map_or(true, |s| s.stateless().is_ok());
+            catch_all_error_handling(selected_ok, log_prefix, e)
+        }
     }};
 
     ($this:expr, $($($kind:ident)|+ => ($cond:ident, $code:expr),)+) => {{
         let log_prefix = &$this.log_prefix;
+        let selected = $this.selected.as_ref();
         move |e| match e {
             $($(Error::$kind)|* => s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::$cond,
                 code: $code,
                 quip: Some(Cow::Owned(e.to_string())),
             }),)*
-            e => catch_all_error_handling(log_prefix, e),
+            e => {
+                let selected_ok = selected.map_or(
+                    true, |s| s.stateless().is_ok());
+                catch_all_error_handling(selected_ok, log_prefix, e)
+            }
         }
     }};
 }
