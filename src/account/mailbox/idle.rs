@@ -75,8 +75,15 @@ impl IdleListener {
     /// Block until a notification is received for this listener.
     pub fn idle(self) -> io::Result<()> {
         let mut buf = [0u8];
-        self.sock.recv(&mut buf)?;
-        Ok(())
+        // In case the notification doesn't work somehow, ensure the process at
+        // least eventually recovers.
+        self.sock
+            .set_read_timeout(Some(std::time::Duration::from_secs(1800)))?;
+        match self.sock.recv(&mut buf) {
+            Ok(_) => Ok(()),
+            Err(e) if io::ErrorKind::TimedOut == e.kind() => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 
     #[cfg(test)]
