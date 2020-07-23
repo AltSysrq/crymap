@@ -1145,10 +1145,8 @@ mod test {
         );
         assert_eq!(
             "1969-02-13T23:32:00-03:30",
-            dt(concat!(
-                "Thu\r\n      13\r\n        Feb\r\n          1969\r\n",
-                "      23:32\r\n               -0330 (Newfoundland Time)"
-            ))
+            dt("Thu\r\n      13\r\n        Feb\r\n          1969\r\n\
+                \x20      23:32\r\n               -0330 (Newfoundland Time)")
         );
         assert_eq!("1997-11-21T09:55:06+00:00", dt("21 Nov 97 09:55:06 GMT"));
         assert_eq!(
@@ -1212,10 +1210,10 @@ mod test {
         assert_eq!("(Who?)<(one)@(y)(test)>", mbox("Who? <one@y.test>"));
         assert_eq!(
             "(Pete)<(pete)@(silly)(test)>",
-            mbox(concat!(
-                "Pete(A wonderful \\) chap) ",
-                "<pete(his account)@silly.test(his host)>"
-            ))
+            mbox(
+                "Pete(A wonderful \\) chap) \
+                 <pete(his account)@silly.test(his host)>"
+            )
         );
         assert_eq!(
             "(Mary)(Smith)<@(machine)(tld):(mary)@(example)(net)>",
@@ -1270,10 +1268,10 @@ mod test {
         );
         assert_eq!(
             "(KeithMoore)<(moore)@(cs)(utk)(edu)>",
-            mbox(concat!(
-                "=?US-ASCII?Q?Keith?= ",
-                "=?US-ASCII?Q?Moore?= <moore@cs.utk.edu>"
-            ))
+            mbox(
+                "=?US-ASCII?Q?Keith?= \
+                  =?US-ASCII?Q?Moore?= <moore@cs.utk.edu>"
+            )
         );
 
         // Ancient put-the-display-name-in-a-comment syntax
@@ -1302,29 +1300,25 @@ mod test {
             mbox_list("\"Joe Q. Public\" <john.q.public@example.com>")
         );
         assert_eq!(
-            concat!(
-                "[",
-                "(Mary)(Smith)<(mary)@(x)(test)>, ",
-                "<(jdoe)@(example)(org)>, ",
-                "(Who?)<(one)@(y)(test)>",
-                "]"
-            ),
-            mbox_list(concat!(
-                "Mary Smith <mary@x.test>, jdoe@example.org, ",
-                "Who? <one@y.test>"
-            ))
+            "[\
+             (Mary)(Smith)<(mary)@(x)(test)>, \
+             <(jdoe)@(example)(org)>, \
+             (Who?)<(one)@(y)(test)>\
+             ]",
+            mbox_list(
+                "Mary Smith <mary@x.test>, jdoe@example.org, \
+                       Who? <one@y.test>"
+            )
         );
         assert_eq!(
-            concat!(
-                "[",
-                "<(boss)@(nil)(test)>, ",
-                "(Giant; \"Big\" Box)<(sysservices)@(example)(net)>",
-                "]"
-            ),
-            mbox_list(concat!(
-                "<boss@nil.test>, ",
-                "\"Giant; \\\"Big\\\" Box\" <sysservices@example.net>"
-            ))
+            "[\
+             <(boss)@(nil)(test)>, \
+             (Giant; \"Big\" Box)<(sysservices)@(example)(net)>\
+             ]",
+            mbox_list(
+                "<boss@nil.test>, \
+                 \"Giant; \\\"Big\\\" Box\" <sysservices@example.net>"
+            )
         );
     }
 
@@ -1346,63 +1340,55 @@ mod test {
             addr_list("\"Joe Q. Public\" <john.q.public@example.com>")
         );
         assert_eq!(
-            concat!(
-                "[",
-                "Mailbox((Mary)(Smith)<(mary)@(x)(test)>), ",
-                "Mailbox(<(jdoe)@(example)(org)>), ",
-                "Mailbox((Who?)<(one)@(y)(test)>)",
-                "]"
-            ),
-            addr_list(concat!(
-                "Mary Smith <mary@x.test>, jdoe@example.org, ",
-                "Who? <one@y.test>"
-            ))
+            "[\
+             Mailbox((Mary)(Smith)<(mary)@(x)(test)>), \
+             Mailbox(<(jdoe)@(example)(org)>), \
+             Mailbox((Who?)<(one)@(y)(test)>)\
+             ]",
+            addr_list(
+                "Mary Smith <mary@x.test>, jdoe@example.org, \
+                 Who? <one@y.test>"
+            )
         );
         assert_eq!(
-            concat!(
-                "[",
-                "Mailbox(<(boss)@(nil)(test)>), ",
-                "Mailbox((Giant; \"Big\" Box)<(sysservices)@(example)(net)>)",
-                "]"
-            ),
-            addr_list(concat!(
-                "<boss@nil.test>, ",
-                "\"Giant; \\\"Big\\\" Box\" <sysservices@example.net>"
-            ))
+            "[\
+             Mailbox(<(boss)@(nil)(test)>), \
+             Mailbox((Giant; \"Big\" Box)<(sysservices)@(example)(net)>)\
+             ]",
+            addr_list(
+                "<boss@nil.test>, \
+                 \"Giant; \\\"Big\\\" Box\" <sysservices@example.net>"
+            )
         );
 
         assert_eq!(
-            concat!(
-                "[Group((A)(Group)",
-                "[(Chris)(Jones)<(c)@(a)(test)>]",
-                "[<(joe)@(where)(test)>]",
-                "[(John)<(jdoe)@(one)(test)>]",
-                ")]"
-            ),
-            addr_list(concat!(
-                "A Group:Chris Jones <c@a.test>,",
-                "joe@where.test,John <jdoe@one.test>;"
-            ))
+            "[Group((A)(Group)\
+             [(Chris)(Jones)<(c)@(a)(test)>]\
+             [<(joe)@(where)(test)>]\
+             [(John)<(jdoe)@(one)(test)>]\
+             )]",
+            addr_list(
+                "A Group:Chris Jones <c@a.test>,\
+                 joe@where.test,John <jdoe@one.test>;"
+            )
         );
         assert_eq!(
             "[Group((Undisclosed)(recipients))]",
             addr_list("Undisclosed recipients:;")
         );
         assert_eq!(
-            concat!(
-                "[Group((A)(Group)",
-                "[(Chris)(Jones)<(c)@(public)(example)>]",
-                "[<(joe)@(example)(org)>]",
-                "[(John)<(jdoe)@(one)(test)>]",
-                ")]"
-            ),
-            addr_list(concat!(
-                "A Group(Some people)\r\n",
-                "     :Chris Jones <c@(Chris's host.)public.example>,\r\n",
-                "         joe@example.org,\r\n",
-                "  John <jdoe@one.test> (my dear friend); ",
-                "(the end of the group)"
-            ))
+            "[Group((A)(Group)\
+             [(Chris)(Jones)<(c)@(public)(example)>]\
+             [<(joe)@(example)(org)>]\
+             [(John)<(jdoe)@(one)(test)>]\
+             )]",
+            addr_list(
+                "A Group(Some people)\r\n\
+                \x20    :Chris Jones <c@(Chris's host.)public.example>,\r\n\
+                \x20         joe@example.org,\r\n\
+                \x20 John <jdoe@one.test> (my dear friend); \
+                (the end of the group)"
+            )
         );
 
         // Test address lists including more than just one group
@@ -1547,14 +1533,12 @@ mod test {
 
         // Examples found in the wild
         assert_eq!(
-            concat!(
-                "(application)/(msword); ",
-                "(name)=(123456 Participant Fee Disclosure.doc)"
-            ),
-            ctype(concat!(
-                "application/msword;",
-                "\tname=\"123456 Participant Fee Disclosure.doc\""
-            ))
+            "(application)/(msword); \
+             (name)=(123456 Participant Fee Disclosure.doc)",
+            ctype(
+                "application/msword;\
+                 \tname=\"123456 Participant Fee Disclosure.doc\""
+            )
         );
         assert_eq!(
             "(application)/(octet-stream); (name)=(PGPipe-1000.asc)",
@@ -1565,40 +1549,34 @@ mod test {
             ctype("application/pdf; name=\"SPDs & SMMs.pdf\"")
         );
         assert_eq!(
-            concat!(
-                "(application)/(pkcs7-mime); ",
-                "(smime-type)=(signed-data); (name)=(smime.p7m)"
-            ),
-            ctype(concat!(
-                "application/pkcs7-mime; ",
-                "smime-type=signed-data; name=\"smime.p7m\""
-            ))
+            "(application)/(pkcs7-mime); \
+             (smime-type)=(signed-data); (name)=(smime.p7m)",
+            ctype(
+                "application/pkcs7-mime; \
+                 smime-type=signed-data; name=\"smime.p7m\""
+            )
         );
         assert_eq!(
-            concat!(
-                "(multipart)/(alternative); ",
-                "(boundary)=(Apple-Mail=_01B5A0AD-",
-                "9508-48B2-B309-1FA4444F1310)"
-            ),
-            ctype(concat!(
-                "multipart/alternative;  ",
-                "boundary=\"Apple-Mail=_01B5A0AD-",
-                "9508-48B2-B309-1FA4444F1310\""
-            ))
+            "(multipart)/(alternative); \
+             (boundary)=(Apple-Mail=_01B5A0AD-\
+             9508-48B2-B309-1FA4444F1310)",
+            ctype(
+                "multipart/alternative;  \
+                 boundary=\"Apple-Mail=_01B5A0AD-\
+                 9508-48B2-B309-1FA4444F1310\""
+            )
         );
         assert_eq!(
-            concat!(
-                "(multipart)/(signed); ",
-                "(boundary)=(----=_NextPart_000_004B_01D04D20.0C896ED0); ",
-                "(protocol)=(application/x-pkcs7-signature); ",
-                "(micalg)=(2.16.840.1.101.3.4.2.3)"
-            ),
-            ctype(concat!(
-                "multipart/signed;       ",
-                "boundary=\"----=_NextPart_000_004B_01D04D20.0C896ED0\";  ",
-                "protocol=\"application/x-pkcs7-signature\"; ",
-                "micalg=2.16.840.1.101.3.4.2.3"
-            ))
+            "(multipart)/(signed); \
+             (boundary)=(----=_NextPart_000_004B_01D04D20.0C896ED0); \
+             (protocol)=(application/x-pkcs7-signature); \
+             (micalg)=(2.16.840.1.101.3.4.2.3)",
+            ctype(
+                "multipart/signed;       \
+                 boundary=\"----=_NextPart_000_004B_01D04D20.0C896ED0\";  \
+                 protocol=\"application/x-pkcs7-signature\"; \
+                 micalg=2.16.840.1.101.3.4.2.3"
+            )
         );
 
         // Test for recovery
@@ -1654,16 +1632,14 @@ mod test {
         // RFC 2183 examples
         assert_eq!("(inline)", cdispos("inline"));
         assert_eq!(
-            concat!(
-                "(attachment); ",
-                "(filename)=(genome.jpeg); ",
-                "(modification-date)=(Wed, 12 Feb 1997 16:29:51 -0500)"
-            ),
-            cdispos(concat!(
-                "attachment; ",
-                "filename=genome.jpeg; ",
-                "modification-date=\"Wed, 12 Feb 1997 16:29:51 -0500\";"
-            ))
+            "(attachment); \
+             (filename)=(genome.jpeg); \
+             (modification-date)=(Wed, 12 Feb 1997 16:29:51 -0500)",
+            cdispos(
+                "attachment; \
+                 filename=genome.jpeg; \
+                 modification-date=\"Wed, 12 Feb 1997 16:29:51 -0500\";"
+            )
         );
     }
 }
