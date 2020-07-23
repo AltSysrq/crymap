@@ -47,6 +47,7 @@ use std::os::unix::fs::DirBuilderExt;
 use std::os::unix::net::UnixDatagram;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use std::sync::Arc;
 
 use log::warn;
 
@@ -60,7 +61,7 @@ static SOCKET_SERNO: AtomicUsize = AtomicUsize::new(0);
 /// is received.
 #[derive(Debug)]
 pub struct IdleListener {
-    sock: UnixDatagram,
+    sock: Arc<UnixDatagram>,
     path: PathBuf,
 }
 
@@ -68,17 +69,13 @@ impl IdleListener {
     /// Return an `IdleNotifier` that can be used to awaken this listener.
     pub fn notifier(&self) -> IdleNotifier {
         IdleNotifier {
-            path: self.path.clone(),
+            sock: Arc::clone(&self.sock),
         }
     }
 
     /// Block until a notification is received for this listener.
     pub fn idle(self) -> io::Result<()> {
         let mut buf = [0u8];
-        // In case the notification doesn't work somehow, ensure the process at
-        // least eventually recovers.
-        self.sock
-            .set_read_timeout(Some(std::time::Duration::from_secs(1800)))?;
         match self.sock.recv(&mut buf) {
             Ok(_) => Ok(()),
             Err(e) if io::ErrorKind::TimedOut == e.kind() => Ok(()),
@@ -100,22 +97,18 @@ impl Drop for IdleListener {
 }
 
 /// References a path that can be used to awaken a single `IdleListener`.
+///
+/// The notifier will work even if the Unix socket itself is removed from the
+/// file system.
 #[derive(Debug, Clone)]
 pub struct IdleNotifier {
-    path: PathBuf,
+    sock: Arc<UnixDatagram>,
 }
 
 impl IdleNotifier {
     /// Wake up the corresponding `IdleListener`.
     pub fn notify(self) -> io::Result<()> {
-        UnixDatagram::unbound()?
-            .send_to(&[0], &self.path)
-            .map(|_| ())
-            // If not found, someone else already notified this notifier and
-            // removed its file.
-            .ignore_not_found()?;
-        let _ = fs::remove_file(&self.path);
-        Ok(())
+        self.sock.shutdown(std::net::Shutdown::Both)
     }
 }
 
@@ -142,7 +135,7 @@ impl StatelessMailbox {
         let _ = fs::remove_file(&sock_path);
 
         Ok(IdleListener {
-            sock: UnixDatagram::bind(&sock_path)?,
+            sock: Arc::new(UnixDatagram::bind(&sock_path)?),
             path: sock_path,
         })
     }
@@ -207,7 +200,10 @@ mod test {
         let setup = set_up();
         let listener = setup.stateless.prepare_idle().unwrap();
         listener.notifier().notify().unwrap();
-        listener.idle_instant().unwrap();
+        // We can't use idle_instant() here since putting the socket in
+        // non-blocking mode causes it to still return WouldBlock even after it
+        // has been shut down.
+        listener.idle().unwrap();
     }
 
     #[test]
