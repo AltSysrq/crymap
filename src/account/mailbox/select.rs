@@ -33,6 +33,7 @@ use crate::account::mailbox_state::*;
 use crate::account::model::*;
 use crate::support::error::Error;
 use crate::support::file_ops::IgnoreKinds;
+use crate::support::threading;
 
 /// The maximum number of rollup files that can exist before we start deleting
 /// them (but not the transactions they contain) with a shorter grace period to
@@ -210,7 +211,7 @@ impl StatefulMailbox {
             s_clone.do_gc(rollups);
             gc_in_progress.store(false, SeqCst);
         } else {
-            rayon::spawn(move || {
+            threading::run_in_background(move || {
                 s_clone.do_gc(rollups);
                 gc_in_progress.store(false, SeqCst);
             });

@@ -16,12 +16,13 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-pub(crate) mod buffer;
-pub(crate) mod compression;
-pub(crate) mod error;
-pub(crate) mod file_ops;
-pub(crate) mod safe_name;
-pub(crate) mod small_bitset;
-pub(crate) mod system_config;
-pub(crate) mod un64;
-pub(crate) mod user_config;
+pub mod buffer;
+pub mod compression;
+pub mod error;
+pub mod file_ops;
+pub mod safe_name;
+pub mod small_bitset;
+pub mod system_config;
+pub mod threading;
+pub mod un64;
+pub mod user_config;

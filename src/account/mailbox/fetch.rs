@@ -22,14 +22,13 @@ use std::io::BufRead;
 use std::mem;
 use std::sync::Arc;
 
-use rayon::prelude::*;
-
 use super::defs::*;
 use crate::account::mailbox_state::*;
 use crate::account::model::*;
 use crate::mime::fetch::multi::*;
 use crate::mime::grovel::{grovel, MessageAccessor};
 use crate::support::error::Error;
+use crate::support::threading;
 
 pub struct MailboxMessageAccessor<'a> {
     mailbox: &'a StatefulMailbox,
@@ -183,15 +182,21 @@ impl StatefulMailbox {
         request: &FetchRequest<Uid>,
         receiver: FetchReceiver<'_>,
     ) -> Result<FetchResponse, Error> {
+        static SG: threading::ScatterGather = threading::ScatterGather {
+            batch_size: 4,
+            escalate: std::time::Duration::from_millis(2),
+            buffer_size: 16,
+        };
+
         enum StrippedFetchResponse {
             Nil,
             UnexpectedExpunge(Uid),
         }
 
-        let fetched: Vec<Result<StrippedFetchResponse, Error>> = request
-            .ids
-            .par_items(self.state.max_uid_val())
-            .map(|uid| {
+        let mut fetched: Vec<Result<StrippedFetchResponse, Error>> = Vec::new();
+        SG.run(
+            request.ids.items(self.state.max_uid_val()),
+            |uid| {
                 let full_response = self.fetch_single(request, uid);
 
                 let full_response = match full_response {
@@ -214,8 +219,9 @@ impl StatefulMailbox {
                         Ok(StrippedFetchResponse::UnexpectedExpunge(uid))
                     }
                 }
-            })
-            .collect();
+            },
+            |r| fetched.push(r),
+        );
 
         let mut response = FetchResponse::default();
 

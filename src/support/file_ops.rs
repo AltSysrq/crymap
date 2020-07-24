@@ -26,7 +26,8 @@ use std::path::Path;
 use log::error;
 use rand::{rngs::OsRng, Rng};
 
-use crate::support::error::Error;
+use super::error::Error;
+use super::threading;
 
 /// Write `data` into the file at `path`, atomically.
 ///
@@ -70,7 +71,7 @@ pub fn delete_async(
 
         match fs::rename(target, &dst) {
             Ok(()) => {
-                rayon::spawn(move || {
+                threading::run_in_background(move || {
                     if let Err(e) = fs::remove_dir_all(&dst) {
                         error!("Failed to remove {}: {}", dst.display(), e);
                     }

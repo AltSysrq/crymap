@@ -26,7 +26,6 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use chrono::prelude::*;
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::account::mailbox::BufferedMessage;
@@ -473,26 +472,6 @@ impl<T: TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync> SeqRange<T> {
             .map(|(&start, &end)| (start, end))
             .filter(move |&(start, _)| start <= max)
             .flat_map(move |(start, end)| (start..=end.min(max)).into_iter())
-            .filter_map(|v| T::try_from(v).ok())
-    }
-
-    /// Return a parallel iterator to the items in this set.
-    ///
-    /// Invalid items and items greater than `max`. are silently excluded.
-    ///
-    /// Items are delivered in strictly ascending order.
-    pub fn par_items<'a>(
-        &'a self,
-        max: impl Into<u32>,
-    ) -> impl ParallelIterator<Item = T> + 'a {
-        let max: u32 = max.into();
-        self.parts
-            .par_iter()
-            .map(|(&start, &end)| (start, end))
-            .filter(move |&(start, _)| start <= max)
-            .flat_map(move |(start, end)| {
-                (start..=end.min(max)).into_par_iter()
-            })
             .filter_map(|v| T::try_from(v).ok())
     }
 

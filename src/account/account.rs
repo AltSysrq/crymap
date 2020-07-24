@@ -32,7 +32,7 @@ use crate::account::mailbox_path::*;
 use crate::account::model::*;
 use crate::crypt::master_key::MasterKey;
 use crate::support::{
-    error::Error, file_ops::IgnoreKinds, user_config::UserConfig,
+    error::Error, file_ops::IgnoreKinds, threading, user_config::UserConfig,
 };
 
 #[derive(Clone)]
@@ -204,7 +204,7 @@ impl Account {
         }
 
         let this = self.clone();
-        rayon::spawn(move || this.run_maintenance());
+        threading::run_in_background(move || this.run_maintenance());
     }
 
     fn run_maintenance(&self) {
