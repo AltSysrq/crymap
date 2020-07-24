@@ -36,8 +36,6 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "APPENDLIMIT=67108864",
     "AUTH=PLAIN",
     "CHILDREN",
-    // TODO There's something wrong with the implementation here
-    // Thunderbird occasionally gets stuck at least
     "COMPRESS=DEFLATE",
     "CREATE-SPECIAL-USE",
     "ENABLE",
