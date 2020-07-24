@@ -43,8 +43,29 @@ pub fn serve(
 ) {
     let system_config = Arc::new(system_config);
 
-    // TODO CONFIGURE LOGGING PROPERLY
-    crate::init_simple_log();
+    // Right now we have this awkward situation where you can use log4rs *or*
+    // syslog, because log4rs-syslog hasn't been updated in quite a while.
+    //
+    // If anything goes wrong, we don't really have a way to recover since
+    // inetd sends even stderr back to the client.
+    let log_config_file = system_root.join("logging.toml");
+    if log_config_file.is_file() {
+        log4rs::init_file(log_config_file, log4rs::file::Deserializers::new())
+            .expect("Failed to initialise logging");
+    } else {
+        let formatter = syslog::Formatter3164 {
+            facility: syslog::Facility::LOG_MAIL,
+            hostname: None,
+            process: env!("CARGO_PKG_NAME").to_owned(),
+            pid: nix::unistd::getpid().as_raw(),
+        };
+
+        let logger =
+            syslog::unix(formatter).expect("Failed to connect to syslog");
+        log::set_boxed_logger(Box::new(syslog::BasicLogger::new(logger)))
+            .map(|_| log::set_max_level(log::LevelFilter::Info))
+            .expect("Failed to initialise logging");
+    }
 
     let mut acceptor =
         match SslAcceptor::mozilla_intermediate_v5(SslMethod::tls_server()) {
@@ -138,7 +159,9 @@ pub fn serve(
     // the client.
     match (nix::unistd::isatty(0), nix::unistd::isatty(1)) {
         (Ok(true), _) | (_, Ok(true)) => {
-            fatal!("stdin and stdout must not be a terminal")
+            // In this case, we *do* want to use die!() since we're on a
+            // terminal.
+            die!("stdin and stdout must not be a terminal")
         }
         _ => (),
     }
