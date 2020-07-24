@@ -262,7 +262,7 @@ pub fn examine_shared(client: &mut PipeClient) {
     append!(5, Some(vec![Flag::Seen]), ENRON_SMALL_MULTIPARTS[2]);
     append!(6, None, ENRON_SMALL_MULTIPARTS[3]);
     ok_command!(client, c("XVANQUISH 6"));
-    ok_command!(client, c("XPURGE"));
+    ok_command!(client, c("XCRY PURGE"));
     append!(
         7,
         Some(vec![Flag::Keyword("$Important".to_owned())]),

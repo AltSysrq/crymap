@@ -896,7 +896,7 @@ fn error_conditions() {
     // Expunge UID 2 without letting the first client remove that from its
     // seqnum mapping.
     ok_command!(client2, c("XVANQUISH 2"));
-    ok_command!(client2, c("XPURGE"));
+    ok_command!(client2, c("XCRY PURGE"));
 
     // First attempt to fetch the expunged message - NO
     // We need to use BODY.PEEK[] or else it will try to store \Seen, which

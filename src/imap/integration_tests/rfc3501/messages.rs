@@ -223,7 +223,7 @@ fn copy_expunged() {
     quick_select(&mut client2, "3501mecx");
 
     ok_command!(client2, c("XVANQUISH 1:2"));
-    ok_command!(client2, c("XPURGE"));
+    ok_command!(client2, c("XCRY PURGE"));
 
     command!([response] = client, c("COPY 1 3501mecx"));
     assert_error_response(
