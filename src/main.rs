@@ -62,18 +62,22 @@ fn init_test_log() {
 }
 
 fn init_simple_log() {
-    fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "{} [{}][{}] {}",
-                chrono::Local::now().format("%H:%M:%S%.3f"),
-                record.level(),
-                record.target(),
-                message,
-            ))
-        })
-        .level(log::LevelFilter::Debug)
-        .chain(std::io::stderr())
-        .apply()
+    let stderr = log4rs::append::console::ConsoleAppender::builder()
+        .target(log4rs::append::console::Target::Stderr)
+        .encoder(Box::new(log4rs::encode::pattern::PatternEncoder::new(
+            "{d(%H:%M:%S%.3f)} [{l}][{t}] {m}{n}",
+        )))
+        .build();
+    let log_config = log4rs::config::Config::builder()
+        .appender(
+            log4rs::config::Appender::builder()
+                .build("stderr", Box::new(stderr)),
+        )
+        .build(
+            log4rs::config::Root::builder()
+                .appender("stderr")
+                .build(log::LevelFilter::Trace),
+        )
         .unwrap();
+    log4rs::init_config(log_config).unwrap();
 }
