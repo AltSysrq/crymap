@@ -243,6 +243,9 @@ mod poll; // NOOP, CHECK, during IDLE, after commands
 mod search; // SEARCH, UID SEARCH
 mod select; // SELECT, EXAMINE, STATUS, also garbage collection
 
+#[cfg(feature = "dev-tools")]
+mod zstd_train;
+
 pub use defs::{StatefulMailbox, StatelessMailbox};
 pub use fetch::{FetchReceiver, MailboxMessageAccessor};
 pub use idle::{IdleListener, IdleNotifier};

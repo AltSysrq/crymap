@@ -94,7 +94,12 @@ impl CommandProcessor {
             s::Command::Simple(s::SimpleCommand::Unselect) => {
                 self.cmd_unselect(sender)
             }
-            s::Command::Simple(s::SimpleCommand::XPurge) => self.cmd_purge(),
+            s::Command::Simple(s::SimpleCommand::XCryPurge) => {
+                self.cmd_xcry_purge()
+            }
+            s::Command::Simple(s::SimpleCommand::XCryZstdTrain) => {
+                self.cmd_xcry_zstd_train()
+            }
             s::Command::Simple(s::SimpleCommand::Xyzzy) => {
                 self.cmd_noop("Nothing happens", sender)
             }
@@ -364,6 +369,68 @@ impl CommandProcessor {
             code: None,
             quip: Some(Cow::Borrowed("Already using TLS")),
         }))
+    }
+
+    #[cfg(not(feature = "dev-tools"))]
+    fn cmd_xcry_zstd_train(&mut self) -> CmdResult {
+        Err(s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::No,
+            code: None,
+            quip: Some(Cow::Borrowed("dev-tools not enabled")),
+        }))
+    }
+
+    #[cfg(feature = "dev-tools")]
+    fn cmd_xcry_zstd_train(&mut self) -> CmdResult {
+        use chrono::prelude::*;
+
+        let data = selected!(self)?.zstd_train().map_err(map_error!(self))?;
+        let data = base64::encode(&data);
+        let mut wrapped_data = String::new();
+        for chunk in data.as_bytes().chunks(72) {
+            wrapped_data.push_str(std::str::from_utf8(chunk).unwrap());
+            wrapped_data.push_str("\n");
+        }
+
+        let message = format!(
+            "\
+From: Crymap <crymap@localhost>
+Date: {}
+Subject: Zstd training data
+Content-Type: multipart/mixed; boundary=bound
+Message-ID: <{}.zstdtrain@localhost>
+MIME-Version: 1.0
+
+--bound
+Content-Type: text/plain
+
+Attached is the result of zstd training.
+
+--bound
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename=\"zstddict.dat\"
+Content-Transfer-Encoding: base64
+
+{}
+--bound--
+",
+            Utc::now().to_rfc2822(),
+            Utc::now().to_rfc3339(),
+            wrapped_data
+        );
+
+        account!(self)?
+            .mailbox("INBOX", false)
+            .map_err(map_error!(self))?
+            .append(
+                FixedOffset::east(0)
+                    .from_utc_datetime(&Utc::now().naive_local()),
+                vec![],
+                message.replace('\n', "\r\n").as_bytes(),
+            )
+            .map_err(map_error!(self))?;
+
+        success()
     }
 
     fn full_poll(&mut self, sender: SendResponse<'_>) -> Result<(), Error> {

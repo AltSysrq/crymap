@@ -16,16 +16,25 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-//! Everything needed to implement the IMAP `FETCH` operation.
+use std::io;
 
-pub mod bodystructure;
-pub mod envelope;
-pub mod multi;
-pub mod search;
-pub mod section;
-pub mod simple;
+use super::defs::*;
+use crate::mime::fetch::zstd_train::ZstdTrainFetcher;
+use crate::mime::grovel::grovel;
+use crate::support::error::Error;
 
-mod strings;
+impl StatefulMailbox {
+    pub fn zstd_train(&mut self) -> Result<Vec<u8>, Error> {
+        let samples = self
+            .state
+            .uids()
+            .map(|uid| {
+                let accessor = self.access_message(uid)?;
+                grovel(&accessor, ZstdTrainFetcher::default())
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
 
-#[cfg(feature = "dev-tools")]
-pub mod zstd_train;
+        zstd::dict::from_samples(&samples, 4096)
+            .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::Other, e)))
+    }
+}

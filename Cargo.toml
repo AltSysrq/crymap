@@ -64,3 +64,6 @@ opt-level = 3
 
 [profile.dev.package.openssl]
 opt-level = 3
+
+[features]
+dev-tools = []

@@ -225,7 +225,7 @@ impl CommandProcessor {
         success()
     }
 
-    pub(super) fn cmd_purge(&mut self) -> CmdResult {
+    pub(super) fn cmd_xcry_purge(&mut self) -> CmdResult {
         let n = selected!(self)?.purge_all();
         Ok(s::Response::Cond(s::CondResponse {
             cond: s::RespCondType::Ok,

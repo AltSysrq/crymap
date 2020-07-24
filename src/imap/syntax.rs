@@ -1400,7 +1400,8 @@ simple_enum! {
         LogOut("LOGOUT"),
         Noop("NOOP"),
         StartTls("STARTTLS"),
-        XPurge("XCRY PURGE"),
+        XCryPurge("XCRY PURGE"),
+        XCryZstdTrain("XCRY ZSTD TRAIN"),
         Xyzzy("XYZZY"),
         // RFC 2342
         Namespace("NAMESPACE"),
