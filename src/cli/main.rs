@@ -31,9 +31,11 @@ enum Command {
     /// Commands to be run on the Crymap server system.
     Server(ServerCommand),
     /// Commands used in the development or testing of Crymap.
+    #[cfg(feature = "dev-tools")]
     Dev(DevSubcommand),
 }
 
+#[cfg(feature = "dev-tools")]
 #[derive(StructOpt)]
 enum DevSubcommand {
     /// Run Crymap in a scratch environment for testing.
@@ -104,6 +106,7 @@ pub fn main() {
     let cmd = Command::from_args();
 
     match cmd {
+        #[cfg(feature = "dev-tools")]
         Command::Dev(DevSubcommand::ImapTest) => super::imap_test::imap_test(),
         Command::Server(cmd) => server(cmd),
     }

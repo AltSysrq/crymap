@@ -25,6 +25,8 @@ macro_rules! die {
 
 pub mod main;
 
+#[cfg(feature = "dev-tools")]
 mod imap_test;
+
 mod serve;
 mod user;
