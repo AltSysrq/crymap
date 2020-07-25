@@ -93,6 +93,13 @@ pub struct MailboxState {
     /// greatest CID seen so far.
     max_modseq: Option<Modseq>,
 
+    /// The greatest `Modseq` currently seen through a transaction.
+    ///
+    /// This may be less than `max_modseq` when the latest transaction did not
+    /// include the latest UID.
+    #[serde(default)]
+    max_tx_modseq: Option<Modseq>,
+
     /// The most recent expungements.
     ///
     /// As new expungements are observed, they are appended to this value, and
@@ -299,10 +306,14 @@ impl MailboxState {
         // Advance our own idea of the maximum modseq
         let nominal_modseq = Modseq::new(tx.max_uid, cid);
         let canonical_modseq = self
-            .max_modseq
+            .max_tx_modseq
             .map(|m| m.combine(nominal_modseq))
             .unwrap_or(nominal_modseq);
-        self.max_modseq = Some(canonical_modseq);
+        self.max_tx_modseq = Some(canonical_modseq);
+        self.max_modseq = Some(
+            self.max_modseq
+                .map_or(canonical_modseq, |m| m.combine(canonical_modseq)),
+        );
 
         let m = canonical_modseq;
         for op in tx.ops {
@@ -1194,6 +1205,58 @@ mod test {
             state.validate_uid(Uid::u(2)),
             Err(Error::ExpungedMessage)
         ));
+    }
+
+    #[test]
+    fn different_tx_uid_orders_produce_consistent_results() {
+        let mut state1 = MailboxState::new();
+        let mut state2 = MailboxState::new();
+
+        state1.seen(Uid::u(1));
+        state2.seen(Uid::u(1));
+        state1.flush();
+        state2.flush();
+
+        // state1 sees a new UID which state2 isn't aware of
+        state1.seen(Uid::u(2));
+        state1.flush();
+
+        // In the mean time, state2 makes a transaction against UID 1
+        let (cid, mut tx) = state2.start_tx().unwrap();
+        tx.add_flag(Uid::u(1), Flag::Deleted);
+        state2.commit(cid, tx.clone());
+        state2.flush();
+
+        // Now state1 sees the transaction. It needs to come up with the same
+        // last_modified for UID 1 as state2.
+        state1.commit(cid, tx.clone());
+        state1.flush();
+
+        assert_eq!(
+            state1.message_status(Uid::u(1)).unwrap().last_modified,
+            state2.message_status(Uid::u(1)).unwrap().last_modified,
+        );
+    }
+
+    #[test]
+    fn seqnum_mapping_not_confused_by_intermediate_transactions() {
+        // Test is a bit poorly named, but this directly tests a specific bug
+        // regarding maintenance of max_modseq which was only caught by
+        // integration-level tests when first introduced.
+
+        let mut state = MailboxState::new();
+
+        state.seen(Uid::u(1));
+        let (cid, mut tx) = state.start_tx().unwrap();
+        tx.add_flag(Uid::u(1), Flag::Deleted);
+        state.seen(Uid::u(2));
+        state.commit(cid, tx);
+        state.flush();
+
+        assert_eq!(Seqnum::u(1), state.uid_to_seqnum(Uid::u(1)).unwrap());
+        assert_eq!(Seqnum::u(2), state.uid_to_seqnum(Uid::u(2)).unwrap());
+        assert_eq!(Uid::u(1), state.seqnum_to_uid(Seqnum::u(1)).unwrap());
+        assert_eq!(Uid::u(2), state.seqnum_to_uid(Seqnum::u(2)).unwrap());
     }
 
     proptest! {
