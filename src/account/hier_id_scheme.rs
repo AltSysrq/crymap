@@ -161,9 +161,43 @@ impl<'a> HierIdScheme<'a> {
 
         // Create gravestones between the nominal next ID and the alignment
         // target
-        for id in first_id..target_id {
+        let mut to_allocate = first_id;
+        while to_allocate < target_id {
+            let id = to_allocate;
             let gravestone = self.path_for_id(id);
-            self.mkdirs(&gravestone)?;
+            if 0 == id % 256 {
+                // Try to allocate all 256 ids at once
+                let parent = gravestone.parent().unwrap();
+                self.mkdirs(&parent)?;
+                let success = match std::os::unix::fs::symlink(
+                    parent.file_name().unwrap(),
+                    parent,
+                ) {
+                    Ok(_) => true,
+                    Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
+                        true
+                    }
+
+                    // Ignore other problems; anything fatal we'll encounter
+                    // again below.
+                    _ => false,
+                };
+
+                if success {
+                    to_allocate += 256;
+                    continue;
+                }
+
+                // We only need to create directories for items evenly
+                // divisible by 256...
+                self.mkdirs(&gravestone)?;
+            }
+
+            // ... or for id 1
+            if 1 == id {
+                self.mkdirs(&gravestone)?;
+            }
+
             match std::os::unix::fs::symlink(
                 gravestone.file_name().unwrap(),
                 &gravestone,
@@ -175,6 +209,8 @@ impl<'a> HierIdScheme<'a> {
                 Err(e) if io::ErrorKind::AlreadyExists == e.kind() => (),
                 Err(e) => return Err(e.into()),
             }
+
+            to_allocate += 1;
         }
 
         // Now to move the whole aligned directory
@@ -637,7 +673,6 @@ fn probe_for_first_id(guess: u32, exists: impl Fn(u32) -> bool) -> u32 {
 #[cfg(test)]
 mod test {
     use proptest::prelude::*;
-    use rayon::prelude::*;
 
     use super::*;
 
@@ -793,6 +828,8 @@ mod test {
 
     #[test]
     fn test_emplace_many() {
+        use rayon::prelude::*;
+
         [
             0u32, 1, 128, 254, 255, 256, 257, 510, 511, 512, 513, 65534, 65535,
             65536, 65537, 131070, 131071, 131072, 131073,
