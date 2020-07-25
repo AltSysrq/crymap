@@ -93,6 +93,7 @@ impl Write for BufferWriter {
                 cryptor,
                 file,
             });
+            self.len = 0;
             self.write_all(&spill)?;
         }
 
@@ -210,7 +211,7 @@ mod test {
     fn large_with_small_ops() {
         test_read_and_write(
             &mut [0; 17],
-            "hello world".repeat(1000).as_bytes(),
+            "hello world".repeat(10000).as_bytes(),
         );
     }
 
@@ -218,7 +219,7 @@ mod test {
     fn large_with_large_ops() {
         test_read_and_write(
             &mut [0; 70000],
-            "hello world".repeat(1000).as_bytes(),
+            "hello world".repeat(10000).as_bytes(),
         );
     }
 }
