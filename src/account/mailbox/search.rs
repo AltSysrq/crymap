@@ -38,6 +38,7 @@ impl StatefulMailbox {
         let result = self.search(request)?;
 
         Ok(SearchResponse {
+            max_modseq: result.max_modseq,
             hits: result
                 .hits
                 .into_iter()
@@ -85,7 +86,15 @@ impl StatefulMailbox {
         // it. We also need the output sorted for ESEARCH.
         hits.sort_unstable();
 
-        Ok(SearchResponse { hits })
+        Ok(SearchResponse {
+            max_modseq: hits
+                .iter()
+                .copied()
+                .filter_map(|uid| self.state.message_status(uid))
+                .map(|m| m.last_modified())
+                .max(),
+            hits,
+        })
     }
 
     fn search_one(
@@ -292,6 +301,10 @@ impl StatefulMailbox {
             }
 
             &SearchQuery::And(ref queries) => self.compile_and(dst, queries),
+
+            &SearchQuery::Modseq(ms) => {
+                dst.push(Op::Modseq(ms));
+            }
         }
     }
 }

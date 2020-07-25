@@ -373,11 +373,6 @@ impl<T: TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync> SeqRange<T> {
         this
     }
 
-    /// Return whether this range is empty (invalid for IMAP wire format).
-    pub fn is_empty(&self) -> bool {
-        self.parts.is_empty()
-    }
-
     /// Append a single item to this range.
     ///
     /// The item must be strictly greater than all other items already
@@ -522,6 +517,13 @@ impl<T: TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync> SeqRange<T> {
     /// Return the maximum value in this sequence set, raw.
     pub fn max(&self) -> Option<u32> {
         self.parts.values().rev().copied().next()
+    }
+}
+
+impl<T> SeqRange<T> {
+    /// Return whether this range is empty (invalid for IMAP wire format).
+    pub fn is_empty(&self) -> bool {
+        self.parts.is_empty()
     }
 }
 
@@ -754,6 +756,10 @@ pub struct StatusRequest {
     pub uidvalidity: bool,
     /// Return the number of not-\Seen messages.
     pub unseen: bool,
+
+    // ==================== RFC 7162 ====================
+    /// Return the greatest Modseq value
+    pub max_modseq: bool,
 }
 
 /// The `STATUS` response
@@ -771,6 +777,8 @@ pub struct StatusResponse {
     pub uidnext: Option<Uid>,
     pub uidvalidity: Option<u32>,
     pub unseen: Option<usize>,
+    // ==================== RFC 7162 ====================
+    pub max_modseq: Option<u64>,
 }
 
 /// Request used for implementing `LIST` and `LSUB`.
@@ -934,6 +942,23 @@ pub struct PollResponse {
     /// The new `HIGHESTMODSEQ`, or `None` if still primordial or hasn't
     /// changed since the last poll.
     pub max_modseq: Option<Modseq>,
+}
+
+/// The `QRESYNC` part of `SELELCT` or `EXPUNGE`.
+#[derive(Clone, Debug)]
+pub struct QresyncRequest {
+    /// The last known UID validity value for the mailbox.
+    pub uid_validity: u32,
+    /// If set, only consider changes that may have occurred after this point.
+    ///
+    /// If clear, consider changes from all time.
+    pub resync_from: Option<Modseq>,
+    /// If set, only return information for UIDs in this set.
+    pub known_uids: Option<SeqRange<Uid>>,
+    /// If set and `resync_from` is earlier than the last known expungement,
+    /// use these parallel seqnum and UID sets to estimate which expungements
+    /// the client already knows about.
+    pub mapping_reference: Option<(SeqRange<Seqnum>, SeqRange<Uid>)>,
 }
 
 /// The result from a `QRESYNC` operation.
@@ -1368,6 +1393,7 @@ pub enum SearchQuery {
     Unkeyword(String),
     Unseen,
     And(Vec<SearchQuery>),
+    Modseq(u64),
 }
 
 /// The response from the `SEARCH` (`ID` = `Seqnum`) or `UID SEARCH`
@@ -1379,6 +1405,8 @@ pub struct SearchResponse<ID> {
     /// For some reason, the ids are returned as a naked list instead of using
     /// IMAP's list syntax or sequence-set syntax.
     pub hits: Vec<ID>,
+    /// The maximum `Modseq` of any hit, or `None` if there were no hits.
+    pub max_modseq: Option<Modseq>,
 }
 
 /// The `APPEND` request.

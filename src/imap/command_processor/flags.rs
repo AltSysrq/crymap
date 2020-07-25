@@ -27,25 +27,26 @@ impl CommandProcessor {
     pub(crate) fn cmd_store(
         &mut self,
         cmd: s::StoreCommand<'_>,
-        _sender: SendResponse<'_>,
+        sender: SendResponse<'_>,
     ) -> CmdResult {
         let ids = self.parse_seqnum_range(&cmd.messages)?;
-        self.store(ids, cmd, StatefulMailbox::seqnum_store)
+        self.store(ids, cmd, sender, StatefulMailbox::seqnum_store)
     }
 
     pub(crate) fn cmd_uid_store(
         &mut self,
         cmd: s::StoreCommand<'_>,
-        _sender: SendResponse<'_>,
+        sender: SendResponse<'_>,
     ) -> CmdResult {
         let ids = self.parse_uid_range(&cmd.messages)?;
-        self.store(ids, cmd, StatefulMailbox::store)
+        self.store(ids, cmd, sender, StatefulMailbox::store)
     }
 
     fn store<ID>(
         &mut self,
         ids: SeqRange<ID>,
         cmd: s::StoreCommand<'_>,
+        sender: SendResponse<'_>,
         f: impl FnOnce(
             &mut StatefulMailbox,
             &StoreRequest<ID>,
@@ -54,13 +55,17 @@ impl CommandProcessor {
     where
         SeqRange<ID>: fmt::Debug,
     {
+        if cmd.unchanged_since.is_some() {
+            self.enable_condstore(sender, true);
+        }
+
         let request = StoreRequest {
             ids: &ids,
             flags: &cmd.flags,
             remove_listed: s::StoreCommandType::Minus == cmd.typ,
             remove_unlisted: s::StoreCommandType::Eq == cmd.typ,
             loud: !cmd.silent,
-            unchanged_since: None,
+            unchanged_since: cmd.unchanged_since,
         };
 
         let resp = f(selected!(self)?, &request).map_err(map_error! {
@@ -73,14 +78,34 @@ impl CommandProcessor {
             GaveUpInsertion => (No, Some(s::RespTextCode::Unavailable(()))),
         })?;
 
-        if resp.ok {
-            success()
-        } else {
-            Ok(s::Response::Cond(s::CondResponse {
+        fn expunged_response() -> s::Response<'static> {
+            s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::No,
                 code: Some(s::RespTextCode::ExpungeIssued(())),
                 quip: Some(Cow::Borrowed("Some messages have been expunged")),
+            })
+        }
+
+        if !resp.modified.is_empty() {
+            if !resp.ok {
+                sender(expunged_response());
+            }
+
+            Ok(s::Response::Cond(s::CondResponse {
+                cond: if resp.ok {
+                    s::RespCondType::Ok
+                } else {
+                    s::RespCondType::No
+                },
+                code: Some(s::RespTextCode::Modified(Cow::Owned(
+                    resp.modified.to_string(),
+                ))),
+                quip: None,
             }))
+        } else if resp.ok {
+            success()
+        } else {
+            Ok(expunged_response())
         }
     }
 }

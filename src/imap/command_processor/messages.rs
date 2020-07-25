@@ -206,6 +206,11 @@ impl CommandProcessor {
                 UnaddressableMessage =>
                     (No, Some(s::RespTextCode::ClientBug(()))),
             })?;
+        // If QRESYNC is enabled, the *tagged* OK response is supposed to have
+        // the HIGHESTMODSEQ as its response code. This is awkward since we
+        // don't know what that value is yet, since the poll output occurs
+        // before our tagged response in the stream but is computed later.
+        // This is handled as a special case by `handle_command()`.
         success()
     }
 

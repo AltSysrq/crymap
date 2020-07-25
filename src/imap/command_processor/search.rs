@@ -20,7 +20,9 @@ use std::borrow::Cow;
 use std::marker::PhantomData;
 
 use super::defs::*;
+use crate::account::mailbox::StatefulMailbox;
 use crate::account::model::*;
+use crate::support::error::Error;
 
 impl CommandProcessor {
     pub(super) fn cmd_search(
@@ -28,17 +30,7 @@ impl CommandProcessor {
         cmd: s::SearchCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        let request = self.search_command_from_ast(cmd)?;
-        let response = selected!(self)?
-            .seqnum_search(&request)
-            .map_err(map_error!(self))?;
-
-        sender(s::Response::Search(s::SearchResponse {
-            hits: response.hits.into_iter().map(|u| u.0.get()).collect(),
-            max_modseq: None,
-            _marker: PhantomData,
-        }));
-        success()
+        self.search(cmd, sender, StatefulMailbox::seqnum_search)
     }
 
     pub(super) fn cmd_uid_search(
@@ -46,14 +38,37 @@ impl CommandProcessor {
         cmd: s::SearchCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        let request = self.search_command_from_ast(cmd)?;
-        let response = selected!(self)?
-            .search(&request)
-            .map_err(map_error!(self))?;
+        self.search(cmd, sender, StatefulMailbox::search)
+    }
+
+    fn search<T: Into<u32>>(
+        &mut self,
+        cmd: s::SearchCommand<'_>,
+        sender: SendResponse<'_>,
+        f: impl FnOnce(
+            &mut StatefulMailbox,
+            &SearchRequest,
+        ) -> Result<SearchResponse<T>, Error>,
+    ) -> CmdResult {
+        let mut has_modseq = false;
+        let request = self.search_command_from_ast(&mut has_modseq, cmd)?;
+
+        if has_modseq && self.selected.is_some() {
+            self.enable_condstore(sender, true);
+        }
+
+        let response =
+            f(selected!(self)?, &request).map_err(map_error!(self))?;
 
         sender(s::Response::Search(s::SearchResponse {
-            hits: response.hits.into_iter().map(|u| u.0.get()).collect(),
-            max_modseq: None,
+            hits: response.hits.into_iter().map(|u| u.into()).collect(),
+            // Only return the MODSEQ item if the client specified a MODSEQ
+            // criterion.
+            max_modseq: if has_modseq {
+                response.max_modseq.map(|m| m.raw().get())
+            } else {
+                None
+            },
             _marker: PhantomData,
         }));
         success()
@@ -61,6 +76,7 @@ impl CommandProcessor {
 
     fn search_command_from_ast(
         &mut self,
+        has_modseq: &mut bool,
         cmd: s::SearchCommand<'_>,
     ) -> PartialResult<SearchRequest> {
         if let Some(charset) = cmd.charset {
@@ -86,13 +102,14 @@ impl CommandProcessor {
             queries: cmd
                 .keys
                 .into_iter()
-                .map(|k| self.search_query_from_ast(k))
+                .map(|k| self.search_query_from_ast(has_modseq, k))
                 .collect::<PartialResult<Vec<_>>>()?,
         })
     }
 
     fn search_query_from_ast(
         &mut self,
+        has_modseq: &mut bool,
         k: s::SearchKey<'_>,
     ) -> PartialResult<SearchQuery> {
         match k {
@@ -151,11 +168,11 @@ impl CommandProcessor {
             )),
             s::SearchKey::Larger(thresh) => Ok(SearchQuery::Larger(thresh)),
             s::SearchKey::Not(sub) => Ok(SearchQuery::Not(Box::new(
-                self.search_query_from_ast(*sub)?,
+                self.search_query_from_ast(has_modseq, *sub)?,
             ))),
             s::SearchKey::Or(or) => Ok(SearchQuery::Or(
-                Box::new(self.search_query_from_ast(*or.a)?),
-                Box::new(self.search_query_from_ast(*or.b)?),
+                Box::new(self.search_query_from_ast(has_modseq, *or.a)?),
+                Box::new(self.search_query_from_ast(has_modseq, *or.b)?),
             )),
             s::SearchKey::Smaller(thresh) => Ok(SearchQuery::Smaller(thresh)),
             s::SearchKey::Uid(ss) => {
@@ -167,10 +184,13 @@ impl CommandProcessor {
             s::SearchKey::And(parts) => Ok(SearchQuery::And(
                 parts
                     .into_iter()
-                    .map(|part| self.search_query_from_ast(part))
+                    .map(|part| self.search_query_from_ast(has_modseq, part))
                     .collect::<PartialResult<Vec<_>>>()?,
             )),
-            s::SearchKey::Modseq(_) => unimplemented!("TODO"),
+            s::SearchKey::Modseq(m) => {
+                *has_modseq = true;
+                Ok(SearchQuery::Modseq(m.modseq))
+            }
         }
     }
 }

@@ -77,13 +77,17 @@ impl CommandProcessor {
             ids.append(uid);
         }
 
+        let mut what = Vec::with_capacity(3);
+        what.push(s::FetchAtt::Uid(()));
+        what.push(s::FetchAtt::Flags(()));
+        if self.condstore_enabled {
+            what.push(s::FetchAtt::Modseq(()));
+        }
+
         let _ = self.fetch(
             s::FetchCommand {
                 messages: Cow::Borrowed(""),
-                target: s::FetchCommandTarget::Multi(vec![
-                    s::FetchAtt::Uid(()),
-                    s::FetchAtt::Flags(()),
-                ]),
+                target: s::FetchCommandTarget::Multi(what),
                 modifiers: None,
             },
             sender,
@@ -124,8 +128,39 @@ impl CommandProcessor {
             ..FetchRequest::default()
         };
 
+        let mut enable_condstore = false;
+        let mut has_changedsince = false;
+        for modifier in cmd.modifiers.unwrap_or_default() {
+            match modifier {
+                s::FetchModifier::ChangedSince(modseq) => {
+                    if has_changedsince {
+                        return Err(s::Response::Cond(s::CondResponse {
+                            cond: s::RespCondType::Bad,
+                            code: Some(s::RespTextCode::ClientBug(())),
+                            quip: Some(Cow::Borrowed(
+                                "CHANGEDSINCE passed more than once",
+                            )),
+                        }));
+                    }
+
+                    enable_condstore = true;
+                    has_changedsince = true;
+                    request.changed_since = Modseq::of(modseq);
+                }
+                s::FetchModifier::Vanished(_) => unimplemented!(),
+            }
+        }
+
         let fetch_properties = fetch_properties(&cmd.target);
         fetch_target_from_ast(&mut request, cmd.target);
+
+        request.modseq |= has_changedsince;
+
+        // Don't implicitly enable CONDSTORE if not selected since we will
+        // return BAD in that case.
+        if (enable_condstore || request.modseq) && self.selected.is_some() {
+            self.enable_condstore(sender, true);
+        }
 
         let selected = selected!(self)?;
 
@@ -398,7 +433,7 @@ fn fetch_att_to_ast(
     match item {
         FI::Nil => panic!("Nil FetchedItem"),
         FI::Uid(uid) => Some(s::MsgAtt::Uid(uid.0.get())),
-        FI::Modseq(_modseq) => unimplemented!("Modseq not yet implemented"),
+        FI::Modseq(modseq) => Some(s::MsgAtt::Modseq(modseq.raw().get())),
         FI::Flags(flags) => Some(s::MsgAtt::Flags(if flags.recent {
             s::FlagsFetch::Recent(flags.flags)
         } else {

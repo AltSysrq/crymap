@@ -101,14 +101,6 @@ impl CommandProcessor {
         success()
     }
 
-    pub(crate) fn cmd_examine(
-        &mut self,
-        cmd: s::ExamineCommand<'_>,
-        sender: SendResponse<'_>,
-    ) -> CmdResult {
-        self.select(&cmd.mailbox, sender, true)
-    }
-
     pub(crate) fn cmd_list(
         &mut self,
         cmd: s::ListCommand<'_>,
@@ -295,12 +287,30 @@ impl CommandProcessor {
         success()
     }
 
+    pub(crate) fn cmd_examine(
+        &mut self,
+        cmd: s::ExamineCommand<'_>,
+        sender: SendResponse<'_>,
+    ) -> CmdResult {
+        self.select(
+            &cmd.mailbox,
+            cmd.modifiers.unwrap_or_default(),
+            sender,
+            true,
+        )
+    }
+
     pub(crate) fn cmd_select(
         &mut self,
         cmd: s::SelectCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        self.select(&cmd.mailbox, sender, false)
+        self.select(
+            &cmd.mailbox,
+            cmd.modifiers.unwrap_or_default(),
+            sender,
+            false,
+        )
     }
 
     pub(crate) fn cmd_status(
@@ -308,7 +318,6 @@ impl CommandProcessor {
         cmd: s::StatusCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        let account = account!(self)?;
         let request = StatusRequest {
             name: cmd.mailbox.get_utf8(self.unicode_aware).into_owned(),
             messages: cmd.atts.contains(&s::StatusAtt::Messages),
@@ -316,15 +325,21 @@ impl CommandProcessor {
             uidnext: cmd.atts.contains(&s::StatusAtt::UidNext),
             uidvalidity: cmd.atts.contains(&s::StatusAtt::UidValidity),
             unseen: cmd.atts.contains(&s::StatusAtt::Unseen),
+            max_modseq: cmd.atts.contains(&s::StatusAtt::HighestModseq),
         };
 
-        let responses = account.status(&request).map_err(map_error! {
-            self,
-            UnsafeName =>
-                (No, Some(s::RespTextCode::Cannot(()))),
-            NxMailbox | MailboxUnselectable =>
-                (No, Some(s::RespTextCode::Nonexistent(()))),
-        })?;
+        if request.max_modseq && self.account.is_some() {
+            self.enable_condstore(sender, true);
+        }
+
+        let responses =
+            account!(self)?.status(&request).map_err(map_error! {
+                self,
+                UnsafeName =>
+                    (No, Some(s::RespTextCode::Cannot(()))),
+                NxMailbox | MailboxUnselectable =>
+                    (No, Some(s::RespTextCode::Nonexistent(()))),
+            })?;
 
         for response in responses {
             let mut atts: Vec<s::StatusResponseAtt<'static>> =
@@ -361,6 +376,13 @@ impl CommandProcessor {
                 atts.push(s::StatusResponseAtt {
                     att: s::StatusAtt::Unseen,
                     value: unseen.try_into().unwrap_or(u32::MAX).into(),
+                    _marker: PhantomData,
+                });
+            }
+            if let Some(max_modseq) = response.max_modseq {
+                atts.push(s::StatusResponseAtt {
+                    att: s::StatusAtt::HighestModseq,
+                    value: max_modseq,
                     _marker: PhantomData,
                 });
             }
@@ -407,12 +429,97 @@ impl CommandProcessor {
     fn select(
         &mut self,
         mailbox: &MailboxName<'_>,
+        modifiers: Vec<s::SelectModifier<'_>>,
         sender: SendResponse,
         read_only: bool,
     ) -> CmdResult {
+        // We need to validate the modifiers before we do anything else
+        let mut enable_condstore = false;
+        let mut qresync: Option<QresyncRequest> = None;
+
+        for modifier in modifiers {
+            match modifier {
+                s::SelectModifier::Condstore(()) => enable_condstore = true,
+                s::SelectModifier::Qresync(qr) => {
+                    if !self.qresync_enabled {
+                        return Err(s::Response::Cond(s::CondResponse {
+                            cond: s::RespCondType::Bad,
+                            code: Some(s::RespTextCode::ClientBug(())),
+                            quip: Some(Cow::Borrowed(
+                                "ENABLE QRESYNC required",
+                            )),
+                        }));
+                    }
+
+                    if qresync.is_some() {
+                        return Err(s::Response::Cond(s::CondResponse {
+                            cond: s::RespCondType::Bad,
+                            code: Some(s::RespTextCode::ClientBug(())),
+                            quip: Some(Cow::Borrowed(
+                                "QRESYNC passed more than once",
+                            )),
+                        }));
+                    }
+
+                    let known_uids = if let Some(ku) = qr.known_uids {
+                        Some(parse_global_seqrange(&ku)?)
+                    } else {
+                        None
+                    };
+
+                    let mapping_reference = if let Some(smd) = qr.seq_match_data
+                    {
+                        let seqnums: SeqRange<Seqnum> =
+                            parse_global_seqrange(&smd.seqnums)?;
+                        let uids: SeqRange<Uid> =
+                            parse_global_seqrange(&smd.uids)?;
+
+                        if seqnums.len() != uids.len() {
+                            return Err(s::Response::Cond(s::CondResponse {
+                                cond: s::RespCondType::Bad,
+                                code: Some(s::RespTextCode::ClientBug(())),
+                                quip: Some(Cow::Borrowed(
+                                    "sequence sets in seq-match-data are \
+                                     not the same length",
+                                )),
+                            }));
+                        }
+
+                        Some((seqnums, uids))
+                    } else {
+                        None
+                    };
+
+                    qresync = Some(QresyncRequest {
+                        uid_validity: qr.uid_validity,
+                        resync_from: Modseq::of(qr.modseq),
+                        known_uids,
+                        mapping_reference,
+                    });
+                }
+            }
+        }
+
         // SELECT and EXAMINE unselect any selected mailbox regardless of
         // whether they succeed.
-        self.unselect();
+        self.unselect(sender);
+
+        // RFC 7162 does not describe whether an implicit enable of CONDSTORE
+        // due to `SELECT mailbox (CONDSTORE)` while another mailbox was
+        // already selected should emit a HIGHESTMODSEQ response for the
+        // previous mailbox.
+        //
+        // Here, we do not do so (by doing this after the implicit unselect
+        // above), on the basis of two theories:
+        //
+        // 1. It isn't useful to return HIGHESTMODSEQ for a mailbox about to be
+        // unselected, so it is unlikely any client depends on this.
+        //
+        // 2. It is more likely a buggy client would be broken by a spurious
+        // HIGHESTMODSEQ than a missing one.
+        if enable_condstore {
+            self.enable_condstore(sender, true);
+        }
 
         let mailbox = mailbox.get_utf8(self.unicode_aware);
         let stateless = account!(self)?.mailbox(&mailbox, read_only).map_err(
@@ -455,6 +562,15 @@ impl CommandProcessor {
             code: Some(s::RespTextCode::UidValidity(select.uidvalidity)),
             quip: None,
         }));
+        if self.condstore_enabled {
+            sender(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Ok,
+                code: Some(s::RespTextCode::HighestModseq(
+                    select.max_modseq.map_or(1, |m| m.raw().get()),
+                )),
+                quip: None,
+            }));
+        }
 
         let read_only = stateful.stateless().read_only();
         self.selected = Some(stateful);
@@ -470,7 +586,14 @@ impl CommandProcessor {
         }))
     }
 
-    fn unselect(&mut self) {
+    fn unselect(&mut self, sender: SendResponse<'_>) {
+        if self.selected.is_some() {
+            sender(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Ok,
+                code: Some(s::RespTextCode::Closed(())),
+                quip: None,
+            }));
+        }
         self.selected = None;
     }
 }

@@ -173,6 +173,11 @@ impl StatefulMailbox {
         self.state.max_uid()
     }
 
+    /// Return the HIGHESTMODSEQ to report to the client.
+    pub fn report_max_modseq(&self) -> Option<Modseq> {
+        self.state.report_max_modseq()
+    }
+
     /// Return whether there are any unapplied expunge events currently known.
     ///
     /// This does not result in any polling, but just looks at the

@@ -337,6 +337,10 @@ pub fn assert_error_response(
 }
 
 pub fn c(s: &'static str) -> s::Command<'static> {
+    cb(s)
+}
+
+pub fn cb<'a>(s: &'a str) -> s::Command<'a> {
     match s::Command::parse(s.as_bytes()) {
         Ok((b"", command)) => command,
         _ => panic!("Bad command: {}", s),

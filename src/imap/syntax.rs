@@ -444,6 +444,7 @@ syntax_rule! {
         #[0* prefix(" ")]
         #[primitive(num_u32, number)]
         hits: Vec<u32>,
+        // TODO/REMINDER EASEARCH is also extended with this
         #[opt surrounded(" (MODSEQ ", ")")]
         #[primitive(num_u64, number64)]
         max_modseq: Option<u64>,

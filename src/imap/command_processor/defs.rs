@@ -17,6 +17,8 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
+use std::convert::TryFrom;
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -37,6 +39,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "AUTH=PLAIN",
     "CHILDREN",
     "COMPRESS=DEFLATE",
+    "CONDSTORE",
     "CREATE-SPECIAL-USE",
     "ENABLE",
     "ID",
@@ -85,6 +88,8 @@ pub struct CommandProcessor {
     pub(super) selected: Option<StatefulMailbox>,
     pub(super) unicode_aware: bool,
     pub(super) utf8_enabled: bool,
+    pub(super) condstore_enabled: bool,
+    pub(super) qresync_enabled: bool,
 
     pub(super) multiappend: Option<Multiappend>,
 
@@ -125,6 +130,8 @@ impl CommandProcessor {
             selected: None,
             unicode_aware: false,
             utf8_enabled: false,
+            condstore_enabled: false,
+            qresync_enabled: false,
 
             multiappend: None,
 
@@ -202,6 +209,31 @@ pub(super) fn success() -> CmdResult {
         code: None,
         quip: None,
     }))
+}
+
+pub(super) fn parse_global_seqrange<
+    T: TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync + Default,
+>(
+    s: &str,
+) -> PartialResult<SeqRange<T>>
+where
+    SeqRange<T>: fmt::Debug,
+{
+    if s.contains('*') {
+        return Err(s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Bad,
+            code: Some(s::RespTextCode::Parse(())),
+            quip: Some(Cow::Borrowed("'*' not allowed in sequence set here")),
+        }));
+    }
+
+    SeqRange::parse(s, T::default()).ok_or_else(|| {
+        s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Bad,
+            code: Some(s::RespTextCode::Parse(())),
+            quip: Some(Cow::Borrowed("Invalid sequence set")),
+        })
+    })
 }
 
 #[cfg(not(test))]

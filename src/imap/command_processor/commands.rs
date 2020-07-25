@@ -60,6 +60,18 @@ impl CommandProcessor {
             _ => true,
         };
 
+        // If this gets set to true and QRESYNC is enabled, a HIGHESTMODSEQ
+        // response code must be stapled onto the tagged response if it doesn't
+        // already have a response code.
+        //
+        // This is used to implement RFC 7162's requirement that the tagged
+        // `OK` response to `UID EXPUNGE` include this response code, unlike
+        // every other situation where the data is sent on an untagged
+        // response. (Note we still send the untagged response as well, but
+        // only if anything actually changed --- but the case for UID EXPUNGE
+        // is unconditional for simplicity.)
+        let mut staple_highest_modseq = false;
+
         let res = match command_line.cmd {
             s::Command::Simple(s::SimpleCommand::Capability) => {
                 self.cmd_capability(sender)
@@ -142,6 +154,7 @@ impl CommandProcessor {
                 self.cmd_uid_store(cmd, sender)
             }
             s::Command::Uid(s::UidCommand::Expunge(uids)) => {
+                staple_highest_modseq = self.qresync_enabled;
                 self.cmd_uid_expunge(uids, sender)
             }
 
@@ -184,6 +197,20 @@ impl CommandProcessor {
             Ok(res) => res,
             Err(res) => res,
         };
+
+        if staple_highest_modseq {
+            if let (&Some(ref selected), &mut s::Response::Cond(ref mut cr)) =
+                (&self.selected, &mut res)
+            {
+                if s::RespCondType::Ok == cr.cond && cr.code.is_none() {
+                    cr.code = Some(s::RespTextCode::HighestModseq(
+                        selected
+                            .report_max_modseq()
+                            .map_or(1, |m| m.raw().get()),
+                    ));
+                }
+            }
+        }
 
         // For a cond response, if we have nothing better to say as far as a
         // "response code" goes and there's a pending unapplied expunge, tell
@@ -240,6 +267,9 @@ impl CommandProcessor {
                 self.unicode_aware = true;
                 self.utf8_enabled = true;
                 enabled.push(ext);
+            } else if "CONDSTORE".eq_ignore_ascii_case(&ext) {
+                self.enable_condstore(sender, false);
+                enabled.push(ext);
             }
         }
 
@@ -255,6 +285,36 @@ impl CommandProcessor {
             code: None,
             quip: Some(Cow::Borrowed(quip)),
         }))
+    }
+
+    pub(super) fn enable_condstore(
+        &mut self,
+        sender: SendResponse<'_>,
+        implicit: bool,
+    ) {
+        if self.condstore_enabled {
+            return;
+        }
+
+        self.condstore_enabled = true;
+
+        let highest_modseq = self
+            .selected
+            .as_ref()
+            .map(|s| s.report_max_modseq().map_or(1, |m| m.raw().get()));
+
+        // Only send an untagged OK if there's something interesting to say
+        if implicit || highest_modseq.is_some() {
+            sender(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Ok,
+                code: highest_modseq.map(s::RespTextCode::HighestModseq),
+                quip: Some(Cow::Borrowed(if implicit {
+                    "CONDSTORE enabled implicitly"
+                } else {
+                    "CONDSTORE enabled while already selected"
+                })),
+            }));
+        }
     }
 
     fn cmd_id(
@@ -455,6 +515,19 @@ Content-Transfer-Encoding: base64
         }
 
         self.fetch_for_background_update(sender, poll.fetch);
+
+        if let Some(max_modseq) = poll.max_modseq {
+            if self.condstore_enabled {
+                sender(s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Ok,
+                    code: Some(s::RespTextCode::HighestModseq(
+                        max_modseq.raw().get(),
+                    )),
+                    quip: None,
+                }));
+            }
+        }
+
         Ok(())
     }
 
@@ -466,6 +539,11 @@ Content-Transfer-Encoding: base64
         let uids = selected.mini_poll();
 
         self.fetch_for_background_update(sender, uids);
+
+        // TODO(QRESYNC) We need to make sure that we also send HIGHESTMODSEQ
+        // after the fetches if the reported HIGHESTMODSEQ is not the same as
+        // the true HIGHESTMODSEQ and we sent at least one FETCH.
+
         Ok(())
     }
 

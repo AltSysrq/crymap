@@ -242,6 +242,10 @@ impl StatefulMailbox {
             }
         }
 
+        for uid in ret.modified.items(u32::MAX) {
+            self.state.add_changed_flags_uid(uid);
+        }
+
         Ok(ret)
     }
 
@@ -698,8 +702,8 @@ mod test {
             res
         );
 
-        // No unsolicited FETCH sent
-        assert!(mb.mini_poll().is_empty());
+        // Unsolicited FETCH sent for the message that failed unchanged_since
+        assert_eq!(vec![uid1], mb.mini_poll());
 
         let poll = mb.poll().unwrap();
         // No transaction happened
@@ -762,8 +766,9 @@ mod test {
             res
         );
 
-        // Only the two changed messages get unsolicited FETCH responses
-        assert_eq!(vec![uid1, uid3], mb.mini_poll());
+        // The two changed messages and the one that failed unchanged_since get
+        // unsolicited FETCH responses
+        assert_eq!(vec![uid1, uid2, uid3], mb.mini_poll());
 
         mb.poll().unwrap();
 
@@ -801,8 +806,8 @@ mod test {
             res
         );
 
-        // No unsolicited FETCH since nothing happened
-        assert!(mb.mini_poll().is_empty());
+        // Unsolicited FETCH sent for the message that failed unchanged_since
+        assert_eq!(vec![uid2], mb.mini_poll());
 
         mb.poll().unwrap();
 
@@ -834,8 +839,8 @@ mod test {
             res
         );
 
-        // No unsolicited FETCH since nothing happened
-        assert!(mb.mini_poll().is_empty());
+        // Unsolicited FETCH for 1 since it failed unchanged_since
+        assert_eq!(vec![uid1], mb.mini_poll());
 
         mb.poll().unwrap();
 
@@ -980,8 +985,9 @@ mod test {
             res
         );
 
-        // Only the changed message get unsolicited FETCH responses
-        assert_eq!(vec![uid3], mb.mini_poll());
+        // The changed message and the one that failed unchanged_since get
+        // unsolicited FETCH responses
+        assert_eq!(vec![uid2, uid3], mb.mini_poll());
 
         mb.poll().unwrap();
 

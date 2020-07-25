@@ -470,6 +470,11 @@ impl Account {
             }
         }
 
+        if request.max_modseq {
+            response.max_modseq =
+                Some(select.max_modseq.map_or(1, |m| m.raw().get()));
+        }
+
         Ok(response)
     }
 

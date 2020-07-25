@@ -60,6 +60,7 @@ pub enum Op {
     DateCompare(NaiveDate, bool, bool, bool),
     SizeCompare(u32, bool, bool, bool),
     UidIn(SeqRange<Uid>),
+    Modseq(u64),
     #[cfg(test)]
     _Const(u64),
 }
@@ -123,6 +124,12 @@ pub fn eval(ops: &[Op], data: &SearchData) -> Option<bool> {
                 s.o(data.flags.as_ref().map(|f| f.contains(flag)))
             }
             &Op::Recent => s.o(data.recent),
+            // RFC 7162 stipulates "equal to or greater than", even though it
+            // seems strict inequality would be more sensible (as that would
+            // mean "modified after")
+            &Op::Modseq(thresh) => {
+                s.o(data.last_modified.map(|m| m.raw().get() >= thresh))
+            }
 
             &Op::From(ref r) => s.o(data.from.as_ref().map(|v| r.is_match(v))),
             &Op::Cc(ref r) => s.o(data.cc.as_ref().map(|v| r.is_match(v))),
@@ -218,7 +225,8 @@ pub fn want(ops: &[Op]) -> OptionalSearchParts {
             | &Op::Content(..)
             | &Op::InternalDateCompare(..)
             | &Op::SizeCompare(..)
-            | &Op::UidIn(..) => OptionalSearchParts::empty(),
+            | &Op::UidIn(..)
+            | &Op::Modseq(..) => OptionalSearchParts::empty(),
 
             #[cfg(test)]
             &Op::_Const(..) => OptionalSearchParts::empty(),
@@ -332,6 +340,39 @@ mod test {
                 ops,
                 &SearchData {
                     recent: Some(false),
+                    ..SearchData::default()
+                }
+            )
+        );
+
+        let modseq = Modseq::new(Uid::u(4), Cid(56));
+        assert_eq!(None, eval(&[Op::Modseq(0)], &SearchData::default()));
+        assert_eq!(
+            Some(true),
+            eval(
+                &[Op::Modseq(0)],
+                &SearchData {
+                    last_modified: Some(modseq),
+                    ..SearchData::default()
+                }
+            )
+        );
+        assert_eq!(
+            Some(true),
+            eval(
+                &[Op::Modseq(modseq.raw().get())],
+                &SearchData {
+                    last_modified: Some(modseq),
+                    ..SearchData::default()
+                }
+            )
+        );
+        assert_eq!(
+            Some(false),
+            eval(
+                &[Op::Modseq(modseq.raw().get() + 1)],
+                &SearchData {
+                    last_modified: Some(modseq),
                     ..SearchData::default()
                 }
             )
