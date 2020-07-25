@@ -106,6 +106,13 @@ pub struct ScatterGather {
     pub buffer_size: usize,
 }
 
+lazy_static! {
+    static ref MAX_THREADS: usize = std::env::var("CRYMAP_MAX_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or_else(num_cpus::get);
+}
+
 impl ScatterGather {
     /// Run a possibly concurrent "scatter gather" operation.
     ///
@@ -128,6 +135,7 @@ impl ScatterGather {
     {
         let mut period_start = Instant::now();
         let mut inputs = inputs.into_iter();
+        let max_threads = *MAX_THREADS;
 
         // Single-threaded mode
         loop {
@@ -138,16 +146,17 @@ impl ScatterGather {
                 }
             }
 
-            let now = Instant::now();
-            if now.duration_since(period_start) > self.escalate {
-                period_start = now;
-                break;
+            if max_threads > 1 {
+                let now = Instant::now();
+                if now.duration_since(period_start) > self.escalate {
+                    period_start = now;
+                    break;
+                }
             }
         }
 
         // Enter multi-threaded mode
         let reduce = Mutex::new(reduce);
-        let max_threads = num_cpus::get();
         let mut current_threads = 0;
         let mut target_threads = 2.min(max_threads);
         let (input_send, input_recv) =
