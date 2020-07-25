@@ -160,6 +160,7 @@ mod rfc4978;
 mod rfc5161;
 mod rfc5258;
 mod rfc6154;
+mod rfc6851;
 mod rfc6855;
 mod rfc7888;
 mod xlist;

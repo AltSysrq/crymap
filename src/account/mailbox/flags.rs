@@ -268,8 +268,6 @@ impl StatefulMailbox {
 
 #[cfg(test)]
 mod test {
-    use std::iter;
-
     use tempfile::TempDir;
 
     use super::super::test_prelude::*;
@@ -426,7 +424,7 @@ mod test {
     #[test]
     fn store_plus_flag_uncond_loud_expunged() {
         let (uid1, mut mb, _root) = store_set_up();
-        mb.vanquish(iter::once(uid1)).unwrap();
+        mb.vanquish(&SeqRange::just(uid1)).unwrap();
         // Don't poll -- we want uid1 to still be in the snapshot, but do
         // ensure we brought the change into memory
         assert_eq!(Some(Modseq::new(uid1, Cid(1))), mb.state.max_modseq());
@@ -563,7 +561,7 @@ mod test {
     #[test]
     fn store_plus_flag_uncond_silent_expunged() {
         let (uid1, mut mb, _root) = store_set_up();
-        mb.vanquish(iter::once(uid1)).unwrap();
+        mb.vanquish(&SeqRange::just(uid1)).unwrap();
         // Don't poll -- we want uid1 to still be in the snapshot, but do
         // ensure we brought the change into memory
         assert_eq!(Some(Modseq::new(uid1, Cid(1))), mb.state.max_modseq());
@@ -935,7 +933,7 @@ mod test {
         let uid2 = simple_append(mb.stateless());
         let uid3 = simple_append(mb.stateless());
         mb.poll().unwrap();
-        mb.vanquish(iter::once(uid1)).unwrap();
+        mb.vanquish(&SeqRange::just(uid1)).unwrap();
         assert_eq!(
             Some(Modseq::new(uid3, Cid(1))),
             mb.poll().unwrap().max_modseq

@@ -323,8 +323,6 @@ fn to_regex(pat: &str) -> Regex {
 
 #[cfg(test)]
 mod test {
-    use std::iter;
-
     use chrono::prelude::*;
 
     use super::super::test_prelude::*;
@@ -372,7 +370,7 @@ mod test {
         mb1.poll().unwrap();
 
         // Create a gap in the sequence number / UID mapping
-        mb1.vanquish(iter::once(uids[5])).unwrap();
+        mb1.vanquish(&SeqRange::just(uids[5])).unwrap();
 
         // Set each flag on a distinct message
         mb1.store(&StoreRequest {
@@ -652,7 +650,7 @@ mod test {
         }
 
         mb1.poll().unwrap();
-        mb1.vanquish(iter::once(Uid::MIN)).unwrap();
+        mb1.vanquish(&SeqRange::just(Uid::MIN)).unwrap();
         mb1.poll().unwrap();
 
         let result = mb1
@@ -677,7 +675,8 @@ mod test {
         mb1.poll().unwrap();
         mb2.poll().unwrap();
 
-        mb2.vanquish(uids[1..].iter().copied()).unwrap();
+        mb2.vanquish(&SeqRange::range(uids[1], uids[uids.len() - 1]))
+            .unwrap();
         // Poll cycle and purge is needed to actually expunge the files
         mb2.poll().unwrap();
         mb2.purge_all();

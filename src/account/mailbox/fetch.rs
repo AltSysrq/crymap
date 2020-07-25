@@ -347,7 +347,6 @@ enum SingleFetchResponse {
 
 #[cfg(test)]
 mod test {
-    use std::iter;
     use std::sync::{Arc, Mutex};
 
     use tempfile::TempDir;
@@ -472,7 +471,7 @@ mod test {
         let mut setup = set_up_fetch();
 
         // Make a hole between UIDs 1 and 3
-        setup.mb1.vanquish(iter::once(setup.uids[1])).unwrap();
+        setup.mb1.vanquish(&SeqRange::just(setup.uids[1])).unwrap();
         setup.mb1.poll().unwrap();
 
         let mut seq = SeqRange::new();
@@ -595,11 +594,17 @@ mod test {
     fn fetch_vanished_strict() {
         let mut setup = set_up_fetch();
 
-        setup.mb1.vanquish(setup.uids[4..].iter().copied()).unwrap();
+        setup
+            .mb1
+            .vanquish(&SeqRange::range(
+                setup.uids[4],
+                setup.uids[setup.uids.len() - 1],
+            ))
+            .unwrap();
         let modseq = setup.mb1.poll().unwrap().max_modseq;
         setup
             .mb1
-            .vanquish(setup.uids[2..4].iter().copied())
+            .vanquish(&SeqRange::range(setup.uids[2], setup.uids[3]))
             .unwrap();
         setup.mb1.poll().unwrap();
 
@@ -627,12 +632,12 @@ mod test {
 
         // Vanquish messages one at a time so that each gets a different CID
         for &uid in &setup.uids[..2] {
-            setup.mb1.vanquish(iter::once(uid)).unwrap();
+            setup.mb1.vanquish(&SeqRange::just(uid)).unwrap();
         }
         let modseq = setup.mb1.poll().unwrap().max_modseq;
 
         for &uid in &setup.uids[4..] {
-            setup.mb1.vanquish(iter::once(uid)).unwrap();
+            setup.mb1.vanquish(&SeqRange::just(uid)).unwrap();
         }
         setup.mb1.poll().unwrap();
 
@@ -656,7 +661,7 @@ mod test {
     fn fetch_unexpected_expunged() {
         let mut setup = set_up_fetch();
 
-        setup.mb2.vanquish(iter::once(setup.uids[0])).unwrap();
+        setup.mb2.vanquish(&SeqRange::just(setup.uids[0])).unwrap();
         setup.mb2.purge_all();
         setup.mb2.poll().unwrap();
 
@@ -686,7 +691,7 @@ mod test {
     fn fetch_unexpected_expunged_already_known_but_still_snapshotted() {
         let mut setup = set_up_fetch();
 
-        setup.mb2.vanquish(iter::once(setup.uids[0])).unwrap();
+        setup.mb2.vanquish(&SeqRange::just(setup.uids[0])).unwrap();
         setup.mb2.poll().unwrap();
 
         // Cause mb1 to become aware of the expungement, though it does not get
@@ -711,7 +716,10 @@ mod test {
     fn seqnum_fetch() {
         let mut setup = set_up_fetch();
 
-        setup.mb1.vanquish(setup.uids[..4].iter().copied()).unwrap();
+        setup
+            .mb1
+            .vanquish(&SeqRange::range(setup.uids[0], setup.uids[3]))
+            .unwrap();
         setup.mb1.poll().unwrap();
 
         let request = FetchRequest {

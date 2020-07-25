@@ -120,6 +120,7 @@ impl CommandProcessor {
             s::Command::Unsubscribe(cmd) => self.cmd_unsubscribe(cmd, sender),
             s::Command::LogIn(cmd) => self.cmd_log_in(cmd),
             s::Command::Copy(cmd) => self.cmd_copy(cmd, sender),
+            s::Command::Move(cmd) => self.cmd_move(cmd, sender),
             s::Command::Fetch(cmd) => self.cmd_fetch(cmd, sender),
             s::Command::Store(cmd) => self.cmd_store(cmd, sender),
             s::Command::Search(cmd) => self.cmd_search(cmd, sender),
@@ -127,6 +128,9 @@ impl CommandProcessor {
 
             s::Command::Uid(s::UidCommand::Copy(cmd)) => {
                 self.cmd_uid_copy(cmd, sender)
+            }
+            s::Command::Uid(s::UidCommand::Move(cmd)) => {
+                self.cmd_uid_move(cmd, sender)
             }
             s::Command::Uid(s::UidCommand::Fetch(cmd)) => {
                 self.cmd_uid_fetch(cmd, sender)

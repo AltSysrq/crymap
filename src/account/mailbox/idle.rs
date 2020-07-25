@@ -233,7 +233,7 @@ mod test {
         let uid1 = simple_append(&setup.stateless);
         let uid2 = simple_append(&setup.stateless);
 
-        let (mb1, _) = setup.stateless.clone().select().unwrap();
+        let (mut mb1, _) = setup.stateless.clone().select().unwrap();
         let listener = setup.stateless.prepare_idle().unwrap();
         mb1.copy(
             &CopyRequest {
@@ -255,7 +255,7 @@ mod test {
         let (mut mb1, _) = setup.stateless.clone().select().unwrap();
         let listener = setup.stateless.prepare_idle().unwrap();
 
-        mb1.vanquish(vec![uid]).unwrap();
+        mb1.vanquish(&SeqRange::just(uid)).unwrap();
 
         listener.idle_instant().unwrap();
     }

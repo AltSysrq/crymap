@@ -1315,6 +1315,18 @@ syntax_rule! {
 }
 
 syntax_rule! {
+    #[prefix("MOVE ")]
+    struct MoveCommand<'a> {
+        #[suffix(" ")]
+        #[primitive(verbatim, sequence_set)]
+        messages: Cow<'a, str>,
+        #[]
+        #[primitive(mailbox, mailbox)]
+        dst: MailboxName<'a>,
+    }
+}
+
+syntax_rule! {
     #[prefix("STORE ")]
     struct StoreCommand<'a> {
         #[suffix(" ")]
@@ -1376,6 +1388,9 @@ syntax_rule! {
         #[]
         #[delegate]
         Copy(CopyCommand<'a>),
+        #[]
+        #[delegate]
+        Move(MoveCommand<'a>),
         #[]
         #[delegate]
         Fetch(FetchCommand<'a>),
@@ -1473,6 +1488,9 @@ syntax_rule! {
         #[]
         #[delegate]
         Copy(CopyCommand<'a>),
+        #[]
+        #[delegate]
+        Move(MoveCommand<'a>),
         #[]
         #[delegate]
         Fetch(FetchCommand<'a>),

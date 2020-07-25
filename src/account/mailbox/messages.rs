@@ -272,7 +272,7 @@ impl StatelessMailbox {
 impl StatefulMailbox {
     /// The RFC 3501 `COPY` command.
     pub fn seqnum_copy(
-        &self,
+        &mut self,
         request: &CopyRequest<Seqnum>,
         dst: &StatelessMailbox,
     ) -> Result<CopyResponse, Error> {
@@ -286,7 +286,7 @@ impl StatefulMailbox {
 
     /// The RFC 3501 `UID COPY` command.
     pub fn copy(
-        &self,
+        &mut self,
         request: &CopyRequest<Uid>,
         dst: &StatelessMailbox,
     ) -> Result<CopyResponse, Error> {
@@ -339,6 +339,35 @@ impl StatefulMailbox {
         );
         Ok(response)
     }
+
+    /// The RFC 6851 MOVE command.
+    pub fn seqnum_moove(
+        &mut self,
+        request: &CopyRequest<Seqnum>,
+        dst: &StatelessMailbox,
+    ) -> Result<CopyResponse, Error> {
+        self.moove(
+            &CopyRequest {
+                ids: self.state.seqnum_range_to_uid(&request.ids, false)?,
+            },
+            dst,
+        )
+    }
+
+    /// The RFC 6851 UID MOVE command.
+    pub fn moove(
+        &mut self,
+        request: &CopyRequest<Uid>,
+        dst: &StatelessMailbox,
+    ) -> Result<CopyResponse, Error> {
+        // This is a simple COPY + VANQUISH. This does lead to a non-atomic
+        // state where the messages were copied to dst but not expunged, but
+        // this is permissible under RFC 6851 as a SHOULD NOT, and is only the
+        // final state in extremely unusual circumstances.
+        let response = self.copy(request, dst)?;
+        self.vanquish(&request.ids)?;
+        Ok(response)
+    }
 }
 
 #[cfg(test)]
@@ -351,6 +380,24 @@ mod test {
     use super::super::test_prelude::*;
     use super::*;
     use crate::account::mailbox_path::MailboxPath;
+
+    fn destination(setup: &Setup) -> StatelessMailbox {
+        let mbox2_path = MailboxPath::root(
+            "archive".to_owned(),
+            setup.root.path(),
+            setup.root.path(),
+        )
+        .unwrap();
+        mbox2_path.create(setup.root.path(), None).unwrap();
+        StatelessMailbox::new(
+            "mailbox".to_owned(),
+            mbox2_path,
+            false,
+            Arc::clone(&setup.key_store),
+            Arc::clone(&setup.common_paths),
+        )
+        .unwrap()
+    }
 
     #[test]
     fn write_and_read_messages() {
@@ -469,23 +516,9 @@ mod test {
     fn copy_into_other() {
         let setup = set_up();
 
-        let (mut mb1, _) = setup.stateless.select().unwrap();
+        let (mut mb1, _) = setup.stateless.clone().select().unwrap();
 
-        let mbox2_path = MailboxPath::root(
-            "archive".to_owned(),
-            setup.root.path(),
-            setup.root.path(),
-        )
-        .unwrap();
-        mbox2_path.create(setup.root.path(), None).unwrap();
-        let stateless2 = StatelessMailbox::new(
-            "mailbox".to_owned(),
-            mbox2_path,
-            false,
-            Arc::clone(&setup.key_store),
-            Arc::clone(&setup.common_paths),
-        )
-        .unwrap();
+        let stateless2 = destination(&setup);
         let (mut mb2, _) = stateless2.select().unwrap();
 
         let uid1 = simple_append(mb1.stateless());
@@ -549,23 +582,9 @@ mod test {
     fn bulk_copy_into_empty_other() {
         let setup = set_up();
 
-        let (mut mb1, _) = setup.stateless.select().unwrap();
+        let (mut mb1, _) = setup.stateless.clone().select().unwrap();
 
-        let mbox2_path = MailboxPath::root(
-            "archive".to_owned(),
-            setup.root.path(),
-            setup.root.path(),
-        )
-        .unwrap();
-        mbox2_path.create(setup.root.path(), None).unwrap();
-        let stateless2 = StatelessMailbox::new(
-            "mailbox".to_owned(),
-            mbox2_path,
-            false,
-            Arc::clone(&setup.key_store),
-            Arc::clone(&setup.common_paths),
-        )
-        .unwrap();
+        let stateless2 = destination(&setup);
         let (mut mb2, _) = stateless2.select().unwrap();
 
         let uid1 = simple_append(mb1.stateless());
@@ -613,7 +632,7 @@ mod test {
         let uid2 = simple_append(mb1.stateless());
         mb1.poll().unwrap();
         mb2.poll().unwrap();
-        mb2.vanquish(vec![uid1, uid2]).unwrap();
+        mb2.vanquish(&SeqRange::range(uid1, uid2)).unwrap();
         mb2.purge_all();
 
         assert_matches!(
@@ -634,6 +653,92 @@ mod test {
                 &setup.stateless
             )
         );
+    }
+
+    #[test]
+    fn moove_into_other() {
+        let setup = set_up();
+        let (mut mb1, _) = setup.stateless.clone().select().unwrap();
+        let stateless2 = destination(&setup);
+        let (mut mb2, _) = stateless2.clone().select().unwrap();
+
+        let _uid1 = simple_append(mb1.stateless());
+        let uid2 = simple_append(mb1.stateless());
+        let uid3 = simple_append(mb1.stateless());
+        mb1.poll().unwrap();
+
+        let response = mb1
+            .moove(
+                &CopyRequest {
+                    ids: SeqRange::just(uid2),
+                },
+                &stateless2,
+            )
+            .unwrap();
+
+        assert_eq!(1, response.from_uids.len());
+        assert_eq!(1, response.to_uids.len());
+        assert_eq!(uid2, response.from_uids.items(u32::MAX).next().unwrap());
+
+        let poll = mb2.poll().unwrap();
+        assert_eq!(Some(1), poll.exists);
+        assert_eq!(
+            vec![response.to_uids.items(u32::MAX).next().unwrap()],
+            poll.fetch
+        );
+
+        let poll = mb1.poll().unwrap();
+        assert_eq!(vec![(Seqnum::u(2), uid2)], poll.expunge);
+
+        let response = mb1
+            .seqnum_moove(
+                &CopyRequest {
+                    ids: SeqRange::just(Seqnum::u(2)),
+                },
+                &stateless2,
+            )
+            .unwrap();
+
+        assert_eq!(1, response.from_uids.len());
+        assert_eq!(1, response.to_uids.len());
+        assert_eq!(uid3, response.from_uids.items(u32::MAX).next().unwrap());
+
+        let poll = mb2.poll().unwrap();
+        assert_eq!(Some(2), poll.exists);
+        assert_eq!(
+            vec![response.to_uids.items(u32::MAX).next().unwrap()],
+            poll.fetch
+        );
+
+        let poll = mb1.poll().unwrap();
+        assert_eq!(vec![(Seqnum::u(2), uid3)], poll.expunge);
+    }
+
+    #[test]
+    fn moove_nx() {
+        let setup = set_up();
+        let (mut mb1, _) = setup.stateless.clone().select().unwrap();
+        let stateless2 = destination(&setup);
+
+        let uid1 = simple_append(mb1.stateless());
+        let uid2 = simple_append(mb1.stateless());
+        let uid3 = simple_append(mb1.stateless());
+        mb1.poll().unwrap();
+
+        mb1.vanquish(&SeqRange::just(uid2)).unwrap();
+        mb1.poll().unwrap();
+
+        let response = mb1
+            .moove(
+                &CopyRequest {
+                    ids: SeqRange::range(uid1, uid3),
+                },
+                &stateless2,
+            )
+            .unwrap();
+
+        assert_eq!(2, response.from_uids.len());
+        assert_eq!(2, response.to_uids.len());
     }
 
     #[test]

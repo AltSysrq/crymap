@@ -215,8 +215,7 @@ impl CommandProcessor {
         _sender: SendResponse<'_>,
     ) -> CmdResult {
         let uids = self.parse_uid_range(&uids)?;
-        let uids = uids.items(u32::MAX).take(65536).collect::<Vec<_>>();
-        selected!(self)?.vanquish(uids).map_err(map_error! {
+        selected!(self)?.vanquish(&uids).map_err(map_error! {
             self,
             MailboxReadOnly => (No, Some(s::RespTextCode::Cannot(()))),
             NxMessage => (No, Some(s::RespTextCode::Nonexistent(()))),
@@ -237,29 +236,75 @@ impl CommandProcessor {
     pub(super) fn cmd_copy(
         &mut self,
         cmd: s::CopyCommand<'_>,
-        _sender: SendResponse<'_>,
+        sender: SendResponse<'_>,
     ) -> CmdResult {
         let messages = self.parse_seqnum_range(&cmd.messages)?;
         let request = CopyRequest { ids: messages };
-        self.copy(&cmd.dst, request, StatefulMailbox::seqnum_copy)
+        self.copy_or_move(
+            &cmd.dst,
+            request,
+            sender,
+            false,
+            StatefulMailbox::seqnum_copy,
+        )
+    }
+
+    pub(super) fn cmd_move(
+        &mut self,
+        cmd: s::MoveCommand<'_>,
+        sender: SendResponse<'_>,
+    ) -> CmdResult {
+        let messages = self.parse_seqnum_range(&cmd.messages)?;
+        let request = CopyRequest { ids: messages };
+        self.copy_or_move(
+            &cmd.dst,
+            request,
+            sender,
+            true,
+            StatefulMailbox::seqnum_moove,
+        )
     }
 
     pub(super) fn cmd_uid_copy(
         &mut self,
         cmd: s::CopyCommand<'_>,
-        _sender: SendResponse<'_>,
+        sender: SendResponse<'_>,
     ) -> CmdResult {
         let messages = self.parse_uid_range(&cmd.messages)?;
         let request = CopyRequest { ids: messages };
-        self.copy(&cmd.dst, request, StatefulMailbox::copy)
+        self.copy_or_move(
+            &cmd.dst,
+            request,
+            sender,
+            false,
+            StatefulMailbox::copy,
+        )
     }
 
-    fn copy<T>(
+    pub(super) fn cmd_uid_move(
+        &mut self,
+        cmd: s::MoveCommand<'_>,
+        sender: SendResponse<'_>,
+    ) -> CmdResult {
+        let messages = self.parse_uid_range(&cmd.messages)?;
+        let request = CopyRequest { ids: messages };
+        self.copy_or_move(
+            &cmd.dst,
+            request,
+            sender,
+            true,
+            StatefulMailbox::moove,
+        )
+    }
+
+    fn copy_or_move<T>(
         &mut self,
         dst: &MailboxName<'_>,
         request: T,
+        sender: SendResponse<'_>,
+        copyuid_in_separate_response: bool,
         f: impl FnOnce(
-            &StatefulMailbox,
+            &mut StatefulMailbox,
             &T,
             &StatelessMailbox,
         ) -> Result<CopyResponse, Error>,
@@ -290,13 +335,25 @@ impl CommandProcessor {
             BatchTooBig => (No, Some(s::RespTextCode::Limit(()))),
         })?;
 
+        let mut copyuid_code = Some(s::RespTextCode::CopyUid(s::CopyUidData {
+            uid_validity: response.uid_validity,
+            from_uids: Cow::Owned(response.from_uids.to_string()),
+            to_uids: Cow::Owned(response.to_uids.to_string()),
+        }));
+
+        if copyuid_in_separate_response {
+            // RFC 6851 recommends sending the COPYUID response in an untagged
+            // response before any EXPUNGE responses.
+            sender(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Ok,
+                code: copyuid_code.take(),
+                quip: None,
+            }));
+        }
+
         Ok(s::Response::Cond(s::CondResponse {
             cond: s::RespCondType::Ok,
-            code: Some(s::RespTextCode::CopyUid(s::CopyUidData {
-                uid_validity: response.uid_validity,
-                from_uids: Cow::Owned(response.from_uids.to_string()),
-                to_uids: Cow::Owned(response.to_uids.to_string()),
-            })),
+            code: copyuid_code,
             quip: None,
         }))
     }
