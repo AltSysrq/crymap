@@ -19,8 +19,9 @@
 //! Provides a façade around compression and decompression, as used for
 //! compressing data streams.
 
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead, Write};
 
+use lazy_static::lazy_static;
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
 use crate::support::un64;
@@ -50,24 +51,51 @@ impl<W: FinishWrite + ?Sized> FinishWrite for Box<W> {
 #[repr(u8)]
 pub enum Compression {
     /// ZStandard compression, with Un-64 as a pre-compressor.
+    ///
+    /// TODO Get rid of this and make Un64Zstd20200725 value 0 before we have
+    /// any real production stuff using this.
     Un64Zstd = 0,
     /// Vanilla ZStandard compression
     Zstd = 1,
+    /// ZStandard compression using the 2020-07-25 base dictionary, with Un-64
+    /// as a pre-compressor.
+    ///
+    /// The pre-built dictionary optimises the headers, so as to minimise the
+    /// amount of data that needs to be fetched for operations such as
+    /// `Envelope` which only need to consult the headers.
+    Un64Zstd20200725 = 2,
+}
+
+/// A dictionary compiled from the headers of a set of ~6k test messages on
+/// 2020-07-25, using the `XCRY ZSTD TRAIN` command.
+static ZSTD_DICT_20200725_RAW: &[u8] = include_bytes!("zstd-dict-20200725.dat");
+
+lazy_static! {
+    static ref ZSTD_DICT_20200725_ENC: zstd::dict::EncoderDictionary<'static> =
+        zstd::dict::EncoderDictionary::new(ZSTD_DICT_20200725_RAW, 5);
+    static ref ZSTD_DICT_20200725_DEC: zstd::dict::DecoderDictionary<'static> =
+        zstd::dict::DecoderDictionary::new(ZSTD_DICT_20200725_RAW);
 }
 
 impl Compression {
-    pub const DEFAULT_FOR_MESSAGE: Self = Compression::Un64Zstd;
+    pub const DEFAULT_FOR_MESSAGE: Self = Compression::Un64Zstd20200725;
     pub const DEFAULT_FOR_STATE: Self = Compression::Zstd;
 
     /// Wrap `reader` to decompress according to this scheme.
     pub fn decompressor<'a>(
         self,
-        reader: impl Read + 'a,
+        reader: impl BufRead + 'a,
     ) -> io::Result<Box<dyn BufRead + 'a>> {
         match self {
             Compression::Un64Zstd => {
                 Ok(box_r(un64::Reader::new(zstd::Decoder::new(reader)?)))
             }
+            Compression::Un64Zstd20200725 => Ok(box_r(un64::Reader::new(
+                zstd::Decoder::with_prepared_dictionary(
+                    reader,
+                    &ZSTD_DICT_20200725_DEC,
+                )?,
+            ))),
             Compression::Zstd => {
                 Ok(box_r(io::BufReader::new(zstd::Decoder::new(reader)?)))
             }
@@ -83,6 +111,12 @@ impl Compression {
             Compression::Un64Zstd => {
                 Ok(box_w(un64::Writer::new(zstd::Encoder::new(writer, 5)?)))
             }
+            Compression::Un64Zstd20200725 => Ok(box_w(un64::Writer::new(
+                zstd::Encoder::with_prepared_dictionary(
+                    writer,
+                    &ZSTD_DICT_20200725_ENC,
+                )?,
+            ))),
             Compression::Zstd => Ok(box_w(zstd::Encoder::new(writer, 5)?)),
         }
     }
