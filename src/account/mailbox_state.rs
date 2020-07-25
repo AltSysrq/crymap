@@ -47,7 +47,16 @@ const MAX_RECENT_EXPUNGEMENTS: usize = 4;
 ///
 /// This struct holds the `\\Recent` status for every message, but does not
 /// contain the logic to maintain it.
+///
+/// ## Maintenance
+///
+/// When adding new fields to this struct which have non-trivial interactions
+/// with other fields, ensure there is sufficient testing that the state
+/// correctly operates if in a state where that field is defaulted but other
+/// fields are populated (i.e., simulate deserialisation from an older
+/// version).
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(default)]
 pub struct MailboxState {
     /// The table of known flags.
     ///
@@ -97,7 +106,6 @@ pub struct MailboxState {
     ///
     /// This may be less than `max_modseq` when the latest transaction did not
     /// include the latest UID.
-    #[serde(default)]
     max_tx_modseq: Option<Modseq>,
 
     /// The most recent expungements.
