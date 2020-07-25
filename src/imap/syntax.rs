@@ -176,9 +176,11 @@ syntax_rule! {
         #[prefix("XLIST ")]
         #[delegate]
         Xlist(MailboxList<'a>),
-        #[prefix("SEARCH") 0* prefix(" ")]
-        #[primitive(num_u32, number)]
-        Search(Vec<u32>),
+        // The SEARCH prefix cannot include the space because a search response
+        // with no results must be simply "SEARCH".
+        #[prefix("SEARCH")]
+        #[delegate]
+        Search(SearchResponse<'a>),
         #[prefix("STATUS ")]
         #[delegate]
         Status(StatusResponse<'a>),
@@ -211,6 +213,10 @@ syntax_rule! {
         #[prefix("ENABLED") 0* prefix(" ")]
         #[primitive(verbatim, normal_atom)]
         Enabled(Vec<Cow<'a, str>>),
+        // RFC 7162
+        #[]
+        #[delegate]
+        Vanished(VanishedResponse<'a>),
     }
 }
 
@@ -360,6 +366,19 @@ syntax_rule! {
         #[]
         #[tag("COMPRESSIONACTIVE")]
         CompressionActive(()),
+        // RFC 7162
+        #[prefix("HIGHESTMODSEQ ")]
+        #[primitive(num_u64, number64)]
+        HighestModseq(u64),
+        #[]
+        #[tag("NOMODSEQ")]
+        NoModseq(()),
+        #[prefix("MODIFIED ")]
+        #[primitive(verbatim, sequence_set)]
+        Modified(Cow<'a, str>),
+        #[]
+        #[tag("CLOSED")]
+        Closed(()),
         // We don't handle unknown response codes, since the server never needs
         // to parse this. Unknown response codes just become part of the text.
     }
@@ -411,8 +430,23 @@ syntax_rule! {
         #[delegate]
         att: StatusAtt,
         #[]
+        #[primitive(num_u64, number64)]
+        value: u64,
+        #[]
+        #[phantom]
+        _marker: PhantomData<&'a ()>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct SearchResponse<'a> {
+        #[0* prefix(" ")]
         #[primitive(num_u32, number)]
-        value: u32,
+        hits: Vec<u32>,
+        #[opt surrounded(" (MODSEQ ", ")")]
+        #[primitive(num_u64, number64)]
+        max_modseq: Option<u64>,
         #[]
         #[phantom]
         _marker: PhantomData<&'a ()>,
@@ -697,6 +731,18 @@ syntax_rule! {
 }
 
 syntax_rule! {
+    #[prefix("VANISHED ")]
+    struct VanishedResponse<'a> {
+        #[]
+        #[cond("(EARLIER) ")]
+        earlier: bool,
+        #[]
+        #[primitive(verbatim, sequence_set)]
+        uids: Cow<'a, str>,
+    }
+}
+
+syntax_rule! {
     #[prefix("LIST ")]
     struct ListCommand<'a> {
         #[opt surrounded("(", ") ") 0*(" ")]
@@ -809,6 +855,9 @@ syntax_rule! {
         #[]
         #[delegate]
         target: FetchCommandTarget<'a>,
+        #[opt surrounded(" (", ")") 1*(" ")]
+        #[delegate(FetchModifier)]
+        modifiers: Option<Vec<FetchModifier<'a>>>,
     }
 }
 
@@ -862,6 +911,10 @@ syntax_rule! {
         #[]
         #[tag("UID")]
         Uid(()),
+        // RFC 7162
+        #[]
+        #[tag("MODSEQ")]
+        Modseq(()),
     }
 }
 
@@ -957,6 +1010,18 @@ syntax_rule! {
     }
 }
 
+syntax_rule! {
+    #[]
+    enum FetchModifier<'a> {
+        #[prefix("CHANGEDSINCE ")]
+        #[primitive(num_u64, number64)]
+        ChangedSince(u64),
+        #[]
+        #[tag("VANISHED")]
+        Vanished(PhantomData<&'a ()>),
+    }
+}
+
 // The RFC 3501 formal syntax is very awkward here since it lumps FETCH and
 // EXPUNGE together because they both start with an nznumber. We follow suit
 // in this case because it is more likely that extensions will want to patch
@@ -1015,6 +1080,10 @@ syntax_rule! {
         #[surrounded("FLAGS (", ")")]
         #[delegate(FlagsFetch)]
         Flags(FlagsFetch<'a>),
+        // RFC 7162
+        #[surrounded("MODSEQ (", ")")]
+        #[primitive(num_u64, number64)]
+        Modseq(u64),
     }
 }
 
@@ -1053,7 +1122,7 @@ syntax_rule! {
         NotRecent(Vec<Flag>),
         // We never actually parse FlagsFetch in the server so this marker case
         // is moot.
-        #[prefix("\x00")]
+        #[prefix("\n")]
         #[phantom]
         _Marker(PhantomData<&'a ()>),
     }
@@ -1184,6 +1253,10 @@ syntax_rule! {
         #[surrounded("(", ")") 1*(" ")]
         #[delegate(SearchKey)]
         And(Vec<SearchKey<'a>>),
+        // RFC 7162
+        #[prefix("MODSEQ ")]
+        #[delegate]
+        Modseq(ModseqSearchKey<'a>),
     }
 }
 
@@ -1208,6 +1281,35 @@ syntax_rule! {
         #[box]
         #[delegate(SearchKey)]
         b: Box<SearchKey<'a>>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct ModseqSearchKey<'a> {
+        #[opt suffix(" ")]
+        #[delegate(ModseqSearchKeyExt)]
+        ext: Option<ModseqSearchKeyExt<'a>>,
+        #[]
+        #[primitive(num_u64, number64)]
+        modseq: u64,
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct ModseqSearchKeyExt<'a> {
+        // RFC 7162 curiously doesn't allow general string syntax --- literals
+        // aren't allowed. However, as a server, we never need to *generate*
+        // this syntax, so just using general strings is safe.
+        #[suffix(" ")]
+        #[primitive(censored_string, string)]
+        name: Cow<'a, str>,
+        // This is formally just one of "priv", "shared", or "all", but we
+        // don't use it for anything so just parse out the raw value.
+        #[]
+        #[primitive(verbatim, normal_atom)]
+        value: Cow<'a, str>,
     }
 }
 
@@ -1238,6 +1340,9 @@ syntax_rule! {
         #[]
         #[primitive(mailbox, mailbox)]
         mailbox: MailboxName<'a>,
+        #[opt surrounded(" (", ")") 1*(" ")]
+        #[delegate(SelectModifier<'a>)]
+        modifiers: Option<Vec<SelectModifier<'a>>>,
     }
 }
 
@@ -1259,6 +1364,51 @@ syntax_rule! {
         #[]
         #[primitive(mailbox, mailbox)]
         mailbox: MailboxName<'a>,
+        #[opt surrounded(" (", ")") 1*(" ")]
+        #[delegate(SelectModifier<'a>)]
+        modifiers: Option<Vec<SelectModifier<'a>>>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    enum SelectModifier<'a> {
+        #[]
+        #[tag("CONDSTORE")]
+        Condstore(()),
+        #[]
+        #[delegate]
+        Qresync(SelectQresyncModifier<'a>),
+    }
+}
+
+syntax_rule! {
+    #[surrounded("QRESYNC (", ")")]
+    struct SelectQresyncModifier<'a> {
+        #[suffix(" ")]
+        #[primitive(num_u32, number)]
+        uid_validity: u32,
+        #[]
+        #[primitive(num_u64, number64)]
+        modseq: u64,
+        #[opt prefix(" ")]
+        #[primitive(verbatim, sequence_set)]
+        known_uids: Option<Cow<'a, str>>,
+        #[opt surrounded(" (", ")")]
+        #[delegate(SeqMatchData)]
+        seq_match_data: Option<SeqMatchData<'a>>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct SeqMatchData<'a> {
+        #[suffix(" ")]
+        #[primitive(verbatim, sequence_set)]
+        seqnums: Cow<'a, str>,
+        #[]
+        #[primitive(verbatim, sequence_set)]
+        uids: Cow<'a, str>,
     }
 }
 
@@ -1276,11 +1426,14 @@ syntax_rule! {
 
 simple_enum! {
     enum StatusAtt {
+        // RFC 3501
         Messages("MESSAGES"),
         Recent("RECENT"),
         UidNext("UIDNEXT"),
         UidValidity("UIDVALIDITY"),
         Unseen("UNSEEN"),
+        // RFC 7162
+        HighestModseq("HIGHESTMODSEQ"),
     }
 }
 
@@ -1332,6 +1485,9 @@ syntax_rule! {
         #[suffix(" ")]
         #[primitive(verbatim, sequence_set)]
         messages: Cow<'a, str>,
+        #[opt surrounded("(UNCHANGEDSINCE ", ") ")]
+        #[primitive(num_u64, number64)]
+        unchanged_since: Option<u64>,
         #[]
         #[delegate]
         typ: StoreCommandType,
@@ -1658,6 +1814,12 @@ fn list_mailbox_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
 fn number(i: &[u8]) -> IResult<&[u8], u32> {
     map_opt(character::complete::digit1, |s| {
         str::from_utf8(s).ok().and_then(|s| s.parse::<u32>().ok())
+    })(i)
+}
+
+fn number64(i: &[u8]) -> IResult<&[u8], u64> {
+    map_opt(character::complete::digit1, |s| {
+        str::from_utf8(s).ok().and_then(|s| s.parse::<u64>().ok())
     })(i)
 }
 
@@ -2446,6 +2608,7 @@ mod test {
             FetchCommand {
                 messages: s("1:2,3:*"),
                 target: FetchCommandTarget::All(()),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2454,6 +2617,7 @@ mod test {
             FetchCommand {
                 messages: s("1:2,3"),
                 target: FetchCommandTarget::Full(()),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2462,6 +2626,7 @@ mod test {
             FetchCommand {
                 messages: s("1:2,3"),
                 target: FetchCommandTarget::Fast(()),
+                modifiers: None,
             }
         );
 
@@ -2471,6 +2636,7 @@ mod test {
             FetchCommand {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Envelope(())),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2479,6 +2645,7 @@ mod test {
             FetchCommand {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Flags(())),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2487,6 +2654,7 @@ mod test {
             FetchCommand {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::InternalDate(())),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2497,6 +2665,7 @@ mod test {
                 target: FetchCommandTarget::Single(
                     FetchAtt::ShortBodyStructure(())
                 ),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2507,6 +2676,7 @@ mod test {
                 target: FetchCommandTarget::Single(
                     FetchAtt::ExtendedBodyStructure(())
                 ),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2515,6 +2685,7 @@ mod test {
             FetchCommand {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Rfc822(None)),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2525,6 +2696,7 @@ mod test {
                 target: FetchCommandTarget::Single(FetchAtt::Rfc822(Some(
                     FetchAttRfc822::Size
                 ))),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2535,6 +2707,7 @@ mod test {
                 target: FetchCommandTarget::Single(FetchAtt::Rfc822(Some(
                     FetchAttRfc822::Header
                 ))),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2545,6 +2718,7 @@ mod test {
                 target: FetchCommandTarget::Single(FetchAtt::Rfc822(Some(
                     FetchAttRfc822::Text
                 ))),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2553,6 +2727,7 @@ mod test {
             FetchCommand {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Uid(())),
+                modifiers: None,
             }
         );
 
@@ -2562,6 +2737,7 @@ mod test {
             FetchCommand {
                 messages: s("1"),
                 target: FetchCommandTarget::Multi(vec![FetchAtt::Flags(())]),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2573,6 +2749,7 @@ mod test {
                     FetchAtt::Flags(()),
                     FetchAtt::Uid(()),
                 ]),
+                modifiers: None,
             }
         );
 
@@ -2588,6 +2765,7 @@ mod test {
                         slice: None,
                     }
                 )),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2602,6 +2780,7 @@ mod test {
                         slice: None,
                     }
                 )),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2620,6 +2799,7 @@ mod test {
                         }),
                     }
                 )),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2636,6 +2816,7 @@ mod test {
                         slice: None,
                     }
                 )),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2652,6 +2833,7 @@ mod test {
                         slice: None,
                     }
                 )),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2671,6 +2853,7 @@ mod test {
                         slice: None,
                     }
                 )),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2690,6 +2873,7 @@ mod test {
                         slice: None,
                     }
                 )),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2709,6 +2893,7 @@ mod test {
                         slice: None,
                     }
                 )),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2728,6 +2913,7 @@ mod test {
                         slice: None,
                     }
                 )),
+                modifiers: None,
             }
         );
 
@@ -2746,6 +2932,7 @@ mod test {
                         slice: None,
                     }
                 )),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2763,6 +2950,7 @@ mod test {
                         slice: None,
                     }
                 )),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2780,6 +2968,7 @@ mod test {
                         slice: None,
                     }
                 )),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2797,6 +2986,7 @@ mod test {
                         slice: None,
                     }
                 )),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -2814,6 +3004,49 @@ mod test {
                         slice: None,
                     }
                 )),
+                modifiers: None,
+            }
+        );
+
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 (UID) (VANISHED)",
+            FetchCommand {
+                messages: s("1"),
+                target: FetchCommandTarget::Multi(vec![FetchAtt::Uid(())]),
+                modifiers: Some(vec![FetchModifier::Vanished(PhantomData),]),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 UID (VANISHED)",
+            FetchCommand {
+                messages: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Uid(())),
+                modifiers: Some(vec![FetchModifier::Vanished(PhantomData),]),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 (UID) (CHANGEDSINCE 12345678901234567890)",
+            FetchCommand {
+                messages: s("1"),
+                target: FetchCommandTarget::Multi(vec![FetchAtt::Uid(())]),
+                modifiers: Some(vec![FetchModifier::ChangedSince(
+                    12345678901234567890
+                ),]),
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 (UID) (CHANGEDSINCE 12345678901234567890 VANISHED)",
+            FetchCommand {
+                messages: s("1"),
+                target: FetchCommandTarget::Multi(vec![FetchAtt::Uid(())]),
+                modifiers: Some(vec![
+                    FetchModifier::ChangedSince(12345678901234567890),
+                    FetchModifier::Vanished(PhantomData),
+                ]),
             }
         );
     }
@@ -3303,6 +3536,32 @@ mod test {
                 keys: vec![SearchKey::Larger(42)],
             }
         );
+
+        assert_reversible!(
+            SearchCommand,
+            "SEARCH MODSEQ 12345678901234567890",
+            SearchCommand {
+                charset: None,
+                keys: vec![SearchKey::Modseq(ModseqSearchKey {
+                    ext: None,
+                    modseq: 12345678901234567890,
+                })],
+            }
+        );
+        assert_reversible!(
+            SearchCommand,
+            r#"SEARCH MODSEQ "/flags/keyword" all 12345678901234567890"#,
+            SearchCommand {
+                charset: None,
+                keys: vec![SearchKey::Modseq(ModseqSearchKey {
+                    ext: Some(ModseqSearchKeyExt {
+                        name: s("/flags/keyword"),
+                        value: s("all"),
+                    }),
+                    modseq: 12345678901234567890,
+                })],
+            }
+        );
     }
 
     #[test]
@@ -3361,6 +3620,7 @@ mod test {
             "EXAMINE mailbox",
             ExamineCommand {
                 mailbox: mn("mailbox"),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -3368,7 +3628,16 @@ mod test {
             ExamineCommand,
             "EXAMINE \"föö\"",
             ExamineCommand {
-                mailbox: mn("föö")
+                mailbox: mn("föö"),
+                modifiers: None,
+            }
+        );
+        assert_reversible!(
+            ExamineCommand,
+            "EXAMINE mailbox (CONDSTORE)",
+            ExamineCommand {
+                mailbox: mn("mailbox"),
+                modifiers: Some(vec![SelectModifier::Condstore(()),]),
             }
         );
         assert_reversible!(
@@ -3393,6 +3662,7 @@ mod test {
             "SELECT mailbox",
             SelectCommand {
                 mailbox: mn("mailbox"),
+                modifiers: None,
             }
         );
         assert_reversible!(
@@ -3400,7 +3670,83 @@ mod test {
             SelectCommand,
             "SELECT \"föö\"",
             SelectCommand {
-                mailbox: mn("föö")
+                mailbox: mn("föö"),
+                modifiers: None,
+            }
+        );
+        assert_reversible!(
+            SelectCommand,
+            "SELECT mailbox (CONDSTORE)",
+            SelectCommand {
+                mailbox: mn("mailbox"),
+                modifiers: Some(vec![SelectModifier::Condstore(()),]),
+            }
+        );
+        assert_reversible!(
+            SelectCommand,
+            "SELECT mailbox (QRESYNC (1234 12345678901234567890))",
+            SelectCommand {
+                mailbox: mn("mailbox"),
+                modifiers: Some(vec![SelectModifier::Qresync(
+                    SelectQresyncModifier {
+                        uid_validity: 1234,
+                        modseq: 12345678901234567890,
+                        known_uids: None,
+                        seq_match_data: None,
+                    }
+                ),]),
+            }
+        );
+        assert_reversible!(
+            SelectCommand,
+            "SELECT mailbox (QRESYNC (1234 12345678901234567890 1:4))",
+            SelectCommand {
+                mailbox: mn("mailbox"),
+                modifiers: Some(vec![SelectModifier::Qresync(
+                    SelectQresyncModifier {
+                        uid_validity: 1234,
+                        modseq: 12345678901234567890,
+                        known_uids: Some(s("1:4")),
+                        seq_match_data: None,
+                    }
+                ),]),
+            }
+        );
+        assert_reversible!(
+            SelectCommand,
+            "SELECT mailbox (QRESYNC (1234 12345678901234567890 (1:2 1,4)))",
+            SelectCommand {
+                mailbox: mn("mailbox"),
+                modifiers: Some(vec![SelectModifier::Qresync(
+                    SelectQresyncModifier {
+                        uid_validity: 1234,
+                        modseq: 12345678901234567890,
+                        known_uids: None,
+                        seq_match_data: Some(SeqMatchData {
+                            seqnums: s("1:2"),
+                            uids: s("1,4"),
+                        }),
+                    }
+                ),]),
+            }
+        );
+        assert_reversible!(
+            SelectCommand,
+            "SELECT mailbox (QRESYNC (1234 12345678901234567890 \
+             1:4 (1:2 1,4)))",
+            SelectCommand {
+                mailbox: mn("mailbox"),
+                modifiers: Some(vec![SelectModifier::Qresync(
+                    SelectQresyncModifier {
+                        uid_validity: 1234,
+                        modseq: 12345678901234567890,
+                        known_uids: Some(s("1:4")),
+                        seq_match_data: Some(SeqMatchData {
+                            seqnums: s("1:2"),
+                            uids: s("1,4"),
+                        }),
+                    }
+                ),]),
             }
         );
         assert_reversible!(
@@ -3413,7 +3759,8 @@ mod test {
         );
         assert_reversible!(
             StatusCommand,
-            "STATUS foo (MESSAGES RECENT UIDNEXT UIDVALIDITY UNSEEN)",
+            "STATUS foo (\
+             MESSAGES RECENT UIDNEXT UIDVALIDITY UNSEEN HIGHESTMODSEQ)",
             StatusCommand {
                 mailbox: mn("foo"),
                 atts: vec![
@@ -3421,7 +3768,8 @@ mod test {
                     StatusAtt::Recent,
                     StatusAtt::UidNext,
                     StatusAtt::UidValidity,
-                    StatusAtt::Unseen
+                    StatusAtt::Unseen,
+                    StatusAtt::HighestModseq,
                 ],
             }
         );
@@ -3473,6 +3821,7 @@ mod test {
             "STORE 1:2,3:* FLAGS (\\Seen)",
             StoreCommand {
                 messages: s("1:2,3:*"),
+                unchanged_since: None,
                 typ: StoreCommandType::Eq,
                 silent: false,
                 flags: vec![Flag::Seen],
@@ -3484,6 +3833,7 @@ mod test {
             "STORE 1 +FLAGS (keyword)",
             StoreCommand {
                 messages: s("1"),
+                unchanged_since: None,
                 typ: StoreCommandType::Plus,
                 silent: false,
                 flags: vec![Flag::Keyword("keyword".to_owned())],
@@ -3495,6 +3845,7 @@ mod test {
             "STORE 1 -FLAGS (\\Flagged \\Deleted)",
             StoreCommand {
                 messages: s("1"),
+                unchanged_since: None,
                 typ: StoreCommandType::Minus,
                 silent: false,
                 flags: vec![Flag::Flagged, Flag::Deleted],
@@ -3506,6 +3857,7 @@ mod test {
             "STORE 1 FLAGS.SILENT (\\Flagged)",
             StoreCommand {
                 messages: s("1"),
+                unchanged_since: None,
                 typ: StoreCommandType::Eq,
                 silent: true,
                 flags: vec![Flag::Flagged],
@@ -3517,9 +3869,23 @@ mod test {
             "STORE 1 FLAGS ()",
             StoreCommand {
                 messages: s("1"),
+                unchanged_since: None,
                 typ: StoreCommandType::Eq,
                 silent: false,
                 flags: vec![],
+                _marker: PhantomData,
+            }
+        );
+
+        assert_reversible!(
+            StoreCommand,
+            "STORE 1 (UNCHANGEDSINCE 12345678901234567890) +FLAGS (\\Seen)",
+            StoreCommand {
+                messages: s("1"),
+                unchanged_since: Some(12345678901234567890),
+                typ: StoreCommandType::Plus,
+                silent: false,
+                flags: vec![Flag::Seen],
                 _marker: PhantomData,
             }
         );
@@ -3637,7 +4003,10 @@ mod test {
         assert_reversible!(
             Command,
             "EXAMINE foo",
-            Command::Examine(ExamineCommand { mailbox: mn("foo") })
+            Command::Examine(ExamineCommand {
+                mailbox: mn("foo"),
+                modifiers: None,
+            })
         );
         assert_reversible!(
             Command,
@@ -3668,7 +4037,10 @@ mod test {
         assert_reversible!(
             Command,
             "SELECT foo",
-            Command::Select(SelectCommand { mailbox: mn("foo") })
+            Command::Select(SelectCommand {
+                mailbox: mn("foo"),
+                modifiers: None,
+            })
         );
         assert_reversible!(
             Command,
@@ -3710,6 +4082,7 @@ mod test {
             Command::Fetch(FetchCommand {
                 messages: s("1"),
                 target: FetchCommandTarget::Full(()),
+                modifiers: None,
             })
         );
         assert_reversible!(
@@ -3717,6 +4090,7 @@ mod test {
             "STORE 1 FLAGS ()",
             Command::Store(StoreCommand {
                 messages: s("1"),
+                unchanged_since: None,
                 typ: StoreCommandType::Eq,
                 silent: false,
                 flags: vec![],
@@ -3752,6 +4126,7 @@ mod test {
             Command::Uid(UidCommand::Fetch(FetchCommand {
                 messages: s("1"),
                 target: FetchCommandTarget::Full(()),
+                modifiers: None,
             }))
         );
         assert_reversible!(
@@ -3767,6 +4142,7 @@ mod test {
             "UID STORE 1 FLAGS ()",
             Command::Uid(UidCommand::Store(StoreCommand {
                 messages: s("1"),
+                unchanged_since: None,
                 typ: StoreCommandType::Eq,
                 silent: false,
                 flags: vec![],
@@ -4047,7 +4423,11 @@ mod test {
             "* SEARCH",
             ResponseLine {
                 tag: None,
-                response: Response::Search(vec![]),
+                response: Response::Search(SearchResponse {
+                    hits: vec![],
+                    max_modseq: None,
+                    _marker: PhantomData,
+                }),
             }
         );
         assert_reversible!(
@@ -4055,7 +4435,11 @@ mod test {
             "* SEARCH 42",
             ResponseLine {
                 tag: None,
-                response: Response::Search(vec![42]),
+                response: Response::Search(SearchResponse {
+                    hits: vec![42],
+                    max_modseq: None,
+                    _marker: PhantomData,
+                }),
             }
         );
         assert_reversible!(
@@ -4063,7 +4447,23 @@ mod test {
             "* SEARCH 42 56",
             ResponseLine {
                 tag: None,
-                response: Response::Search(vec![42, 56]),
+                response: Response::Search(SearchResponse {
+                    hits: vec![42, 56],
+                    max_modseq: None,
+                    _marker: PhantomData,
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* SEARCH 42 (MODSEQ 12345678901234567890)",
+            ResponseLine {
+                tag: None,
+                response: Response::Search(SearchResponse {
+                    hits: vec![42],
+                    max_modseq: Some(12345678901234567890),
+                    _marker: PhantomData,
+                }),
             }
         );
         assert_reversible!(
@@ -4147,6 +4547,29 @@ mod test {
                 tag: None,
                 response: Response::Capability(CapabilityData {
                     capabilities: vec![s("IMAP4rev1"), s("XYZZY")],
+                }),
+            }
+        );
+
+        assert_reversible!(
+            ResponseLine,
+            "* VANISHED 1:4",
+            ResponseLine {
+                tag: None,
+                response: Response::Vanished(VanishedResponse {
+                    earlier: false,
+                    uids: s("1:4"),
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            "* VANISHED (EARLIER) 1:4",
+            ResponseLine {
+                tag: None,
+                response: Response::Vanished(VanishedResponse {
+                    earlier: true,
+                    uids: s("1:4"),
                 }),
             }
         );

@@ -84,6 +84,7 @@ impl CommandProcessor {
                     s::FetchAtt::Uid(()),
                     s::FetchAtt::Flags(()),
                 ]),
+                modifiers: None,
             },
             sender,
             ids,
@@ -270,6 +271,7 @@ where
             request.bodystructure = true;
         }
         s::FetchAtt::Uid(()) => request.uid = true,
+        s::FetchAtt::Modseq(()) => request.modseq = true,
         s::FetchAtt::Rfc822(Some(s::FetchAttRfc822::Header)) => {
             request.sections.push(BodySection {
                 leaf_type: LeafType::Headers,

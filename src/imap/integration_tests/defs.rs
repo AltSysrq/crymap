@@ -188,6 +188,7 @@ pub fn quick_select(client: &mut PipeClient, mailbox: &str) {
         client,
         s::Command::Select(s::SelectCommand {
             mailbox: MailboxName::of_wire(Cow::Borrowed(mailbox)),
+            modifiers: None,
         })
     );
 }

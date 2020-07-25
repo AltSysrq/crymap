@@ -17,6 +17,7 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
+use std::marker::PhantomData;
 
 use super::defs::*;
 use crate::account::model::*;
@@ -32,9 +33,11 @@ impl CommandProcessor {
             .seqnum_search(&request)
             .map_err(map_error!(self))?;
 
-        sender(s::Response::Search(
-            response.hits.into_iter().map(|u| u.0.get()).collect(),
-        ));
+        sender(s::Response::Search(s::SearchResponse {
+            hits: response.hits.into_iter().map(|u| u.0.get()).collect(),
+            max_modseq: None,
+            _marker: PhantomData,
+        }));
         success()
     }
 
@@ -48,9 +51,11 @@ impl CommandProcessor {
             .search(&request)
             .map_err(map_error!(self))?;
 
-        sender(s::Response::Search(
-            response.hits.into_iter().map(|u| u.0.get()).collect(),
-        ));
+        sender(s::Response::Search(s::SearchResponse {
+            hits: response.hits.into_iter().map(|u| u.0.get()).collect(),
+            max_modseq: None,
+            _marker: PhantomData,
+        }));
         success()
     }
 
@@ -165,6 +170,7 @@ impl CommandProcessor {
                     .map(|part| self.search_query_from_ast(part))
                     .collect::<PartialResult<Vec<_>>>()?,
             )),
+            s::SearchKey::Modseq(_) => unimplemented!("TODO"),
         }
     }
 }

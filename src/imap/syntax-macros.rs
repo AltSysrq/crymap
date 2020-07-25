@@ -236,7 +236,7 @@ macro_rules! generate_field_form {
         <$ty>::parse
     };
     ($_ty:ty, tag($tag:expr)) => {
-        map(kw($tag), |_| ())
+        map(kw($tag), |_| Default::default())
     };
     ($_ty:ty, cond($tag:expr)) => {
         map(opt(kw($tag)), |v| v.is_some())

@@ -29,7 +29,7 @@ fn search(client: &mut PipeClient, command: &'static str) -> Vec<u32> {
         s::ResponseLine {
             tag: None,
             response: s::Response::Search(v),
-        } => v,
+        } => v.hits,
         r => panic!("Unexpected response: {:?}", r),
     }
 }

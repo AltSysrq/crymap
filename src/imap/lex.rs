@@ -244,6 +244,10 @@ impl<W: Write> LexWriter<W> {
         write!(self.writer, "{}", *value)
     }
 
+    pub fn num_u64(&mut self, value: &u64) -> io::Result<()> {
+        write!(self.writer, "{}", *value)
+    }
+
     fn astring(&mut self, s: &str) -> io::Result<()> {
         if self.is_conservative_atom(s) {
             write!(self.writer, "{}", s)?;

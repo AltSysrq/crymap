@@ -332,35 +332,35 @@ impl CommandProcessor {
             if let Some(messages) = response.messages {
                 atts.push(s::StatusResponseAtt {
                     att: s::StatusAtt::Messages,
-                    value: messages.try_into().unwrap_or(u32::MAX),
+                    value: messages.try_into().unwrap_or(u32::MAX).into(),
                     _marker: PhantomData,
                 });
             }
             if let Some(recent) = response.recent {
                 atts.push(s::StatusResponseAtt {
                     att: s::StatusAtt::Recent,
-                    value: recent.try_into().unwrap_or(u32::MAX),
+                    value: recent.try_into().unwrap_or(u32::MAX).into(),
                     _marker: PhantomData,
                 });
             }
             if let Some(uid) = response.uidnext {
                 atts.push(s::StatusResponseAtt {
                     att: s::StatusAtt::UidNext,
-                    value: uid.0.get(),
+                    value: uid.0.get().into(),
                     _marker: PhantomData,
                 });
             }
             if let Some(uidvalidity) = response.uidvalidity {
                 atts.push(s::StatusResponseAtt {
                     att: s::StatusAtt::UidValidity,
-                    value: uidvalidity,
+                    value: uidvalidity.into(),
                     _marker: PhantomData,
                 });
             }
             if let Some(unseen) = response.unseen {
                 atts.push(s::StatusResponseAtt {
                     att: s::StatusAtt::Unseen,
-                    value: unseen.try_into().unwrap_or(u32::MAX),
+                    value: unseen.try_into().unwrap_or(u32::MAX).into(),
                     _marker: PhantomData,
                 });
             }
