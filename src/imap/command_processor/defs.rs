@@ -49,6 +49,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "MOVE",
     "MULTIAPPEND",
     "NAMESPACE",
+    "QRESYNC",
     "SASL-IR",
     "SPECIAL-USE",
     "UIDPLUS",

@@ -22,6 +22,7 @@ mod condstore_fetch;
 mod condstore_flags;
 mod condstore_search;
 mod condstore_status;
+mod qresync;
 
 use super::defs::*;
 

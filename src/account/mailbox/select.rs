@@ -195,6 +195,32 @@ impl StatefulMailbox {
         Ok((this, select_response))
     }
 
+    /// The QRESYNC operation that can be part of `SELECT` and `EXPUNGE`.
+    ///
+    /// The `changed` UIDs on the response are automatically added to the list
+    /// of UIDs to fetch on the next poll.
+    pub fn qresync(
+        &mut self,
+        request: QresyncRequest,
+    ) -> Result<QresyncResponse, Error> {
+        if request.uid_validity != self.s.uid_validity()? {
+            return Ok(QresyncResponse::default());
+        }
+
+        let (seqnum_reference, uid_reference) =
+            request.mapping_reference.unwrap_or_default();
+        let known_uids = request.known_uids;
+
+        let response = self.state.qresync(
+            request.resync_from,
+            |&uid| known_uids.as_ref().map_or(true, |k| k.contains(uid)),
+            seqnum_reference.items(u32::MAX),
+            uid_reference.items(u32::MAX),
+        );
+        self.state.add_changed_flags_uids(&response.changed);
+        Ok(response)
+    }
+
     fn start_gc(&self, rollups: Vec<RollupInfo>, force: bool) {
         if self.s.read_only && !force {
             return;

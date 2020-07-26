@@ -23,6 +23,7 @@ use log::{error, info};
 
 use super::defs::*;
 use crate::account::mailbox::IdleListener;
+use crate::account::model::SeqRange;
 use crate::support::error::Error;
 
 impl CommandProcessor {
@@ -65,10 +66,10 @@ impl CommandProcessor {
         // already have a response code.
         //
         // This is used to implement RFC 7162's requirement that the tagged
-        // `OK` response to `UID EXPUNGE` include this response code, unlike
+        // `OK` response to `[UID] EXPUNGE` include this response code, unlike
         // every other situation where the data is sent on an untagged
         // response. (Note we still send the untagged response as well, but
-        // only if anything actually changed --- but the case for UID EXPUNGE
+        // only if anything actually changed --- but the case for [UID] EXPUNGE
         // is unconditional for simplicity.)
         let mut staple_highest_modseq = false;
 
@@ -86,6 +87,7 @@ impl CommandProcessor {
                 panic!("COMPRESS DEFLATE should be handled by server.rs")
             }
             s::Command::Simple(s::SimpleCommand::Expunge) => {
+                staple_highest_modseq = true;
                 self.cmd_expunge(sender)
             }
             s::Command::Simple(s::SimpleCommand::Idle) => {
@@ -269,6 +271,37 @@ impl CommandProcessor {
                 enabled.push(ext);
             } else if "CONDSTORE".eq_ignore_ascii_case(&ext) {
                 self.enable_condstore(sender, false);
+                enabled.push(ext);
+            } else if "QRESYNC".eq_ignore_ascii_case(&ext) {
+                // RFC 7162 says:
+                //
+                // > A server compliant with this specification is REQUIRED to
+                // > support "ENABLE QRESYNC" and "ENABLE QRESYNC CONDSTORE"
+                // > (which are "CONDSTORE enabling commands", see Section 3.1,
+                // > and have identical results).
+                // > ...
+                // > Clarified that ENABLE QRESYNC CONDSTORE and ENABLE
+                // > CONDSTORE QRESYNC are equivalent.
+                //
+                // This would imply that `ENABLE QRESYNC` would need to include
+                // an `ENABLED CONDSTORE` response, which is pretty strange.
+                // Based on the trace in this (otherwise unrelated) post:
+                // https://forum.vivaldi.net/topic/44076/can-t-add-email-account-to-mailspring-can-t-connect-to-smtp
+                // it looks like Dovecot's approach is the more reasonable one:
+                // `ENABLE QRESYNC` and `ENABLE QRESYNC CONDSTORE` are *not*
+                // equivalent, but `ENABLE QRESYNC` enables a superset of
+                // behaviours that `ENABLE CONDSTORE` does.
+                //
+                // That is, Dovecot answers
+                //   . ENABLE QRESYNC
+                // with
+                //   * ENABLED QRESYNC
+                // and not
+                //   * ENABLED CONDSTORE QRESYNC
+                //
+                // This is what we do here as well.
+                self.enable_condstore(sender, false);
+                self.qresync_enabled = true;
                 enabled.push(ext);
             }
         }
@@ -504,8 +537,21 @@ Content-Transfer-Encoding: base64
         };
 
         let poll = selected.poll()?;
-        for (seqnum, _) in poll.expunge.into_iter().rev() {
-            sender(s::Response::Expunge(seqnum.0.get()));
+        if self.qresync_enabled {
+            if !poll.expunge.is_empty() {
+                let mut sr = SeqRange::new();
+                for (_, uid) in poll.expunge {
+                    sr.append(uid);
+                }
+                sender(s::Response::Vanished(s::VanishedResponse {
+                    earlier: false,
+                    uids: Cow::Owned(sr.to_string()),
+                }));
+            }
+        } else {
+            for (seqnum, _) in poll.expunge.into_iter().rev() {
+                sender(s::Response::Expunge(seqnum.0.get()));
+            }
         }
         if let Some(exists) = poll.exists {
             sender(s::Response::Exists(exists.try_into().unwrap_or(u32::MAX)));
@@ -516,6 +562,8 @@ Content-Transfer-Encoding: base64
 
         self.fetch_for_background_update(sender, poll.fetch);
 
+        // This must come after fetch_for_background_update so that we can
+        // override the client's own calculation of HIGHESTMODSEQ
         if let Some(max_modseq) = poll.max_modseq {
             if self.condstore_enabled {
                 sender(s::Response::Cond(s::CondResponse {
@@ -537,12 +585,27 @@ Content-Transfer-Encoding: base64
             None => return Ok(()),
         };
         let uids = selected.mini_poll();
+        let uids_empty = uids.is_empty();
+        let divergent_modseq = selected.divergent_modseq();
 
         self.fetch_for_background_update(sender, uids);
 
-        // TODO(QRESYNC) We need to make sure that we also send HIGHESTMODSEQ
-        // after the fetches if the reported HIGHESTMODSEQ is not the same as
-        // the true HIGHESTMODSEQ and we sent at least one FETCH.
+        // If the true max modseq is not the same as the reported max modseq,
+        // we need to also send a HIGHESTMODSEQ response (after the fetches
+        // above) to override the client's own calculation of that value based
+        // on looking at the FETCH responses, since the value from FETCH could
+        // be greater than of an expungement the client hasn't seen.
+        if !uids_empty {
+            if let Some(divergent_modseq) = divergent_modseq {
+                sender(s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Ok,
+                    code: Some(s::RespTextCode::HighestModseq(
+                        divergent_modseq.raw().get(),
+                    )),
+                    quip: Some(Cow::Borrowed("Snapshot diverged from reality")),
+                }));
+            }
+        }
 
         Ok(())
     }

@@ -531,7 +531,7 @@ impl CommandProcessor {
                     (No, Some(s::RespTextCode::Cannot(()))),
             },
         )?;
-        let (stateful, select) =
+        let (mut stateful, select) =
             stateless.select().map_err(map_error!(self))?;
         sender(s::Response::Flags(select.flags.clone()));
         sender(s::Response::Cond(s::CondResponse {
@@ -570,6 +570,19 @@ impl CommandProcessor {
                 )),
                 quip: None,
             }));
+        }
+
+        if let Some(qresync) = qresync {
+            let response =
+                stateful.qresync(qresync).map_err(map_error!(self))?;
+            if !response.expunged.is_empty() {
+                sender(s::Response::Vanished(s::VanishedResponse {
+                    earlier: true,
+                    uids: Cow::Owned(response.expunged.to_string()),
+                }));
+            }
+            // The FETCH responses, if any, are handled by the poll cycle at
+            // the end of the SELECT.
         }
 
         let read_only = stateful.stateless().read_only();

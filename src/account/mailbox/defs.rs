@@ -178,6 +178,22 @@ impl StatefulMailbox {
         self.state.report_max_modseq()
     }
 
+    /// If the reported HIGHESTMODSEQ is different from the actual maximum
+    /// modseq, and it is possible for the client to have observed this, return
+    /// the value to report.
+    pub fn divergent_modseq(&self) -> Option<Modseq> {
+        if self.state.report_max_modseq() != self.state.max_modseq() {
+            // This will, in practise, always be Some if the value will
+            // eventually be returned to the client, since we only consider
+            // modseqs to diverge if the client has seen at least one message.
+            // However, this function can be called before that is checked, so
+            // no assertion.
+            self.state.report_max_modseq()
+        } else {
+            None
+        }
+    }
+
     /// Return whether there are any unapplied expunge events currently known.
     ///
     /// This does not result in any polling, but just looks at the

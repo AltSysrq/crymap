@@ -424,6 +424,12 @@ impl MailboxState {
         self.changed_flags_uids.push(uid);
     }
 
+    /// Add the given UIDs to the next value that will be returned from
+    /// `take_changed_flags_uids()`.
+    pub fn add_changed_flags_uids(&mut self, uids: &[Uid]) {
+        self.changed_flags_uids.extend_from_slice(uids);
+    }
+
     /// Returns the number of messages currently addressable by sequence
     /// numbers.
     pub fn num_messages(&self) -> usize {
@@ -694,15 +700,10 @@ impl MailboxState {
     ) -> QresyncResponse {
         let max_modseq = match self.max_modseq {
             Some(m) => m,
-            None => {
-                return QresyncResponse {
-                    expunged: Vec::new(),
-                    changed: Vec::new(),
-                }
-            }
+            None => return QresyncResponse::default(),
         };
 
-        let mut expunged = if self
+        let expunged = if self
             .recent_expungements
             .front()
             .copied()
@@ -715,13 +716,23 @@ impl MailboxState {
             // head of recent_expungements, and just dump stuff out of
             // recent_expungements
             let resync_from = resync_from.unwrap();
-            self.recent_expungements
+            let mut uids = self
+                .recent_expungements
                 .iter()
                 .copied()
                 .filter(|&(m, _)| m > resync_from)
                 .map(|(_, uid)| uid)
                 .filter(&mut filter)
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            uids.sort_unstable();
+            uids.dedup();
+
+            let mut s = SeqRange::new();
+            for uid in uids {
+                s.append(uid);
+            }
+
+            s
         } else {
             let expunge_start = seqnum_reference
                 .into_iter()
@@ -733,14 +744,17 @@ impl MailboxState {
                 .map(|(_, uid)| uid)
                 .unwrap_or(Uid::MIN);
 
-            (expunge_start.0.get()..=max_modseq.uid().0.get())
+            let mut s = SeqRange::new();
+            for uid in (expunge_start.0.get()..=max_modseq.uid().0.get())
                 .into_iter()
                 .map(|uid| Uid::of(uid).unwrap())
                 .filter(|uid| !self.message_status.contains_key(uid))
                 .filter(&mut filter)
-                .collect::<Vec<_>>()
+            {
+                s.append(uid);
+            }
+            s
         };
-        expunged.sort();
 
         let changed = self
             .message_status
@@ -1309,7 +1323,7 @@ mod test {
                 |_| true,
                 resync_checkpoints.iter().copied().map(|(s, _)| s),
                 resync_checkpoints.iter().copied().map(|(_, u)| u));
-            for uid in qresync.expunged {
+            for uid in qresync.expunged.items(u32::MAX) {
                 client_expunged.insert(uid);
             }
 

@@ -962,7 +962,7 @@ pub struct QresyncRequest {
 }
 
 /// The result from a `QRESYNC` operation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct QresyncResponse {
     /// Messages that have been expunged since the reference point or best
     /// guess thereof.
@@ -970,7 +970,7 @@ pub struct QresyncResponse {
     /// ```
     /// * VANISHED (EARLIER) uid,uid,...
     /// ```
-    pub expunged: Vec<Uid>,
+    pub expunged: SeqRange<Uid>,
     /// Messages that have been changed or created since the reference time.
     ///
     /// ```

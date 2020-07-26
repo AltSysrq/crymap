@@ -44,6 +44,7 @@ impl CommandProcessor {
             sender,
             ids,
             false,
+            false,
             StatefulMailbox::seqnum_store,
             |mb, r| mb.prefetch(&r, &SeqRange::new()),
             StatefulMailbox::seqnum_fetch,
@@ -60,6 +61,7 @@ impl CommandProcessor {
             cmd,
             sender,
             ids,
+            true,
             true,
             StatefulMailbox::store,
             |mb, r| mb.prefetch(&r, &r.ids),
@@ -93,6 +95,7 @@ impl CommandProcessor {
             sender,
             ids,
             false,
+            false,
             |_, _| panic!("Shouldn't STORE in background update"),
             |mb, r| mb.prefetch(&r, &r.ids),
             |mb, r, f| mb.fetch(&r, f),
@@ -105,6 +108,7 @@ impl CommandProcessor {
         sender: SendResponse<'_>,
         ids: SeqRange<ID>,
         force_fetch_uid: bool,
+        allow_vanished: bool,
         f_store: impl FnOnce(
             &mut StatefulMailbox,
             &StoreRequest<ID>,
@@ -147,8 +151,48 @@ impl CommandProcessor {
                     has_changedsince = true;
                     request.changed_since = Modseq::of(modseq);
                 }
-                s::FetchModifier::Vanished(_) => unimplemented!(),
+                s::FetchModifier::Vanished(_) => {
+                    if !self.qresync_enabled {
+                        return Err(s::Response::Cond(s::CondResponse {
+                            cond: s::RespCondType::Bad,
+                            code: Some(s::RespTextCode::ClientBug(())),
+                            quip: Some(Cow::Borrowed(
+                                "VANISHED requires ENABLE QRESYNC",
+                            )),
+                        }));
+                    }
+
+                    if !allow_vanished {
+                        return Err(s::Response::Cond(s::CondResponse {
+                            cond: s::RespCondType::Bad,
+                            code: Some(s::RespTextCode::ClientBug(())),
+                            quip: Some(Cow::Borrowed(
+                                "VANISHED not allowed here",
+                            )),
+                        }));
+                    }
+
+                    if request.collect_vanished {
+                        return Err(s::Response::Cond(s::CondResponse {
+                            cond: s::RespCondType::Bad,
+                            code: Some(s::RespTextCode::ClientBug(())),
+                            quip: Some(Cow::Borrowed(
+                                "VANISHED passed more than once",
+                            )),
+                        }));
+                    }
+
+                    request.collect_vanished = true;
+                }
             }
+        }
+
+        if request.collect_vanished && !has_changedsince {
+            return Err(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Bad,
+                code: Some(s::RespTextCode::ClientBug(())),
+                quip: Some(Cow::Borrowed("VANISHED without CHANGEDSINCE")),
+            }));
         }
 
         let fetch_properties = fetch_properties(&cmd.target);
@@ -383,6 +427,12 @@ fn fetch_preresponse(
     sender: SendResponse,
     response: PrefetchResponse,
 ) -> PartialResult<()> {
+    if !response.vanished.is_empty() {
+        sender(s::Response::Vanished(s::VanishedResponse {
+            earlier: true,
+            uids: Cow::Owned(response.vanished.to_string()),
+        }));
+    }
     if !response.flags.is_empty() {
         sender(s::Response::Flags(response.flags));
     }
