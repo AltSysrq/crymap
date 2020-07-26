@@ -663,9 +663,9 @@ fn body_structure_to_ast(
             content_type_parms: content_parms_to_ast(bs.content_type_parms),
             content_id: bs.content_id.map(Cow::Owned),
             content_description: bs.content_description.map(Cow::Owned),
-            content_transfer_encoding: Cow::Borrowed(
-                bs.content_transfer_encoding.name(),
-            ),
+            content_transfer_encoding: bs
+                .content_transfer_encoding
+                .map_or(Cow::Borrowed("7bit"), Cow::Owned),
             size_octets: bs.size_octets.try_into().unwrap_or(u32::MAX),
         };
 

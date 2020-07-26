@@ -510,6 +510,38 @@ fn check_torture_test_body_structure(bs: &s::Body<'_>, extended: bool) {
 }
 
 #[test]
+fn fetch_body_structure_unknown_cte() {
+    let setup = set_up();
+    let mut client = setup.connect("3501feuc");
+    quick_log_in(&mut client);
+    quick_create(&mut client, "3501feuc");
+
+    client
+        .start_append("3501feuc", s::AppendFragment::default(), UNKNOWN_CTE)
+        .unwrap();
+    let mut buffer = Vec::new();
+    let mut responses = client.finish_append(&mut buffer).unwrap();
+    assert_tagged_ok_any(responses.pop().unwrap());
+
+    quick_select(&mut client, "3501feuc");
+    fetch_single!(client, c("FETCH 1 BODYSTRUCTURE"), fr => {
+        has_msgatt_matching! {
+            s::MsgAtt::ExtendedBodyStructure(
+                s::Body::SinglePart(s::BodyType1Part {
+                    core: s::ClassifiedBodyType1Part::Text(ref txt),
+                    ..
+                })
+            ) in fr => {
+                assert_eq!(
+                    "chunked",
+                    txt.body_fields.content_transfer_encoding
+                );
+            }
+        }
+    });
+}
+
+#[test]
 fn fetch_body_parts() {
     let setup = set_up();
     let mut client = setup.connect("3501febp");

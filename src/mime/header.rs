@@ -95,6 +95,12 @@ pub fn parse_content_transfer_encoding(
         })
 }
 
+/// Parse the `Content-Transfer-Encoding` header, as defined by RFC 2045,
+/// without trying to interpret the value.
+pub fn parse_content_transfer_encoding_raw(i: &[u8]) -> Option<&str> {
+    token(i).ok().and_then(|r| str::from_utf8(r.1).ok())
+}
+
 /// Parse the `Content-Language` header as per the intersection of RFC 3306 and
 /// RFC 3282.
 pub fn parse_content_language(i: &[u8]) -> Option<&[u8]> {

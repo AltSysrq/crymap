@@ -72,3 +72,6 @@ pub static WITH_OBSOLETE_ROUTING: &[u8] =
 /// This message exposed a bug in the way header wrapping is handled.
 pub static DOVECOT_PREFER_STANDALONE_DAEMONS: &[u8] =
     include_bytes!("dovecot-prefer-standalone-daemons.eml");
+
+/// A message with an unknown Content-Transfer-Encoding.
+pub static UNKNOWN_CTE: &[u8] = include_bytes!("unknown-cte.eml");

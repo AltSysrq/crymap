@@ -90,7 +90,7 @@ pub struct BodyStructure {
     /// The `Content-Description` header, if set, decoded.
     pub content_description: Option<String>,
     /// The `Content-Transfer-Encoding` of this part.
-    pub content_transfer_encoding: header::ContentTransferEncoding,
+    pub content_transfer_encoding: Option<String>,
     /// The exact length of the content of this part, measured in encoded form
     pub size_octets: u64,
     /// The number of lines of the content of this part, measured in encoded
@@ -257,8 +257,8 @@ impl BodyStructureFetcher {
 
     fn content_transfer_encoding(&mut self, value: &[u8]) {
         self.bs.content_transfer_encoding =
-            header::parse_content_transfer_encoding(value)
-                .unwrap_or(header::ContentTransferEncoding::Binary);
+            header::parse_content_transfer_encoding_raw(value)
+                .map(|v| v.to_owned())
     }
 }
 
@@ -323,10 +323,7 @@ hello world
 
         assert_eq!("text", bs.content_type.0);
         assert_eq!("plain", bs.content_type.1);
-        assert_eq!(
-            header::ContentTransferEncoding::SevenBit,
-            bs.content_transfer_encoding
-        );
+        assert_eq!(None, bs.content_transfer_encoding);
         assert_eq!(13, bs.size_octets);
         assert_eq!(1, bs.size_lines);
         assert_eq!("a0f2a3c1dcd5b1cac71bf0c03f2ff1bd", bs.md5);
@@ -468,10 +465,7 @@ content-transfer-encoding: 8bit
         assert_eq!("http://example.com/foo", bs.content_location.unwrap());
         assert_eq!("<contentid@example.com>", bs.content_id.unwrap());
         assert_eq!("This is a description", bs.content_description.unwrap());
-        assert_eq!(
-            header::ContentTransferEncoding::EightBit,
-            bs.content_transfer_encoding
-        );
+        assert_eq!(Some("8bit".to_owned()), bs.content_transfer_encoding);
     }
 
     #[test]
