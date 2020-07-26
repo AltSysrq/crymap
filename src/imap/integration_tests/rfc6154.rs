@@ -109,4 +109,14 @@ fn create_special_use() {
         Some(s::RespTextCode::UseAttr(())),
         Error::UnsupportedSpecialUse,
     );
+
+    command!(
+        [response] = client,
+        c("CREATE 6154crea/bad USE (\\Subscribed)")
+    );
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::UseAttr(())),
+        Error::UnsupportedSpecialUse,
+    );
 }
