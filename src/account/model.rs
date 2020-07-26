@@ -1398,13 +1398,25 @@ pub enum SearchQuery {
 
 /// The response from the `SEARCH` (`ID` = `Seqnum`) or `UID SEARCH`
 /// (`ID` = `Uid`) commands.
+///
+/// This also holds the data necessary to partially convert the structure into
+/// an `ESEARCH` response, though the tag and the UID flag must be provided by
+/// higher-level code.
 #[derive(Clone, Debug)]
 pub struct SearchResponse<ID> {
     /// The ids to return in the untagged `* SEARCH` response.
     ///
     /// For some reason, the ids are returned as a naked list instead of using
     /// IMAP's list syntax or sequence-set syntax.
+    ///
+    /// These are always sorted ascending. This is not required by RFC 3501,
+    /// but it makes the ESEARCH implementation easier and testing much
+    /// simpler.
     pub hits: Vec<ID>,
+    /// The `Modseq` of `hits[0]`.
+    pub first_modseq: Option<Modseq>,
+    /// The `Modseq` of `hits[hits.len() - 1]`.
+    pub last_modseq: Option<Modseq>,
     /// The maximum `Modseq` of any hit, or `None` if there were no hits.
     pub max_modseq: Option<Modseq>,
 }

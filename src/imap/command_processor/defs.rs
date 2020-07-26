@@ -42,6 +42,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "CONDSTORE",
     "CREATE-SPECIAL-USE",
     "ENABLE",
+    "ESEARCH",
     "ID",
     "IDLE",
     "LIST-EXTENDED",

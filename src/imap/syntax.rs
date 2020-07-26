@@ -217,6 +217,10 @@ syntax_rule! {
         #[]
         #[delegate]
         Vanished(VanishedResponse<'a>),
+        // RFC 4466 + RFC 4731
+        #[prefix("ESEARCH ")]
+        #[delegate]
+        Esearch(EsearchResponse<'a>),
     }
 }
 
@@ -451,6 +455,40 @@ syntax_rule! {
         #[]
         #[phantom]
         _marker: PhantomData<&'a ()>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct EsearchResponse<'a> {
+        // RFC 4466 makes this optional, but we always include it
+        // Yes, it needs to be a string, even though `tag` is a subset of atom.
+        // At least it uses the standard string syntax.
+        #[surrounded("(TAG ", ")")]
+        #[primitive(censored_string, string)]
+        tag: Cow<'a, str>,
+        #[]
+        #[cond(" UID")]
+        uid: bool,
+        // The search return data is formally allowed to be in any order, but
+        // we always return it in this order. The parser generated here also
+        // expects it to be in this particular order, but we don't need to
+        // parse anyone else's ESEARCH responses.
+        #[opt prefix(" MIN ")]
+        #[primitive(num_u32, number)]
+        min: Option<u32>,
+        #[opt prefix(" MAX ")]
+        #[primitive(num_u32, number)]
+        max: Option<u32>,
+        #[opt prefix(" ALL ")]
+        #[primitive(verbatim, sequence_set)]
+        all: Option<Cow<'a, str>>,
+        #[opt prefix(" COUNT ")]
+        #[primitive(num_u32, number)]
+        count: Option<u32>,
+        #[opt prefix(" MODSEQ ")]
+        #[primitive(num_u64, number64)]
+        modseq: Option<u64>,
     }
 }
 
@@ -1203,12 +1241,26 @@ simple_enum! {
 syntax_rule! {
     #[prefix("SEARCH ")]
     struct SearchCommand<'a> {
+        // RFC 4466 allows a more complex syntax, but RFC 4731 doesn't use it
+        // and we can just treat this as a list of atoms.
+        #[opt surrounded("RETURN (", ") ") 0*(" ")]
+        #[delegate(SearchReturnOpt)]
+        return_opts: Option<Vec<SearchReturnOpt>>,
         #[opt surrounded("CHARSET ", " ")]
         #[primitive(censored_astring, astring)]
         charset: Option<Cow<'a, str>>,
         #[1*(" ")]
         #[delegate(SearchKey)]
         keys: Vec<SearchKey<'a>>,
+    }
+}
+
+simple_enum! {
+    enum SearchReturnOpt {
+        Min("MIN"),
+        Max("MAX"),
+        All("ALL"),
+        Count("COUNT"),
     }
 }
 
@@ -3517,6 +3569,7 @@ mod test {
             SearchCommand,
             "SEARCH LARGER 42",
             SearchCommand {
+                return_opts: None,
                 charset: None,
                 keys: vec![SearchKey::Larger(42)],
             }
@@ -3525,6 +3578,7 @@ mod test {
             SearchCommand,
             "SEARCH LARGER 42 SMALLER 56",
             SearchCommand {
+                return_opts: None,
                 charset: None,
                 keys: vec![SearchKey::Larger(42), SearchKey::Smaller(56)],
             }
@@ -3533,6 +3587,7 @@ mod test {
             SearchCommand,
             "SEARCH CHARSET utf-8 LARGER 42",
             SearchCommand {
+                return_opts: None,
                 charset: ns("utf-8"),
                 keys: vec![SearchKey::Larger(42)],
             }
@@ -3542,6 +3597,7 @@ mod test {
             SearchCommand,
             "SEARCH MODSEQ 12345678901234567890",
             SearchCommand {
+                return_opts: None,
                 charset: None,
                 keys: vec![SearchKey::Modseq(ModseqSearchKey {
                     ext: None,
@@ -3553,6 +3609,7 @@ mod test {
             SearchCommand,
             r#"SEARCH MODSEQ "/flags/keyword" all 12345678901234567890"#,
             SearchCommand {
+                return_opts: None,
                 charset: None,
                 keys: vec![SearchKey::Modseq(ModseqSearchKey {
                     ext: Some(ModseqSearchKeyExt {
@@ -3561,6 +3618,27 @@ mod test {
                     }),
                     modseq: 12345678901234567890,
                 })],
+            }
+        );
+        assert_reversible!(
+            SearchCommand,
+            "SEARCH RETURN (MIN MAX) ALL",
+            SearchCommand {
+                return_opts: Some(vec![
+                    SearchReturnOpt::Min,
+                    SearchReturnOpt::Max,
+                ]),
+                charset: None,
+                keys: vec![SearchKey::Simple(SimpleSearchKey::All)],
+            }
+        );
+        assert_reversible!(
+            SearchCommand,
+            "SEARCH RETURN () ALL",
+            SearchCommand {
+                return_opts: Some(vec![]),
+                charset: None,
+                keys: vec![SearchKey::Simple(SimpleSearchKey::All)],
             }
         );
     }
@@ -4102,6 +4180,7 @@ mod test {
             Command,
             "SEARCH UNSEEN",
             Command::Search(SearchCommand {
+                return_opts: None,
                 charset: None,
                 keys: vec![SearchKey::Simple(SimpleSearchKey::Unseen)],
             })
@@ -4134,6 +4213,7 @@ mod test {
             Command,
             "UID SEARCH UNSEEN",
             Command::Uid(UidCommand::Search(SearchCommand {
+                return_opts: None,
                 charset: None,
                 keys: vec![SearchKey::Simple(SimpleSearchKey::Unseen)],
             }))
@@ -4464,6 +4544,38 @@ mod test {
                     hits: vec![42],
                     max_modseq: Some(12345678901234567890),
                     _marker: PhantomData,
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            r#"* ESEARCH (TAG "42") MIN 1 MAX 42 MODSEQ 12345678901234567890"#,
+            ResponseLine {
+                tag: None,
+                response: Response::Esearch(EsearchResponse {
+                    tag: s("42"),
+                    uid: false,
+                    min: Some(1),
+                    max: Some(42),
+                    all: None,
+                    count: None,
+                    modseq: Some(12345678901234567890),
+                }),
+            }
+        );
+        assert_reversible!(
+            ResponseLine,
+            r#"* ESEARCH (TAG "42") UID ALL 2:4 COUNT 42"#,
+            ResponseLine {
+                tag: None,
+                response: Response::Esearch(EsearchResponse {
+                    tag: s("42"),
+                    uid: true,
+                    min: None,
+                    max: None,
+                    all: ns("2:4"),
+                    count: Some(42),
+                    modseq: None,
                 }),
             }
         );

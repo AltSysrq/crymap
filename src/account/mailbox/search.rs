@@ -39,6 +39,8 @@ impl StatefulMailbox {
 
         Ok(SearchResponse {
             max_modseq: result.max_modseq,
+            first_modseq: result.first_modseq,
+            last_modseq: result.last_modseq,
             hits: result
                 .hits
                 .into_iter()
@@ -87,6 +89,14 @@ impl StatefulMailbox {
         hits.sort_unstable();
 
         Ok(SearchResponse {
+            first_modseq: hits
+                .first()
+                .and_then(|&uid| self.state.message_status(uid))
+                .map(|ms| ms.last_modified()),
+            last_modseq: hits
+                .last()
+                .and_then(|&uid| self.state.message_status(uid))
+                .map(|ms| ms.last_modified()),
             max_modseq: hits
                 .iter()
                 .copied()
@@ -703,5 +713,52 @@ mod test {
             .unwrap();
 
         assert_eq!(vec![uids[0]], result.hits);
+    }
+
+    #[test]
+    fn correct_modseqs_returned() {
+        let setup = set_up();
+        let (mut mb, _) = setup.stateless.select().unwrap();
+
+        let uids = ENRON_SMALL_MULTIPARTS[..5]
+            .iter()
+            .map(|data| simple_append_data(mb.stateless(), data))
+            .collect::<Vec<_>>();
+        mb.poll().unwrap();
+
+        // Give UID 1 the highest modseq
+        mb.store(&StoreRequest {
+            ids: &SeqRange::just(uids[1]),
+            flags: &[Flag::Answered],
+            remove_listed: false,
+            remove_unlisted: false,
+            loud: false,
+            unchanged_since: None,
+        })
+        .unwrap();
+
+        let result = mb
+            .search(&SearchRequest {
+                queries: vec![SearchQuery::All],
+            })
+            .unwrap();
+        assert_eq!(
+            Some(Modseq::new(uids[0], Cid::GENESIS)),
+            result.first_modseq
+        );
+        assert_eq!(
+            Some(Modseq::new(uids[4], Cid::GENESIS)),
+            result.last_modseq
+        );
+        assert_eq!(Some(Modseq::new(uids[4], Cid(1))), result.max_modseq);
+
+        let result = mb
+            .search(&SearchRequest {
+                queries: vec![SearchQuery::Text("gaap".to_owned())],
+            })
+            .unwrap();
+        assert_eq!(None, result.first_modseq);
+        assert_eq!(None, result.last_modseq);
+        assert_eq!(None, result.max_modseq);
     }
 }

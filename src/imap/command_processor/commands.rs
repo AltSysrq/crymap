@@ -137,7 +137,9 @@ impl CommandProcessor {
             s::Command::Move(cmd) => self.cmd_move(cmd, sender),
             s::Command::Fetch(cmd) => self.cmd_fetch(cmd, sender),
             s::Command::Store(cmd) => self.cmd_store(cmd, sender),
-            s::Command::Search(cmd) => self.cmd_search(cmd, sender),
+            s::Command::Search(cmd) => {
+                self.cmd_search(cmd, &command_line.tag, sender)
+            }
             s::Command::XVanquish(uids) => self.cmd_vanquish(uids, sender),
 
             s::Command::Uid(s::UidCommand::Copy(cmd)) => {
@@ -150,7 +152,7 @@ impl CommandProcessor {
                 self.cmd_uid_fetch(cmd, sender)
             }
             s::Command::Uid(s::UidCommand::Search(cmd)) => {
-                self.cmd_uid_search(cmd, sender)
+                self.cmd_uid_search(cmd, &command_line.tag, sender)
             }
             s::Command::Uid(s::UidCommand::Store(cmd)) => {
                 self.cmd_uid_store(cmd, sender)

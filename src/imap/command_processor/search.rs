@@ -17,6 +17,7 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
+use std::convert::TryFrom;
 use std::marker::PhantomData;
 
 use super::defs::*;
@@ -28,28 +29,46 @@ impl CommandProcessor {
     pub(super) fn cmd_search(
         &mut self,
         cmd: s::SearchCommand<'_>,
+        tag: &str,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        self.search(cmd, sender, StatefulMailbox::seqnum_search)
+        self.search(cmd, tag, sender, false, StatefulMailbox::seqnum_search)
     }
 
     pub(super) fn cmd_uid_search(
         &mut self,
         cmd: s::SearchCommand<'_>,
+        tag: &str,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        self.search(cmd, sender, StatefulMailbox::search)
+        self.search(cmd, tag, sender, true, StatefulMailbox::search)
     }
 
-    fn search<T: Into<u32>>(
+    fn search<
+        T: Into<u32> + TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync + Copy,
+    >(
         &mut self,
-        cmd: s::SearchCommand<'_>,
+        mut cmd: s::SearchCommand<'_>,
+        tag: &str,
         sender: SendResponse<'_>,
+        is_uid: bool,
         f: impl FnOnce(
             &mut StatefulMailbox,
             &SearchRequest,
         ) -> Result<SearchResponse<T>, Error>,
     ) -> CmdResult {
+        // RFC 4731 indicates:
+        //
+        // > If one or more result options described above are specified, the
+        // > extended SEARCH command MUST return a single ESEARCH response
+        //
+        // This means that `SEARCH RETURN () ...` is semantically equivalent to
+        // `SEARCH ...` and should return a vanilla SEARCH response instead of
+        // ESEARCH, which is a bit weird since it's using extended search
+        // syntax, but it makes our lives a bit easier.
+        let return_opts = cmd.return_opts.take().unwrap_or_default();
+        let return_extended = !return_opts.is_empty();
+
         let mut has_modseq = false;
         let request = self.search_command_from_ast(&mut has_modseq, cmd)?;
 
@@ -60,17 +79,69 @@ impl CommandProcessor {
         let response =
             f(selected!(self)?, &request).map_err(map_error!(self))?;
 
-        sender(s::Response::Search(s::SearchResponse {
-            hits: response.hits.into_iter().map(|u| u.into()).collect(),
-            // Only return the MODSEQ item if the client specified a MODSEQ
-            // criterion.
-            max_modseq: if has_modseq {
-                response.max_modseq.map(|m| m.raw().get())
-            } else {
-                None
-            },
-            _marker: PhantomData,
-        }));
+        let response = if return_extended {
+            let mut r = s::EsearchResponse {
+                tag: Cow::Borrowed(tag),
+                uid: is_uid,
+                min: None,
+                max: None,
+                all: None,
+                count: None,
+                modseq: None,
+            };
+            let mut modseq: Option<Modseq> = None;
+
+            if return_opts.contains(&s::SearchReturnOpt::Min) {
+                r.min = response.hits.first().map(|&hit| hit.into());
+                modseq = response.first_modseq;
+            }
+
+            if return_opts.contains(&s::SearchReturnOpt::Max) {
+                r.max = response.hits.last().map(|&hit| hit.into());
+                // If given MIN + MAX, the modseq is the maximum of the two
+                if let Some(last_modseq) = response.last_modseq {
+                    modseq = modseq
+                        .map(|m| m.max(last_modseq))
+                        .or(response.last_modseq);
+                }
+            }
+
+            if return_opts.contains(&s::SearchReturnOpt::All)
+                && !response.hits.is_empty()
+            {
+                let mut sr = SeqRange::new();
+                for &hit in &response.hits {
+                    sr.append(hit);
+                }
+                r.all = Some(Cow::Owned(sr.to_string()));
+                modseq = response.max_modseq;
+            }
+
+            if return_opts.contains(&s::SearchReturnOpt::Count) {
+                r.count = Some(response.hits.len() as u32);
+                modseq = response.max_modseq;
+            }
+
+            if has_modseq {
+                r.modseq = modseq.map(|m| m.raw().get());
+            }
+
+            s::Response::Esearch(r)
+        } else {
+            s::Response::Search(s::SearchResponse {
+                hits: response.hits.into_iter().map(|u| u.into()).collect(),
+                // Only return the MODSEQ item if the client specified a MODSEQ
+                // criterion.
+                max_modseq: if has_modseq {
+                    response.max_modseq.map(|m| m.raw().get())
+                } else {
+                    None
+                },
+                _marker: PhantomData,
+            })
+        };
+
+        sender(response);
         success()
     }
 
