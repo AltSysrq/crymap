@@ -244,7 +244,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
     pub fn start_append(
         &mut self,
         mailbox: &str,
-        frag: s::AppendFragment<'_>,
+        frag: s::AppendFragment,
         data: &[u8],
     ) -> Result<(), Error> {
         let tag = self.next_tag;
@@ -290,7 +290,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
 
     pub fn append_item(
         &mut self,
-        mut frag: s::AppendFragment<'_>,
+        mut frag: s::AppendFragment,
         data: &[u8],
     ) -> Result<(), Error> {
         let mut request_buffer = Vec::<u8>::new();

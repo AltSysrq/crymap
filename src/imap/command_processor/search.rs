@@ -18,7 +18,6 @@
 
 use std::borrow::Cow;
 use std::convert::TryFrom;
-use std::marker::PhantomData;
 
 use super::defs::*;
 use crate::account::mailbox::StatefulMailbox;
@@ -179,7 +178,6 @@ impl CommandProcessor {
                 } else {
                     None
                 },
-                _marker: PhantomData,
             })
         };
 

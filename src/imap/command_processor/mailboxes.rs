@@ -18,7 +18,6 @@
 
 use std::borrow::Cow;
 use std::convert::TryInto;
-use std::marker::PhantomData;
 
 use log::warn;
 
@@ -153,14 +152,14 @@ impl CommandProcessor {
                 .contains(&s::ListSelectOpt::RecursiveMatch),
             return_subscribed: select_opts
                 .contains(&s::ListSelectOpt::Subscribed)
-                || return_opts.contains(&s::ListReturnOpt::Subscribed),
+                || return_opts.contains(&s::ListReturnOpt::Subscribed(())),
             // For non-extended LIST, we return \HasChildren and
             // \HasNoChildren. For extended LIST, we'll let the client decide.
             return_children: !is_extended
-                || return_opts.contains(&s::ListReturnOpt::Children),
+                || return_opts.contains(&s::ListReturnOpt::Children(())),
             return_special_use: select_opts
                 .contains(&s::ListSelectOpt::SpecialUse)
-                || return_opts.contains(&s::ListReturnOpt::SpecialUse),
+                || return_opts.contains(&s::ListReturnOpt::SpecialUse(())),
             lsub_style: false,
         };
 
@@ -342,48 +341,41 @@ impl CommandProcessor {
             })?;
 
         for response in responses {
-            let mut atts: Vec<s::StatusResponseAtt<'static>> =
-                Vec::with_capacity(10);
+            let mut atts: Vec<s::StatusResponseAtt> = Vec::with_capacity(10);
             if let Some(messages) = response.messages {
                 atts.push(s::StatusResponseAtt {
                     att: s::StatusAtt::Messages,
                     value: messages.try_into().unwrap_or(u32::MAX).into(),
-                    _marker: PhantomData,
                 });
             }
             if let Some(recent) = response.recent {
                 atts.push(s::StatusResponseAtt {
                     att: s::StatusAtt::Recent,
                     value: recent.try_into().unwrap_or(u32::MAX).into(),
-                    _marker: PhantomData,
                 });
             }
             if let Some(uid) = response.uidnext {
                 atts.push(s::StatusResponseAtt {
                     att: s::StatusAtt::UidNext,
                     value: uid.0.get().into(),
-                    _marker: PhantomData,
                 });
             }
             if let Some(uidvalidity) = response.uidvalidity {
                 atts.push(s::StatusResponseAtt {
                     att: s::StatusAtt::UidValidity,
                     value: uidvalidity.into(),
-                    _marker: PhantomData,
                 });
             }
             if let Some(unseen) = response.unseen {
                 atts.push(s::StatusResponseAtt {
                     att: s::StatusAtt::Unseen,
                     value: unseen.try_into().unwrap_or(u32::MAX).into(),
-                    _marker: PhantomData,
                 });
             }
             if let Some(max_modseq) = response.max_modseq {
                 atts.push(s::StatusResponseAtt {
                     att: s::StatusAtt::HighestModseq,
                     value: max_modseq,
-                    _marker: PhantomData,
                 });
             }
 

@@ -66,7 +66,7 @@ impl CommandProcessor {
 
     pub fn cmd_append_item(
         &mut self,
-        cmd: s::AppendFragment<'_>,
+        cmd: s::AppendFragment,
         item_size: u32,
         item_data: impl Read,
     ) -> PartialResult<()> {

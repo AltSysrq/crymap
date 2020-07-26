@@ -99,8 +99,6 @@
 //! - `cond(str)`. Map `str` to `true` and absence to `false` at read. Write
 //! ` str` on `true` and nothing on `false`.
 //!
-//! - `phantom`. Map between nothingness and `PhantomData`.
-//!
 //! "modifiers" are more diverse. More than one can be chained together. When
 //! there is more than one, they apply left to right. E.g., `suffix(" ") opt`
 //! will always add/expect a space regardless of whether the value is present,
@@ -126,7 +124,6 @@
 
 use std::borrow::Cow;
 use std::io::{self, Write};
-use std::marker::PhantomData;
 use std::str;
 
 use chrono::prelude::*;
@@ -180,7 +177,7 @@ syntax_rule! {
         // with no results must be simply "SEARCH".
         #[prefix("SEARCH")]
         #[delegate]
-        Search(SearchResponse<'a>),
+        Search(SearchResponse),
         #[prefix("STATUS ")]
         #[delegate]
         Status(StatusResponse<'a>),
@@ -427,38 +424,31 @@ syntax_rule! {
         mailbox: MailboxName<'a>,
         #[surrounded(" (", ")") 1*(" ")]
         #[delegate(StatusResponseAtt)]
-        atts: Vec<StatusResponseAtt<'a>>,
+        atts: Vec<StatusResponseAtt>,
     }
 }
 
 syntax_rule! {
     #[]
-    struct StatusResponseAtt<'a> {
+    struct StatusResponseAtt {
         #[suffix(" ")]
         #[delegate]
         att: StatusAtt,
         #[]
         #[primitive(num_u64, number64)]
         value: u64,
-        #[]
-        #[phantom]
-        _marker: PhantomData<&'a ()>,
     }
 }
 
 syntax_rule! {
     #[]
-    struct SearchResponse<'a> {
+    struct SearchResponse {
         #[0* prefix(" ")]
         #[primitive(num_u32, number)]
         hits: Vec<u32>,
-        // TODO/REMINDER EASEARCH is also extended with this
         #[opt surrounded(" (MODSEQ ", ")")]
         #[primitive(num_u64, number64)]
         max_modseq: Option<u64>,
-        #[]
-        #[phantom]
-        _marker: PhantomData<&'a ()>,
     }
 }
 
@@ -831,13 +821,20 @@ syntax_rule! {
     }
 }
 
-simple_enum! {
+syntax_rule! {
+    #[]
     enum ListReturnOpt {
         // RFC 5258
-        Children("CHILDREN"),
-        Subscribed("SUBSCRIBED"),
+        #[]
+        #[tag("CHILDREN")]
+        Children(()),
+        #[]
+        #[tag("SUBSCRIBED")]
+        Subscribed(()),
         // RFC 6154
-        SpecialUse("SPECIAL-USE"),
+        #[]
+        #[tag("SPECIAL-USE")]
+        SpecialUse(()),
     }
 }
 
@@ -900,7 +897,7 @@ syntax_rule! {
         target: FetchCommandTarget<'a>,
         #[opt surrounded(" (", ")") 1*(" ")]
         #[delegate(FetchModifier)]
-        modifiers: Option<Vec<FetchModifier<'a>>>,
+        modifiers: Option<Vec<FetchModifier>>,
     }
 }
 
@@ -980,7 +977,7 @@ syntax_rule! {
         section: Option<SectionSpec<'a>>,
         #[opt]
         #[delegate(FetchAttBodySlice)]
-        slice: Option<FetchAttBodySlice<'a>>,
+        slice: Option<FetchAttBodySlice>,
     }
 }
 
@@ -1040,28 +1037,25 @@ syntax_rule! {
 
 syntax_rule! {
     #[surrounded("<", ">")]
-    struct FetchAttBodySlice<'a> {
+    struct FetchAttBodySlice {
         #[suffix(".")]
         #[primitive(num_u32, number)]
         start: u32,
         #[]
         #[primitive(num_u32, number)]
         length: u32,
-        #[]
-        #[phantom]
-        _marker: PhantomData<&'a ()>,
     }
 }
 
 syntax_rule! {
     #[]
-    enum FetchModifier<'a> {
+    enum FetchModifier {
         #[prefix("CHANGEDSINCE ")]
         #[primitive(num_u64, number64)]
         ChangedSince(u64),
         #[]
         #[tag("VANISHED")]
-        Vanished(PhantomData<&'a ()>),
+        Vanished(()),
     }
 }
 
@@ -1121,8 +1115,8 @@ syntax_rule! {
         #[primitive(num_u32, number)]
         Uid(u32),
         #[surrounded("FLAGS (", ")")]
-        #[delegate(FlagsFetch)]
-        Flags(FlagsFetch<'a>),
+        #[delegate]
+        Flags(FlagsFetch),
         // RFC 7162
         #[surrounded("MODSEQ (", ")")]
         #[primitive(num_u64, number64)]
@@ -1156,18 +1150,13 @@ syntax_rule! {
     // non-Crymap client, since it can only parse the list if \Recent is the
     // first item.
     #[]
-    enum FlagsFetch<'a> {
+    enum FlagsFetch {
         #[prefix("\\Recent") 0* prefix(" ")]
         #[primitive(flag, flag)]
         Recent(Vec<Flag>),
         #[0*(" ")]
         #[primitive(flag, flag)]
         NotRecent(Vec<Flag>),
-        // We never actually parse FlagsFetch in the server so this marker case
-        // is moot.
-        #[prefix("\n")]
-        #[phantom]
-        _Marker(PhantomData<&'a ()>),
     }
 }
 
@@ -1218,16 +1207,13 @@ simple_enum! {
 
 syntax_rule! {
     #[]
-    struct DateSearchKey<'a> {
+    struct DateSearchKey {
         #[suffix(" ")]
         #[delegate]
         typ: DateSearchKeyType,
         #[]
         #[primitive(date, date)]
         date: NaiveDate,
-        #[]
-        #[phantom]
-        _marker: PhantomData<&'a ()>,
     }
 }
 
@@ -1280,7 +1266,7 @@ syntax_rule! {
         Text(TextSearchKey<'a>),
         #[]
         #[delegate]
-        Date(DateSearchKey<'a>),
+        Date(DateSearchKey),
         #[prefix("KEYWORD ")]
         #[primitive(flag, keyword)]
         Keyword(Flag),
@@ -1555,9 +1541,6 @@ syntax_rule! {
         #[maybe_surrounded("(", ")") 0*(" ")]
         #[primitive(flag, flag)]
         flags: Vec<Flag>,
-        #[]
-        #[phantom]
-        _marker: PhantomData<&'a ()>,
     }
 }
 
@@ -1748,7 +1731,7 @@ syntax_rule! {
         mailbox: MailboxName<'a>,
         #[]
         #[delegate]
-        first_fragment: AppendFragment<'a>,
+        first_fragment: AppendFragment,
     }
 }
 
@@ -1760,7 +1743,7 @@ syntax_rule! {
 // before the literal itself.
 syntax_rule! {
     #[prefix(" ")]
-    struct AppendFragment<'a> {
+    struct AppendFragment {
         #[opt surrounded("(", ") ") 0*(" ")]
         #[primitive(flag, flag)]
         flags: Option<Vec<Flag>>,
@@ -1770,19 +1753,15 @@ syntax_rule! {
         #[]
         #[cond("UTF8 (")]
         utf8: bool,
-        #[]
-        #[phantom]
-        _marker: PhantomData<&'a ()>,
     }
 }
 
-impl<'a> Default for AppendFragment<'a> {
+impl Default for AppendFragment {
     fn default() -> Self {
         AppendFragment {
             flags: None,
             internal_date: None,
             utf8: false,
-            _marker: PhantomData,
         }
     }
 }
@@ -2865,7 +2844,6 @@ mod test {
                         slice: Some(FetchAttBodySlice {
                             start: 42,
                             length: 56,
-                            _marker: PhantomData,
                         }),
                     }
                 )),
@@ -3084,7 +3062,7 @@ mod test {
             FetchCommand {
                 messages: s("1"),
                 target: FetchCommandTarget::Multi(vec![FetchAtt::Uid(())]),
-                modifiers: Some(vec![FetchModifier::Vanished(PhantomData),]),
+                modifiers: Some(vec![FetchModifier::Vanished(())]),
             }
         );
         assert_reversible!(
@@ -3093,7 +3071,7 @@ mod test {
             FetchCommand {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Uid(())),
-                modifiers: Some(vec![FetchModifier::Vanished(PhantomData),]),
+                modifiers: Some(vec![FetchModifier::Vanished(())]),
             }
         );
         assert_reversible!(
@@ -3115,7 +3093,7 @@ mod test {
                 target: FetchCommandTarget::Multi(vec![FetchAtt::Uid(())]),
                 modifiers: Some(vec![
                     FetchModifier::ChangedSince(12345678901234567890),
-                    FetchModifier::Vanished(PhantomData),
+                    FetchModifier::Vanished(()),
                 ]),
             }
         );
@@ -3368,7 +3346,6 @@ mod test {
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::Before,
                 date: NaiveDate::from_ymd(2020, 7, 4),
-                _marker: PhantomData,
             })
         );
         assert_reversible!(
@@ -3426,7 +3403,6 @@ mod test {
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::On,
                 date: NaiveDate::from_ymd(2020, 7, 4),
-                _marker: PhantomData,
             })
         );
         assert_reversible!(
@@ -3445,7 +3421,6 @@ mod test {
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::Since,
                 date: NaiveDate::from_ymd(2020, 7, 4),
-                _marker: PhantomData,
             })
         );
         assert_reversible!(
@@ -3531,7 +3506,6 @@ mod test {
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::SentBefore,
                 date: NaiveDate::from_ymd(2020, 7, 4),
-                _marker: PhantomData,
             })
         );
         assert_reversible!(
@@ -3540,7 +3514,6 @@ mod test {
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::SentOn,
                 date: NaiveDate::from_ymd(2020, 7, 4),
-                _marker: PhantomData,
             })
         );
         assert_reversible!(
@@ -3549,7 +3522,6 @@ mod test {
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::SentSince,
                 date: NaiveDate::from_ymd(2020, 7, 4),
-                _marker: PhantomData,
             })
         );
         assert_reversible!(SearchKey, "SMALLER 42", SearchKey::Smaller(42));
@@ -3921,7 +3893,6 @@ mod test {
                 typ: StoreCommandType::Eq,
                 silent: false,
                 flags: vec![Flag::Seen],
-                _marker: PhantomData,
             }
         );
         assert_reversible!(
@@ -3933,7 +3904,6 @@ mod test {
                 typ: StoreCommandType::Plus,
                 silent: false,
                 flags: vec![Flag::Keyword("keyword".to_owned())],
-                _marker: PhantomData,
             }
         );
         assert_reversible!(
@@ -3945,7 +3915,6 @@ mod test {
                 typ: StoreCommandType::Minus,
                 silent: false,
                 flags: vec![Flag::Flagged, Flag::Deleted],
-                _marker: PhantomData,
             }
         );
         assert_reversible!(
@@ -3957,7 +3926,6 @@ mod test {
                 typ: StoreCommandType::Eq,
                 silent: true,
                 flags: vec![Flag::Flagged],
-                _marker: PhantomData,
             }
         );
         assert_reversible!(
@@ -3969,7 +3937,6 @@ mod test {
                 typ: StoreCommandType::Eq,
                 silent: false,
                 flags: vec![],
-                _marker: PhantomData,
             }
         );
 
@@ -3982,7 +3949,6 @@ mod test {
                 typ: StoreCommandType::Plus,
                 silent: false,
                 flags: vec![Flag::Seen],
-                _marker: PhantomData,
             }
         );
 
@@ -4190,7 +4156,6 @@ mod test {
                 typ: StoreCommandType::Eq,
                 silent: false,
                 flags: vec![],
-                _marker: PhantomData,
             })
         );
         assert_reversible!(
@@ -4244,7 +4209,6 @@ mod test {
                 typ: StoreCommandType::Eq,
                 silent: false,
                 flags: vec![],
-                _marker: PhantomData,
             }))
         );
         assert_reversible!(
@@ -4524,7 +4488,6 @@ mod test {
                 response: Response::Search(SearchResponse {
                     hits: vec![],
                     max_modseq: None,
-                    _marker: PhantomData,
                 }),
             }
         );
@@ -4536,7 +4499,6 @@ mod test {
                 response: Response::Search(SearchResponse {
                     hits: vec![42],
                     max_modseq: None,
-                    _marker: PhantomData,
                 }),
             }
         );
@@ -4548,7 +4510,6 @@ mod test {
                 response: Response::Search(SearchResponse {
                     hits: vec![42, 56],
                     max_modseq: None,
-                    _marker: PhantomData,
                 }),
             }
         );
@@ -4560,7 +4521,6 @@ mod test {
                 response: Response::Search(SearchResponse {
                     hits: vec![42],
                     max_modseq: Some(12345678901234567890),
-                    _marker: PhantomData,
                 }),
             }
         );
@@ -4643,7 +4603,6 @@ mod test {
                     atts: vec![StatusResponseAtt {
                         att: StatusAtt::Recent,
                         value: 1,
-                        _marker: PhantomData,
                     }],
                 }),
             }
@@ -4659,12 +4618,10 @@ mod test {
                         StatusResponseAtt {
                             att: StatusAtt::Recent,
                             value: 1,
-                            _marker: PhantomData,
                         },
                         StatusResponseAtt {
                             att: StatusAtt::Unseen,
                             value: 2,
-                            _marker: PhantomData,
                         }
                     ],
                 }),
@@ -4717,7 +4674,6 @@ mod test {
                     flags: None,
                     internal_date: None,
                     utf8: false,
-                    _marker: PhantomData,
                 },
             }
         );
@@ -4731,7 +4687,6 @@ mod test {
                     flags: None,
                     internal_date: None,
                     utf8: true,
-                    _marker: PhantomData,
                 },
             }
         );
@@ -4745,7 +4700,6 @@ mod test {
                     flags: Some(vec![]),
                     internal_date: None,
                     utf8: false,
-                    _marker: PhantomData,
                 },
             }
         );
@@ -4759,7 +4713,6 @@ mod test {
                     flags: Some(vec![Flag::Deleted]),
                     internal_date: None,
                     utf8: false,
-                    _marker: PhantomData,
                 },
             }
         );
@@ -4776,7 +4729,6 @@ mod test {
                     ]),
                     internal_date: None,
                     utf8: false,
-                    _marker: PhantomData,
                 },
             }
         );
@@ -4794,7 +4746,6 @@ mod test {
                             .and_hms(16, 31, 0)
                     ),
                     utf8: false,
-                    _marker: PhantomData,
                 }
             }
         );
@@ -4812,7 +4763,6 @@ mod test {
                             .and_hms(16, 31, 0)
                     ),
                     utf8: false,
-                    _marker: PhantomData,
                 }
             }
         );

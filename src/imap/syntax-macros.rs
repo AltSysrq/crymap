@@ -66,18 +66,21 @@ macro_rules! big_alt {
 
 macro_rules! syntax_rule {
     (#[$($whole_struct_mod:tt)*]
-     struct $struct_name:ident<$lt:lifetime> {
+     struct $struct_name:ident $(<$lt:lifetime>)* {
          $(#[$($field_mod:tt)*]
            #[$($field_form:tt)*]
            $field_name:ident: $field_type:ty,)+
     }) => {
         #[derive(Debug, Clone, PartialEq, Eq)]
-        pub struct $struct_name<$lt> {
+        pub struct $struct_name $(<$lt>)* {
             $(pub $field_name: $field_type,)+
         }
 
-        impl<'a> $struct_name<'a> {
-            pub fn parse(i: &'a [u8]) -> IResult<&'a [u8], $struct_name<'a>> {
+        impl $(<$lt>)* $struct_name $(<$lt>)* {
+            pub fn parse
+                (i: &$($lt)*[u8])
+                 -> IResult<&$($lt)*[u8], $struct_name $(<$lt>)*>
+            {
                 apply_nom_modifiers!(
                     [$($whole_struct_mod)*],
                     map(sequence::tuple((
@@ -108,18 +111,21 @@ macro_rules! syntax_rule {
     };
 
     (#[$($whole_enum_mod:tt)*]
-     enum $enum_name:ident<$lt:lifetime> {
+     enum $enum_name:ident $(<$lt:lifetime>)* {
          $(#[$($case_mod:tt)*]
            #[$($case_form:tt)*]
            $case_name:ident($case_type:ty),)+
     }) => {
         #[derive(Debug, Clone, PartialEq, Eq)]
-        pub enum $enum_name<$lt> {
+        pub enum $enum_name $(<$lt>)* {
             $($case_name($case_type),)+
         }
 
-        impl<'a> $enum_name<'a> {
-            pub fn parse(i: &'a [u8]) -> IResult<&'a [u8], $enum_name<'a>> {
+        impl $(<$lt>)* $enum_name $(<$lt>)* {
+            pub fn parse
+                (i: &$($lt)*[u8])
+                 -> IResult<&$($lt)*[u8], $enum_name $(<$lt>)*>
+            {
                 apply_nom_modifiers!(
                     [$($whole_enum_mod)*],
                     big_alt!(
@@ -241,9 +247,6 @@ macro_rules! generate_field_form {
     ($_ty:ty, cond($tag:expr)) => {
         map(opt(kw($tag)), |v| v.is_some())
     };
-    ($_ty:ty, phantom) => {
-        |i| Ok((i, PhantomData))
-    };
 }
 
 macro_rules! apply_write_modifiers {
@@ -361,9 +364,6 @@ macro_rules! generate_field_writer {
         if *$value {
             $lex.verbatim($tag)?;
         }
-    };
-    (phantom, $_lex:expr, $_value:expr) => {
-        let _value = $_value;
     };
 }
 
