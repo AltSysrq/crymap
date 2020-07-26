@@ -32,6 +32,7 @@ use crate::account::model::Flag;
 use crate::crypt::master_key::MasterKey;
 use crate::imap::client::Client;
 use crate::imap::command_processor::CommandProcessor;
+use crate::imap::literal_source::LiteralSource;
 use crate::imap::mailbox_name::MailboxName;
 use crate::imap::server::Server;
 use crate::support::error::Error;
@@ -440,4 +441,34 @@ pub fn assert_bad_command(
             assert_eq!(code, c);
         }
     };
+}
+
+pub fn assert_literal_like(
+    start: &[u8],
+    end: &[u8],
+    len: u64,
+    binary: bool,
+    mut lit: LiteralSource,
+) {
+    if 0 != len {
+        assert_eq!(len, lit.len);
+    }
+    assert_eq!(binary, lit.binary);
+
+    let mut data = Vec::<u8>::new();
+    lit.data.read_to_end(&mut data).unwrap();
+    if 0 != len {
+        assert_eq!(len as usize, data.len());
+    }
+    assert_eq!(lit.len as usize, data.len());
+    assert!(
+        data.starts_with(start),
+        "Data didn't have expected prefix; got:\n{}",
+        String::from_utf8_lossy(&data)
+    );
+    assert!(
+        data.ends_with(end),
+        "Data didn't have expected end; got:\n{}",
+        String::from_utf8_lossy(&data)
+    );
 }

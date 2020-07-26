@@ -22,24 +22,8 @@ use chrono::prelude::*;
 
 use super::super::defs::*;
 use crate::account::model::Flag;
-use crate::imap::literal_source::LiteralSource;
 use crate::support::error::Error;
 use crate::test_data::*;
-
-macro_rules! fetch_single {
-    ($client:expr, $cmd:expr, $fr:pat => $result:expr) => {{
-        command!(mut responses = $client, $cmd);
-        assert_eq!(2, responses.len());
-        assert_tagged_ok(responses.pop().unwrap());
-        match responses.pop().unwrap() {
-            s::ResponseLine {
-                tag: None,
-                response: s::Response::Fetch($fr),
-            } => $result,
-            r => panic!("Unexpected response: {:?}", r),
-        }
-    }};
-}
 
 #[test]
 fn fetch_single_scalars() {
@@ -580,6 +564,7 @@ fn fetch_body_parts() {
     fetch_single!(client, c("FETCH 1 BODY[]"), fr => {
         has_msgatt_matching! {
             move s::MsgAtt::Body(s::MsgAttBody {
+                kind: s::FetchAttBodyKind::Body,
                 section: None,
                 slice_origin: None,
                 data: lit,
@@ -593,6 +578,7 @@ fn fetch_body_parts() {
     fetch_single!(client, c("FETCH 1 BODY[HEADER]"), fr => {
         has_msgatt_matching! {
             move s::MsgAtt::Body(s::MsgAttBody {
+                kind: s::FetchAttBodyKind::Body,
                 section: Some(s::SectionSpec::TopLevel(
                     s::SectionText::Header(()))),
                 slice_origin: None,
@@ -607,6 +593,7 @@ fn fetch_body_parts() {
     fetch_single!(client, c("FETCH 1 BODY[HEADER.FIELDS (From To)]"), fr => {
         has_msgatt_matching! {
             move s::MsgAtt::Body(s::MsgAttBody {
+                kind: s::FetchAttBodyKind::Body,
                 section: Some(s::SectionSpec::TopLevel(
                     s::SectionText::HeaderFields(s::SectionTextHeaderField {
                         negative: false,
@@ -627,6 +614,7 @@ fn fetch_body_parts() {
                              (Remark Content-Transfer-Encoding)]"), fr => {
         has_msgatt_matching! {
             move s::MsgAtt::Body(s::MsgAttBody {
+                kind: s::FetchAttBodyKind::Body,
                 section: Some(s::SectionSpec::TopLevel(
                     s::SectionText::HeaderFields(s::SectionTextHeaderField {
                         negative: true,
@@ -647,6 +635,7 @@ fn fetch_body_parts() {
     fetch_single!(client, c("FETCH 1 BODY[TEXT]"), fr => {
         has_msgatt_matching! {
             move s::MsgAtt::Body(s::MsgAttBody {
+                kind: s::FetchAttBodyKind::Body,
                 section: Some(s::SectionSpec::TopLevel(
                     s::SectionText::Text(()))),
                 slice_origin: None,
@@ -663,6 +652,7 @@ fn fetch_body_parts() {
     fetch_single!(client, c("FETCH 1 BODY[1]"), fr => {
         has_msgatt_matching! {
             move s::MsgAtt::Body(s::MsgAttBody {
+                kind: s::FetchAttBodyKind::Body,
                 section: Some(s::SectionSpec::Sub(s::SubSectionSpec {
                     subscripts,
                     text: None,
@@ -682,6 +672,7 @@ fn fetch_body_parts() {
     fetch_single!(client, c("FETCH 2 BODY[1]"), fr => {
         has_msgatt_matching! {
             move s::MsgAtt::Body(s::MsgAttBody {
+                kind: s::FetchAttBodyKind::Body,
                 section: Some(s::SectionSpec::Sub(s::SubSectionSpec {
                     subscripts,
                     text: None,
@@ -703,6 +694,7 @@ fn fetch_body_parts() {
     fetch_single!(client, c("FETCH 2 BODY[1.MIME]"), fr => {
         has_msgatt_matching! {
             move s::MsgAtt::Body(s::MsgAttBody {
+                kind: s::FetchAttBodyKind::Body,
                 section: Some(s::SectionSpec::Sub(s::SubSectionSpec {
                     subscripts,
                     text: Some(s::SectionText::Mime(())),
@@ -724,6 +716,7 @@ fn fetch_body_parts() {
     fetch_single!(client, c("FETCH 2 BODY[2.MIME]"), fr => {
         has_msgatt_matching! {
             move s::MsgAtt::Body(s::MsgAttBody {
+                kind: s::FetchAttBodyKind::Body,
                 section: Some(s::SectionSpec::Sub(s::SubSectionSpec {
                     subscripts,
                     text: Some(s::SectionText::Mime(())),
@@ -745,6 +738,7 @@ fn fetch_body_parts() {
     fetch_single!(client, c("FETCH 2 BODY[2.HEADER]"), fr => {
         has_msgatt_matching! {
             move s::MsgAtt::Body(s::MsgAttBody {
+                kind: s::FetchAttBodyKind::Body,
                 section: Some(s::SectionSpec::Sub(s::SubSectionSpec {
                     subscripts,
                     text: Some(s::SectionText::Header(())),
@@ -766,6 +760,7 @@ fn fetch_body_parts() {
     fetch_single!(client, c("FETCH 2 BODY[2.TEXT]"), fr => {
         has_msgatt_matching! {
             move s::MsgAtt::Body(s::MsgAttBody {
+                kind: s::FetchAttBodyKind::Body,
                 section: Some(s::SectionSpec::Sub(s::SubSectionSpec {
                     subscripts,
                     text: Some(s::SectionText::Text(())),
@@ -787,6 +782,7 @@ fn fetch_body_parts() {
     fetch_single!(client, c("FETCH 1 BODY[]<1.5>"), fr => {
         has_msgatt_matching! {
             move s::MsgAtt::Body(s::MsgAttBody {
+                kind: s::FetchAttBodyKind::Body,
                 section: None,
                 slice_origin: Some(1),
                 data: lit,
@@ -799,6 +795,7 @@ fn fetch_body_parts() {
     fetch_single!(client, c("FETCH 1 BODY[]<0.5000>"), fr => {
         has_msgatt_matching! {
             move s::MsgAtt::Body(s::MsgAttBody {
+                kind: s::FetchAttBodyKind::Body,
                 section: None,
                 slice_origin: Some(0),
                 data: lit,
@@ -808,36 +805,6 @@ fn fetch_body_parts() {
             }
         };
     });
-}
-
-fn assert_literal_like(
-    start: &[u8],
-    end: &[u8],
-    len: u64,
-    binary: bool,
-    mut lit: LiteralSource,
-) {
-    if 0 != len {
-        assert_eq!(len, lit.len);
-    }
-    assert_eq!(binary, lit.binary);
-
-    let mut data = Vec::<u8>::new();
-    lit.data.read_to_end(&mut data).unwrap();
-    if 0 != len {
-        assert_eq!(len as usize, data.len());
-    }
-    assert_eq!(lit.len as usize, data.len());
-    assert!(
-        data.starts_with(start),
-        "Data didn't have expected prefix; got:\n{}",
-        String::from_utf8_lossy(&data)
-    );
-    assert!(
-        data.ends_with(end),
-        "Data didn't have expected end; got:\n{}",
-        String::from_utf8_lossy(&data)
-    );
 }
 
 #[test]
@@ -1010,6 +977,7 @@ fn wrapped_headers_not_mangled() {
     fetch_single!(client, c("FETCH 1 BODY.PEEK[]"), fr => {
         has_msgatt_matching! {
             move s::MsgAtt::Body(s::MsgAttBody {
+                kind: s::FetchAttBodyKind::Body,
                 section: None,
                 slice_origin: None,
                 data: lit,

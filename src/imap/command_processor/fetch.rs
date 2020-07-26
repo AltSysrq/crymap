@@ -252,6 +252,7 @@ impl CommandProcessor {
             ExpungedMessage => (No, Some(s::RespTextCode::ExpungeIssued(()))),
             NxMessage => (No, Some(s::RespTextCode::Nonexistent(()))),
             UnaddressableMessage => (No, Some(s::RespTextCode::ClientBug(()))),
+            UnknownCte => (No, Some(s::RespTextCode::UnknownCte(()))),
         })?;
         fetch_response_final(response)
     }
@@ -286,7 +287,7 @@ fn scan_fetch_properties(props: &mut FetchProperties, att: &s::FetchAtt<'_>) {
         s::FetchAtt::ExtendedBodyStructure(_) => {
             props.extended_body_structure = true;
         }
-        s::FetchAtt::Body(ref body) if !body.peek => {
+        s::FetchAtt::Body(ref body) if !body.peek && !body.size_only => {
             props.set_seen = true;
         }
         s::FetchAtt::Rfc822(Some(s::FetchAttRfc822::Size)) => (),
@@ -401,13 +402,21 @@ where
             }
 
             let mut section = BodySection::default();
+            section.report_as_binary = s::FetchAttBodyKind::Binary == body.kind;
+            section.size_only = body.size_only;
+
             match body.section {
                 None => (),
                 Some(s::SectionSpec::TopLevel(spec)) => {
+                    // We don't set decode_cte here --- BINARY[] is exactly
+                    // equivalent to BODY[]
                     apply_section_text(&mut section, Some(spec));
                 }
                 Some(s::SectionSpec::Sub(spec)) => {
                     section.subscripts = spec.subscripts;
+                    // With subscripts, we decode the CTE if this is a BINARY
+                    // command
+                    section.decode_cte = section.report_as_binary;
                     apply_section_text(&mut section, spec.text);
                 }
             }
@@ -507,7 +516,11 @@ fn fetch_att_to_ast(
             let data = match fetched_result {
                 Ok(fetched) => {
                     let len = fetched.buffer.len();
-                    LiteralSource::of_reader(fetched.buffer, len, false)
+                    LiteralSource::of_reader(
+                        fetched.buffer,
+                        len,
+                        section.report_as_binary && fetched.contains_nul,
+                    )
                 }
                 Err(e) => {
                     // Should never happen since the `fetch` implementation
@@ -555,6 +568,9 @@ fn fetch_att_to_ast(
             }
 
             let partial = section.partial;
+            let report_as_binary = section.report_as_binary;
+            let size_only = section.size_only;
+
             let section_spec =
                 match (section.subscripts.is_empty(), section.leaf_type) {
                     (true, LeafType::Full) => None,
@@ -573,14 +589,26 @@ fn fetch_att_to_ast(
                     }
                 };
 
-            Some(s::MsgAtt::Body(s::MsgAttBody {
-                section: section_spec,
-                slice_origin: partial.map(|(start, _)| {
-                    let start: u32 = start.try_into().unwrap_or(u32::MAX);
-                    start
-                }),
-                data,
-            }))
+            if size_only {
+                Some(s::MsgAtt::BinarySize(s::MsgAttBinarySize {
+                    section: section_spec,
+                    size: data.len.try_into().unwrap_or(u32::MAX),
+                }))
+            } else {
+                Some(s::MsgAtt::Body(s::MsgAttBody {
+                    kind: if report_as_binary {
+                        s::FetchAttBodyKind::Binary
+                    } else {
+                        s::FetchAttBodyKind::Body
+                    },
+                    section: section_spec,
+                    slice_origin: partial.map(|(start, _)| {
+                        let start: u32 = start.try_into().unwrap_or(u32::MAX);
+                        start
+                    }),
+                    data,
+                }))
+            }
         }
     }
 }

@@ -66,6 +66,8 @@ pub enum Error {
     RenameIntoSelf,
     #[error("Too many items in batch operation")]
     BatchTooBig,
+    #[error("Unknown Content-Transfer-Encoding")]
+    UnknownCte,
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]

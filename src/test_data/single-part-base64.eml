@@ -1,0 +1,8 @@
+From: from@example.com
+To: to@example.com
+Date: Fri, 21 Nov 1997 09:55:06 -0600
+Subject: This is the subject
+Content-Transfer-Encoding: base64
+Remark: Content is "hello world" with no newline
+
+aGVsbG8gd29ybGQ=

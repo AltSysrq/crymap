@@ -360,7 +360,7 @@ mod test {
                 leaf_type: section::LeafType::Content,
                 ..section::BodySection::default()
             }
-            .fetcher(None, Arc::clone(&common_paths)),
+            .fetcher(Arc::clone(&common_paths)),
         );
         fetcher.add_section(
             section::BodySection {
@@ -368,7 +368,7 @@ mod test {
                 leaf_type: section::LeafType::Mime,
                 ..section::BodySection::default()
             }
-            .fetcher(None, Arc::clone(&common_paths)),
+            .fetcher(Arc::clone(&common_paths)),
         );
         fetcher.add_section(
             section::BodySection {
@@ -376,7 +376,7 @@ mod test {
                 leaf_type: section::LeafType::Content,
                 ..section::BodySection::default()
             }
-            .fetcher(None, Arc::clone(&common_paths)),
+            .fetcher(Arc::clone(&common_paths)),
         );
         fetcher.add_uid();
         fetcher.add_modseq();

@@ -382,8 +382,12 @@ syntax_rule! {
         Closed(()),
         // RFC 5182
         #[]
-        #[tag("NotSaved")]
+        #[tag("NOTSAVED")]
         NotSaved(()),
+        // RFC 3516
+        #[]
+        #[tag("UNKNOWN-CTE")]
+        UnknownCte(()),
         // We don't handle unknown response codes, since the server never needs
         // to parse this. Unknown response codes just become part of the text.
     }
@@ -943,7 +947,7 @@ syntax_rule! {
         Rfc822(Option<FetchAttRfc822>),
         // Must come before the body structure stuff to resolve the ambiguity
         // the correct way.
-        #[prefix("BODY")]
+        #[]
         #[delegate]
         Body(FetchAttBody<'a>),
         #[]
@@ -973,15 +977,32 @@ simple_enum! {
 syntax_rule! {
     #[]
     struct FetchAttBody<'a> {
+        // This definition allows for some non-standard forms, such as
+        // BODY.SIZE, BINARY.PEEK.SIZE, slicing on BINARY.SIZE, and accessing
+        // non-content parts through BINARY. However, there doesn't seem to be
+        // all that much reason to prevent these since they're not useful.
+        #[]
+        #[delegate]
+        kind: FetchAttBodyKind,
         #[]
         #[cond(".PEEK")]
         peek: bool,
+        #[]
+        #[cond(".SIZE")]
+        size_only: bool,
         #[surrounded("[", "]") opt]
         #[delegate(SectionSpec)]
         section: Option<SectionSpec<'a>>,
         #[opt]
         #[delegate(FetchAttBodySlice)]
         slice: Option<FetchAttBodySlice>,
+    }
+}
+
+simple_enum! {
+    enum FetchAttBodyKind {
+        Body("BODY"),
+        Binary("BINARY"),
     }
 }
 
@@ -1112,7 +1133,10 @@ syntax_rule! {
         #[prefix("BODYSTRUCTURE ")]
         #[delegate]
         ExtendedBodyStructure(Body<'a>),
-        #[prefix("BODY")]
+        #[prefix("BINARY.SIZE")]
+        #[delegate]
+        BinarySize(MsgAttBinarySize<'a>),
+        #[]
         #[delegate]
         Body(MsgAttBody<'a>),
         #[prefix("UID ")]
@@ -1131,6 +1155,9 @@ syntax_rule! {
 syntax_rule! {
     #[]
     struct MsgAttBody<'a> {
+        #[]
+        #[delegate]
+        kind: FetchAttBodyKind,
         #[surrounded("[", "]") opt]
         #[delegate(SectionSpec)]
         section: Option<SectionSpec<'a>>,
@@ -1140,6 +1167,18 @@ syntax_rule! {
         #[prefix(" ")]
         #[primitive(literal_source, literal_source)]
         data: LiteralSource,
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct MsgAttBinarySize<'a> {
+        #[surrounded("[", "]") opt]
+        #[delegate(SectionSpec)]
+        section: Option<SectionSpec<'a>>,
+        #[prefix(" ")]
+        #[primitive(num_u32, number)]
+        size: u32,
     }
 }
 
@@ -2813,7 +2852,9 @@ mod test {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
+                        kind: FetchAttBodyKind::Body,
                         peek: false,
+                        size_only: false,
                         section: None,
                         slice: None,
                     }
@@ -2828,7 +2869,9 @@ mod test {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
+                        kind: FetchAttBodyKind::Body,
                         peek: true,
+                        size_only: false,
                         section: None,
                         slice: None,
                     }
@@ -2843,7 +2886,9 @@ mod test {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
+                        kind: FetchAttBodyKind::Body,
                         peek: false,
+                        size_only: false,
                         section: None,
                         slice: Some(FetchAttBodySlice {
                             start: 42,
@@ -2861,7 +2906,9 @@ mod test {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
+                        kind: FetchAttBodyKind::Body,
                         peek: false,
+                        size_only: false,
                         section: Some(SectionSpec::TopLevel(
                             SectionText::Header(())
                         )),
@@ -2878,7 +2925,9 @@ mod test {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
+                        kind: FetchAttBodyKind::Body,
                         peek: false,
+                        size_only: false,
                         section: Some(SectionSpec::TopLevel(
                             SectionText::Text(())
                         )),
@@ -2895,7 +2944,9 @@ mod test {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
+                        kind: FetchAttBodyKind::Body,
                         peek: false,
+                        size_only: false,
                         section: Some(SectionSpec::TopLevel(
                             SectionText::HeaderFields(SectionTextHeaderField {
                                 negative: false,
@@ -2915,7 +2966,9 @@ mod test {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
+                        kind: FetchAttBodyKind::Body,
                         peek: false,
+                        size_only: false,
                         section: Some(SectionSpec::TopLevel(
                             SectionText::HeaderFields(SectionTextHeaderField {
                                 negative: true,
@@ -2935,7 +2988,9 @@ mod test {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
+                        kind: FetchAttBodyKind::Body,
                         peek: false,
+                        size_only: false,
                         section: Some(SectionSpec::TopLevel(
                             SectionText::HeaderFields(SectionTextHeaderField {
                                 negative: false,
@@ -2955,7 +3010,9 @@ mod test {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
+                        kind: FetchAttBodyKind::Body,
                         peek: false,
+                        size_only: false,
                         section: Some(SectionSpec::TopLevel(
                             SectionText::HeaderFields(SectionTextHeaderField {
                                 negative: true,
@@ -2976,7 +3033,9 @@ mod test {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
+                        kind: FetchAttBodyKind::Body,
                         peek: false,
+                        size_only: false,
                         section: Some(SectionSpec::Sub(SubSectionSpec {
                             subscripts: vec![1],
                             text: None,
@@ -2994,7 +3053,9 @@ mod test {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
+                        kind: FetchAttBodyKind::Body,
                         peek: false,
+                        size_only: false,
                         section: Some(SectionSpec::Sub(SubSectionSpec {
                             subscripts: vec![1, 2, 3],
                             text: None,
@@ -3012,7 +3073,9 @@ mod test {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
+                        kind: FetchAttBodyKind::Body,
                         peek: false,
+                        size_only: false,
                         section: Some(SectionSpec::Sub(SubSectionSpec {
                             subscripts: vec![1],
                             text: Some(SectionText::Mime(())),
@@ -3030,7 +3093,9 @@ mod test {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
+                        kind: FetchAttBodyKind::Body,
                         peek: false,
+                        size_only: false,
                         section: Some(SectionSpec::Sub(SubSectionSpec {
                             subscripts: vec![1],
                             text: Some(SectionText::Header(())),
@@ -3048,10 +3113,72 @@ mod test {
                 messages: s("1"),
                 target: FetchCommandTarget::Single(FetchAtt::Body(
                     FetchAttBody {
+                        kind: FetchAttBodyKind::Body,
                         peek: false,
+                        size_only: false,
                         section: Some(SectionSpec::Sub(SubSectionSpec {
                             subscripts: vec![1],
                             text: Some(SectionText::Text(())),
+                        })),
+                        slice: None,
+                    }
+                )),
+                modifiers: None,
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BINARY[1]",
+            FetchCommand {
+                messages: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        kind: FetchAttBodyKind::Binary,
+                        peek: false,
+                        size_only: false,
+                        section: Some(SectionSpec::Sub(SubSectionSpec {
+                            subscripts: vec![1],
+                            text: None,
+                        })),
+                        slice: None,
+                    }
+                )),
+                modifiers: None,
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BINARY.SIZE[1]",
+            FetchCommand {
+                messages: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        kind: FetchAttBodyKind::Binary,
+                        peek: false,
+                        size_only: true,
+                        section: Some(SectionSpec::Sub(SubSectionSpec {
+                            subscripts: vec![1],
+                            text: None,
+                        })),
+                        slice: None,
+                    }
+                )),
+                modifiers: None,
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 BINARY.PEEK[1]",
+            FetchCommand {
+                messages: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::Body(
+                    FetchAttBody {
+                        kind: FetchAttBodyKind::Binary,
+                        peek: true,
+                        size_only: false,
+                        section: Some(SectionSpec::Sub(SubSectionSpec {
+                            subscripts: vec![1],
+                            text: None,
                         })),
                         slice: None,
                     }
@@ -3200,6 +3327,7 @@ mod test {
             MsgAtt,
             "BODY[] {3}\r\nfoo",
             MsgAtt::Body(MsgAttBody {
+                kind: FetchAttBodyKind::Body,
                 section: None,
                 slice_origin: None,
                 data: LiteralSource::of_data(b"foo", false),
@@ -3209,6 +3337,7 @@ mod test {
             MsgAtt,
             "BODY[HEADER] {3}\r\nfoo",
             MsgAtt::Body(MsgAttBody {
+                kind: FetchAttBodyKind::Body,
                 section: Some(SectionSpec::TopLevel(SectionText::Header(()))),
                 slice_origin: None,
                 data: LiteralSource::of_data(b"foo", false),
@@ -3218,6 +3347,7 @@ mod test {
             MsgAtt,
             "BODY[HEADER.FIELDS (Foo)] {3}\r\nfoo",
             MsgAtt::Body(MsgAttBody {
+                kind: FetchAttBodyKind::Body,
                 section: Some(SectionSpec::TopLevel(
                     SectionText::HeaderFields(SectionTextHeaderField {
                         negative: false,
@@ -3232,6 +3362,7 @@ mod test {
             MsgAtt,
             "BODY[TEXT] {3}\r\nfoo",
             MsgAtt::Body(MsgAttBody {
+                kind: FetchAttBodyKind::Body,
                 section: Some(SectionSpec::TopLevel(SectionText::Text(()))),
                 slice_origin: None,
                 data: LiteralSource::of_data(b"foo", false),
@@ -3241,6 +3372,7 @@ mod test {
             MsgAtt,
             "BODY[1.2.MIME] {3}\r\nfoo",
             MsgAtt::Body(MsgAttBody {
+                kind: FetchAttBodyKind::Body,
                 section: Some(SectionSpec::Sub(SubSectionSpec {
                     subscripts: vec![1, 2],
                     text: Some(SectionText::Mime(())),
@@ -3253,9 +3385,41 @@ mod test {
             MsgAtt,
             "BODY[]<42> {3}\r\nfoo",
             MsgAtt::Body(MsgAttBody {
+                kind: FetchAttBodyKind::Body,
                 section: None,
                 slice_origin: Some(42),
                 data: LiteralSource::of_data(b"foo", false),
+            })
+        );
+
+        assert_reversible!(
+            MsgAtt,
+            "BINARY[]<42> ~{3}\r\nf\0o",
+            MsgAtt::Body(MsgAttBody {
+                kind: FetchAttBodyKind::Binary,
+                section: None,
+                slice_origin: Some(42),
+                data: LiteralSource::of_data(b"f\0o", true),
+            })
+        );
+
+        assert_reversible!(
+            MsgAtt,
+            "BINARY.SIZE[] 1234",
+            MsgAtt::BinarySize(MsgAttBinarySize {
+                section: None,
+                size: 1234,
+            })
+        );
+        assert_reversible!(
+            MsgAtt,
+            "BINARY.SIZE[1] 1234",
+            MsgAtt::BinarySize(MsgAttBinarySize {
+                section: Some(SectionSpec::Sub(SubSectionSpec {
+                    subscripts: vec![1],
+                    text: None,
+                })),
+                size: 1234,
             })
         );
 

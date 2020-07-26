@@ -75,3 +75,10 @@ pub static DOVECOT_PREFER_STANDALONE_DAEMONS: &[u8] =
 
 /// A message with an unknown Content-Transfer-Encoding.
 pub static UNKNOWN_CTE: &[u8] = include_bytes!("unknown-cte.eml");
+
+/// A single-part message with base64-encoded content.
+pub static SINGLE_PART_BASE64: &[u8] = include_bytes!("single-part-base64.eml");
+
+/// A multi-part message with two base64-encoded parts, one of which contains
+/// an encoded NUL byte.
+pub static MULTI_PART_BASE64: &[u8] = include_bytes!("multi-part-base64.eml");

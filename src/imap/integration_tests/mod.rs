@@ -105,6 +105,21 @@ macro_rules! has_untagged_response_matching {
     }};
 }
 
+macro_rules! fetch_single {
+    ($client:expr, $cmd:expr, $fr:pat => $result:expr) => {{
+        command!(mut responses = $client, $cmd);
+        assert_eq!(2, responses.len());
+        assert_tagged_ok(responses.pop().unwrap());
+        match responses.pop().unwrap() {
+            s::ResponseLine {
+                tag: None,
+                response: s::Response::Fetch($fr),
+            } => $result,
+            r => panic!("Unexpected response: {:?}", r),
+        }
+    }};
+}
+
 macro_rules! has_msgatt_matching {
     (move $pat:pat in $fetch_response:expr) => {
         has_msgatt_matching! {
@@ -153,6 +168,7 @@ mod rfc2971;
 mod rfc3348;
 mod rfc3501;
 mod rfc3502;
+mod rfc3516;
 mod rfc3691;
 mod rfc4315;
 mod rfc4731;

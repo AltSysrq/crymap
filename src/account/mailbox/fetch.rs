@@ -293,7 +293,7 @@ impl StatefulMailbox {
                     fetcher.add_section(
                         section
                             .to_owned()
-                            .fetcher(None, Arc::clone(&self.s.common_paths)),
+                            .fetcher(Arc::clone(&self.s.common_paths)),
                     );
                 }
 

@@ -391,17 +391,15 @@ mod test {
             BodySection {
                 subscripts,
                 leaf_type: LeafType::Content,
+                // This causes it to use ContentDecoder
+                decode_cte: true,
+                decode_charset,
                 ..BodySection::default()
             }
-            .fetcher(
-                Some(Box::new(move |v| {
-                    Box::new(ContentDecoder::new(v, decode_charset))
-                })),
-                Arc::new(CommonPaths {
-                    tmp: std::env::temp_dir(),
-                    garbage: std::env::temp_dir(),
-                }),
-            ),
+            .fetcher(Arc::new(CommonPaths {
+                tmp: std::env::temp_dir(),
+                garbage: std::env::temp_dir(),
+            })),
         )
         .unwrap();
         let mut result = result.unwrap();
