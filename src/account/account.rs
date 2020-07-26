@@ -428,9 +428,9 @@ impl Account {
     pub fn status(
         &self,
         request: &StatusRequest,
-    ) -> Result<Vec<StatusResponse>, Error> {
+    ) -> Result<StatusResponse, Error> {
         let mailbox_path = self.mailbox_path(&request.name)?;
-        Ok(vec![self.status_for(mailbox_path, request)?])
+        Ok(self.status_for(mailbox_path, request)?)
     }
 
     fn status_for(
@@ -1548,7 +1548,7 @@ mod test {
                     messages: true,
                     ..StatusRequest::default()
                 })
-                .unwrap()[0]
+                .unwrap()
         );
 
         assert_eq!(
@@ -1564,7 +1564,7 @@ mod test {
                     recent: true,
                     ..StatusRequest::default()
                 })
-                .unwrap()[0]
+                .unwrap()
         );
 
         assert_eq!(
@@ -1580,7 +1580,7 @@ mod test {
                     uidnext: true,
                     ..StatusRequest::default()
                 })
-                .unwrap()[0]
+                .unwrap()
         );
 
         assert_eq!(
@@ -1596,7 +1596,7 @@ mod test {
                     uidvalidity: true,
                     ..StatusRequest::default()
                 })
-                .unwrap()[0]
+                .unwrap()
         );
 
         assert_eq!(
@@ -1612,7 +1612,7 @@ mod test {
                     unseen: true,
                     ..StatusRequest::default()
                 })
-                .unwrap()[0]
+                .unwrap()
         );
     }
 }

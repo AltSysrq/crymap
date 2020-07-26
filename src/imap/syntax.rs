@@ -835,6 +835,10 @@ syntax_rule! {
         #[]
         #[tag("SPECIAL-USE")]
         SpecialUse(()),
+        // RFC 5819
+        #[surrounded("STATUS (", ")") 1*(" ")]
+        #[delegate(StatusAtt)]
+        Status(Vec<StatusAtt>),
     }
 }
 

@@ -122,6 +122,22 @@ impl CommandProcessor {
 
         let select_opts = cmd.select_opts.unwrap_or_default();
         let return_opts = cmd.return_opts.unwrap_or_default();
+        let mut return_stati: Option<Vec<s::StatusAtt>> = None;
+        for opt in &return_opts {
+            if let s::ListReturnOpt::Status(ref stati) = opt {
+                if return_stati.is_some() {
+                    return Err(s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Bad,
+                        code: Some(s::RespTextCode::ClientBug(())),
+                        quip: Some(Cow::Borrowed(
+                            "STATUS passed more than once",
+                        )),
+                    }));
+                }
+
+                return_stati = Some(stati.clone());
+            }
+        }
 
         // If select_opts contains RECURSIVEMATCH, it must also contain some
         // item which implies filtering.
@@ -165,7 +181,47 @@ impl CommandProcessor {
 
         let responses =
             account!(self)?.list(&request).map_err(map_error!(self))?;
-        for response in responses {
+        for mut response in responses {
+            let status = return_stati.as_ref().and_then(|stati| {
+                // Unlike virtually every other place in IMAP, RFC 5819
+                // stipulates a very strict response order: we return the LIST
+                // response, then the STATUS, but the content of the LIST
+                // depends on our result for computing the STATUS.
+
+                // First off, there's no status if this mailbox is \Noselect or
+                // \NonExistent.
+                if response.attributes.contains(&MailboxAttribute::Noselect)
+                    || response
+                        .attributes
+                        .contains(&MailboxAttribute::NonExistent)
+                {
+                    return None;
+                }
+
+                // It exists(ed), try to get its status
+                if let Ok(status) = self.evaluate_status(
+                    Cow::Borrowed(&response.name),
+                    stati,
+                    sender,
+                ) {
+                    Some(status)
+                } else {
+                    // RFC 5819 specifies to silently drop the STATUS response
+                    // if anything goes wrong. However, we're still required to
+                    // handle the case where the mailbox was deleted between
+                    // getting the list response and STATUS.
+                    if !self
+                        .account
+                        .as_ref()
+                        .and_then(|a| a.mailbox_path(&response.name).ok())
+                        .map_or(true, |mbp| mbp.is_selectable())
+                    {
+                        response.attributes.push(MailboxAttribute::Noselect);
+                    }
+                    None
+                }
+            });
+
             sender(s::Response::List(s::MailboxList {
                 flags: response
                     .attributes
@@ -185,6 +241,10 @@ impl CommandProcessor {
                     )
                 },
             }));
+
+            if let Some(status) = status {
+                sender(status);
+            }
         }
 
         success()
@@ -317,21 +377,35 @@ impl CommandProcessor {
         cmd: s::StatusCommand<'_>,
         sender: SendResponse<'_>,
     ) -> CmdResult {
+        sender(self.evaluate_status(
+            cmd.mailbox.get_utf8(self.unicode_aware),
+            &cmd.atts,
+            sender,
+        )?);
+        success()
+    }
+
+    fn evaluate_status(
+        &mut self,
+        mailbox_name: Cow<'_, str>,
+        atts: &[s::StatusAtt],
+        sender: SendResponse<'_>,
+    ) -> PartialResult<s::Response<'static>> {
         let request = StatusRequest {
-            name: cmd.mailbox.get_utf8(self.unicode_aware).into_owned(),
-            messages: cmd.atts.contains(&s::StatusAtt::Messages),
-            recent: cmd.atts.contains(&s::StatusAtt::Recent),
-            uidnext: cmd.atts.contains(&s::StatusAtt::UidNext),
-            uidvalidity: cmd.atts.contains(&s::StatusAtt::UidValidity),
-            unseen: cmd.atts.contains(&s::StatusAtt::Unseen),
-            max_modseq: cmd.atts.contains(&s::StatusAtt::HighestModseq),
+            name: mailbox_name.into_owned(),
+            messages: atts.contains(&s::StatusAtt::Messages),
+            recent: atts.contains(&s::StatusAtt::Recent),
+            uidnext: atts.contains(&s::StatusAtt::UidNext),
+            uidvalidity: atts.contains(&s::StatusAtt::UidValidity),
+            unseen: atts.contains(&s::StatusAtt::Unseen),
+            max_modseq: atts.contains(&s::StatusAtt::HighestModseq),
         };
 
         if request.max_modseq && self.account.is_some() {
             self.enable_condstore(sender, true);
         }
 
-        let responses =
+        let response =
             account!(self)?.status(&request).map_err(map_error! {
                 self,
                 UnsafeName =>
@@ -340,52 +414,48 @@ impl CommandProcessor {
                     (No, Some(s::RespTextCode::Nonexistent(()))),
             })?;
 
-        for response in responses {
-            let mut atts: Vec<s::StatusResponseAtt> = Vec::with_capacity(10);
-            if let Some(messages) = response.messages {
-                atts.push(s::StatusResponseAtt {
-                    att: s::StatusAtt::Messages,
-                    value: messages.try_into().unwrap_or(u32::MAX).into(),
-                });
-            }
-            if let Some(recent) = response.recent {
-                atts.push(s::StatusResponseAtt {
-                    att: s::StatusAtt::Recent,
-                    value: recent.try_into().unwrap_or(u32::MAX).into(),
-                });
-            }
-            if let Some(uid) = response.uidnext {
-                atts.push(s::StatusResponseAtt {
-                    att: s::StatusAtt::UidNext,
-                    value: uid.0.get().into(),
-                });
-            }
-            if let Some(uidvalidity) = response.uidvalidity {
-                atts.push(s::StatusResponseAtt {
-                    att: s::StatusAtt::UidValidity,
-                    value: uidvalidity.into(),
-                });
-            }
-            if let Some(unseen) = response.unseen {
-                atts.push(s::StatusResponseAtt {
-                    att: s::StatusAtt::Unseen,
-                    value: unseen.try_into().unwrap_or(u32::MAX).into(),
-                });
-            }
-            if let Some(max_modseq) = response.max_modseq {
-                atts.push(s::StatusResponseAtt {
-                    att: s::StatusAtt::HighestModseq,
-                    value: max_modseq,
-                });
-            }
-
-            sender(s::Response::Status(s::StatusResponse {
-                mailbox: MailboxName::of_utf8(Cow::Owned(response.name)),
-                atts,
-            }));
+        let mut atts: Vec<s::StatusResponseAtt> = Vec::with_capacity(10);
+        if let Some(messages) = response.messages {
+            atts.push(s::StatusResponseAtt {
+                att: s::StatusAtt::Messages,
+                value: messages.try_into().unwrap_or(u32::MAX).into(),
+            });
+        }
+        if let Some(recent) = response.recent {
+            atts.push(s::StatusResponseAtt {
+                att: s::StatusAtt::Recent,
+                value: recent.try_into().unwrap_or(u32::MAX).into(),
+            });
+        }
+        if let Some(uid) = response.uidnext {
+            atts.push(s::StatusResponseAtt {
+                att: s::StatusAtt::UidNext,
+                value: uid.0.get().into(),
+            });
+        }
+        if let Some(uidvalidity) = response.uidvalidity {
+            atts.push(s::StatusResponseAtt {
+                att: s::StatusAtt::UidValidity,
+                value: uidvalidity.into(),
+            });
+        }
+        if let Some(unseen) = response.unseen {
+            atts.push(s::StatusResponseAtt {
+                att: s::StatusAtt::Unseen,
+                value: unseen.try_into().unwrap_or(u32::MAX).into(),
+            });
+        }
+        if let Some(max_modseq) = response.max_modseq {
+            atts.push(s::StatusResponseAtt {
+                att: s::StatusAtt::HighestModseq,
+                value: max_modseq,
+            });
         }
 
-        success()
+        Ok(s::Response::Status(s::StatusResponse {
+            mailbox: MailboxName::of_utf8(Cow::Owned(response.name)),
+            atts,
+        }))
     }
 
     pub(crate) fn cmd_subscribe(
