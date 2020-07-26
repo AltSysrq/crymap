@@ -428,3 +428,16 @@ pub fn lsub_results_to_str(lines: Vec<s::ResponseLine<'_>>) -> String {
 
     ret
 }
+
+pub fn assert_bad_command(
+    client: &mut PipeClient,
+    code: Option<s::RespTextCode<'_>>,
+    command: &str,
+) {
+    command!(mut responses = client, cb(command));
+    unpack_cond_response! {
+        (Some(_), s::RespCondType::Bad, c, _) = responses.pop().unwrap() => {
+            assert_eq!(code, c);
+        }
+    };
+}

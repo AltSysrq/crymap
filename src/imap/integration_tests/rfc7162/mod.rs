@@ -16,6 +16,7 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+mod bad;
 mod condstore_basics;
 mod condstore_enable;
 mod condstore_fetch;

@@ -439,7 +439,19 @@ impl CommandProcessor {
 
         for modifier in modifiers {
             match modifier {
-                s::SelectModifier::Condstore(()) => enable_condstore = true,
+                s::SelectModifier::Condstore(()) => {
+                    if enable_condstore {
+                        return Err(s::Response::Cond(s::CondResponse {
+                            cond: s::RespCondType::Bad,
+                            code: Some(s::RespTextCode::ClientBug(())),
+                            quip: Some(Cow::Borrowed(
+                                "CONDSTORE passed more than once",
+                            )),
+                        }));
+                    }
+
+                    enable_condstore = true;
+                }
                 s::SelectModifier::Qresync(qr) => {
                     if !self.qresync_enabled {
                         return Err(s::Response::Cond(s::CondResponse {
