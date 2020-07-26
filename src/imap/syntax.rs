@@ -383,6 +383,10 @@ syntax_rule! {
         #[]
         #[tag("CLOSED")]
         Closed(()),
+        // RFC 5182
+        #[]
+        #[tag("NotSaved")]
+        NotSaved(()),
         // We don't handle unknown response codes, since the server never needs
         // to parse this. Unknown response codes just become part of the text.
     }
@@ -1261,6 +1265,7 @@ simple_enum! {
         Max("MAX"),
         All("ALL"),
         Count("COUNT"),
+        Save("SAVE"),
     }
 }
 
@@ -1966,7 +1971,10 @@ fn mailbox(i: &[u8]) -> IResult<&[u8], MailboxName<'_>> {
 }
 
 fn sequence_set(i: &[u8]) -> IResult<&[u8], Cow<str>> {
-    map(is_a("0123456789:*,"), String::from_utf8_lossy)(i)
+    map(
+        alt((is_a("0123456789:*,"), tag("$"))),
+        String::from_utf8_lossy,
+    )(i)
 }
 
 fn text(i: &[u8]) -> IResult<&[u8], Cow<str>> {
@@ -2660,6 +2668,15 @@ mod test {
             "FETCH 1:2,3:* ALL",
             FetchCommand {
                 messages: s("1:2,3:*"),
+                target: FetchCommandTarget::All(()),
+                modifiers: None,
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH $ ALL",
+            FetchCommand {
+                messages: s("$"),
                 target: FetchCommandTarget::All(()),
                 modifiers: None,
             }

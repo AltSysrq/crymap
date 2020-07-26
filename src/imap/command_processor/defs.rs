@@ -52,6 +52,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "NAMESPACE",
     "QRESYNC",
     "SASL-IR",
+    "SEARCHRES",
     "SPECIAL-USE",
     "UIDPLUS",
     "UNSELECT",
@@ -88,6 +89,7 @@ pub struct CommandProcessor {
 
     pub(super) account: Option<Account>,
     pub(super) selected: Option<StatefulMailbox>,
+    pub(super) searchres: SeqRange<Uid>,
     pub(super) unicode_aware: bool,
     pub(super) utf8_enabled: bool,
     pub(super) condstore_enabled: bool,
@@ -130,6 +132,7 @@ impl CommandProcessor {
 
             account: None,
             selected: None,
+            searchres: SeqRange::new(),
             unicode_aware: false,
             utf8_enabled: false,
             condstore_enabled: false,
@@ -159,6 +162,10 @@ impl CommandProcessor {
         &mut self,
         raw: &str,
     ) -> PartialResult<SeqRange<Seqnum>> {
+        if "$" == raw {
+            return Ok(selected!(self)?.uid_range_to_seqnum(&self.searchres));
+        }
+
         let max_seqnum = selected!(self)?.max_seqnum().unwrap_or(Seqnum::MIN);
         let seqrange = SeqRange::parse(raw, max_seqnum).ok_or_else(|| {
             s::Response::Cond(s::CondResponse {
@@ -189,6 +196,11 @@ impl CommandProcessor {
         &mut self,
         raw: &str,
     ) -> PartialResult<SeqRange<Uid>> {
+        if "$" == raw {
+            let _ = selected!(self)?;
+            return Ok(self.searchres.clone());
+        }
+
         let max_uid = selected!(self)?.max_uid().unwrap_or(Uid::MIN);
         let seqrange = SeqRange::parse(raw, max_uid).ok_or_else(|| {
             s::Response::Cond(s::CondResponse {

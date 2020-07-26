@@ -201,6 +201,18 @@ impl StatefulMailbox {
     pub fn has_pending_expunge(&self) -> bool {
         self.state.has_pending_expunge()
     }
+
+    /// Translate a sequence set of UIDs to a sequence set of sequence numbers.
+    ///
+    /// Unaddressable messages are silently dropped.
+    pub fn uid_range_to_seqnum(
+        &self,
+        range: &SeqRange<Uid>,
+    ) -> SeqRange<Seqnum> {
+        self.state
+            .uid_range_to_seqnum(range, true)
+            .expect("silent uid_range_to_seqnum should never fail")
+    }
 }
 
 // Not a great place for these tests, but there's nowhere better right now.

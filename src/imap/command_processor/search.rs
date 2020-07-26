@@ -78,6 +78,7 @@ impl CommandProcessor {
 
         let response =
             f(selected!(self)?, &request).map_err(map_error!(self))?;
+        let mut return_response = false;
 
         let response = if return_extended {
             let mut r = s::EsearchResponse {
@@ -91,9 +92,46 @@ impl CommandProcessor {
             };
             let mut modseq: Option<Modseq> = None;
 
+            if return_opts.contains(&s::SearchReturnOpt::Save) {
+                self.searchres.clear();
+
+                // Per RFC 5182, SAVE interacts with MIN and MAX
+                // pathologically: if either was specified, and no additional
+                // return option that would cause all matching messages to be
+                // enumerated was specified, only the MIN and MAX which were
+                // requested are saved.
+                if return_opts.contains(&s::SearchReturnOpt::All)
+                    || return_opts.contains(&s::SearchReturnOpt::Count)
+                    || (!return_opts.contains(&s::SearchReturnOpt::Min)
+                        && !return_opts.contains(&s::SearchReturnOpt::Max))
+                {
+                    // Sane case
+                    for uid in response.hit_uids {
+                        self.searchres.append(uid);
+                    }
+                } else {
+                    // Pathological case
+                    if return_opts.contains(&s::SearchReturnOpt::Min) {
+                        if let Some(&uid) = response.hit_uids.first() {
+                            self.searchres.append(uid);
+                        }
+                    }
+
+                    if return_opts.contains(&s::SearchReturnOpt::Max) {
+                        if let Some(&uid) = response.hit_uids.last() {
+                            // MIN could have inserted the same UID already
+                            if !self.searchres.contains(uid) {
+                                self.searchres.append(uid);
+                            }
+                        }
+                    }
+                }
+            }
+
             if return_opts.contains(&s::SearchReturnOpt::Min) {
                 r.min = response.hits.first().map(|&hit| hit.into());
                 modseq = response.first_modseq;
+                return_response = true;
             }
 
             if return_opts.contains(&s::SearchReturnOpt::Max) {
@@ -104,6 +142,7 @@ impl CommandProcessor {
                         .map(|m| m.max(last_modseq))
                         .or(response.last_modseq);
                 }
+                return_response = true;
             }
 
             if return_opts.contains(&s::SearchReturnOpt::All)
@@ -115,11 +154,13 @@ impl CommandProcessor {
                 }
                 r.all = Some(Cow::Owned(sr.to_string()));
                 modseq = response.max_modseq;
+                return_response = true;
             }
 
             if return_opts.contains(&s::SearchReturnOpt::Count) {
                 r.count = Some(response.hits.len() as u32);
                 modseq = response.max_modseq;
+                return_response = true;
             }
 
             if has_modseq {
@@ -128,6 +169,7 @@ impl CommandProcessor {
 
             s::Response::Esearch(r)
         } else {
+            return_response = true;
             s::Response::Search(s::SearchResponse {
                 hits: response.hits.into_iter().map(|u| u.into()).collect(),
                 // Only return the MODSEQ item if the client specified a MODSEQ
@@ -141,7 +183,9 @@ impl CommandProcessor {
             })
         };
 
-        sender(response);
+        if return_response {
+            sender(response);
+        }
         success()
     }
 

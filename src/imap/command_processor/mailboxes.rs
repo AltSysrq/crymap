@@ -620,5 +620,6 @@ impl CommandProcessor {
             }));
         }
         self.selected = None;
+        self.searchres.clear();
     }
 }

@@ -518,6 +518,11 @@ impl<T: TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync> SeqRange<T> {
     pub fn max(&self) -> Option<u32> {
         self.parts.values().rev().copied().next()
     }
+
+    /// Remove all items from this sequence set.
+    pub fn clear(&mut self) {
+        self.parts.clear();
+    }
 }
 
 impl<T> SeqRange<T> {
@@ -1413,6 +1418,12 @@ pub struct SearchResponse<ID> {
     /// but it makes the ESEARCH implementation easier and testing much
     /// simpler.
     pub hits: Vec<ID>,
+    /// The UIDs that were matched.
+    ///
+    /// For `SearchResponse<Uid>`, this is just a clone of `hits`.
+    ///
+    /// This is used to implement SEARCHRES.
+    pub hit_uids: Vec<Uid>,
     /// The `Modseq` of `hits[0]`.
     pub first_modseq: Option<Modseq>,
     /// The `Modseq` of `hits[hits.len() - 1]`.

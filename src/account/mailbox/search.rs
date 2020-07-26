@@ -41,6 +41,7 @@ impl StatefulMailbox {
             max_modseq: result.max_modseq,
             first_modseq: result.first_modseq,
             last_modseq: result.last_modseq,
+            hit_uids: result.hit_uids,
             hits: result
                 .hits
                 .into_iter()
@@ -103,6 +104,7 @@ impl StatefulMailbox {
                 .filter_map(|uid| self.state.message_status(uid))
                 .map(|m| m.last_modified())
                 .max(),
+            hit_uids: hits.clone(),
             hits,
         })
     }
