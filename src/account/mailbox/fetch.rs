@@ -126,23 +126,20 @@ impl StatefulMailbox {
             response.flags = self.flags_response();
         }
 
-        let precise_expunged = if request.collect_vanished {
-            request
+        if request.collect_vanished {
+            let precise_expunged = request
                 .changed_since
                 .and_then(|since| self.state.uids_expunged_since(since))
-                .map(|it| it.collect::<HashSet<Uid>>())
-        } else {
-            None
-        };
-
-        for uid in uids.items(self.state.max_uid_val()) {
-            if precise_expunged
-                .as_ref()
-                .map(|p| p.contains(&uid))
-                .unwrap_or(true)
-                && self.state.message_status(uid).is_none()
-            {
-                response.vanished.append(uid);
+                .map(|it| it.collect::<HashSet<Uid>>());
+            for uid in uids.items(self.state.max_uid_val()) {
+                if precise_expunged
+                    .as_ref()
+                    .map(|p| p.contains(&uid))
+                    .unwrap_or(true)
+                    && self.state.message_status(uid).is_none()
+                {
+                    response.vanished.append(uid);
+                }
             }
         }
 
@@ -588,6 +585,34 @@ mod test {
             &FetchedItem::Uid(uid) => assert_eq!(setup.uids[3], uid),
             f => panic!("Unexpected item: {:?}", f),
         }
+    }
+
+    #[test]
+    fn vanished_not_collected_if_not_requested() {
+        let mut setup = set_up_fetch();
+
+        setup
+            .mb1
+            .vanquish(&SeqRange::range(
+                setup.uids[4],
+                setup.uids[setup.uids.len() - 1],
+            ))
+            .unwrap();
+        setup.mb1.poll().unwrap();
+        setup
+            .mb1
+            .vanquish(&SeqRange::range(setup.uids[2], setup.uids[3]))
+            .unwrap();
+        setup.mb1.poll().unwrap();
+
+        let request = FetchRequest {
+            ids: SeqRange::range(Uid::MIN, Uid::MAX),
+            uid: true,
+            collect_vanished: false,
+            ..FetchRequest::default()
+        };
+        let prefetch = setup.mb1.prefetch(&request, &request.ids);
+        assert!(prefetch.vanished.is_empty());
     }
 
     #[test]

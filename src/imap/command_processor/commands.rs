@@ -87,7 +87,7 @@ impl CommandProcessor {
                 panic!("COMPRESS DEFLATE should be handled by server.rs")
             }
             s::Command::Simple(s::SimpleCommand::Expunge) => {
-                staple_highest_modseq = true;
+                staple_highest_modseq = self.qresync_enabled;
                 self.cmd_expunge(sender)
             }
             s::Command::Simple(s::SimpleCommand::Idle) => {
@@ -595,7 +595,7 @@ Content-Transfer-Encoding: base64
         // above) to override the client's own calculation of that value based
         // on looking at the FETCH responses, since the value from FETCH could
         // be greater than of an expungement the client hasn't seen.
-        if !uids_empty {
+        if !uids_empty && self.condstore_enabled {
             if let Some(divergent_modseq) = divergent_modseq {
                 sender(s::Response::Cond(s::CondResponse {
                     cond: s::RespCondType::Ok,
