@@ -37,7 +37,10 @@ fn qresync_select() {
     command!(responses = client, c("STATUS 7162qrqs (UIDVALIDITY)"));
     let uid_validity = has_untagged_response_matching! {
         s::Response::Status(ref s) in responses => {
-            s.atts[0].value as u32
+            match s.atts[0] {
+                s::StatusResponseAtt::UidValidity(uv) => uv,
+                _ => panic!("Unexpected status attribute"),
+            }
         }
     };
 

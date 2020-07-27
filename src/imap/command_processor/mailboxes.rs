@@ -416,40 +416,28 @@ impl CommandProcessor {
 
         let mut atts: Vec<s::StatusResponseAtt> = Vec::with_capacity(10);
         if let Some(messages) = response.messages {
-            atts.push(s::StatusResponseAtt {
-                att: s::StatusAtt::Messages,
-                value: messages.try_into().unwrap_or(u32::MAX).into(),
-            });
+            atts.push(s::StatusResponseAtt::Messages(
+                messages.try_into().unwrap_or(u32::MAX),
+            ));
         }
         if let Some(recent) = response.recent {
-            atts.push(s::StatusResponseAtt {
-                att: s::StatusAtt::Recent,
-                value: recent.try_into().unwrap_or(u32::MAX).into(),
-            });
+            atts.push(s::StatusResponseAtt::Recent(
+                recent.try_into().unwrap_or(u32::MAX),
+            ));
         }
         if let Some(uid) = response.uidnext {
-            atts.push(s::StatusResponseAtt {
-                att: s::StatusAtt::UidNext,
-                value: uid.0.get().into(),
-            });
+            atts.push(s::StatusResponseAtt::UidNext(uid.0.get().into()));
         }
         if let Some(uidvalidity) = response.uidvalidity {
-            atts.push(s::StatusResponseAtt {
-                att: s::StatusAtt::UidValidity,
-                value: uidvalidity.into(),
-            });
+            atts.push(s::StatusResponseAtt::UidValidity(uidvalidity.into()));
         }
         if let Some(unseen) = response.unseen {
-            atts.push(s::StatusResponseAtt {
-                att: s::StatusAtt::Unseen,
-                value: unseen.try_into().unwrap_or(u32::MAX).into(),
-            });
+            atts.push(s::StatusResponseAtt::Unseen(
+                unseen.try_into().unwrap_or(u32::MAX).into(),
+            ));
         }
         if let Some(max_modseq) = response.max_modseq {
-            atts.push(s::StatusResponseAtt {
-                att: s::StatusAtt::HighestModseq,
-                value: max_modseq,
-            });
+            atts.push(s::StatusResponseAtt::HighestModseq(max_modseq));
         }
 
         Ok(s::Response::Status(s::StatusResponse {

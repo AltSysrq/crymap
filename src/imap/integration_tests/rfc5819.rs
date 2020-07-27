@@ -60,14 +60,8 @@ fn test_list_status() {
             response: s::Response::Status(sr),
         } => {
             assert_eq!("5819lsst/foo", sr.mailbox.raw);
-            assert!(sr.atts.contains(&s::StatusResponseAtt {
-                att: s::StatusAtt::Recent,
-                value: 2,
-            }));
-            assert!(sr.atts.contains(&s::StatusResponseAtt {
-                att: s::StatusAtt::UidNext,
-                value: 3,
-            }));
+            assert!(sr.atts.contains(&s::StatusResponseAtt::Recent(2)));
+            assert!(sr.atts.contains(&s::StatusResponseAtt::UidNext(3)));
         }
         r => panic!("Unexpected response: {:?}", r),
     }
@@ -97,14 +91,8 @@ fn test_list_status() {
             response: s::Response::Status(sr),
         } => {
             assert_eq!("5819lsst/noselect/bar", sr.mailbox.raw);
-            assert!(sr.atts.contains(&s::StatusResponseAtt {
-                att: s::StatusAtt::Recent,
-                value: 3,
-            }));
-            assert!(sr.atts.contains(&s::StatusResponseAtt {
-                att: s::StatusAtt::UidNext,
-                value: 4,
-            }));
+            assert!(sr.atts.contains(&s::StatusResponseAtt::Recent(3)));
+            assert!(sr.atts.contains(&s::StatusResponseAtt::UidNext(4)));
         }
         r => panic!("Unexpected response: {:?}", r),
     }

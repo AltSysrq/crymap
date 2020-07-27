@@ -30,8 +30,7 @@ fn condstore_status_highest_modseq() {
     has_untagged_response_matching! {
         s::Response::Status(ref sr) in responses => {
             assert_eq!(1, sr.atts.len());
-            assert_eq!(s::StatusAtt::HighestModseq, sr.atts[0].att);
-            assert_eq!(1, sr.atts[0].value);
+            assert_eq!(s::StatusResponseAtt::HighestModseq(1), sr.atts[0]);
         }
     };
 
@@ -42,8 +41,10 @@ fn condstore_status_highest_modseq() {
     has_untagged_response_matching! {
         s::Response::Status(ref sr) in responses => {
             assert_eq!(1, sr.atts.len());
-            assert_eq!(s::StatusAtt::HighestModseq, sr.atts[0].att);
-            assert!(sr.atts[0].value > 1);
+            match sr.atts[0] {
+                s::StatusResponseAtt::HighestModseq(v) => assert!(v > 1),
+                _ => panic!("Unexpected attribute"),
+            }
         }
     };
 }

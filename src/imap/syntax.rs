@@ -434,13 +434,25 @@ syntax_rule! {
 
 syntax_rule! {
     #[]
-    struct StatusResponseAtt {
-        #[suffix(" ")]
-        #[delegate]
-        att: StatusAtt,
-        #[]
+    enum StatusResponseAtt {
+        #[prefix("MESSAGES ")]
+        #[primitive(num_u32, number)]
+        Messages(u32),
+        #[prefix("RECENT ")]
+        #[primitive(num_u32, number)]
+        Recent(u32),
+        #[prefix("UIDNEXT ")]
+        #[primitive(num_u32, number)]
+        UidNext(u32),
+        #[prefix("UIDVALIDITY ")]
+        #[primitive(num_u32, number)]
+        UidValidity(u32),
+        #[prefix("UNSEEN ")]
+        #[primitive(num_u32, number)]
+        Unseen(u32),
+        #[prefix("HIGHESTMODSEQ ")]
         #[primitive(num_u64, number64)]
-        value: u64,
+        HighestModseq(u64),
     }
 }
 
@@ -4768,29 +4780,25 @@ mod test {
                 tag: None,
                 response: Response::Status(StatusResponse {
                     mailbox: mn("foo"),
-                    atts: vec![StatusResponseAtt {
-                        att: StatusAtt::Recent,
-                        value: 1,
-                    }],
+                    atts: vec![StatusResponseAtt::Recent(1)]
                 }),
             }
         );
         assert_reversible!(
             ResponseLine,
-            "* STATUS foo (RECENT 1 UNSEEN 2)",
+            "* STATUS foo (MESSAGES 1 RECENT 2 UIDNEXT 3 UIDVALIDITY 4 \
+             UNSEEN 5 HIGHESTMODSEQ 12345678901234567890)",
             ResponseLine {
                 tag: None,
                 response: Response::Status(StatusResponse {
                     mailbox: mn("foo"),
                     atts: vec![
-                        StatusResponseAtt {
-                            att: StatusAtt::Recent,
-                            value: 1,
-                        },
-                        StatusResponseAtt {
-                            att: StatusAtt::Unseen,
-                            value: 2,
-                        }
+                        StatusResponseAtt::Messages(1),
+                        StatusResponseAtt::Recent(2),
+                        StatusResponseAtt::UidNext(3),
+                        StatusResponseAtt::UidValidity(4),
+                        StatusResponseAtt::Unseen(5),
+                        StatusResponseAtt::HighestModseq(12345678901234567890),
                     ],
                 }),
             }
