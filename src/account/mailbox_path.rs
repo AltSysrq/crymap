@@ -26,6 +26,7 @@ use std::io::{self, Read};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
+use rand::{rngs::OsRng, Rng};
 use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
 
@@ -197,11 +198,13 @@ impl MailboxPath {
     /// status.
     ///
     /// Does not create parent mailboxes implicitly.
+    ///
+    /// Returns the MAILBOXID of the new path.
     pub fn create(
         &self,
         tmp: &Path,
         special_use: Option<MailboxAttribute>,
-    ) -> Result<(), Error> {
+    ) -> Result<String, Error> {
         // Generate the UID validity by using the lower 32 bits of the
         // UNIX time. It is fine that this will wrap in 2106. To even
         // have a chance of colliding, the mail server would need to be
@@ -262,8 +265,13 @@ impl MailboxPath {
             scoped_path.file_name().unwrap(),
             &stage_mbox.data_path,
         )?;
+        let mailbox_id = gen_mailbox_id();
+        let full_mailbox_id = self.format_mailbox_id(&mailbox_id);
         let metadata = MailboxMetadata {
-            imap: MailboxImapMetadata { special_use },
+            imap: MailboxImapMetadata {
+                special_use,
+                mailbox_id,
+            },
         };
 
         let metadata_toml = format!(
@@ -291,7 +299,7 @@ impl MailboxPath {
                 e => e,
             })?;
 
-        Ok(())
+        Ok(full_mailbox_id)
     }
 
     /// Create this mailbox if it does not already exist.
@@ -299,7 +307,8 @@ impl MailboxPath {
         if !self.exists() {
             match self.create(tmp, None) {
                 Err(Error::MailboxExists) => Ok(()),
-                r => r,
+                Err(e) => Err(e),
+                Ok(_) => Ok(()),
             }
         } else {
             Ok(())
@@ -384,7 +393,7 @@ impl MailboxPath {
         // in the inbox are not reachable by any mailbox, which is far worse.
         if &self.name == "INBOX" {
             match self.create(tmp, None) {
-                Ok(()) => (),
+                Ok(_) => (),
                 Err(Error::MailboxExists) => (),
                 Err(e) => return Err(e),
             }
@@ -404,6 +413,20 @@ impl MailboxPath {
         let mut data = Vec::new();
         reader.read_to_end(&mut data)?;
         Ok(toml::from_slice(&data)?)
+    }
+
+    /// Return the RFC 8474 MAILBOXID for this mailbox.
+    pub fn mailbox_id(&self) -> Result<String, Error> {
+        let base_id = self.metadata()?.imap.mailbox_id;
+        Ok(self.format_mailbox_id(&base_id))
+    }
+
+    fn format_mailbox_id(&self, base_id: &str) -> String {
+        if "INBOX" == self.name {
+            format!("I{}", base_id)
+        } else {
+            format!("M{}", base_id)
+        }
     }
 
     /// Mark this mailbox as subscribed.
@@ -681,6 +704,12 @@ pub struct MailboxMetadata {
 pub struct MailboxImapMetadata {
     /// If this is a special-use mailbox, the attribute representing that use.
     pub special_use: Option<MailboxAttribute>,
+    /// The RFC 8474 MAILBOXID of this mailbox, sans prefix.
+    ///
+    /// On INBOX, this gets prefixed with "I". On any other mailbox, it gets
+    /// prefixed with "M". This is needed to maintain the illusion that a
+    /// RENAME of INBOX is not actually a rename.
+    pub mailbox_id: String,
 }
 
 /// Parse the UID validity out of the given path.
@@ -700,6 +729,17 @@ pub fn parse_uid_validity(path: impl AsRef<Path>) -> Result<u32, Error> {
     }
 
     u32::from_str_radix(&name[1..], 16).map_err(|_| Error::CorruptFileLayout)
+}
+
+fn gen_mailbox_id() -> String {
+    // 15 bytes = 120 bits of entropy, roughly the same as a V4 UUID, but
+    // shorter since we can use base64 encoding. This outputs a 20 character
+    // string, and then we have the extra 1-character prefix for a total of 21
+    // character ids. Using 15 bytes means there is no padding, which is
+    // important since the padding characters are not allowed in object ids.
+    // (The set of allowed characters is exactly the set of "URL Safe" base64.)
+    let data: [u8; 15] = OsRng.gen();
+    base64::encode_config(&data, base64::URL_SAFE)
 }
 
 #[cfg(test)]

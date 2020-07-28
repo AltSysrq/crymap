@@ -317,6 +317,16 @@ impl StatefulMailbox {
             &SearchQuery::Modseq(ms) => {
                 dst.push(Op::Modseq(ms));
             }
+
+            &SearchQuery::EmailId(ref email_id) => {
+                dst.push(Op::EmailId(email_id.clone()));
+            }
+
+            &SearchQuery::ThreadId(_) => {
+                // We don't support THREADID, so this never matches
+                dst.push(Op::True);
+                dst.push(Op::Not);
+            }
         }
     }
 }

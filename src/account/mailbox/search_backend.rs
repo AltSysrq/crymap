@@ -61,6 +61,7 @@ pub enum Op {
     SizeCompare(u32, bool, bool, bool),
     UidIn(SeqRange<Uid>),
     Modseq(u64),
+    EmailId(String),
     #[cfg(test)]
     _Const(u64),
 }
@@ -130,6 +131,11 @@ pub fn eval(ops: &[Op], data: &SearchData) -> Option<bool> {
             &Op::Modseq(thresh) => {
                 s.o(data.last_modified.map(|m| m.raw().get() >= thresh))
             }
+            // RFC 8474 requires case-sensitive comparison
+            &Op::EmailId(ref email_id) => s.o(data
+                .metadata
+                .as_ref()
+                .map(|md| md.format_email_id() == *email_id)),
 
             &Op::From(ref r) => s.o(data.from.as_ref().map(|v| r.is_match(v))),
             &Op::Cc(ref r) => s.o(data.cc.as_ref().map(|v| r.is_match(v))),
@@ -226,7 +232,8 @@ pub fn want(ops: &[Op]) -> OptionalSearchParts {
             | &Op::InternalDateCompare(..)
             | &Op::SizeCompare(..)
             | &Op::UidIn(..)
-            | &Op::Modseq(..) => OptionalSearchParts::empty(),
+            | &Op::Modseq(..)
+            | &Op::EmailId(..) => OptionalSearchParts::empty(),
 
             #[cfg(test)]
             &Op::_Const(..) => OptionalSearchParts::empty(),
@@ -571,8 +578,8 @@ mod test {
                 ops,
                 &SearchData {
                     metadata: Some(MessageMetadata {
-                        size: 0,
                         internal_date: datetime0,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -584,8 +591,8 @@ mod test {
                 ops,
                 &SearchData {
                     metadata: Some(MessageMetadata {
-                        size: 0,
                         internal_date: datetime1,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -597,8 +604,8 @@ mod test {
                 ops,
                 &SearchData {
                     metadata: Some(MessageMetadata {
-                        size: 0,
                         internal_date: datetime2,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -613,8 +620,8 @@ mod test {
                 ops,
                 &SearchData {
                     metadata: Some(MessageMetadata {
-                        size: 0,
                         internal_date: datetime0,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -626,8 +633,8 @@ mod test {
                 ops,
                 &SearchData {
                     metadata: Some(MessageMetadata {
-                        size: 0,
                         internal_date: datetime1,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -639,8 +646,8 @@ mod test {
                 ops,
                 &SearchData {
                     metadata: Some(MessageMetadata {
-                        size: 0,
                         internal_date: datetime2,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -655,8 +662,8 @@ mod test {
                 ops,
                 &SearchData {
                     metadata: Some(MessageMetadata {
-                        size: 0,
                         internal_date: datetime0,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -668,8 +675,8 @@ mod test {
                 ops,
                 &SearchData {
                     metadata: Some(MessageMetadata {
-                        size: 0,
                         internal_date: datetime1,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -681,8 +688,8 @@ mod test {
                 ops,
                 &SearchData {
                     metadata: Some(MessageMetadata {
-                        size: 0,
                         internal_date: datetime2,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -804,6 +811,7 @@ mod test {
                     metadata: Some(MessageMetadata {
                         size: 99,
                         internal_date: datetime0,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -817,6 +825,7 @@ mod test {
                     metadata: Some(MessageMetadata {
                         size: 100,
                         internal_date: datetime0,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -830,6 +839,7 @@ mod test {
                     metadata: Some(MessageMetadata {
                         size: 101,
                         internal_date: datetime0,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -846,6 +856,7 @@ mod test {
                     metadata: Some(MessageMetadata {
                         size: 99,
                         internal_date: datetime0,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -859,6 +870,7 @@ mod test {
                     metadata: Some(MessageMetadata {
                         size: 100,
                         internal_date: datetime0,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -872,6 +884,7 @@ mod test {
                     metadata: Some(MessageMetadata {
                         size: 101,
                         internal_date: datetime0,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -888,6 +901,7 @@ mod test {
                     metadata: Some(MessageMetadata {
                         size: 99,
                         internal_date: datetime0,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -901,6 +915,7 @@ mod test {
                     metadata: Some(MessageMetadata {
                         size: 100,
                         internal_date: datetime0,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }
@@ -914,6 +929,7 @@ mod test {
                     metadata: Some(MessageMetadata {
                         size: 101,
                         internal_date: datetime0,
+                        ..MessageMetadata::default()
                     }),
                     ..SearchData::default()
                 }

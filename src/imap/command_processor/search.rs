@@ -304,6 +304,12 @@ impl CommandProcessor {
                 *has_modseq = true;
                 Ok(SearchQuery::Modseq(m.modseq))
             }
+            s::SearchKey::EmailId(id) => {
+                Ok(SearchQuery::EmailId(id.into_owned()))
+            }
+            s::SearchKey::ThreadId(id) => {
+                Ok(SearchQuery::ThreadId(id.into_owned()))
+            }
         }
     }
 }

@@ -352,6 +352,8 @@ where
         }
         s::FetchAtt::Uid(()) => request.uid = true,
         s::FetchAtt::Modseq(()) => request.modseq = true,
+        s::FetchAtt::EmailId(()) => request.email_id = true,
+        s::FetchAtt::ThreadId(()) => request.thread_id = true,
         s::FetchAtt::Rfc822(Some(s::FetchAttRfc822::Header)) => {
             request.sections.push(BodySection {
                 leaf_type: LeafType::Headers,
@@ -500,6 +502,8 @@ fn fetch_att_to_ast(
         })),
         FI::Rfc822Size(size) => Some(s::MsgAtt::Rfc822Size(size)),
         FI::InternalDate(dt) => Some(s::MsgAtt::InternalDate(dt)),
+        FI::EmailId(ei) => Some(s::MsgAtt::EmailId(Cow::Owned(ei))),
+        FI::ThreadIdNil => Some(s::MsgAtt::ThreadIdNil(())),
         FI::Envelope(env) => Some(s::MsgAtt::Envelope(envelope_to_ast(env))),
         FI::BodyStructure(bs) => {
             let converted = body_structure_to_ast(

@@ -388,6 +388,10 @@ syntax_rule! {
         #[]
         #[tag("UNKNOWN-CTE")]
         UnknownCte(()),
+        // RFC 8474
+        #[surrounded("MAILBOXID (", ")")]
+        #[primitive(verbatim, normal_atom)]
+        MailboxId(Cow<'a, str>),
         // We don't handle unknown response codes, since the server never needs
         // to parse this. Unknown response codes just become part of the text.
     }
@@ -428,13 +432,13 @@ syntax_rule! {
         mailbox: MailboxName<'a>,
         #[surrounded(" (", ")") 1*(" ")]
         #[delegate(StatusResponseAtt)]
-        atts: Vec<StatusResponseAtt>,
+        atts: Vec<StatusResponseAtt<'a>>,
     }
 }
 
 syntax_rule! {
     #[]
-    enum StatusResponseAtt {
+    enum StatusResponseAtt<'a> {
         #[prefix("MESSAGES ")]
         #[primitive(num_u32, number)]
         Messages(u32),
@@ -453,6 +457,9 @@ syntax_rule! {
         #[prefix("HIGHESTMODSEQ ")]
         #[primitive(num_u64, number64)]
         HighestModseq(u64),
+        #[surrounded("MAILBOXID (", ")")]
+        #[primitive(verbatim, normal_atom)]
+        MailboxId(Cow<'a, str>),
     }
 }
 
@@ -975,6 +982,13 @@ syntax_rule! {
         #[]
         #[tag("MODSEQ")]
         Modseq(()),
+        // RFC 8474
+        #[]
+        #[tag("EMAILID")]
+        EmailId(()),
+        #[]
+        #[tag("THREADID")]
+        ThreadId(()),
     }
 }
 
@@ -1161,6 +1175,13 @@ syntax_rule! {
         #[surrounded("MODSEQ (", ")")]
         #[primitive(num_u64, number64)]
         Modseq(u64),
+        // RFC 8474
+        #[surrounded("EMAILID (", ")")]
+        #[primitive(verbatim, normal_atom)]
+        EmailId(Cow<'a, str>),
+        #[]
+        #[tag("THREADID NIL")]
+        ThreadIdNil(()),
     }
 }
 
@@ -1356,6 +1377,15 @@ syntax_rule! {
         #[prefix("MODSEQ ")]
         #[delegate]
         Modseq(ModseqSearchKey<'a>),
+        // RFC 8474
+        // Note that unlike in the FETCH and STATUS cases, there is not an
+        // extra set of parentheses around the object id.
+        #[prefix("EMAILID ")]
+        #[primitive(verbatim, normal_atom)]
+        EmailId(Cow<'a, str>),
+        #[prefix("THREADID ")]
+        #[primitive(verbatim, normal_atom)]
+        ThreadId(Cow<'a, str>),
     }
 }
 
@@ -1533,6 +1563,8 @@ simple_enum! {
         Unseen("UNSEEN"),
         // RFC 7162
         HighestModseq("HIGHESTMODSEQ"),
+        // RFC 8474
+        MailboxId("MAILBOXID"),
     }
 }
 
@@ -2834,6 +2866,24 @@ mod test {
                 modifiers: None,
             }
         );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 EMAILID",
+            FetchCommand {
+                messages: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::EmailId(())),
+                modifiers: None,
+            }
+        );
+        assert_reversible!(
+            FetchCommand,
+            "FETCH 1 THREADID",
+            FetchCommand {
+                messages: s("1"),
+                target: FetchCommandTarget::Single(FetchAtt::ThreadId(())),
+                modifiers: None,
+            }
+        );
 
         assert_reversible!(
             FetchCommand,
@@ -3290,6 +3340,13 @@ mod test {
             "RFC822.SIZE 1234",
             MsgAtt::Rfc822Size(1234)
         );
+
+        assert_reversible!(
+            MsgAtt,
+            "EMAILID (Ethemessageid)",
+            MsgAtt::EmailId(s("Ethemessageid"))
+        );
+        assert_reversible!(MsgAtt, "THREADID NIL", MsgAtt::ThreadIdNil(()));
 
         assert_reversible!(
             MsgAtt,
@@ -3787,6 +3844,24 @@ mod test {
                     }),
                     modseq: 12345678901234567890,
                 })],
+            }
+        );
+        assert_reversible!(
+            SearchCommand,
+            "SEARCH EMAILID Efoo",
+            SearchCommand {
+                return_opts: None,
+                charset: None,
+                keys: vec![SearchKey::EmailId(s("Efoo"))],
+            }
+        );
+        assert_reversible!(
+            SearchCommand,
+            "SEARCH THREADID Efoo",
+            SearchCommand {
+                return_opts: None,
+                charset: None,
+                keys: vec![SearchKey::ThreadId(s("Efoo"))],
             }
         );
         assert_reversible!(
@@ -4612,6 +4687,18 @@ mod test {
                 }),
             }
         );
+        assert_reversible!(
+            ResponseLine,
+            "* OK [MAILBOXID (MINBOX)] K",
+            ResponseLine {
+                tag: None,
+                response: Response::Cond(CondResponse {
+                    cond: RespCondType::Ok,
+                    code: Some(RespTextCode::MailboxId(s("MINBOX"))),
+                    quip: None,
+                }),
+            }
+        );
 
         assert_reversible!(
             ResponseLine,
@@ -4787,7 +4874,8 @@ mod test {
         assert_reversible!(
             ResponseLine,
             "* STATUS foo (MESSAGES 1 RECENT 2 UIDNEXT 3 UIDVALIDITY 4 \
-             UNSEEN 5 HIGHESTMODSEQ 12345678901234567890)",
+             UNSEEN 5 HIGHESTMODSEQ 12345678901234567890 \
+             MAILBOXID (MINBOX))",
             ResponseLine {
                 tag: None,
                 response: Response::Status(StatusResponse {
@@ -4799,6 +4887,7 @@ mod test {
                         StatusResponseAtt::UidValidity(4),
                         StatusResponseAtt::Unseen(5),
                         StatusResponseAtt::HighestModseq(12345678901234567890),
+                        StatusResponseAtt::MailboxId(s("MINBOX")),
                     ],
                 }),
             }

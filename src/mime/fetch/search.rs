@@ -313,6 +313,7 @@ impl<F: FnMut(&SearchData) -> Option<bool>> Visitor for SearchFetcher<F> {
         self.data.metadata.get_or_insert_with(|| MessageMetadata {
             size: 0,
             internal_date: FixedOffset::east(0).timestamp_millis(0),
+            email_id: Default::default(),
         });
         self.finish_headers();
         self.data.content = Some(
@@ -460,6 +461,7 @@ mod test {
             metadata: MessageMetadata {
                 size: 12345,
                 internal_date: FixedOffset::east(3600).timestamp_millis(1000),
+                email_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
             },
             data: message.into(),
         };

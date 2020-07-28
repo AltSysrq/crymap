@@ -203,17 +203,12 @@ pub struct SimpleAccessor {
 #[cfg(test)]
 impl Default for SimpleAccessor {
     fn default() -> Self {
-        use chrono::prelude::*;
-
         SimpleAccessor {
             uid: Uid::MIN,
             last_modified: Modseq::MIN,
             recent: false,
             flags: vec![],
-            metadata: MessageMetadata {
-                size: 0,
-                internal_date: FixedOffset::east(0).timestamp_millis(0),
-            },
+            metadata: MessageMetadata::default(),
             data: vec![],
         }
     }

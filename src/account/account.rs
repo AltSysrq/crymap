@@ -276,7 +276,7 @@ impl Account {
     }
 
     /// The RFC 3501 `CREATE` command.
-    pub fn create(&self, request: CreateRequest) -> Result<(), Error> {
+    pub fn create(&self, request: CreateRequest) -> Result<String, Error> {
         if request.special_use.len() > 1 {
             return Err(Error::UnsupportedSpecialUse);
         }
@@ -300,8 +300,7 @@ impl Account {
         };
 
         self.mailbox_path_create_parents(&request.name)?
-            .create(&self.common_paths.tmp, special_use)?;
-        Ok(())
+            .create(&self.common_paths.tmp, special_use)
     }
 
     /// The RFC 3501 `DELETE` command.
@@ -473,6 +472,11 @@ impl Account {
         if request.max_modseq {
             response.max_modseq =
                 Some(select.max_modseq.map_or(1, |m| m.raw().get()));
+        }
+
+        if request.mailbox_id {
+            response.mailbox_id =
+                Some(mailbox.stateless().path().mailbox_id()?);
         }
 
         Ok(response)

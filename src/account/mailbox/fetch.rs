@@ -169,6 +169,8 @@ impl StatefulMailbox {
             modseq: request.modseq,
             changed_since: request.changed_since,
             collect_vanished: request.collect_vanished,
+            email_id: request.email_id,
+            thread_id: request.thread_id,
         };
         self.fetch(&request, receiver)
     }
@@ -282,6 +284,12 @@ impl StatefulMailbox {
                 }
                 if request.internal_date {
                     fetcher.add_internal_date();
+                }
+                if request.email_id {
+                    fetcher.add_email_id();
+                }
+                if request.thread_id {
+                    fetcher.add_thread_id();
                 }
                 if request.envelope {
                     fetcher.add_envelope();
@@ -417,6 +425,8 @@ mod test {
             modseq: true,
             changed_since: None,
             collect_vanished: false,
+            email_id: true,
+            thread_id: true,
         };
         let prefetch = setup.mb1.prefetch(&request, &request.ids);
         let response = setup.mb1.fetch(&request, &setup.receiver()).unwrap();
@@ -437,6 +447,8 @@ mod test {
             let mut has_bodystructure = false;
             let mut has_section = false;
             let mut has_modseq = false;
+            let mut has_emailid = false;
+            let mut has_threadid = false;
 
             for part in fetched {
                 match part {
@@ -448,6 +460,8 @@ mod test {
                     FetchedItem::BodyStructure(_) => has_bodystructure = true,
                     FetchedItem::BodySection((_, Ok(_))) => has_section = true,
                     FetchedItem::Modseq(_) => has_modseq = true,
+                    FetchedItem::EmailId(_) => has_emailid = true,
+                    FetchedItem::ThreadIdNil => has_threadid = true,
                     part => panic!("Unexpected part: {:?}", part),
                 }
             }
@@ -460,6 +474,8 @@ mod test {
             assert!(has_bodystructure);
             assert!(has_section);
             assert!(has_modseq);
+            assert!(has_emailid);
+            assert!(has_threadid);
         }
     }
 

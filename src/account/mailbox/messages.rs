@@ -172,6 +172,7 @@ impl StatelessMailbox {
         let metadata = MessageMetadata {
             size: OsRng.gen(),
             internal_date: internal_date,
+            email_id: OsRng.gen(),
         };
         let compression = Compression::DEFAULT_FOR_MESSAGE;
 

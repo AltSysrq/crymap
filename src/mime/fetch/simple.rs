@@ -131,3 +131,18 @@ impl Visitor for InternalDateFetcher {
         panic!("InternalDateFetcher.end()")
     }
 }
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct EmailIdFetcher;
+
+impl Visitor for EmailIdFetcher {
+    type Output = String;
+
+    fn metadata(&mut self, md: &MessageMetadata) -> Result<(), String> {
+        Err(md.format_email_id())
+    }
+
+    fn end(&mut self) -> String {
+        panic!("EmailIdFetcher.end()")
+    }
+}

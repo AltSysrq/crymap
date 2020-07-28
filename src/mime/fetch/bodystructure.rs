@@ -282,8 +282,6 @@ mod test {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    use chrono::prelude::*;
-
     use super::*;
     use crate::account::model::*;
     use crate::mime::grovel;
@@ -1258,11 +1256,7 @@ hello world
                     ) -> Result<(MessageMetadata, Self::Reader), Error>
                     {
                         Ok((
-                            MessageMetadata {
-                                size: 0,
-                                internal_date: FixedOffset::east(0)
-                                    .timestamp_millis(0),
-                            },
+                            MessageMetadata::default(),
                             std::io::BufReader::new(
                                 fs::File::open(&self.0).unwrap(),
                             ),

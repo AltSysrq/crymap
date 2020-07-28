@@ -59,6 +59,12 @@ pub fn set_up() -> Setup {
         return Setup { system_dir };
     }
 
+    let setup = set_up_new_root();
+    *lock = Arc::downgrade(&setup.system_dir);
+    setup
+}
+
+pub fn set_up_new_root() -> Setup {
     let system_dir = Arc::new(TempDir::new().unwrap());
     let user_dir = system_dir.path().join("azure");
     fs::create_dir(&user_dir).unwrap();
@@ -69,8 +75,6 @@ pub fn set_up() -> Setup {
         Some(Arc::new(MasterKey::new())),
     );
     account.provision(b"hunter2").unwrap();
-
-    *lock = Arc::downgrade(&system_dir);
 
     Setup { system_dir }
 }

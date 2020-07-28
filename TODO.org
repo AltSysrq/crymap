@@ -1,5 +1,3 @@
-OBJECTID extension
-
 IMAP4rev2 DELETED status item
 
 Experimental IMAP4rev2 support

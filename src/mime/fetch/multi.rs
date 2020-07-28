@@ -41,6 +41,8 @@ pub enum FetchedItem {
     Flags(simple::FlagsInfo),
     Rfc822Size(u32),
     InternalDate(DateTime<FixedOffset>),
+    EmailId(String),
+    ThreadIdNil,
     Envelope(envelope::Envelope),
     BodyStructure(bodystructure::BodyStructure),
     BodySection(
@@ -144,6 +146,24 @@ impl MultiFetcher {
         self.add_fetcher(Box::new(VisitorMap::new(
             Box::new(simple::InternalDateFetcher),
             FetchedItem::InternalDate,
+            FetchedItem::into_none,
+        )))
+    }
+
+    /// Fetch the email id of the message.
+    pub fn add_email_id(&mut self) {
+        self.add_fetcher(Box::new(VisitorMap::new(
+            Box::new(simple::EmailIdFetcher),
+            FetchedItem::EmailId,
+            FetchedItem::into_none,
+        )))
+    }
+
+    /// "Fetch" the token `ThreadIdNil` item.
+    pub fn add_thread_id(&mut self) {
+        self.add_fetcher(Box::new(VisitorMap::new(
+            Box::new(simple::UidFetcher),
+            |_| FetchedItem::ThreadIdNil,
             FetchedItem::into_none,
         )))
     }
@@ -383,6 +403,7 @@ mod test {
         fetcher.add_flags();
         fetcher.add_rfc822size();
         fetcher.add_internal_date();
+        fetcher.add_email_id();
 
         let uid = Uid::u(42);
         let modseq = Modseq::new(Uid::u(56), Cid(100));
@@ -397,13 +418,16 @@ mod test {
                 metadata: MessageMetadata {
                     size: 1234,
                     internal_date,
+                    email_id: [
+                        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                    ],
                 },
             },
             fetcher,
         )
         .unwrap();
 
-        assert_eq!(9, result.len());
+        assert_eq!(10, result.len());
 
         match &result[0] {
             &FetchedItem::Envelope(ref envelope) => {
@@ -467,6 +491,13 @@ mod test {
                 assert_eq!(FixedOffset::east(0).timestamp_millis(1000), id)
             }
             r => panic!("Unexpected internal date result: {:#?}", r),
+        }
+
+        match &result[9] {
+            &FetchedItem::EmailId(ref id) => {
+                assert_eq!("EAQIDBAUGBwgJCgsMDQ4P", id);
+            }
+            r => panic!("Unexpected email id result: {:#?}", r),
         }
     }
 }

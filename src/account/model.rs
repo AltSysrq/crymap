@@ -765,6 +765,10 @@ pub struct StatusRequest {
     // ==================== RFC 7162 ====================
     /// Return the greatest Modseq value
     pub max_modseq: bool,
+
+    // ==================== RFC 8474 ====================
+    /// Return the ID of the mailbox.
+    pub mailbox_id: bool,
 }
 
 /// The `STATUS` response
@@ -784,6 +788,8 @@ pub struct StatusResponse {
     pub unseen: Option<usize>,
     // ==================== RFC 7162 ====================
     pub max_modseq: Option<u64>,
+    // ==================== RFC 8474 ====================
+    pub mailbox_id: Option<String>,
 }
 
 /// Request used for implementing `LIST` and `LSUB`.
@@ -1168,6 +1174,11 @@ where
     /// point are gathered. Otherwise, all expunged UIDs requested will be
     /// gathered.
     pub collect_vanished: bool,
+    // ==================== RFC 8474 ====================
+    /// Return the email id?
+    pub email_id: bool,
+    /// Return the thread id?
+    pub thread_id: bool,
 }
 
 /// What the tagged response from a `FETCH` should be.
@@ -1399,6 +1410,8 @@ pub enum SearchQuery {
     Unseen,
     And(Vec<SearchQuery>),
     Modseq(u64),
+    EmailId(String),
+    ThreadId(String),
 }
 
 /// The response from the `SEARCH` (`ID` = `Seqnum`) or `UID SEARCH`
@@ -1498,6 +1511,8 @@ pub struct CommonPaths {
     pub garbage: PathBuf,
 }
 
+pub const EMAIL_ID_LEN: usize = 15;
+
 /// Metadata about a message which is stored encrypted in the message file.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageMetadata {
@@ -1513,6 +1528,78 @@ pub struct MessageMetadata {
     /// day-based comparisons.
     #[serde(alias = "d")]
     pub internal_date: DateTime<FixedOffset>,
+    /// The RFC 8474 EMAILID of this message, in raw form.
+    ///
+    /// The string form is the "URL Safe" base64 encoding of this value,
+    /// prefixed with 'E'.
+    #[serde(alias = "i", with = "email_id_ser")]
+    pub email_id: [u8; EMAIL_ID_LEN],
+}
+
+impl MessageMetadata {
+    /// Return the formatted RFC 8474 EMAILID of the message.
+    pub fn format_email_id(&self) -> String {
+        format!(
+            "E{}",
+            base64::encode_config(&self.email_id, base64::URL_SAFE)
+        )
+    }
+}
+
+mod email_id_ser {
+    use std::fmt;
+
+    use serde::{Deserializer, Serializer};
+
+    use super::EMAIL_ID_LEN;
+
+    pub fn serialize<S: Serializer>(
+        bytes: &[u8; EMAIL_ID_LEN],
+        ser: S,
+    ) -> Result<S::Ok, S::Error> {
+        ser.serialize_bytes(bytes)
+    }
+
+    pub fn deserialize<'a, D: Deserializer<'a>>(
+        de: D,
+    ) -> Result<[u8; EMAIL_ID_LEN], D::Error> {
+        use serde::de::Error;
+
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = [u8; EMAIL_ID_LEN];
+            fn visit_bytes<E: Error>(
+                self,
+                bytes: &[u8],
+            ) -> Result<Self::Value, E> {
+                if EMAIL_ID_LEN != bytes.len() {
+                    Err(Error::custom("Incorrect email_id length"))
+                } else {
+                    let mut email_id = [0u8; EMAIL_ID_LEN];
+                    email_id.copy_from_slice(bytes);
+                    Ok(email_id)
+                }
+            }
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "[u8;15]")
+            }
+        }
+
+        de.deserialize_bytes(Visitor)
+    }
+}
+
+// Default is only available for tests since it produces invalid data.
+#[cfg(test)]
+impl Default for MessageMetadata {
+    fn default() -> Self {
+        MessageMetadata {
+            size: 0,
+            internal_date: FixedOffset::east(0).timestamp_millis(0),
+            email_id: Default::default(),
+        }
+    }
 }
 
 #[cfg(test)]

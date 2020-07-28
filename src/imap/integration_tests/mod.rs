@@ -183,4 +183,5 @@ mod rfc6851;
 mod rfc6855;
 mod rfc7162;
 mod rfc7888;
+mod rfc8474;
 mod xlist;

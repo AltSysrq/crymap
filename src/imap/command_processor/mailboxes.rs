@@ -69,7 +69,7 @@ impl CommandProcessor {
                 .map(|u| u.into_owned())
                 .collect(),
         };
-        account.create(request).map_err(map_error! {
+        let mailbox_id = account.create(request).map_err(map_error! {
             self,
             MailboxExists =>
                 (No, Some(s::RespTextCode::AlreadyExists(()))),
@@ -78,7 +78,12 @@ impl CommandProcessor {
             UnsupportedSpecialUse =>
                 (No, Some(s::RespTextCode::UseAttr(()))),
         })?;
-        success()
+
+        Ok(s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Ok,
+            code: Some(s::RespTextCode::MailboxId(Cow::Owned(mailbox_id))),
+            quip: None,
+        }))
     }
 
     pub(crate) fn cmd_delete(
@@ -399,6 +404,7 @@ impl CommandProcessor {
             uidvalidity: atts.contains(&s::StatusAtt::UidValidity),
             unseen: atts.contains(&s::StatusAtt::Unseen),
             max_modseq: atts.contains(&s::StatusAtt::HighestModseq),
+            mailbox_id: atts.contains(&s::StatusAtt::MailboxId),
         };
 
         if request.max_modseq && self.account.is_some() {
@@ -438,6 +444,9 @@ impl CommandProcessor {
         }
         if let Some(max_modseq) = response.max_modseq {
             atts.push(s::StatusResponseAtt::HighestModseq(max_modseq));
+        }
+        if let Some(mailbox_id) = response.mailbox_id {
+            atts.push(s::StatusResponseAtt::MailboxId(Cow::Owned(mailbox_id)));
         }
 
         Ok(s::Response::Status(s::StatusResponse {
@@ -593,8 +602,22 @@ impl CommandProcessor {
                     (No, Some(s::RespTextCode::Cannot(()))),
             },
         )?;
+        let mailbox_id = stateless.path().mailbox_id().map_err(map_error! {
+            self,
+            NxMailbox | MailboxUnselectable =>
+                (No, Some(s::RespTextCode::Nonexistent(()))),
+            UnsafeName =>
+                (No, Some(s::RespTextCode::Cannot(()))),
+        })?;
+
         let (mut stateful, select) =
-            stateless.select().map_err(map_error!(self))?;
+            stateless.select().map_err(map_error! {
+                self,
+                NxMailbox | MailboxUnselectable =>
+                    (No, Some(s::RespTextCode::Nonexistent(()))),
+                UnsafeName =>
+                    (No, Some(s::RespTextCode::Cannot(()))),
+            })?;
         sender(s::Response::Flags(select.flags.clone()));
         sender(s::Response::Cond(s::CondResponse {
             cond: s::RespCondType::Ok,
@@ -622,6 +645,11 @@ impl CommandProcessor {
         sender(s::Response::Cond(s::CondResponse {
             cond: s::RespCondType::Ok,
             code: Some(s::RespTextCode::UidValidity(select.uidvalidity)),
+            quip: None,
+        }));
+        sender(s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Ok,
+            code: Some(s::RespTextCode::MailboxId(Cow::Owned(mailbox_id))),
             quip: None,
         }));
         if self.condstore_enabled {
