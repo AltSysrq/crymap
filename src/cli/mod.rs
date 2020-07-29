@@ -17,9 +17,9 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 macro_rules! die {
-    ($($stuff:tt)*) => {{
+    ($ex:ident, $($stuff:tt)*) => {{
         eprintln!($($stuff)*);
-        std::process::exit(1)
+        crate::cli::sysexits::$ex.exit()
     }}
 }
 
@@ -29,4 +29,5 @@ pub mod main;
 mod imap_test;
 
 mod serve;
+mod sysexits;
 mod user;

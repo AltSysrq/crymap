@@ -30,9 +30,9 @@ use crate::support::system_config::SystemConfig;
 
 // Need to use a this and not die! so that errors go to syslog/etc
 macro_rules! fatal {
-    ($($stuff:tt)*) => {{
+    ($ex:ident, $($stuff:tt)*) => {{
         error!($($stuff)*);
-        std::process::exit(1)
+        super::sysexits::$ex.exit()
     }}
 }
 
@@ -70,7 +70,11 @@ pub fn serve(
     let mut acceptor =
         match SslAcceptor::mozilla_intermediate_v5(SslMethod::tls_server()) {
             Ok(a) => a,
-            Err(e) => fatal!("Failed to initialise OpenSSL acceptor: {}", e),
+            Err(e) => fatal!(
+                EX_SOFTWARE,
+                "Failed to initialise OpenSSL acceptor: {}",
+                e
+            ),
         };
 
     let private_key_path = system_root.join(&system_config.tls.private_key);
@@ -78,6 +82,7 @@ pub fn serve(
         acceptor.set_private_key_file(&private_key_path, SslFiletype::PEM)
     {
         fatal!(
+            EX_CONFIG,
             "Unable to load TLS private key from '{}': {}",
             private_key_path.display(),
             e
@@ -90,6 +95,7 @@ pub fn serve(
         acceptor.set_certificate_file(&certificate_path, SslFiletype::PEM)
     {
         fatal!(
+            EX_CONFIG,
             "Unable to load TLS certificate chain from '{}': {}",
             certificate_path.display(),
             e
@@ -97,7 +103,7 @@ pub fn serve(
     }
 
     if let Err(e) = acceptor.check_private_key() {
-        fatal!("TLS key seems to be invalid: {}", e);
+        fatal!(EX_CONFIG, "TLS key seems to be invalid: {}", e);
     }
 
     // We've opened access to everything on the main system we need; now we can
@@ -110,10 +116,12 @@ pub fn serve(
         {
             Ok(Some(user)) => Some(user),
             Ok(None) => fatal!(
+                EX_NOUSER,
                 "system_user '{}' does not exist!",
                 system_config.security.system_user
             ),
             Err(e) => fatal!(
+                EX_OSFILE,
                 "Unable to look up system_user '{}': {}",
                 system_config.security.system_user,
                 e
@@ -126,7 +134,7 @@ pub fn serve(
             &std::ffi::CString::new(system_user.name.clone()).unwrap(),
             system_user.gid,
         ) {
-            fatal!("Unable to set up groups for system user: {}", e);
+            fatal!(EX_OSERR, "Unable to set up groups for system user: {}", e);
         }
     }
 
@@ -136,7 +144,12 @@ pub fn serve(
             nix::unistd::chroot(&users_root)
             .and_then(|_| nix::unistd::chdir("/"))
         {
-            fatal!("Failed to chroot to '{}': {}", users_root.display(), e);
+            fatal!(
+                EX_OSERR,
+                "Failed to chroot to '{}': {}",
+                users_root.display(),
+                e
+            );
         }
 
         users_root.push("/");
@@ -147,6 +160,7 @@ pub fn serve(
             .and_then(|_| nix::unistd::setuid(system_user.uid))
         {
             fatal!(
+                EX_OSERR,
                 "Failed to set UID:GID to {}:{}: {}",
                 system_user.uid,
                 system_user.gid,
@@ -161,14 +175,14 @@ pub fn serve(
         (Ok(true), _) | (_, Ok(true)) => {
             // In this case, we *do* want to use die!() since we're on a
             // terminal.
-            die!("stdin and stdout must not be a terminal")
+            die!(EX_USAGE, "stdin and stdout must not be a terminal")
         }
         _ => (),
     }
 
     let peer_name = match nix::sys::socket::getpeername(0) {
         Ok(addr) => addr.to_string(),
-        Err(e) => fatal!("Unable to determine peer name: {}", e),
+        Err(e) => fatal!(EX_NOHOST, "Unable to determine peer name: {}", e),
     };
 
     if let Err(e) = nix::sys::socket::setsockopt(
@@ -232,6 +246,7 @@ pub fn serve(
             })
     {
         fatal!(
+            EX_OSERR,
             "{} Unable to put input/output into non-blocking mode: {}",
             peer_name,
             e

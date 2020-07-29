@@ -19,10 +19,10 @@
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::exit;
 
 use structopt::StructOpt;
 
+use super::sysexits::*;
 use crate::support::system_config::SystemConfig;
 
 #[derive(StructOpt)]
@@ -103,7 +103,25 @@ pub(super) struct ServerUserAddSubcommand {
 }
 
 pub fn main() {
-    let cmd = Command::from_args();
+    // Clap exits with status 1 instead of EX_USAGE if we use the more concise
+    // API
+    let cmd = Command::from_clap(&match Command::clap().get_matches_safe() {
+        Ok(matches) => matches,
+        Err(clap::Error {
+            kind: clap::ErrorKind::HelpDisplayed,
+            ..
+        })
+        | Err(clap::Error {
+            kind: clap::ErrorKind::VersionDisplayed,
+            ..
+        }) => {
+            return;
+        }
+        Err(e) => {
+            eprintln!("{}", e.message);
+            EX_USAGE.exit()
+        }
+    });
 
     match cmd {
         #[cfg(feature = "dev-tools")]
@@ -124,7 +142,7 @@ fn server(cmd: ServerCommand) {
                  the Crymap root; use --root=/path/to/crymap if your\n\
                  installation is elsewhere."
             );
-            exit(1)
+            EX_CONFIG.exit()
         }
     });
 
@@ -134,7 +152,7 @@ fn server(cmd: ServerCommand) {
         .and_then(|mut f| f.read_to_end(&mut system_config_toml))
     {
         eprintln!("Error reading '{}': {}", system_config_path.display(), e);
-        exit(1);
+        EX_CONFIG.exit();
     }
 
     let system_config: SystemConfig =
@@ -146,13 +164,14 @@ fn server(cmd: ServerCommand) {
                     system_config_path.display(),
                     e
                 );
-                exit(1)
+                EX_CONFIG.exit()
             }
         };
 
     let users_root = root.join("users");
     if !users_root.is_dir() {
         eprintln!("'{}' seems to be missing", users_root.display());
+        EX_CONFIG.exit();
     }
 
     let users_root = match users_root.canonicalize() {
@@ -163,7 +182,7 @@ fn server(cmd: ServerCommand) {
                 users_root.display(),
                 e
             );
-            exit(1)
+            EX_IOERR.exit()
         }
     };
 

@@ -30,7 +30,7 @@ use crate::support::safe_name::is_safe_name;
 
 pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
     if !is_safe_name(&cmd.name) {
-        die!("Invalid user name: {}", cmd.name);
+        die!(EX_USAGE, "Invalid user name: {}", cmd.name);
     }
 
     let nominal_path = users_root.join(&cmd.name);
@@ -42,6 +42,7 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
         && !data_path_configured
     {
         die!(
+            EX_USAGE,
             "This would put the user data under {}, which is probably not\n\
              what you want. Explicit specification of the data-path is\n\
              required.",
@@ -50,11 +51,12 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
     }
 
     if nominal_path.symlink_metadata().is_ok() {
-        die!("User '{}' already exists", cmd.name);
+        die!(EX_CANTCREAT, "User '{}' already exists", cmd.name);
     }
 
     if actual_path.is_dir() {
         die!(
+            EX_CANTCREAT,
             "'{}' is already a directory. If you want to link an existing\n\
              account as a new user in the system, you can run a command like\n\
              \n\
@@ -79,16 +81,18 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
         };
 
         match user_result {
-            (q, Err(e)) => die!("Unable to look up UNIX user {}: {}", q, e),
-            (q, Ok(None)) => die!("{} is not a UNIX user", q),
+            (q, Err(e)) => {
+                die!(EX_OSFILE, "Unable to look up UNIX user {}: {}", q, e)
+            }
+            (q, Ok(None)) => die!(EX_NOUSER, "{} is not a UNIX user", q),
             (_, Ok(Some(user))) if user.uid == nix::unistd::ROOT => {
-                die!("Creating account for root not allowed")
+                die!(EX_USAGE, "Creating account for root not allowed")
             }
             (_, Ok(Some(user))) => Some(user),
         }
     } else {
         if cmd.uid.is_some() {
-            die!("`-u` can only be used as root.")
+            die!(EX_NOPERM, "`-u` can only be used as root.")
         } else {
             None
         }
@@ -101,9 +105,9 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
                     .map(|b| (a, b))
             },
         ) {
-            Err(e) => die!("Failed to read password: {}", e),
-            Ok((a, b)) if a != b => die!("Passwords don't match"),
-            Ok((a, _)) if a.is_empty() => die!("No password given"),
+            Err(e) => die!(EX_NOINPUT, "Failed to read password: {}", e),
+            Ok((a, b)) if a != b => die!(EX_DATAERR, "Passwords don't match"),
+            Ok((a, _)) if a.is_empty() => die!(EX_NOINPUT, "No password given"),
             Ok((a, _)) => a,
         }
     } else {
@@ -112,13 +116,19 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
     };
 
     if let Err(e) = fs::DirBuilder::new().mode(0o770).create(&actual_path) {
-        die!("Failed to create '{}': {}", actual_path.display(), e);
+        die!(
+            EX_CANTCREAT,
+            "Failed to create '{}': {}",
+            actual_path.display(),
+            e
+        );
     }
 
     if actual_path != nominal_path {
         if let Err(e) = std::os::unix::fs::symlink(&actual_path, &nominal_path)
         {
             die!(
+                EX_CANTCREAT,
                 "Failed to link '{}' to '{}': {}",
                 nominal_path.display(),
                 actual_path.display(),
@@ -132,6 +142,7 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
             nix::unistd::chown(&actual_path, Some(user.uid), Some(user.gid))
         {
             die!(
+                EX_OSERR,
                 "Failed to change ownership of '{}' to ({},{}): {}",
                 actual_path.display(),
                 user.uid,
@@ -147,7 +158,12 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
         .and_then(|_| nix::unistd::setgid(user.gid))
         .and_then(|_| nix::unistd::setuid(user.uid))
         {
-            die!("Failed to switch to UNIX user {}: {}", user.name, e);
+            die!(
+                EX_OSERR,
+                "Failed to switch to UNIX user {}: {}",
+                user.name,
+                e
+            );
         }
     }
 
@@ -158,7 +174,7 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
     );
 
     if let Err(e) = account.provision(password.as_bytes()) {
-        die!("Error provisioning account: {}", e);
+        die!(EX_SOFTWARE, "Error provisioning account: {}", e);
     }
 
     if !cmd.prompt_password {
