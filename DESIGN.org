@@ -1006,3 +1006,15 @@ make sense to move over to that from the current encoded word hack.
 There's not really anything we need to do specifically; UTF8=ACCEPT and
 IMAP4rev2 don't offer any in-band improvements here, so we might as well let
 clients sort things out between themselves.
+* Mail delivery
+
+Originally, the intent was to simply have Crymap be something to be invoked
+from `.forward` and similar. Unfortunately, it turns out that emails passed
+through that sort of pipe have had their line endings tranlsated to UNIX line
+endings, so we'd need to translate back, which isn't the end of the world, but
+it means this stack cannot support binary payloads. It's still worth supporting
+but we should have something that's actually binary-safe.
+
+LMTP seems fairly reasonable. It's more work to implement, but since it
+absolves us of needing to do any kind of mail queueing (as we would with SMTP),
+it shouldn't be too big a deal.
