@@ -406,6 +406,7 @@ impl CommandProcessor {
             max_modseq: atts.contains(&s::StatusAtt::HighestModseq),
             mailbox_id: atts.contains(&s::StatusAtt::MailboxId),
             size: atts.contains(&s::StatusAtt::Size),
+            deleted: atts.contains(&s::StatusAtt::Deleted),
         };
 
         if request.max_modseq && self.account.is_some() {
@@ -440,7 +441,7 @@ impl CommandProcessor {
         }
         if let Some(unseen) = response.unseen {
             atts.push(s::StatusResponseAtt::Unseen(
-                unseen.try_into().unwrap_or(u32::MAX).into(),
+                unseen.try_into().unwrap_or(u32::MAX),
             ));
         }
         if let Some(max_modseq) = response.max_modseq {
@@ -451,6 +452,11 @@ impl CommandProcessor {
         }
         if let Some(size) = response.size {
             atts.push(s::StatusResponseAtt::Size(size));
+        }
+        if let Some(deleted) = response.deleted {
+            atts.push(s::StatusResponseAtt::Deleted(
+                deleted.try_into().unwrap_or(u32::MAX),
+            ));
         }
 
         Ok(s::Response::Status(s::StatusResponse {

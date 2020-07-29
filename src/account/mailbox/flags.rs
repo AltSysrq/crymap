@@ -260,12 +260,25 @@ impl StatefulMailbox {
     pub fn count_unseen(&self) -> usize {
         let seen = match self.state.flag_id(&Flag::Seen) {
             Some(seen) => seen,
+            // TODO This is wrong
             None => return 0,
         };
 
         self.state
             .uids()
             .filter(|&u| !self.state.test_flag(seen, u))
+            .count()
+    }
+    /// Return the count of \Deleted messages in the mailbox.
+    pub fn count_deleted(&self) -> usize {
+        let deleted = match self.state.flag_id(&Flag::Deleted) {
+            Some(seen) => seen,
+            None => return 0,
+        };
+
+        self.state
+            .uids()
+            .filter(|&u| self.state.test_flag(deleted, u))
             .count()
     }
 }

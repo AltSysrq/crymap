@@ -463,6 +463,9 @@ syntax_rule! {
         #[prefix("SIZE ")]
         #[primitive(num_u64, number64)]
         Size(u64),
+        #[prefix("DELETED ")]
+        #[primitive(num_u32, number)]
+        Deleted(u32),
     }
 }
 
@@ -1610,6 +1613,8 @@ simple_enum! {
         MailboxId("MAILBOXID"),
         // RFC 8438
         Size("SIZE"),
+        // IMAP4rev2 draft
+        Deleted("DELETED"),
     }
 }
 

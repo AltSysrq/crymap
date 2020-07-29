@@ -778,6 +778,10 @@ pub struct StatusRequest {
     /// it is required by the IMAP4rev2 draft, so we implement the letter of
     /// the requirement since we can't implement the spirit.
     pub size: bool,
+
+    // ==================== IMAP4rev2 ====================
+    /// Count the number of \Deleted messages.
+    pub deleted: bool,
 }
 
 /// The `STATUS` response
@@ -801,6 +805,8 @@ pub struct StatusResponse {
     pub mailbox_id: Option<String>,
     // ==================== RFC 8438 ====================
     pub size: Option<u64>,
+    // ==================== IMAP4rev2 ====================
+    pub deleted: Option<usize>,
 }
 
 /// Request used for implementing `LIST` and `LSUB`.

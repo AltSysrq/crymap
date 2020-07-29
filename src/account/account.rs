@@ -508,6 +508,10 @@ impl Account {
             response.size = Some(size);
         }
 
+        if request.deleted {
+            response.deleted = Some(mailbox.count_deleted());
+        }
+
         Ok(response)
     }
 

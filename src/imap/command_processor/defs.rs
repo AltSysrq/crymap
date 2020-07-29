@@ -35,6 +35,10 @@ pub(super) use crate::imap::syntax as s;
 
 pub(super) static CAPABILITIES: &[&str] = &[
     "IMAP4rev1",
+    // Our IMAP4rev2 support is current as of the 2020-07 draft
+    // We don't advertise it as IMAP4rev2 since that is not yet a standard
+    // capability.
+    "XIMAP4rev2",
     "APPENDLIMIT=67108864",
     "AUTH=PLAIN",
     "BINARY",
@@ -98,6 +102,7 @@ pub struct CommandProcessor {
     pub(super) utf8_enabled: bool,
     pub(super) condstore_enabled: bool,
     pub(super) qresync_enabled: bool,
+    pub(super) imap4rev2_enabled: bool,
 
     pub(super) multiappend: Option<Multiappend>,
 
@@ -141,6 +146,7 @@ impl CommandProcessor {
             utf8_enabled: false,
             condstore_enabled: false,
             qresync_enabled: false,
+            imap4rev2_enabled: false,
 
             multiappend: None,
 

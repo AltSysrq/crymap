@@ -305,6 +305,10 @@ impl CommandProcessor {
                 self.enable_condstore(sender, false);
                 self.qresync_enabled = true;
                 enabled.push(ext);
+            } else if "IMAP4rev2".eq_ignore_ascii_case(&ext) {
+                self.unicode_aware = true;
+                self.imap4rev2_enabled = true;
+                enabled.push(ext);
             }
         }
 

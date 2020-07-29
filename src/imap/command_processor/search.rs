@@ -66,7 +66,8 @@ impl CommandProcessor {
         // ESEARCH, which is a bit weird since it's using extended search
         // syntax, but it makes our lives a bit easier.
         let return_opts = cmd.return_opts.take().unwrap_or_default();
-        let return_extended = !return_opts.is_empty();
+        // IMAP4rev2 (2020-07 draft) requires SEARCH to always return ESEARCH
+        let return_extended = !return_opts.is_empty() || self.imap4rev2_enabled;
 
         let mut has_modseq = false;
         let request = self.search_command_from_ast(&mut has_modseq, cmd)?;
@@ -77,7 +78,10 @@ impl CommandProcessor {
 
         let response =
             f(selected!(self)?, &request).map_err(map_error!(self))?;
-        let mut return_response = false;
+        // We normally return a response. If SAVE is specified, we won't unless
+        // another return option requests it.
+        let mut return_response =
+            !return_opts.contains(&s::SearchReturnOpt::Save);
 
         let response = if return_extended {
             let mut r = s::EsearchResponse {
