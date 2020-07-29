@@ -735,6 +735,46 @@ syntax_rule! {
 syntax_rule! {
     #[]
     struct BodyFields<'a> {
+        // TODO Move this to a better documentation location
+        //
+        // These parameters, as well as those on `Content-Disposition`, present
+        // us with quite the conundrum. RFC 2331 describes a way to split one
+        // parameter into pieces, as well as a way to do percent-encoding to
+        // embed non-ASCII characters. A small corner of the RFC underhands a
+        // soft requirement at us:
+        //
+        // > IMAP4 [RFC-2060] servers SHOULD decode parameter value continuations
+        // > when generating the BODY and BODYSTRUCTURE fetch attributes.
+        //
+        // The IMAP4rev2 draft also includes this as a SHOULD.
+        //
+        // This requirement is problematic, since one of the main points for
+        // that MIME extension is to embed non-ASCII characters, and
+        // IMAP4/IMAP4rev1 give us *literally no way to represent them* here.
+        //
+        // We could, in theory, do that decoding and pass it on when the client
+        // has enabled UTF8=ACCEPT or IMAP4rev2, but that would add a decent
+        // amount of complexity.
+        //
+        // For now, we *DO NOT* do that decoding, on several grounds:
+        //
+        // 1. It is not possible to do the decoding and simultaneously comply
+        //    with the hard requirements of the IMAP4rev1 specification.
+        //
+        // 2. It's only a SHOULD. We're still compliant by not doing it.
+        //
+        // 3. It's highly likely that most clients that care are already
+        //    designed to deal with servers that don't do the decoding, both
+        //    since servers are constrained by point (1) and because, as
+        //    described in the IMAP4rev2 draft, the suggestion for IMAP servers
+        //    to do that decoding was previously hidden away in a completely
+        //    unrelated RFC, so many server implementors (and client
+        //    implementors, for that matter) would not have expected such
+        //    decoding to happen.
+        //
+        // Non-ASCII characters can still appear through 8BITMIME. For this
+        // reason, we still use `censored_string` here to ensure that
+        // non-Unicode-aware clients aren't broken.
         #[suffix(" ") nil_if_empty surrounded("(", ")") 1*(" ")]
         #[primitive(censored_string, string)]
         content_type_parms: Vec<Cow<'a, str>>,

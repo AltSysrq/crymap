@@ -2,8 +2,6 @@ IMAP4rev2 DELETED status item
 
 Experimental IMAP4rev2 support
 
-RFC 2231 parm continuation decoding/combination
-
 Can we reduce the number of gravestones by forcing allocation to go through
 another level of redirection? I.e. leaf directory would initially contain a
 `self -> .` symlink, which gets changed to `self -> self` once directory is
