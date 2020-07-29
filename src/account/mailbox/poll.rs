@@ -72,6 +72,27 @@ impl StatefulMailbox {
             .map_or(Uid::MIN, |uid| uid.next().unwrap_or(Uid::MAX));
 
         self.fetch_loopbreaker.clear();
+        // It is very important to discover UIDs by probing, *THEN* search for
+        // CIDs. This ensures we reach one of two states:
+        //
+        // - New UIDs were inserted without new changes happening first. In
+        // this case, we end up with a max_modseq which is not the canonical
+        // modseq of any transaction, but is also not concurrent with any
+        // transaction under the vector clock interpretation.
+        //
+        // - At least one transaction happened since the last discovered UID.
+        // In this case, max_modseq ends up being the canonical modseq of the
+        // last transaction.
+        //
+        // We specifically need to avoid the case where one process determines
+        // a max_modseq of (uid+1,cid) and another (uid,cid+1), since the
+        // CONDSTORE semantics require that (uid+1,cid) is considered to be
+        // strictly after (uid,cid+1).
+        //
+        // The relevance of the ordering to this requirement is that change
+        // transactions contain UIDs and thereby can synchronise both values,
+        // while messages do not contain a CID and can only synchronise the
+        // UID.
         self.poll_for_new_uids();
         self.poll_for_new_changes()?;
 
