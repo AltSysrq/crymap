@@ -57,6 +57,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "SASL-IR",
     "SEARCHRES",
     "SPECIAL-USE",
+    "STATUS=SIZE",
     "UIDPLUS",
     "UNSELECT",
     "UTF8=ACCEPT",

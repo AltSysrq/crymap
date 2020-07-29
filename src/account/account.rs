@@ -479,6 +479,35 @@ impl Account {
                 Some(mailbox.stateless().path().mailbox_id()?);
         }
 
+        // To get the "size", we simply multiply the number of messages by
+        // 2**32, which fulfils the letter of the standard:
+        //
+        // > The total size of the mailbox in octets.  This is not strictly
+        // > required to be an exact value, but it MUST be equal to or greater
+        // > than the sum of the values of the RFC822.SIZE FETCH message data
+        // > item [IMAP4rev1] of all messages in the mailbox.
+        //
+        // It's unfortunate that the standard precludes us from calculating the
+        // *actual* size of the mailbox, which would be useful. But since the
+        // actual size is usually smaller than the sum of the `RFC822.SIZE`, we
+        // can't do that, and have to do this useless exercise instead.
+        //
+        // Arguably, this approach is sufficiently useless that we could in
+        // fact just return i64::MAX and call it a day.
+        if request.size {
+            let mut size = select.exists as u64;
+            size *= u32::MAX as u64;
+            // RFC 8438 requires accommodating environments that don't have
+            // support for real 64-bit integers.
+            //
+            // Strictly, there's nothing stopping someone from having 2**32 4GB
+            // messages, but that's sufficiently unlikely to ever happen that
+            // naïve clamping is reasonable.
+            size = size.min(i64::MAX as u64);
+
+            response.size = Some(size);
+        }
+
         Ok(response)
     }
 

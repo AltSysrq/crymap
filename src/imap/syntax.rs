@@ -460,6 +460,9 @@ syntax_rule! {
         #[surrounded("MAILBOXID (", ")")]
         #[primitive(verbatim, normal_atom)]
         MailboxId(Cow<'a, str>),
+        #[prefix("SIZE ")]
+        #[primitive(num_u64, number64)]
+        Size(u64),
     }
 }
 
@@ -1605,6 +1608,8 @@ simple_enum! {
         HighestModseq("HIGHESTMODSEQ"),
         // RFC 8474
         MailboxId("MAILBOXID"),
+        // RFC 8438
+        Size("SIZE"),
     }
 }
 

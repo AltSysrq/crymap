@@ -405,6 +405,7 @@ impl CommandProcessor {
             unseen: atts.contains(&s::StatusAtt::Unseen),
             max_modseq: atts.contains(&s::StatusAtt::HighestModseq),
             mailbox_id: atts.contains(&s::StatusAtt::MailboxId),
+            size: atts.contains(&s::StatusAtt::Size),
         };
 
         if request.max_modseq && self.account.is_some() {
@@ -447,6 +448,9 @@ impl CommandProcessor {
         }
         if let Some(mailbox_id) = response.mailbox_id {
             atts.push(s::StatusResponseAtt::MailboxId(Cow::Owned(mailbox_id)));
+        }
+        if let Some(size) = response.size {
+            atts.push(s::StatusResponseAtt::Size(size));
         }
 
         Ok(s::Response::Status(s::StatusResponse {

@@ -769,6 +769,15 @@ pub struct StatusRequest {
     // ==================== RFC 8474 ====================
     /// Return the ID of the mailbox.
     pub mailbox_id: bool,
+
+    // ==================== RFC 8438 ====================
+    /// Return an upper bound on the sum of the sizes of the messages in this
+    /// mailbox (as would be reported by `RFC822.SIZE`).
+    ///
+    /// The way this is implemented actually makes it completely useless, but
+    /// it is required by the IMAP4rev2 draft, so we implement the letter of
+    /// the requirement since we can't implement the spirit.
+    pub size: bool,
 }
 
 /// The `STATUS` response
@@ -790,6 +799,8 @@ pub struct StatusResponse {
     pub max_modseq: Option<u64>,
     // ==================== RFC 8474 ====================
     pub mailbox_id: Option<String>,
+    // ==================== RFC 8438 ====================
+    pub size: Option<u64>,
 }
 
 /// Request used for implementing `LIST` and `LSUB`.
