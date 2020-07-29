@@ -148,7 +148,11 @@ impl CommandProcessor {
                 return_response = true;
             }
 
-            if return_opts.contains(&s::SearchReturnOpt::All)
+            // In IMAP4rev2, `RETURN ()` is equivalent to `RETURN (ALL)`.
+            // In IMAP4rev1 with RFC 4731, we don't get here, since `RETURN ()`
+            // is equivalent to an RFC 3501 search.
+            if (return_opts.contains(&s::SearchReturnOpt::All)
+                || return_opts.is_empty())
                 && !response.hits.is_empty()
             {
                 let mut sr = SeqRange::new();

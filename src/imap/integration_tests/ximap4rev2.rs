@@ -85,6 +85,7 @@ fn esearch_replaces_search() {
     has_untagged_response_matching! {
         s::Response::Esearch(s::EsearchResponse {
             uid: false,
+            all: Some(_),
             ..
         }) in responses
     };
@@ -95,6 +96,7 @@ fn esearch_replaces_search() {
     has_untagged_response_matching! {
         s::Response::Esearch(s::EsearchResponse {
             uid: true,
+            all: Some(_),
             ..
         }) in responses
     };
