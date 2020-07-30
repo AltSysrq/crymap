@@ -19,16 +19,17 @@
 use std::borrow::Cow;
 use std::fs;
 use std::io::Read;
-use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use log::{error, info, warn};
+use log::{info, warn};
 
 use super::defs::*;
 use crate::account::account::{account_config_file, Account};
 use crate::crypt::master_key::MasterKey;
-use crate::support::{safe_name::is_safe_name, user_config::UserConfig};
+use crate::support::{
+    safe_name::is_safe_name, unix_privileges, user_config::UserConfig,
+};
 
 impl CommandProcessor {
     /// Called when a line initiating an `AUTHENTICATE` is received.
@@ -201,7 +202,7 @@ impl CommandProcessor {
         self.log_prefix.push_str(&cmd.userid);
         info!("{} Login successful", self.log_prefix);
 
-        self.drop_privelages(&mut user_dir)?;
+        self.drop_privileges(&mut user_dir)?;
 
         let account = Account::new(
             self.log_prefix.clone(),
@@ -222,128 +223,16 @@ impl CommandProcessor {
         }))
     }
 
-    fn drop_privelages(&mut self, user_dir: &mut PathBuf) -> PartialResult<()> {
-        // Nothing to do if we aren't root
-        if nix::unistd::ROOT != nix::unistd::getuid() {
-            return Ok(());
-        }
-
-        // Before we can chroot, we need to figure out what our groups will be
-        // once we drop down to the user, because we won't have access to
-        // /etc/group after the chroot
-        let md = match user_dir.metadata() {
-            Ok(md) => md,
-            Err(e) => {
-                error!(
-                    "{} Failed to stat '{}': {}",
-                    self.log_prefix,
-                    user_dir.display(),
-                    e
-                );
-                return auth_misconfiguration();
-            }
-        };
-        let target_uid =
-            nix::unistd::Uid::from_raw(md.uid() as nix::libc::uid_t);
-        let (has_user_groups, target_gid) = match nix::unistd::User::from_uid(
-            target_uid,
+    fn drop_privileges(&mut self, user_dir: &mut PathBuf) -> PartialResult<()> {
+        if unix_privileges::drop_privileges(
+            &self.log_prefix,
+            self.system_config.security.chroot_system,
+            user_dir,
         ) {
-            Ok(Some(user)) => {
-                match nix::unistd::initgroups(
-                    &std::ffi::CString::new(user.name.to_owned())
-                        .expect("Got UNIX user name with NUL?"),
-                    user.gid,
-                ) {
-                    Ok(()) => (true, user.gid),
-                    Err(e) => {
-                        warn!(
-                            "{} Failed to init groups for user: {}",
-                            self.log_prefix, e
-                        );
-                        (false, user.gid)
-                    }
-                }
-            }
-            Ok(None) => {
-                // Failure to access /etc/group is expected if we chroot'ed
-                // into the system data directory already
-                if !self.system_config.security.chroot_system {
-                    warn!(
-                        "{} No passwd entry for UID {}, assuming GID {}",
-                        self.log_prefix,
-                        target_uid,
-                        md.gid()
-                    );
-                }
-                (
-                    false,
-                    nix::unistd::Gid::from_raw(md.gid() as nix::libc::gid_t),
-                )
-            }
-            Err(e) => {
-                // Failure to access /etc/group is expected if we chroot'ed
-                // into the system data directory already
-                if !self.system_config.security.chroot_system {
-                    warn!(
-                        "{} Failed to look up passwd entry for UID {}, \
-                         assuming GID {}: {}",
-                        self.log_prefix,
-                        target_uid,
-                        md.gid(),
-                        e
-                    );
-                }
-                (
-                    false,
-                    nix::unistd::Gid::from_raw(md.gid() as nix::libc::gid_t),
-                )
-            }
-        };
-
-        if let Err(e) = nix::unistd::chdir(user_dir)
-            .and_then(|()| nix::unistd::chroot(user_dir))
-        {
-            error!(
-                "{} Chroot (forced because Crymap is running as root) \
-                    into '{}' failed: {}",
-                self.log_prefix,
-                user_dir.display(),
-                e
-            );
-            return auth_misconfiguration();
-        }
-
-        // Chroot successful, adjust the path to reflect that
-        user_dir.push("/"); // Clears everything but '/'
-
-        // Now we can finish dropping privileges
-        if let Err(e) = if has_user_groups {
             Ok(())
         } else {
-            nix::unistd::setgroups(&[target_gid])
+            auth_misconfiguration()
         }
-        .and_then(|()| nix::unistd::setgid(target_gid))
-        .and_then(|()| nix::unistd::setuid(target_uid))
-        {
-            error!(
-                "{} Failed to drop privileges to {}:{}: {}",
-                self.log_prefix, target_uid, target_gid, e
-            );
-            return auth_misconfiguration();
-        }
-
-        if nix::unistd::ROOT == nix::unistd::getuid() {
-            error!(
-                "{} Crymap is still root! You must either \
-                    (a) Run Crymap as a non-root user; \
-                    (b) Set [security].system_user in crymap.toml; \
-                    (c) Ensure that user directories are not owned by root.",
-                self.log_prefix
-            );
-            return auth_misconfiguration();
-        }
-
-        Ok(())
     }
 }
 
