@@ -27,12 +27,13 @@ use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
 use crate::imap::command_processor::CommandProcessor;
 use crate::imap::server::Server;
 use crate::support::system_config::SystemConfig;
+use crate::support::unix_privileges;
 
 // Need to use a this and not die! so that errors go to syslog/etc
 macro_rules! fatal {
     ($ex:ident, $($stuff:tt)*) => {{
         error!($($stuff)*);
-        super::sysexits::$ex.exit()
+        crate::support::sysexits::$ex.exit()
     }}
 }
 
@@ -42,30 +43,6 @@ pub fn serve(
     mut users_root: PathBuf,
 ) {
     let system_config = Arc::new(system_config);
-
-    // Right now we have this awkward situation where you can use log4rs *or*
-    // syslog, because log4rs-syslog hasn't been updated in quite a while.
-    //
-    // If anything goes wrong, we don't really have a way to recover since
-    // inetd sends even stderr back to the client.
-    let log_config_file = system_root.join("logging.toml");
-    if log_config_file.is_file() {
-        log4rs::init_file(log_config_file, log4rs::file::Deserializers::new())
-            .expect("Failed to initialise logging");
-    } else {
-        let formatter = syslog::Formatter3164 {
-            facility: syslog::Facility::LOG_MAIL,
-            hostname: None,
-            process: env!("CARGO_PKG_NAME").to_owned(),
-            pid: nix::unistd::getpid().as_raw(),
-        };
-
-        let logger =
-            syslog::unix(formatter).expect("Failed to connect to syslog");
-        log::set_boxed_logger(Box::new(syslog::BasicLogger::new(logger)))
-            .map(|_| log::set_max_level(log::LevelFilter::Info))
-            .expect("Failed to initialise logging");
-    }
 
     let mut acceptor =
         match SslAcceptor::mozilla_intermediate_v5(SslMethod::tls_server()) {
@@ -109,64 +86,10 @@ pub fn serve(
     // We've opened access to everything on the main system we need; now we can
     // apply chroot and privilege deescalation.
 
-    let system_user = if system_config.security.system_user.is_empty() {
-        None
-    } else {
-        match nix::unistd::User::from_name(&system_config.security.system_user)
-        {
-            Ok(Some(user)) => Some(user),
-            Ok(None) => fatal!(
-                EX_NOUSER,
-                "system_user '{}' does not exist!",
-                system_config.security.system_user
-            ),
-            Err(e) => fatal!(
-                EX_OSFILE,
-                "Unable to look up system_user '{}': {}",
-                system_config.security.system_user,
-                e
-            ),
-        }
-    };
-
-    if let Some(ref system_user) = system_user {
-        if let Err(e) = nix::unistd::initgroups(
-            &std::ffi::CString::new(system_user.name.clone()).unwrap(),
-            system_user.gid,
-        ) {
-            fatal!(EX_OSERR, "Unable to set up groups for system user: {}", e);
-        }
-    }
-
-    if system_config.security.chroot_system {
-        if let Err(e) =
-            // chroot, then chdir, since users_root could be relative
-            nix::unistd::chroot(&users_root)
-            .and_then(|_| nix::unistd::chdir("/"))
-        {
-            fatal!(
-                EX_OSERR,
-                "Failed to chroot to '{}': {}",
-                users_root.display(),
-                e
-            );
-        }
-
-        users_root.push("/");
-    }
-
-    if let Some(system_user) = system_user {
-        if let Err(e) = nix::unistd::setgid(system_user.gid)
-            .and_then(|_| nix::unistd::setuid(system_user.uid))
-        {
-            fatal!(
-                EX_OSERR,
-                "Failed to set UID:GID to {}:{}: {}",
-                system_user.uid,
-                system_user.gid,
-                e
-            );
-        }
+    if let Err(exit) =
+        unix_privileges::assume_system(&system_config.security, &mut users_root)
+    {
+        exit.exit();
     }
 
     // We've dropped all privileges we can; it's now safe to start talking to

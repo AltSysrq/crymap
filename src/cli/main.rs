@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 use structopt::StructOpt;
 
-use super::sysexits::*;
+use crate::support::sysexits::*;
 use crate::support::system_config::SystemConfig;
 
 #[derive(StructOpt)]
@@ -67,6 +67,7 @@ struct ServerCommand {
 
 #[derive(StructOpt)]
 enum ServerSubcommand {
+    Deliver(ServerDeliverSubcommand),
     /// Manage user accounts.
     User(ServerUserSubcommand),
     /// Serve a single IMAPS session over standard IO.
@@ -102,19 +103,82 @@ pub(super) struct ServerUserAddSubcommand {
     pub(super) data_path: Option<PathBuf>,
 }
 
+/// Deliver or import mail.
+///
+/// By default, this will read from standard input and deliver it to the INBOX
+/// of the Crymap user whose name matches the current UNIX user.
+///
+/// Delivering to another user can be accomplished by setting `--user`. This
+/// requires having sufficient privilege to write into the user's mail
+/// directory.
+///
+/// If this command is run as root, it will automatically change its UID to
+/// that of the recipient before delivering the message and will chroot into
+/// the user's directory. This happens BEFORE any input files are opened. In
+/// general, this command should be run as the UNIX user that normally would
+/// process the user's mail when not acting as a stdio-based MDA.
+///
+/// If the first line of an input ends with a UNIX line endings, all line feeds
+/// in that input are converted into DOS line endings. If the first line ends
+/// with a DOS line ending, the input is passed through bit-for-bit.
+///
+/// A maildir mailbox can be imported by simply passing all the files into this
+/// command individually. For example:
+///
+/// ls Maildir/cur/* | xargs -d'\n' crymap server deliver --maildir-flags
+///
+/// This command cannot be used to import mbox files.
+#[derive(StructOpt)]
+pub(super) struct ServerDeliverSubcommand {
+    /// Deliver to this user instead of yourself.
+    #[structopt(short, long)]
+    pub(super) user: Option<String>,
+
+    /// Deliver to this mailbox. This must be an IMAP mailbox name, not a UNIX
+    /// path.
+    #[structopt(short, long, default_value = "INBOX")]
+    pub(super) mailbox: String,
+
+    /// Create the destination mailbox if it does not already exist.
+    #[structopt(short, long)]
+    pub(super) create: bool,
+
+    /// Add this IMAP flag (e.g., '\Flagged') or keyword to the delivered
+    /// message(s). Can be passed multiple times.
+    #[structopt(parse(try_from_str), short, long, number_of_values(1))]
+    pub(super) flag: Vec<crate::account::model::Flag>,
+
+    /// Extract maildir-style flags from the file name(s).
+    #[structopt(long)]
+    pub(super) maildir_flags: bool,
+
+    /// The files to import/deliver. "-" will read from stdin.
+    #[structopt(parse(from_os_str), default_value = "-")]
+    pub(super) inputs: Vec<PathBuf>,
+}
+
 pub fn main() {
     // Clap exits with status 1 instead of EX_USAGE if we use the more concise
     // API
     let cmd = Command::from_clap(&match Command::clap().get_matches_safe() {
         Ok(matches) => matches,
-        Err(clap::Error {
-            kind: clap::ErrorKind::HelpDisplayed,
-            ..
-        })
-        | Err(clap::Error {
-            kind: clap::ErrorKind::VersionDisplayed,
-            ..
-        }) => {
+        Err(
+            e
+            @
+            clap::Error {
+                kind: clap::ErrorKind::HelpDisplayed,
+                ..
+            },
+        )
+        | Err(
+            e
+            @
+            clap::Error {
+                kind: clap::ErrorKind::VersionDisplayed,
+                ..
+            },
+        ) => {
+            println!("{}", e.message);
             return;
         }
         Err(e) => {
@@ -186,7 +250,43 @@ fn server(cmd: ServerCommand) {
         }
     };
 
+    if Ok(true) == nix::unistd::isatty(2) {
+        // Running interactively; ignore logging configuration and just write
+        // to stderr.
+        crate::init_simple_log();
+    } else {
+        // Right now we have this awkward situation where you can use log4rs *or*
+        // syslog, because log4rs-syslog hasn't been updated in quite a while.
+        //
+        // If anything goes wrong, we don't really have a way to recover since
+        // inetd sends even stderr back to the client.
+        let log_config_file = root.join("logging.toml");
+        if log_config_file.is_file() {
+            log4rs::init_file(
+                log_config_file,
+                log4rs::file::Deserializers::new(),
+            )
+            .expect("Failed to initialise logging");
+        } else {
+            let formatter = syslog::Formatter3164 {
+                facility: syslog::Facility::LOG_MAIL,
+                hostname: None,
+                process: env!("CARGO_PKG_NAME").to_owned(),
+                pid: nix::unistd::getpid().as_raw(),
+            };
+
+            let logger =
+                syslog::unix(formatter).expect("Failed to connect to syslog");
+            log::set_boxed_logger(Box::new(syslog::BasicLogger::new(logger)))
+                .map(|_| log::set_max_level(log::LevelFilter::Info))
+                .expect("Failed to initialise logging");
+        }
+    }
+
     match cmd.subcommand {
+        ServerSubcommand::Deliver(cmd) => {
+            super::deliver::deliver(system_config, cmd, users_root);
+        }
         ServerSubcommand::User(ServerUserSubcommand::Add(cmd)) => {
             super::user::add(cmd, users_root);
         }

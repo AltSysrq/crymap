@@ -21,6 +21,97 @@ use std::path::PathBuf;
 
 use log::{error, warn};
 
+use super::sysexits::*;
+use super::system_config::SecurityConfig;
+
+/// If a system user is configured, switch to it if not already that user.
+///
+/// If a system chroot is configured, enter it. `users_root` is updated to `/`
+/// to reflect this.
+///
+/// On failure, an error message has already been logged, and the appropriate
+/// exit code is returned.
+pub fn assume_system(
+    security: &SecurityConfig,
+    users_root: &mut PathBuf,
+) -> Result<(), Sysexit> {
+    macro_rules! fatal {
+        ($sysexit:expr, $($stuff:tt)*) => {{
+            error!($($stuff)*);
+            return Err($sysexit)
+        }}
+    }
+
+    let system_user = if security.system_user.is_empty() {
+        None
+    } else {
+        match nix::unistd::User::from_name(&security.system_user) {
+            Ok(Some(user)) => Some(user),
+            Ok(None) => fatal!(
+                EX_NOUSER,
+                "system_user '{}' does not exist!",
+                security.system_user
+            ),
+            Err(e) => fatal!(
+                EX_OSFILE,
+                "Unable to look up system_user '{}': {}",
+                security.system_user,
+                e
+            ),
+        }
+    };
+
+    if let Some(ref system_user) = system_user {
+        if system_user.uid != nix::unistd::getuid() {
+            if let Err(e) = nix::unistd::initgroups(
+                &std::ffi::CString::new(system_user.name.clone()).unwrap(),
+                system_user.gid,
+            ) {
+                fatal!(
+                    EX_OSERR,
+                    "Unable to set up groups for system user: {}",
+                    e
+                );
+            }
+        }
+    }
+
+    if security.chroot_system {
+        if let Err(e) =
+            // chroot, then chdir, since users_root could be relative
+            nix::unistd::chroot(users_root)
+            .and_then(|_| nix::unistd::chdir("/"))
+        {
+            fatal!(
+                EX_OSERR,
+                "Failed to chroot to '{}': {}",
+                users_root.display(),
+                e
+            );
+        }
+
+        users_root.push("/");
+    }
+
+    if let Some(system_user) = system_user {
+        if system_user.uid != nix::unistd::getuid() {
+            if let Err(e) = nix::unistd::setgid(system_user.gid)
+                .and_then(|_| nix::unistd::setuid(system_user.uid))
+            {
+                fatal!(
+                    EX_OSERR,
+                    "Failed to set UID:GID to {}:{}: {}",
+                    system_user.uid,
+                    system_user.gid,
+                    e
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Given a path to a user directory, drop privileges as appropriate.
 ///
 /// If the current process is not running as root, does nothing.
@@ -29,16 +120,16 @@ use log::{error, warn};
 /// that directory and chroot into it. If this happens, `user_dir` is mutated
 /// to hold the new path after the chroot.
 ///
-/// Returns whether the operation succeeded. If false, the process is in an
-/// indeterminate state and will need to exit soon.
-pub fn drop_privileges(
+/// On failure, returns a status code appropriate to use if the process is
+/// about to exit in response.
+pub fn assume_user_privileges(
     log_prefix: &str,
     chroot_system: bool,
     user_dir: &mut PathBuf,
-) -> bool {
+) -> Result<(), Sysexit> {
     // Nothing to do if we aren't root
     if nix::unistd::ROOT != nix::unistd::getuid() {
-        return true;
+        return Ok(());
     }
 
     // Before we can chroot, we need to figure out what our groups will be
@@ -53,7 +144,7 @@ pub fn drop_privileges(
                 user_dir.display(),
                 e
             );
-            return false;
+            return Err(EX_NOUSER);
         }
     };
     let target_uid = nix::unistd::Uid::from_raw(md.uid() as nix::libc::uid_t);
@@ -121,7 +212,7 @@ pub fn drop_privileges(
             user_dir.display(),
             e
         );
-        return false;
+        return Err(EX_OSERR);
     }
 
     // Chroot successful, adjust the path to reflect that
@@ -140,7 +231,7 @@ pub fn drop_privileges(
             "{} Failed to drop privileges to {}:{}: {}",
             log_prefix, target_uid, target_gid, e
         );
-        return false;
+        return Err(EX_OSERR);
     }
 
     if nix::unistd::ROOT == nix::unistd::getuid() {
@@ -151,8 +242,8 @@ pub fn drop_privileges(
              (c) Ensure that user directories are not owned by root.",
             log_prefix
         );
-        return false;
+        return Err(EX_USAGE);
     }
 
-    true
+    Ok(())
 }

@@ -224,11 +224,13 @@ impl CommandProcessor {
     }
 
     fn drop_privileges(&mut self, user_dir: &mut PathBuf) -> PartialResult<()> {
-        if unix_privileges::drop_privileges(
+        if unix_privileges::assume_user_privileges(
             &self.log_prefix,
             self.system_config.security.chroot_system,
             user_dir,
-        ) {
+        )
+        .is_ok()
+        {
             Ok(())
         } else {
             auth_misconfiguration()

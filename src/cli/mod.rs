@@ -19,7 +19,7 @@
 macro_rules! die {
     ($ex:ident, $($stuff:tt)*) => {{
         eprintln!($($stuff)*);
-        crate::cli::sysexits::$ex.exit()
+        crate::support::sysexits::$ex.exit()
     }}
 }
 
@@ -28,6 +28,6 @@ pub mod main;
 #[cfg(feature = "dev-tools")]
 mod imap_test;
 
+mod deliver;
 mod serve;
-mod sysexits;
 mod user;
