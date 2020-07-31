@@ -624,7 +624,7 @@ impl<V> Groveller<V> {
         let mut bh = mem::replace(&mut self.buffered_header, Vec::new());
         let ret = self.process_header(&bh);
         bh.clear();
-        mem::replace(&mut self.buffered_header, bh);
+        self.buffered_header = bh;
         ret
     }
 
