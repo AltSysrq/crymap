@@ -5,4 +5,8 @@ fully allocated.
 
 Command-line invocation to deliver/import mail
 
+A way to change the user's password
+
+A way to update key configuration
+
 Documentation
