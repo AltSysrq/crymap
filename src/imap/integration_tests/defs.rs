@@ -19,6 +19,7 @@
 use std::borrow::Cow;
 use std::fs;
 use std::io;
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
 
@@ -79,13 +80,14 @@ pub fn set_up_new_root() -> Setup {
     Setup { system_dir }
 }
 
-pub type PipeClient =
-    Client<io::BufReader<os_pipe::PipeReader>, os_pipe::PipeWriter>;
+pub type PipeClient = Client<io::BufReader<UnixStream>, UnixStream>;
 
 impl Setup {
     pub fn connect(&self, name: &'static str) -> PipeClient {
-        let (server_in, client_out) = os_pipe::pipe().unwrap();
-        let (client_in, server_out) = os_pipe::pipe().unwrap();
+        // These streams are really bidirectional, but it's simpler to keep
+        // them separate.
+        let (server_in, client_out) = UnixStream::pair().unwrap();
+        let (client_in, server_out) = UnixStream::pair().unwrap();
         // We don't want the server thread to hold on to the TempDir since the
         // test process can exit before the last server thread notices the EOF
         // and terminates.

@@ -61,7 +61,6 @@ features = [
 ]
 
 [dev-dependencies]
-os_pipe = "0.9"
 proptest = "0.10"
 rayon = "1.3"
 

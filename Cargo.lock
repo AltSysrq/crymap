@@ -243,7 +243,6 @@ dependencies = [
  "nom",
  "num_cpus",
  "openssl",
- "os_pipe",
  "proptest",
  "rand",
  "rayon",
@@ -585,16 +584,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3741934be594d77de1c8461ebcbbe866f585ea616a9753aa78f2bdc69f0e4579"
 dependencies = [
  "num-traits",
-]
-
-[[package]]
-name = "os_pipe"
-version = "0.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb233f06c2307e1f5ce2ecad9f8121cffbbee2c95428f44ea85222e460d0d213"
-dependencies = [
- "libc",
- "winapi",
 ]
 
 [[package]]
