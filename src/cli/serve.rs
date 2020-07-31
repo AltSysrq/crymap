@@ -265,15 +265,7 @@ impl WrappedIo {
                     PollFlags::POLLIN | PollFlags::POLLERR,
                 )];
 
-                let ready = poll(&mut stdin, 30 * 60_000).map_err(nix_to_io)?;
-                if 0 == ready {
-                    return Err(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        "Socket timed out",
-                    ));
-                }
-
-                Ok(())
+                handle_poll_result(poll(&mut stdin, 30 * 60_000))
             }
             openssl::ssl::ErrorCode::WANT_WRITE => {
                 let mut stdout = [PollFd::new(
@@ -281,16 +273,7 @@ impl WrappedIo {
                     PollFlags::POLLOUT | PollFlags::POLLERR,
                 )];
 
-                let ready =
-                    poll(&mut stdout, 30 * 60_000).map_err(nix_to_io)?;
-                if 0 == ready {
-                    return Err(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        "Socket timed out",
-                    ));
-                }
-
-                Ok(())
+                handle_poll_result(poll(&mut stdout, 30 * 60_000))
             }
             _ => Err(e
                 .into_io_error()
@@ -299,18 +282,19 @@ impl WrappedIo {
     }
 }
 
-fn nix_to_io(e: nix::Error) -> io::Error {
-    io::Error::from_raw_os_error(e.as_errno().unwrap() as i32)
+fn handle_poll_result(
+    result: Result<nix::libc::c_int, nix::Error>,
+) -> io::Result<()> {
+    match result {
+        Ok(0) => {
+            Err(io::Error::new(io::ErrorKind::TimedOut, "Socket timed out"))
+        }
+        Ok(_) => Ok(()),
+        Err(nix::Error::Sys(nix::errno::Errno::EINTR)) => Ok(()),
+        Err(e) => Err(nix_to_io(e)),
+    }
 }
 
-fn require_ready_or_error(
-    mut ready: nix::sys::select::FdSet,
-    mut error: nix::sys::select::FdSet,
-    fd: RawFd,
-) -> Result<(), io::Error> {
-    if !ready.contains(fd) && !error.contains(fd) {
-        Err(io::Error::new(io::ErrorKind::TimedOut, "Socket timed out"))
-    } else {
-        Ok(())
-    }
+fn nix_to_io(e: nix::Error) -> io::Error {
+    io::Error::from_raw_os_error(e.as_errno().unwrap() as i32)
 }
