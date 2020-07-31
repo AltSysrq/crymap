@@ -832,7 +832,7 @@ mod test {
 
         [
             0u32, 1, 128, 254, 255, 256, 257, 510, 511, 512, 513, 65534, 65535,
-            65536, 65537, 131070, 131071, 131072, 131073,
+            65536, 131071, 131072,
         ]
         .par_iter()
         .for_each(|&num_prefix_messages| {
@@ -869,7 +869,13 @@ mod test {
         let base = scheme.emplace_many(&paths, root.path(), 1 << 30).unwrap();
 
         // All values from 1 to base + num_new_messages should be allocated now
-        for i in 1..base + num_new_messages {
+        let fast_verify_end = base.saturating_sub(500).max(1);
+        for i_100 in 1..(fast_verify_end / 100).max(1) {
+            let i = i_100 * 100;
+            assert!(scheme.is_allocated(i), "ID {} not allocated", i);
+        }
+
+        for i in fast_verify_end..base + num_new_messages {
             assert!(scheme.is_allocated(i), "ID {} not allocated", i);
         }
     }
