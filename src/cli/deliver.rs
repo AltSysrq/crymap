@@ -39,8 +39,6 @@ pub(super) fn deliver(
     mut cmd: ServerDeliverSubcommand,
     mut users_root: PathBuf,
 ) {
-    // TODO Logging
-
     if let Err(exit) =
         unix_privileges::assume_system(&system_config.security, &mut users_root)
     {
