@@ -121,9 +121,13 @@ impl<'a> HierIdScheme<'a> {
     /// Link `src` into this scheme at the given destination identifier.
     ///
     /// Returns whether any change was made.
-    pub fn emplace(&self, src: &Path, dst: u32) -> Result<bool, Error> {
-        let dst = self.allocation_path_for_id(dst);
-        self.mkdirs(&dst)?;
+    pub fn emplace(&self, src: &Path, dst_id: u32) -> Result<bool, Error> {
+        let dst = self.allocation_path_for_id(dst_id);
+        // We only need to try allocating the directory for the first item in
+        // each branch.
+        if 1 == dst_id || 0 == dst_id % 256 {
+            self.mkdirs(&dst)?;
+        }
 
         match nix::unistd::linkat(
             None,
