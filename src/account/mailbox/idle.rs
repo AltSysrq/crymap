@@ -76,9 +76,12 @@ impl IdleListener {
     /// Block until a notification is received for this listener.
     pub fn idle(self) -> io::Result<()> {
         let mut buf = [0u8];
+        // On Linux, recv() on after the notifier closed the socket returns
+        // immediately with an empty read.
+        // On FreeBSD, it fails with NotConnected.
         match self.sock.recv(&mut buf) {
             Ok(_) => Ok(()),
-            Err(e) if io::ErrorKind::TimedOut == e.kind() => Ok(()),
+            Err(e) if io::ErrorKind::NotConnected == e.kind() => Ok(()),
             Err(e) => Err(e),
         }
     }
