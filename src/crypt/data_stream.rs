@@ -391,7 +391,7 @@ mod test {
                     &mut ciphertext,
                     &RSA1024A,
                     "the key name".to_owned(),
-                    Compression::Un64Zstd,
+                    Compression::DEFAULT_FOR_MESSAGE,
                 )
                 .unwrap();
                 writer.write_all(&cleartext).unwrap();

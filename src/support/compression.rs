@@ -50,20 +50,15 @@ impl<W: FinishWrite + ?Sized> FinishWrite for Box<W> {
 )]
 #[repr(u8)]
 pub enum Compression {
-    /// ZStandard compression, with Un-64 as a pre-compressor.
-    ///
-    /// TODO Get rid of this and make Un64Zstd20200725 value 0 before we have
-    /// any real production stuff using this.
-    Un64Zstd = 0,
-    /// Vanilla ZStandard compression
-    Zstd = 1,
     /// ZStandard compression using the 2020-07-25 base dictionary, with Un-64
     /// as a pre-compressor.
     ///
     /// The pre-built dictionary optimises the headers, so as to minimise the
     /// amount of data that needs to be fetched for operations such as
     /// `Envelope` which only need to consult the headers.
-    Un64Zstd20200725 = 2,
+    Un64Zstd20200725 = 0,
+    /// Vanilla ZStandard compression
+    Zstd = 1,
 }
 
 /// A dictionary compiled from the headers of a set of ~6k test messages on
@@ -87,9 +82,6 @@ impl Compression {
         reader: impl BufRead + 'a,
     ) -> io::Result<Box<dyn BufRead + 'a>> {
         match self {
-            Compression::Un64Zstd => {
-                Ok(box_r(un64::Reader::new(zstd::Decoder::new(reader)?)))
-            }
             Compression::Un64Zstd20200725 => Ok(box_r(un64::Reader::new(
                 zstd::Decoder::with_prepared_dictionary(
                     reader,
@@ -108,9 +100,6 @@ impl Compression {
         writer: impl Write + 'a,
     ) -> io::Result<impl FinishWrite + 'a> {
         match self {
-            Compression::Un64Zstd => {
-                Ok(box_w(un64::Writer::new(zstd::Encoder::new(writer, 5)?)))
-            }
             Compression::Un64Zstd20200725 => Ok(box_w(un64::Writer::new(
                 zstd::Encoder::with_prepared_dictionary(
                     writer,
