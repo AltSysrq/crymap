@@ -260,8 +260,7 @@ impl StatefulMailbox {
     pub fn count_unseen(&self) -> usize {
         let seen = match self.state.flag_id(&Flag::Seen) {
             Some(seen) => seen,
-            // TODO This is wrong
-            None => return 0,
+            None => return self.state.num_messages(),
         };
 
         self.state

@@ -1651,5 +1651,33 @@ mod test {
                 })
                 .unwrap()
         );
+
+        {
+            let mb = setup.account.mailbox("Archive", false).unwrap();
+
+            // Adjust Archive to have 1 recent, 1 unseen, 1 message.
+            mb.append(
+                FixedOffset::east(0).timestamp_millis(0),
+                vec![],
+                &b"this is a test message"[..],
+            )
+            .unwrap();
+        };
+
+        assert_eq!(
+            StatusResponse {
+                name: "Archive".to_owned(),
+                unseen: Some(1),
+                ..StatusResponse::default()
+            },
+            setup
+                .account
+                .status(&StatusRequest {
+                    name: "Archive".to_owned(),
+                    unseen: true,
+                    ..StatusRequest::default()
+                })
+                .unwrap()
+        );
     }
 }
