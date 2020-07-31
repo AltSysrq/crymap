@@ -193,7 +193,8 @@ mod test {
         assert!(mb1
             .stateless()
             .message_scheme()
-            .path_for_id(uid.0.get())
+            .access_path_for_id(uid.0.get())
+            .assume_exists()
             .is_file());
         mb1.expunge_all_deleted().unwrap();
         mb1.poll().unwrap();
@@ -201,7 +202,8 @@ mod test {
         assert!(!mb1
             .stateless()
             .message_scheme()
-            .path_for_id(uid.0.get())
+            .access_path_for_id(uid.0.get())
+            .assume_exists()
             .is_file());
 
         // Expunge via mb2, who thinks the message still exists
@@ -249,7 +251,8 @@ mod test {
         assert!(!mb2
             .stateless()
             .message_scheme()
-            .path_for_id(uid.0.get())
+            .access_path_for_id(uid.0.get())
+            .assume_exists()
             .is_file());
     }
 
@@ -287,7 +290,8 @@ mod test {
         assert!(mb2
             .stateless()
             .message_scheme()
-            .path_for_id(uid2.0.get())
+            .access_path_for_id(uid2.0.get())
+            .assume_exists()
             .is_file());
     }
 

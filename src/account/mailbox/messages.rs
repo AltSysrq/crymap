@@ -50,13 +50,15 @@ impl StatelessMailbox {
         uid: Uid,
     ) -> Result<(MessageMetadata, Box<dyn BufRead + 'a>), Error> {
         let scheme = self.message_scheme();
-        let mut file = match fs::File::open(scheme.path_for_id(uid.0.get())) {
+        let mut file = match fs::File::open(
+            scheme.access_path_for_id(uid.0.get()).assume_exists(),
+        ) {
             Ok(f) => f,
-            Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
+            Err(e)
+                if Some(nix::libc::ELOOP) == e.raw_os_error()
+                    || io::ErrorKind::NotFound == e.kind() =>
+            {
                 return Err(Error::ExpungedMessage)
-            }
-            Err(e) if io::ErrorKind::NotFound == e.kind() => {
-                return Err(Error::NxMessage)
             }
             Err(e) => return Err(e.into()),
         };
@@ -241,10 +243,10 @@ impl StatelessMailbox {
                 // We could have failed because `src` is invalid.
                 match fs::metadata(src[0]) {
                     Ok(_) => (),
-                    Err(e) if io::ErrorKind::NotFound == e.kind() => {
-                        return Err(Error::NxMessage);
-                    }
-                    Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
+                    Err(e)
+                        if Some(nix::libc::ELOOP) == e.raw_os_error()
+                            || io::ErrorKind::NotFound == e.kind() =>
+                    {
                         return Err(Error::ExpungedMessage);
                     }
                     Err(e) => return Err(e.into()),
@@ -314,7 +316,12 @@ impl StatefulMailbox {
                     .filter_map(|id| self.state.flag(id).cloned())
                     .collect::<Vec<_>>(),
             );
-            path_bufs.push(self.s.message_scheme().path_for_id(uid.0.get()));
+            path_bufs.push(
+                self.s
+                    .message_scheme()
+                    .access_path_for_id(uid.0.get())
+                    .assume_exists(),
+            );
         }
 
         if path_bufs.is_empty() {

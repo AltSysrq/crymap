@@ -17,6 +17,7 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::fs;
+use std::io;
 use std::os::unix::fs::DirBuilderExt;
 
 use chrono::prelude::*;
@@ -110,8 +111,13 @@ impl StatefulMailbox {
             let scheme = self.s.message_scheme();
             for uid in first_unchecked_uid.0.get()..=last_unchecked_uid.0.get()
             {
-                match fs::metadata(scheme.path_for_id(uid)) {
-                    Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
+                match fs::metadata(
+                    scheme.access_path_for_id(uid).assume_exists(),
+                ) {
+                    Err(e)
+                        if Some(nix::libc::ELOOP) == e.raw_os_error()
+                            || io::ErrorKind::NotFound == e.kind() =>
+                    {
                         self.state.silent_expunge(Uid::of(uid).unwrap());
                     }
                     _ => (),
@@ -237,8 +243,13 @@ impl StatefulMailbox {
     fn apply_change(&mut self, cid: Cid) -> Result<(), Error> {
         self.state.commit(
             cid,
-            self.s
-                .read_state_file(&self.s.change_scheme().path_for_id(cid.0))?,
+            self.s.read_state_file(
+                &self
+                    .s
+                    .change_scheme()
+                    .access_path_for_id(cid.0)
+                    .assume_exists(),
+            )?,
         );
 
         self.see_cid(cid);
@@ -555,7 +566,12 @@ mod test {
         }
 
         // The earliest change should get expunged
-        assert!(!mb1.stateless().change_scheme().path_for_id(1).is_file());
+        assert!(!mb1
+            .stateless()
+            .change_scheme()
+            .access_path_for_id(1)
+            .assume_exists()
+            .is_file());
     }
 
     #[test]
@@ -581,6 +597,11 @@ mod test {
         assert!(list_rollups(mb1.stateless()).unwrap().is_empty());
 
         // The earliest change should not get expunged
-        assert!(mb1.stateless().change_scheme().path_for_id(1).is_file());
+        assert!(mb1
+            .stateless()
+            .change_scheme()
+            .access_path_for_id(1)
+            .assume_exists()
+            .is_file());
     }
 }

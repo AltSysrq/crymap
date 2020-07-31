@@ -511,7 +511,12 @@ mod test {
             }
 
             // The earliest change should get expunged
-            assert!(!mb1.stateless().change_scheme().path_for_id(1).is_file());
+            assert!(!mb1
+                .stateless()
+                .change_scheme()
+                .access_path_for_id(1)
+                .assume_exists()
+                .is_file());
         }
 
         let (mb2, _) = setup.stateless.clone().select().unwrap();

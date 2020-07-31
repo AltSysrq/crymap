@@ -109,8 +109,15 @@
 //! small mailboxes while keeping each "section" of the tree small enough to
 //! iterate efficiently and allowing some garbage collection.
 //!
-//! The directory-like elements in the path (other than the top one) is a
+//! The directory-like elements in the path (other than the top one) are each a
 //! symlink to a directory of the same name, but suffixed with `.d`.
+//!
+//! The bottom level in the tree additionally has a symlink named `alloc`.
+//! Initially, it points to `.`. When the directory becomes fully allocated or
+//! some time thereafter, the symlink is updated to point to `alloc`, i.e., to
+//! be self-referential. All ID allocations go through this extra symlink. This
+//! allows gravestones to be removed while still allowing the whole directory
+//! to be unambiguously considered fully allocated.
 //!
 //! When an item is expunged, it is replaced with a symlink to itself. A
 //! "garbage collection" process can identify directories containing only such
@@ -119,8 +126,8 @@
 //!
 //! The gravestone scheme enables a number of consistent, atomic operations:
 //!
-//! - Reading: Open succeeds iff the item exists; fails with `ENOENT` if it was
-//! never allocated; fails with `ELOOP` if the item was expunged.
+//! - Reading: Open succeeds iff the item exists; fails with `ELOOP` or
+//! `ENOENT` if the item was expunged.
 //!
 //! - Creating: `link()` succeeds iff the item is unallocated; fails with
 //! `EEXISTS` or `ELOOP` if it was already allocated.

@@ -46,9 +46,37 @@ pub struct HierIdScheme<'a> {
     pub root: &'a Path,
 }
 
+/// A path into a `HierIdScheme` which is used to allocate new IDs or to check
+/// whether IDs are allocated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AllocationPath(PathBuf);
+
+impl AllocationPath {
+    /// Return the path to the `alloc` symlink in this path.
+    fn alloc_path(&self) -> &Path {
+        self.0.parent().unwrap()
+    }
+
+    /// Return the path to the bottom directory level in this path.
+    fn containing_directory(&self) -> &Path {
+        self.alloc_path().parent().unwrap()
+    }
+}
+
+/// A path into a `HierIdScheme` which is used to access IDs known to already
+/// be allocated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccessPath(PathBuf);
+
+impl AccessPath {
+    pub fn assume_exists(self) -> PathBuf {
+        self.0
+    }
+}
+
 impl<'a> HierIdScheme<'a> {
-    /// Return the path that is assigned to the given id.
-    pub fn path_for_id(&self, id: u32) -> PathBuf {
+    /// Return the raw path that is assigned to the given id.
+    fn path_for_id(&self, id: u32, for_allocation: bool) -> PathBuf {
         let first_octet: u32;
 
         let mut first_name = [self.prefix, 0];
@@ -71,22 +99,37 @@ impl<'a> HierIdScheme<'a> {
         for octet in first_octet..3 {
             buf.push(format!("{:02x}", (id >> (8 * (3 - octet))) & 0xFF));
         }
+
+        if for_allocation {
+            buf.push("alloc");
+        }
+
         buf.push(format!("{:02x}.{}", id & 0xFF, self.extension));
         buf
+    }
+
+    /// Return the allocation path that is assigned to the given id.
+    pub fn allocation_path_for_id(&self, id: u32) -> AllocationPath {
+        AllocationPath(self.path_for_id(id, true))
+    }
+
+    /// Return the access path that is assigned to the given id.
+    pub fn access_path_for_id(&self, id: u32) -> AccessPath {
+        AccessPath(self.path_for_id(id, false))
     }
 
     /// Link `src` into this scheme at the given destination identifier.
     ///
     /// Returns whether any change was made.
     pub fn emplace(&self, src: &Path, dst: u32) -> Result<bool, Error> {
-        let dst = self.path_for_id(dst);
+        let dst = self.allocation_path_for_id(dst);
         self.mkdirs(&dst)?;
 
         match nix::unistd::linkat(
             None,
             src,
             None,
-            &dst,
+            &dst.0,
             nix::unistd::LinkatFlags::SymlinkFollow,
         ) {
             Ok(_) => Ok(true),
@@ -164,11 +207,11 @@ impl<'a> HierIdScheme<'a> {
         let mut to_allocate = first_id;
         while to_allocate < target_id {
             let id = to_allocate;
-            let gravestone = self.path_for_id(id);
+            let gravestone = self.allocation_path_for_id(id);
             if 0 == id % 256 {
                 // Try to allocate all 256 ids at once
-                let parent = gravestone.parent().unwrap();
-                self.mkdirs(&parent)?;
+                let parent = gravestone.containing_directory();
+                self.mkdirs_bare(&parent)?;
                 let success = match std::os::unix::fs::symlink(
                     parent.file_name().unwrap(),
                     parent,
@@ -198,24 +241,19 @@ impl<'a> HierIdScheme<'a> {
                 self.mkdirs(&gravestone)?;
             }
 
-            match std::os::unix::fs::symlink(
-                gravestone.file_name().unwrap(),
-                &gravestone,
-            ) {
-                Ok(_) => (),
-                // ID was already exposed and garbage collection collapsed the
-                // containing directory
-                Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => (),
-                Err(e) if io::ErrorKind::AlreadyExists == e.kind() => (),
-                Err(e) => return Err(e.into()),
-            }
-
-            to_allocate += 1;
+            // Mark the whole directory as allocated and increment the current
+            // id to the next multiple of 256.
+            //
+            // We don't need to consider the case where target_id is within
+            // that range since target_id is always aligned at least to a
+            // multiple of 256.
+            self.expunge_path(id, gravestone.alloc_path(), tmp)?;
+            to_allocate = (id + 256) / 256 * 256;
         }
 
         // Now to move the whole aligned directory
-        let mut atomic_src = isolated.path_for_id(BASE);
-        let mut atomic_dst = self.path_for_id(target_id);
+        let mut atomic_src = isolated.path_for_id(BASE, false);
+        let mut atomic_dst = self.path_for_id(target_id, false);
         for _ in 0..levels {
             atomic_src.pop();
             atomic_dst.pop();
@@ -225,7 +263,7 @@ impl<'a> HierIdScheme<'a> {
         let atomic_dst_nominal = atomic_dst.clone();
         atomic_dst.set_extension("d");
 
-        self.mkdirs(&atomic_dst)?;
+        self.mkdirs_bare(&atomic_dst)?;
         fs::rename(&atomic_src, &atomic_dst).map_err(|e| {
             // ENOTEMPTY: Someone else made the directory first
             // ELOOP: The directory was created and expunged by GC before we
@@ -254,8 +292,8 @@ impl<'a> HierIdScheme<'a> {
     ///
     /// The gravestone is staged in a random file in `tmp`.
     pub fn expunge(&self, target: u32, tmp: &Path) -> Result<(), Error> {
-        let path = self.path_for_id(target);
-        self.expunge_path(target, &path, tmp)
+        let path = self.allocation_path_for_id(target);
+        self.expunge_path(target, &path.0, tmp)
     }
 
     fn expunge_path(
@@ -268,7 +306,7 @@ impl<'a> HierIdScheme<'a> {
 
         // To avoid making a bunch of redundant writes to the FS, see if the
         // file is already a gravestone and short-circuit if it is.
-        match fs::metadata(path) {
+        match fs::metadata(&path) {
             Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
                 return Ok(())
             }
@@ -303,7 +341,7 @@ impl<'a> HierIdScheme<'a> {
     /// Return whether the given identifier is already allocated.
     pub fn is_allocated(&self, id: u32) -> bool {
         // Follow symlinks here to get ELOOP for expunged individual item
-        match fs::metadata(&self.path_for_id(id)) {
+        match fs::metadata(&self.allocation_path_for_id(id).0) {
             Ok(_) => true,
             Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => true,
             _ => false,
@@ -344,11 +382,26 @@ impl<'a> HierIdScheme<'a> {
         result
     }
 
+    /// Create the file system to contain the given `AllocationPath`, including
+    /// the `self` symlink.
+    fn mkdirs(&self, path: &AllocationPath) -> io::Result<()> {
+        self.mkdirs_bare(path.alloc_path())?;
+        match std::os::unix::fs::symlink(".", path.alloc_path()) {
+            Ok(_) => (),
+            Err(e) if io::ErrorKind::AlreadyExists == e.kind() => (),
+            Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => (),
+            Err(e) => return Err(e),
+        }
+        Ok(())
+    }
+
     /// Create the file system above `path`, where `path` must be a value
-    /// produced by `path_for_id()`.
+    /// produced by one of the `*path_for_id()` functions.
+    ///
+    /// This does not create the bottom-level `self` symlink.
     ///
     /// This will silently succeed if a part of the path is already expunged.
-    pub fn mkdirs(&self, path: &Path) -> io::Result<()> {
+    fn mkdirs_bare(&self, path: &Path) -> io::Result<()> {
         // 255/256th of the time, everything already exists
         match fs::symlink_metadata(path.parent().unwrap()) {
             Ok(_) => return Ok(()),
@@ -578,6 +631,16 @@ impl<'a> HierIdScheme<'a> {
             return Ok(true);
         }
 
+        path.push("alloc");
+        let fully_allocated = match fs::metadata(&path) {
+            Err(e) => Some(nix::libc::ELOOP) == e.raw_os_error(),
+            Ok(_) => false,
+        };
+        path.pop();
+
+        let mut expunged_paths = Vec::new();
+        let mut all_gone = true;
+
         // Iterate descending so that we find unallocated items more quickly
         for i in (0..=255).into_iter().rev() {
             path.push(format!("{:02x}.{}", i, self.extension));
@@ -595,20 +658,42 @@ impl<'a> HierIdScheme<'a> {
                 exists = false;
             }
 
+            if allocated && !exists {
+                expunged_paths.push(path.clone());
+            }
+
             path.pop();
 
             // If the slot is unallocated or still holds an existing item, we
-            // can't GC this leaf.
+            // can't GC this leaf at all.
             //
             // ID 0 is never allocated, but we don't need to special-case that
             // since the top-level "X0" directory cannot be garbage-collected
             // anyway.
-            if !allocated || exists {
+            if !allocated && !fully_allocated {
                 return Ok(false);
+            }
+
+            all_gone &= !exists;
+        }
+
+        if !all_gone && !expunged_paths.is_empty() {
+            // We can't fully GC this branch, but we can prune the dead leaves
+            // at least.
+
+            // Ensure the whole directory is marked allocated
+            if !fully_allocated {
+                path.push("alloc");
+                self.expunge_path(id_prefix, &path, tmp)?;
+                path.pop();
+            }
+
+            for path in expunged_paths {
+                let _ = fs::remove_file(path);
             }
         }
 
-        Ok(true)
+        Ok(all_gone)
     }
 }
 
@@ -713,31 +798,31 @@ mod test {
 
         assert_eq!(
             ["z0", "01.eml"].iter().collect::<PathBuf>(),
-            scheme.path_for_id(1)
+            scheme.access_path_for_id(1).0
         );
         assert_eq!(
             ["z0", "ff.eml"].iter().collect::<PathBuf>(),
-            scheme.path_for_id(255)
+            scheme.access_path_for_id(255).0
         );
         assert_eq!(
             ["z1", "30", "39.eml"].iter().collect::<PathBuf>(),
-            scheme.path_for_id(12345)
+            scheme.access_path_for_id(12345).0
         );
         assert_eq!(
             ["z2", "01", "e2", "40.eml"].iter().collect::<PathBuf>(),
-            scheme.path_for_id(123456)
+            scheme.access_path_for_id(123456).0
         );
         assert_eq!(
             ["z3", "01", "00", "00", "00.eml"]
                 .iter()
                 .collect::<PathBuf>(),
-            scheme.path_for_id(16777216)
+            scheme.access_path_for_id(16777216).0
         );
         assert_eq!(
             ["z3", "ff", "ff", "ff", "ff.eml"]
                 .iter()
                 .collect::<PathBuf>(),
-            scheme.path_for_id(4294967295)
+            scheme.access_path_for_id(4294967295).0
         );
     }
 
@@ -781,6 +866,16 @@ mod test {
         assert!(root.path().join("x1/02/00.foo").is_file());
         scheme.expunge(512, root.path()).unwrap();
         assert!(!root.path().join("x1/02/00.foo").is_file());
+        // The gravestone is still there
+        assert!(fs::symlink_metadata(root.path().join("x1/02/00.foo")).is_ok());
+
+        assert!(root.path().join("x1/0b/b8.foo").is_file());
+        scheme.expunge(3000, root.path()).unwrap();
+        assert!(!root.path().join("x1/0b/b8.foo").is_file());
+        // The gravestone is still there
+        assert!(fs::symlink_metadata(root.path().join("x1/0b/b8.foo")).is_ok());
+
+        scheme.expunge(N - 1, root.path()).unwrap();
 
         // Expunge the whole page starting at 1024 (x1/04/*)
         for i in 1024..1024 + 256 {
@@ -788,7 +883,10 @@ mod test {
         }
 
         // x1/04 and x1/01 should get remove entirely. The contents of x0 and
-        // some of x1/02 get expunged.
+        // some of x1/02 get expunged. 01/0b/b8.foo's gravestone is removed,
+        // but the directory containing it is marked fully allocated. N-1's
+        // gravestone *must not* be removed since that branch is not completely
+        // allocated.
         scheme.gc(root.path(), root.path(), 550).unwrap();
         assert!(!root.path().join("x0/80.foo").is_file());
         assert!(!root.path().join("x1/02/00.foo").is_file());
@@ -799,12 +897,16 @@ mod test {
         // Cross-check that the above assertions make sense
         assert!(root.path().join("x1/02").is_dir());
         assert!(root.path().join("x1/02.d").is_dir());
+        assert!(fs::symlink_metadata(root.path().join("x1/0b/b8.foo")).is_err());
 
         assert!(scheme.is_allocated(1));
         assert!(scheme.is_allocated(256));
         assert!(scheme.is_allocated(512));
         assert!(scheme.is_allocated(513));
         assert!(scheme.is_allocated(1024));
+        assert!(scheme.is_allocated(3000));
+        assert!(scheme.is_allocated(N - 1));
+        assert!(!scheme.is_allocated(N));
 
         // Test that overwriting fails in a variety of cases
         assert!(!scheme.emplace(&dummy, N - 1).unwrap());
@@ -945,7 +1047,7 @@ mod test {
         for i in 1..N {
             assert_eq!(
                 i >= N - 100 || is_power_of_7(i),
-                scheme.path_for_id(i).is_file(),
+                scheme.access_path_for_id(i).assume_exists().is_file(),
                 "Unexpected value for {}",
                 i
             );

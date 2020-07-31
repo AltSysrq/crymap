@@ -148,7 +148,13 @@ mod test {
 
         let tx: StateTransaction = setup
             .stateless
-            .read_state_file(&setup.stateless.change_scheme().path_for_id(1))
+            .read_state_file(
+                &setup
+                    .stateless
+                    .change_scheme()
+                    .access_path_for_id(1)
+                    .assume_exists(),
+            )
             .unwrap();
 
         // If we were able to deserialise it at all, the read operation worked.
