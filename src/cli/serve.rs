@@ -17,6 +17,7 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::io::{self, Read, Write};
+use std::os::unix::io::RawFd;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -28,6 +29,9 @@ use crate::imap::command_processor::CommandProcessor;
 use crate::imap::server::Server;
 use crate::support::system_config::SystemConfig;
 use crate::support::unix_privileges;
+
+const STDIN: RawFd = 0;
+const STDOUT: RawFd = 1;
 
 // Need to use a this and not die! so that errors go to syslog/etc
 macro_rules! fatal {
@@ -94,7 +98,7 @@ pub fn serve(
 
     // We've dropped all privileges we can; it's now safe to start talking to
     // the client.
-    match (nix::unistd::isatty(0), nix::unistd::isatty(1)) {
+    match (nix::unistd::isatty(STDIN), nix::unistd::isatty(STDOUT)) {
         (Ok(true), _) | (_, Ok(true)) => {
             // In this case, we *do* want to use die!() since we're on a
             // terminal.
@@ -103,19 +107,19 @@ pub fn serve(
         _ => (),
     }
 
-    let peer_name = match nix::sys::socket::getpeername(0) {
+    let peer_name = match nix::sys::socket::getpeername(STDIN) {
         Ok(addr) => addr.to_string(),
         Err(e) => fatal!(EX_NOHOST, "Unable to determine peer name: {}", e),
     };
 
     if let Err(e) = nix::sys::socket::setsockopt(
-        0,
+        STDIN,
         nix::sys::socket::sockopt::ReceiveTimeout,
         &nix::sys::time::TimeVal::minutes(30),
     )
     .and_then(|_| {
         nix::sys::socket::setsockopt(
-            1,
+            STDOUT,
             nix::sys::socket::sockopt::SendTimeout,
             &nix::sys::time::TimeVal::minutes(30),
         )
@@ -124,7 +128,7 @@ pub fn serve(
     }
 
     if let Err(e) = nix::sys::socket::setsockopt(
-        1,
+        STDOUT,
         nix::sys::socket::sockopt::TcpNoDelay,
         &true,
     ) {
@@ -159,15 +163,16 @@ pub fn serve(
         processor,
     );
 
-    if let Err(e) =
-        nix::fcntl::fcntl(0, nix::fcntl::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK))
-            .and_then(|_| {
-                nix::fcntl::fcntl(
-                    1,
-                    nix::fcntl::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
-                )
-            })
-    {
+    if let Err(e) = nix::fcntl::fcntl(
+        STDIN,
+        nix::fcntl::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
+    )
+    .and_then(|_| {
+        nix::fcntl::fcntl(
+            STDOUT,
+            nix::fcntl::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
+        )
+    }) {
         fatal!(
             EX_OSERR,
             "{} Unable to put input/output into non-blocking mode: {}",
@@ -188,7 +193,7 @@ struct Stdio;
 
 impl Read for Stdio {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        nix::unistd::read(0, buf).map_err(|e| {
+        nix::unistd::read(STDIN, buf).map_err(|e| {
             io::Error::from_raw_os_error(e.as_errno().unwrap() as i32)
         })
     }
@@ -196,7 +201,7 @@ impl Read for Stdio {
 
 impl Write for Stdio {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        nix::unistd::write(1, buf).map_err(|e| {
+        nix::unistd::write(STDOUT, buf).map_err(|e| {
             io::Error::from_raw_os_error(e.as_errno().unwrap() as i32)
         })
     }
@@ -254,29 +259,33 @@ impl WrappedIo {
     fn on_error(&mut self, e: openssl::ssl::Error) -> io::Result<()> {
         match e.code() {
             openssl::ssl::ErrorCode::WANT_READ => {
-                let mut stdin = nix::sys::select::FdSet::new();
-                stdin.insert(0);
+                let mut stdin_ready = nix::sys::select::FdSet::new();
+                stdin_ready.insert(STDIN);
+                let mut stdin_error = stdin_ready.clone();
                 nix::sys::select::select(
                     None,
-                    Some(&mut stdin.clone()),
+                    Some(&mut stdin_ready),
                     None,
-                    Some(&mut stdin),
+                    Some(&mut stdin_error),
                     Some(&mut nix::sys::time::TimeVal::minutes(30)),
                 )
                 .map_err(nix_to_io)?;
+                require_ready_or_error(stdin_ready, stdin_error, STDIN)?;
                 Ok(())
             }
             openssl::ssl::ErrorCode::WANT_WRITE => {
-                let mut stdout = nix::sys::select::FdSet::new();
-                stdout.insert(1);
+                let mut stdout_ready = nix::sys::select::FdSet::new();
+                stdout_ready.insert(STDOUT);
+                let mut stdout_error = stdout_ready.clone();
                 nix::sys::select::select(
                     None,
                     None,
-                    Some(&mut stdout.clone()),
-                    Some(&mut stdout.clone()),
+                    Some(&mut stdout_ready),
+                    Some(&mut stdout_error),
                     Some(&mut nix::sys::time::TimeVal::minutes(30)),
                 )
                 .map_err(nix_to_io)?;
+                require_ready_or_error(stdout_ready, stdout_error, STDOUT)?;
                 Ok(())
             }
             _ => Err(e
@@ -288,4 +297,16 @@ impl WrappedIo {
 
 fn nix_to_io(e: nix::Error) -> io::Error {
     io::Error::from_raw_os_error(e.as_errno().unwrap() as i32)
+}
+
+fn require_ready_or_error(
+    mut ready: nix::sys::select::FdSet,
+    mut error: nix::sys::select::FdSet,
+    fd: RawFd,
+) -> Result<(), io::Error> {
+    if !ready.contains(fd) && !error.contains(fd) {
+        Err(io::Error::new(io::ErrorKind::TimedOut, "Socket timed out"))
+    } else {
+        Ok(())
+    }
 }

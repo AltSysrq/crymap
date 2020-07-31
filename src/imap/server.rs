@@ -696,8 +696,9 @@ impl Server {
             notifier: Option<IdleNotifier>,
         }
 
-        let (send_read, recv_read) =
-            std::sync::mpsc::sync_channel::<Box<dyn BufRead + Send>>(1);
+        let (send_read, recv_read) = std::sync::mpsc::sync_channel::<
+            Result<Box<dyn BufRead + Send>, io::Error>,
+        >(1);
         let context: Arc<Mutex<IdleContext>> =
             Arc::new(Mutex::new(IdleContext {
                 keep_idling: true,
@@ -723,14 +724,23 @@ impl Server {
 
                 let mut read = mem::replace(read_ref, Box::new(&[] as &[u8]));
                 std::thread::spawn(move || {
-                    let _ = read
+                    let mut done_line = Vec::new();
+                    let mut read_result = read
                         .by_ref()
-                        .take(256)
-                        .read_until(b'\n', &mut Vec::new());
+                        .take(16)
+                        .read_until(b'\n', &mut done_line);
+
+                    if read_result.is_ok() && !done_line.ends_with(b"\n") {
+                        read_result = Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "Expected DONE, got garbage",
+                        ));
+                    }
+
                     // Either we got DONE\r\n (or some other line that fits in
                     // the buffer, we don't really care), or something's gone
                     // very wrong. Either way, we just end the idle and let the
-                    // normal command flow detect any error conditions.
+                    // outer code deal with it.
                     {
                         let mut cxt = cxt.lock().unwrap();
                         cxt.keep_idling = false;
@@ -744,7 +754,7 @@ impl Server {
                         }
                     }
 
-                    send_read.send(read).unwrap();
+                    send_read.send(read_result.map(|_| read)).unwrap();
                 });
 
                 Ok(())
@@ -766,7 +776,7 @@ impl Server {
         drop(sender);
 
         if started_idle {
-            self.read = recv_read.recv().unwrap();
+            self.read = recv_read.recv().unwrap()?;
         }
 
         self.send_response(response)?;

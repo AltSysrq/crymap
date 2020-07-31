@@ -3,8 +3,6 @@ another level of redirection? I.e. leaf directory would initially contain a
 `self -> .` symlink, which gets changed to `self -> self` once directory is
 fully allocated.
 
-Verify network timeouts work properly
-
 Command-line invocation to deliver/import mail
 
 Documentation
