@@ -22,6 +22,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use log::{error, info, warn};
+use nix::poll::{poll, PollFd, PollFlags};
 use nix::sys::time::TimeValLike;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
 
@@ -259,33 +260,36 @@ impl WrappedIo {
     fn on_error(&mut self, e: openssl::ssl::Error) -> io::Result<()> {
         match e.code() {
             openssl::ssl::ErrorCode::WANT_READ => {
-                let mut stdin_ready = nix::sys::select::FdSet::new();
-                stdin_ready.insert(STDIN);
-                let mut stdin_error = stdin_ready.clone();
-                nix::sys::select::select(
-                    None,
-                    Some(&mut stdin_ready),
-                    None,
-                    Some(&mut stdin_error),
-                    Some(&mut nix::sys::time::TimeVal::minutes(30)),
-                )
-                .map_err(nix_to_io)?;
-                require_ready_or_error(stdin_ready, stdin_error, STDIN)?;
+                let mut stdin = [PollFd::new(
+                    STDIN,
+                    PollFlags::POLLIN | PollFlags::POLLERR,
+                )];
+
+                let ready = poll(&mut stdin, 30 * 60_000).map_err(nix_to_io)?;
+                if 0 == ready {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "Socket timed out",
+                    ));
+                }
+
                 Ok(())
             }
             openssl::ssl::ErrorCode::WANT_WRITE => {
-                let mut stdout_ready = nix::sys::select::FdSet::new();
-                stdout_ready.insert(STDOUT);
-                let mut stdout_error = stdout_ready.clone();
-                nix::sys::select::select(
-                    None,
-                    None,
-                    Some(&mut stdout_ready),
-                    Some(&mut stdout_error),
-                    Some(&mut nix::sys::time::TimeVal::minutes(30)),
-                )
-                .map_err(nix_to_io)?;
-                require_ready_or_error(stdout_ready, stdout_error, STDOUT)?;
+                let mut stdout = [PollFd::new(
+                    STDOUT,
+                    PollFlags::POLLOUT | PollFlags::POLLERR,
+                )];
+
+                let ready =
+                    poll(&mut stdout, 30 * 60_000).map_err(nix_to_io)?;
+                if 0 == ready {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "Socket timed out",
+                    ));
+                }
+
                 Ok(())
             }
             _ => Err(e
