@@ -36,6 +36,9 @@
 //! error, and then unlinks the socket and its symlink. This ensures that
 //! sockets left behind by dead processes are cleaned up expediently.
 //!
+//! Waking up a listener within the process is currently done via a separate
+//! pair of anonymous UNIX datagram sockets.
+//!
 //! To avoid races, stateful idling needs to run by the below procedure:
 //!
 //! ```ignore
@@ -50,12 +53,14 @@
 use std::fs;
 use std::io;
 use std::os::unix::fs::DirBuilderExt;
+use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixDatagram;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Arc;
 
 use log::warn;
+use nix::poll::{poll, PollFd, PollFlags};
 
 use super::defs::*;
 use crate::support::error::Error;
@@ -67,7 +72,9 @@ static SOCKET_SERNO: AtomicUsize = AtomicUsize::new(0);
 /// is received.
 #[derive(Debug)]
 pub struct IdleListener {
-    sock: Arc<UnixDatagram>,
+    sock: UnixDatagram,
+    recv_self_notify: UnixDatagram,
+    send_self_notify: Arc<UnixDatagram>,
     sock_path: PathBuf,
     symlink_path: PathBuf,
 }
@@ -76,27 +83,54 @@ impl IdleListener {
     /// Return an `IdleNotifier` that can be used to awaken this listener.
     pub fn notifier(&self) -> IdleNotifier {
         IdleNotifier {
-            sock: Arc::clone(&self.sock),
+            sock: Arc::clone(&self.send_self_notify),
         }
     }
 
     /// Block until a notification is received for this listener.
     pub fn idle(self) -> io::Result<()> {
-        let mut buf = [0u8];
-        // On Linux, recv() on after the notifier closed the socket returns
-        // immediately with an empty read.
-        // On FreeBSD, it fails with NotConnected.
-        match self.sock.recv(&mut buf) {
-            Ok(_) => Ok(()),
-            Err(e) if io::ErrorKind::NotConnected == e.kind() => Ok(()),
-            Err(e) => Err(e),
+        self.idle_impl(-1)
+    }
+
+    fn idle_impl(self, timeout: nix::libc::c_int) -> io::Result<()> {
+        let mut pollfd = [
+            PollFd::new(
+                self.sock.as_raw_fd(),
+                PollFlags::POLLIN | PollFlags::POLLERR,
+            ),
+            PollFd::new(
+                self.recv_self_notify.as_raw_fd(),
+                PollFlags::POLLIN | PollFlags::POLLERR,
+            ),
+        ];
+
+        loop {
+            match poll(&mut pollfd, timeout) {
+                // Timeouts can only happen in test code
+                Ok(0) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "IDLE timed out",
+                    ))
+                }
+                Ok(_) => {
+                    // We don't care about what data we're going to receive.
+                    // There's something, and that's enough to wake up.
+                    return Ok(());
+                }
+                Err(nix::Error::Sys(nix::errno::Errno::EINTR)) => continue,
+                Err(e) => {
+                    return Err(io::Error::from_raw_os_error(
+                        e.as_errno().unwrap() as i32,
+                    ));
+                }
+            }
         }
     }
 
     #[cfg(test)]
     fn idle_instant(self) -> io::Result<()> {
-        self.sock.set_nonblocking(true)?;
-        self.idle()
+        self.idle_impl(0)
     }
 }
 
@@ -119,7 +153,7 @@ pub struct IdleNotifier {
 impl IdleNotifier {
     /// Wake up the corresponding `IdleListener`.
     pub fn notify(self) -> io::Result<()> {
-        self.sock.shutdown(std::net::Shutdown::Both)
+        self.sock.send(&[0]).map(|_| ())
     }
 }
 
@@ -144,8 +178,12 @@ impl StatelessMailbox {
         let _ = fs::remove_file(&sock_path);
         let _ = fs::remove_file(&symlink_path);
 
+        let (self_recv, self_send) = UnixDatagram::pair()?;
+
         let listener = IdleListener {
-            sock: Arc::new(UnixDatagram::bind(&sock_path)?),
+            sock: UnixDatagram::bind(&sock_path)?,
+            recv_self_notify: self_recv,
+            send_self_notify: Arc::new(self_send),
             sock_path,
             symlink_path,
         };
@@ -209,7 +247,7 @@ mod test {
     fn listener_would_block_without_notification() {
         let setup = set_up();
         match setup.stateless.prepare_idle().unwrap().idle_instant() {
-            Err(e) if io::ErrorKind::WouldBlock == e.kind() => (),
+            Err(e) if io::ErrorKind::TimedOut == e.kind() => (),
             Err(e) => panic!("Unexpected error: {}", e),
             Ok(_) => panic!("Didn't block"),
         }
