@@ -142,3 +142,33 @@ fn delete_mailbox_during_idle() {
         (None, s::RespCondType::Bye, None, _) = response
     };
 }
+
+#[test]
+fn idle_works_with_extremely_long_paths() {
+    const MXNAME: &str = "2177ixlp/\
+         01234567891123456789212345678931234567894123456789\
+         51234567896123456789712345678981234567899123456789/\
+         averylongpath";
+
+    let setup = set_up();
+    let mut client = setup.connect("2177ixlp");
+    quick_log_in(&mut client);
+    quick_create(&mut client, MXNAME);
+    quick_select(&mut client, MXNAME);
+
+    client.write_raw(b"I1 IDLE\r\n").unwrap();
+    let mut buffer = Vec::new();
+    client.read_logical_line(&mut buffer).unwrap();
+    assert!(buffer.starts_with(b"+ "));
+
+    let mut client2 = setup.connect("2177ixlp2");
+    quick_log_in(&mut client2);
+    quick_append_enron(&mut client2, MXNAME, 1);
+
+    buffer.clear();
+    let response = client.read_one_response(&mut buffer).unwrap();
+    assert_matches!(s::ResponseLine {
+        tag: None,
+        response: s::Response::Exists(_),
+    }, response);
+}

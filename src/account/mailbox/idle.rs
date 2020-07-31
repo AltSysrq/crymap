@@ -22,13 +22,19 @@
 //!
 //! Notifications are implemented by "one-shot" UNIX sockets. When a process
 //! goes into idle, it binds a UNIX datagram socket named `$pid.$serno` in the
-//! mailbox's `socks` directory. It then waits until a packet is received. The
-//! content of transmitted data is irrelevant; it is used only as a wakeup. On
-//! wakeup, the socket is unlinked if it is still there.
+//! account's `tmp` directory and symlinks it from the mailbox's `socks`
+//! directory. It then waits until a packet is received. The content of
+//! transmitted data is irrelevant; it is used only as a wakeup. On wakeup, the
+//! socket is unlinked if it is still there.
+//!
+//! Sockets are allocated in the `tmp` directory instead of directly under
+//! `socks` since the path within the mailbox could easily exceed the maximum
+//! length for a UNIX socket pathname on the host OS (e.g., on FreeBSD the
+//! limit is 104 bytes; on Linux it is 108 bytes).
 //!
 //! To notify a listener, the notifier sends a single-byte message, ignores any
-//! error, and then unlinks the socket. This ensures that sockets left behind
-//! by dead processes are cleaned up expediently.
+//! error, and then unlinks the socket and its symlink. This ensures that
+//! sockets left behind by dead processes are cleaned up expediently.
 //!
 //! To avoid races, stateful idling needs to run by the below procedure:
 //!
@@ -62,7 +68,8 @@ static SOCKET_SERNO: AtomicUsize = AtomicUsize::new(0);
 #[derive(Debug)]
 pub struct IdleListener {
     sock: Arc<UnixDatagram>,
-    path: PathBuf,
+    sock_path: PathBuf,
+    symlink_path: PathBuf,
 }
 
 impl IdleListener {
@@ -95,7 +102,8 @@ impl IdleListener {
 
 impl Drop for IdleListener {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        let _ = fs::remove_file(&self.symlink_path);
+        let _ = fs::remove_file(&self.sock_path);
     }
 }
 
@@ -127,20 +135,26 @@ impl StatelessMailbox {
             .ignore_already_exists()?;
 
         let serno = SOCKET_SERNO.fetch_add(1, SeqCst);
-        let sock_path = self.path.socks_path.join(format!(
-            "{}.{}",
-            nix::unistd::getpid(),
-            serno
-        ));
+        let sock_name = format!("{}.{}", nix::unistd::getpid(), serno);
+        let symlink_path = self.path.socks_path.join(&sock_name);
+        let sock_path = self.common_paths.tmp.join(&sock_name);
 
         // Remove any stray socket left over from a prior process that had the
         // same PID.
         let _ = fs::remove_file(&sock_path);
+        let _ = fs::remove_file(&symlink_path);
 
-        Ok(IdleListener {
+        let listener = IdleListener {
             sock: Arc::new(UnixDatagram::bind(&sock_path)?),
-            path: sock_path,
-        })
+            sock_path,
+            symlink_path,
+        };
+
+        std::os::unix::fs::symlink(
+            &listener.sock_path,
+            &listener.symlink_path,
+        )?;
+        Ok(listener)
     }
 
     /// Wake all idlers up.
@@ -158,7 +172,10 @@ impl StatelessMailbox {
             let entry = entry?;
 
             let path = entry.path();
-            let _ = sock.send_to(&[0], &path);
+            if let Ok(destination) = path.canonicalize() {
+                let _ = sock.send_to(&[0], &destination);
+                let _ = fs::remove_file(&destination);
+            }
             let _ = fs::remove_file(&path);
         }
 

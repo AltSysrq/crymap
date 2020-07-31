@@ -730,6 +730,13 @@ impl Server {
                         .take(16)
                         .read_until(b'\n', &mut done_line);
 
+                    if read_result.is_ok() && done_line.is_empty() {
+                        read_result = Err(io::Error::new(
+                            io::ErrorKind::UnexpectedEof,
+                            "Connection closed while idling",
+                        ));
+                    }
+
                     if read_result.is_ok() && !done_line.ends_with(b"\n") {
                         read_result = Err(io::Error::new(
                             io::ErrorKind::InvalidData,
