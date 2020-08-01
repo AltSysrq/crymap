@@ -73,9 +73,7 @@ pub fn serve(
 
     let certificate_path =
         system_root.join(&system_config.tls.certificate_chain);
-    if let Err(e) =
-        acceptor.set_certificate_file(&certificate_path, SslFiletype::PEM)
-    {
+    if let Err(e) = acceptor.set_certificate_chain_file(&certificate_path) {
         fatal!(
             EX_CONFIG,
             "Unable to load TLS certificate chain from '{}': {}",
