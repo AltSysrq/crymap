@@ -86,5 +86,6 @@ mod flags;
 mod mailboxes;
 mod messages;
 mod search;
+mod user_config;
 
 pub use self::defs::CommandProcessor;

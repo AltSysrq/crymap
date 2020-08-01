@@ -18,7 +18,7 @@
 
 use std::borrow::Cow;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -32,8 +32,19 @@ use crate::account::mailbox_path::*;
 use crate::account::model::*;
 use crate::crypt::master_key::MasterKey;
 use crate::support::{
-    error::Error, file_ops::IgnoreKinds, threading, user_config::UserConfig,
+    error::Error, file_ops::IgnoreKinds, safe_name::is_safe_name, threading,
+    user_config::UserConfig,
 };
+
+// Like format!, but returns None if the formatter fails instead of panicking.
+macro_rules! try_format {
+    ($($stuff:tt)*) => {{
+        use std::io::Write;
+        let mut buf = Vec::new();
+        write!(&mut buf, $($stuff)*).ok()
+            .and_then(|_| String::from_utf8(buf).ok())
+    }}
+}
 
 #[derive(Clone)]
 pub struct Account {
@@ -181,6 +192,89 @@ impl Account {
         self.subscribe("Trash")?;
 
         Ok(())
+    }
+
+    /// Load and return the user's current configuration.
+    ///
+    /// This may not be the exact configuration currently applied.
+    pub fn load_config(&self) -> Result<UserConfig, Error> {
+        let mut data = Vec::new();
+        fs::File::open(&self.config_file)?.read_to_end(&mut data)?;
+
+        let config: UserConfig = toml::from_slice(&data)?;
+        Ok(config)
+    }
+
+    /// Update the user's configuration.
+    ///
+    /// The changes do not apply to the current connection.
+    ///
+    /// Returns the location of the backup file this creates.
+    pub fn update_config(
+        &self,
+        request: SetUserConfigRequest,
+    ) -> Result<String, Error> {
+        let mut config = self.load_config()?;
+        let master_key = self
+            .master_key
+            .as_ref()
+            .ok_or(Error::MasterKeyUnavailable)?;
+        let now = Utc::now().naive_local();
+
+        if let Some(internal_key_pattern) = request.internal_key_pattern {
+            // We need to format the keys with some date to check the patterns
+            // for validity. This is both because they contain % in raw form,
+            // which makes for an unsafe name, and because format!() will
+            // result in a panic if the date format is not understood by
+            // chrono.
+            if !is_safe_name(
+                &try_format!("{}", now.format(&internal_key_pattern))
+                    .unwrap_or_default(),
+            ) {
+                return Err(Error::UnsafeName);
+            }
+
+            config.key_store.internal_key_pattern = internal_key_pattern;
+        }
+
+        if let Some(external_key_pattern) = request.external_key_pattern {
+            if !is_safe_name(
+                &try_format!("{}", now.format(&external_key_pattern))
+                    .unwrap_or_default(),
+            ) {
+                return Err(Error::UnsafeName);
+            }
+
+            config.key_store.external_key_pattern = external_key_pattern;
+        }
+
+        if let Some(password) = request.password {
+            config.master_key = master_key
+                .make_config(password.as_bytes())
+                .expect("argon2 hash failed");
+            config.master_key.last_changed =
+                Some(FixedOffset::east(0).from_utc_datetime(&now));
+        }
+
+        let config_toml =
+            toml::to_vec(&config).expect("TOML serialisation failed");
+
+        let mut tmpfile =
+            tempfile::NamedTempFile::new_in(&self.common_paths.tmp)?;
+        tmpfile.write_all(&config_toml)?;
+
+        let backup_name = format!("config-backup-{}.toml", now);
+        let backup_file = self.common_paths.tmp.join(&backup_name);
+        nix::unistd::linkat(
+            None,
+            &self.config_file,
+            None,
+            &backup_file,
+            nix::unistd::LinkatFlags::NoSymlinkFollow,
+        )?;
+        tmpfile.persist(&self.config_file).map_err(|e| e.error)?;
+
+        Ok(backup_name)
     }
 
     fn start_maintenance(&self) {

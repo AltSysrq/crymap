@@ -1512,6 +1512,14 @@ pub struct CopyResponse {
     pub to_uids: SeqRange<Uid>,
 }
 
+/// The `XCRY SET-USER-CONFIG` command.
+#[derive(Debug, Clone, Default)]
+pub struct SetUserConfigRequest {
+    pub internal_key_pattern: Option<String>,
+    pub external_key_pattern: Option<String>,
+    pub password: Option<String>,
+}
+
 /// Holder for common paths used pervasively through a process.
 #[derive(Clone, Debug)]
 pub struct CommonPaths {

@@ -218,6 +218,13 @@ syntax_rule! {
         #[prefix("ESEARCH ")]
         #[delegate]
         Esearch(EsearchResponse<'a>),
+        // Crymap extensions
+        #[prefix("XCRY USER-CONFIG")]
+        #[delegate]
+        XCryUserConfig(XCryUserConfigData<'a>),
+        #[prefix("XCRY BACKUP-FILE ")]
+        #[primitive(unicode_astring, astring)]
+        XCryBackupFile(Cow<'a, str>),
     }
 }
 
@@ -1749,6 +1756,7 @@ simple_enum! {
         LogOut("LOGOUT"),
         Noop("NOOP"),
         StartTls("STARTTLS"),
+        XCryGetUserConfig("XCRY GET-USER-CONFIG"),
         XCryPurge("XCRY PURGE"),
         XCryZstdTrain("XCRY ZSTD TRAIN"),
         Xyzzy("XYZZY"),
@@ -1848,6 +1856,10 @@ syntax_rule! {
         #[prefix("ENABLE ") 1*(" ")]
         #[primitive(verbatim, normal_atom)]
         Enable(Vec<Cow<'a, str>>),
+        // Crymap extensions
+        #[prefix("XCRY SET-USER-CONFIG") 1* prefix(" ")]
+        #[delegate(XCryUserConfigOption)]
+        XCrySetUserConfig(Vec<XCryUserConfigOption<'a>>),
     }
 }
 
@@ -1912,6 +1924,42 @@ syntax_rule! {
         #[]
         #[primitive(verbatim, text)]
         garbage: Cow<'a, str>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct XCryUserConfigData<'a> {
+        #[surrounded(" (", ")") 1*(" ")]
+        #[primitive(unicode_astring, astring)]
+        capabilities: Vec<Cow<'a, str>>,
+        #[prefix(" ")]
+        #[primitive(unicode_astring, astring)]
+        internal_key_pattern: Cow<'a, str>,
+        #[prefix(" ")]
+        #[primitive(unicode_astring, astring)]
+        external_key_pattern: Cow<'a, str>,
+        #[prefix(" ") nil]
+        #[primitive(datetime, datetime)]
+        password_changed: Option<DateTime<FixedOffset>>,
+        #[0* prefix(" ")]
+        #[primitive(unicode_astring, astring)]
+        extended: Vec<Cow<'a, str>>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    enum XCryUserConfigOption<'a> {
+        #[prefix("INTERNAL-KEY-PATTERN ")]
+        #[primitive(unicode_astring, astring)]
+        InternalKeyPattern(Cow<'a, str>),
+        #[prefix("EXTERNAL-KEY-PATTERN ")]
+        #[primitive(unicode_astring, astring)]
+        ExternalKeyPattern(Cow<'a, str>),
+        #[prefix("PASSWORD ")]
+        #[primitive(unicode_astring, astring)]
+        Password(Cow<'a, str>),
     }
 }
 

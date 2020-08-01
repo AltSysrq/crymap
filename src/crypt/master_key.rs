@@ -47,6 +47,7 @@
 //! process memory as much, instead being kept in a locked page and zeroed out
 //! on destruction.
 
+use chrono::prelude::*;
 use rand::{rngs::OsRng, Rng};
 use secstr::SecBox;
 use serde::{Deserialize, Serialize};
@@ -91,6 +92,11 @@ pub struct MasterKeyConfig {
     /// Currently, this is expected to always be exactly 32 bytes long.
     #[serde(with = "b64")]
     master_key_xor: Vec<u8>,
+    /// The last time at which the master key was changed.
+    ///
+    /// The `MasterKey` code itself always generates `None` for this value.
+    #[serde(default)]
+    pub last_changed: Option<DateTime<FixedOffset>>,
 }
 
 /// A randomly generated master key and secondary keys derived from it.
@@ -162,6 +168,7 @@ impl MasterKey {
             salt: salt[..].to_owned(),
             algorithm: Algorithm::default(),
             master_key_xor,
+            last_changed: None,
         })
     }
 

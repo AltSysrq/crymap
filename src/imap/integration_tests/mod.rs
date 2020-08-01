@@ -185,5 +185,6 @@ mod rfc7162;
 mod rfc7888;
 mod rfc8438;
 mod rfc8474;
+mod xcry;
 mod ximap4rev2;
 mod xlist;

@@ -1,7 +1,5 @@
-Command-line invocation to deliver/import mail
+LMTP
 
-A way to change the user's password
-
-A way to update key configuration
+CLI commands to change user configuration/password
 
 Documentation

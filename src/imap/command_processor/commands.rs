@@ -111,6 +111,9 @@ impl CommandProcessor {
             s::Command::Simple(s::SimpleCommand::XCryPurge) => {
                 self.cmd_xcry_purge()
             }
+            s::Command::Simple(s::SimpleCommand::XCryGetUserConfig) => {
+                self.cmd_xcry_get_user_config(sender)
+            }
             s::Command::Simple(s::SimpleCommand::XCryZstdTrain) => {
                 self.cmd_xcry_zstd_train()
             }
@@ -165,6 +168,10 @@ impl CommandProcessor {
             s::Command::Id(parms) => self.cmd_id(parms, sender),
 
             s::Command::Enable(exts) => self.cmd_enable(exts, sender),
+
+            s::Command::XCrySetUserConfig(configs) => {
+                self.cmd_xcry_set_user_config(configs, sender)
+            }
         };
 
         if res.is_ok() {
