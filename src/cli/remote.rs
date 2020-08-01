@@ -231,14 +231,10 @@ fn change_password(client: &mut RemoteClient) -> Result<(), Error> {
         }
     };
 
-    client.write_raw(
-        format!(
-            "C1 XCRY SET-USER-CONFIG PASSWORD {{{}+}}\r\n",
-            new_password.len()
-        )
-        .as_bytes(),
+    client.write_raw(b"C1 XCRY SET-USER-CONFIG PASSWORD ")?;
+    client.write_raw_censored(
+        format!("{{{}+}}\r\n{}", new_password.len(), new_password).as_bytes(),
     )?;
-    client.write_raw_censored(new_password.as_bytes())?;
     client.write_raw(b"\r\n")?;
 
     let mut buffer = Vec::new();

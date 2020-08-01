@@ -105,11 +105,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
 
     pub fn write_raw_censored(&mut self, bytes: &[u8]) -> Result<(), Error> {
         if let Some(prefix) = self.trace_stderr {
-            eprintln!(
-                "{:10} WIRE >>[raw]<{} bytes not shown>",
-                prefix,
-                bytes.len()
-            );
+            eprintln!("{:10} WIRE >>[raw]<data not shown>", prefix,);
         }
         self.write.write_all(bytes)?;
         self.write.flush()?;
