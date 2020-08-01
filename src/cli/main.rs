@@ -29,6 +29,8 @@ use crate::support::system_config::SystemConfig;
 #[derive(StructOpt)]
 #[structopt(max_term_width = 80)]
 enum Command {
+    /// Commands which connect to a remote Crymap server system.
+    Remote(RemoteSubcommand),
     /// Commands to be run on the Crymap server system.
     Server(ServerSubcommand),
     /// Commands used in the development or testing of Crymap.
@@ -173,6 +175,52 @@ pub(super) struct ServerDeliverSubcommand {
     pub(super) inputs: Vec<PathBuf>,
 }
 
+#[derive(StructOpt, Default)]
+pub(super) struct RemoteCommonOptions {
+    /// The user name to log in as [default: current UNIX user name]
+    #[structopt(long, short)]
+    pub(super) user: Option<String>,
+    /// The host to connect to
+    #[structopt(long, short)]
+    pub(super) host: String,
+    /// The port to connect to
+    #[structopt(long, short, default_value = "993")]
+    pub(super) port: u16,
+    /// Allow insecure TLS connections
+    #[structopt(long)]
+    pub(super) allow_insecure_tls_connections: bool,
+    /// Dump a trace of the IMAP connection to standard error.
+    #[structopt(long)]
+    pub(super) trace: bool,
+}
+
+#[derive(StructOpt)]
+pub(super) enum RemoteSubcommand {
+    /// Connect and log in to a remote Crymap server, then disconnect.
+    ///
+    /// If this succeeds, it means that the following are working properly:
+    ///
+    /// - TLS (assuming --allow-insecure-tls-connections was not passed)
+    ///
+    /// - inetd or whatever else is responsible for running Crymap
+    ///
+    /// - User login
+    ///
+    /// - Any proxy in front of Crymap
+    ///
+    /// This cannot detect problems that require deeper inspection of the user
+    /// account, such as file system corruption.
+    Test(RemoteCommonOptions),
+}
+
+impl RemoteSubcommand {
+    pub(super) fn common_options(&mut self) -> RemoteCommonOptions {
+        match *self {
+            RemoteSubcommand::Test(ref mut c) => mem::take(c),
+        }
+    }
+}
+
 pub fn main() {
     // Clap exits with status 1 instead of EX_USAGE if we use the more concise
     // API
@@ -206,6 +254,7 @@ pub fn main() {
     match cmd {
         #[cfg(feature = "dev-tools")]
         Command::Dev(DevSubcommand::ImapTest) => super::imap_test::imap_test(),
+        Command::Remote(cmd) => super::remote::main(cmd),
         Command::Server(cmd) => server(cmd),
     }
 }

@@ -29,5 +29,6 @@ pub mod main;
 mod imap_test;
 
 mod deliver;
+mod remote;
 mod serve;
 mod user;

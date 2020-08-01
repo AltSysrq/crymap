@@ -103,6 +103,19 @@ impl<R: BufRead, W: Write> Client<R, W> {
         Ok(())
     }
 
+    pub fn write_raw_censored(&mut self, bytes: &[u8]) -> Result<(), Error> {
+        if let Some(prefix) = self.trace_stderr {
+            eprintln!(
+                "{:10} WIRE >>[raw]<{} bytes not shown>",
+                prefix,
+                bytes.len()
+            );
+        }
+        self.write.write_all(bytes)?;
+        self.write.flush()?;
+        Ok(())
+    }
+
     pub fn read_line_raw(&mut self, dst: &mut Vec<u8>) -> Result<usize, Error> {
         let start = dst.len();
         let nread = self.read.read_until(b'\n', dst)?;
