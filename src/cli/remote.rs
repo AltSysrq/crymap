@@ -55,6 +55,9 @@ fn main_impl(mut cmd: RemoteSubcommand) -> Result<(), Error> {
         RemoteSubcommand::Test(_) => {
             println!("Server looks OK");
         }
+        RemoteSubcommand::Chpw(_) => {
+            change_password(&mut client)?;
+        }
     }
 
     let mut buffer = Vec::new();
@@ -136,10 +139,11 @@ fn connect(options: RemoteCommonOptions) -> Result<RemoteClient, Error> {
         );
     }
 
-    let password = match rpassword::read_password_from_tty(Some("Password: ")) {
-        Ok(p) => p,
-        Err(e) => die!(EX_NOINPUT, "Failed to read password: {}", e),
-    };
+    let password =
+        match rpassword::read_password_from_tty(Some("Current password: ")) {
+            Ok(p) => p,
+            Err(e) => die!(EX_NOINPUT, "Failed to read password: {}", e),
+        };
 
     let mut auth_string =
         base64::encode(format!("{}\0{}\0{}", user, user, password));
@@ -205,6 +209,57 @@ fn die_if_not_success(what: &str, response: s::ResponseLine<'_>) {
             );
         }
     }
+}
+
+fn change_password(client: &mut RemoteClient) -> Result<(), Error> {
+    let new_password = loop {
+        match rpassword::read_password_from_tty(Some("New password: "))
+            .and_then(|a| {
+                rpassword::read_password_from_tty(Some("Confirm: "))
+                    .map(|b| (a, b))
+            }) {
+            Err(e) => die!(EX_NOINPUT, "Failed to read password: {}", e),
+            Ok((a, b)) if a != b => {
+                eprintln!("Passwords don't match, try again");
+            }
+            Ok((a, _)) if a.is_empty() => die!(EX_NOINPUT, "No password given"),
+            Ok((a, _)) => break a,
+        }
+    };
+
+    client.write_raw(
+        format!(
+            "C1 XCRY SET-USER-CONFIG PASSWORD {{{}+}}\r\n",
+            new_password.len()
+        )
+        .as_bytes(),
+    )?;
+    client.write_raw_censored(new_password.as_bytes())?;
+    client.write_raw(b"\r\n")?;
+
+    let mut buffer = Vec::new();
+    let mut responses = client.read_responses_until_tagged(&mut buffer)?;
+    die_if_not_success("SET-USER-CONFIG", responses.pop().unwrap());
+
+    println!("Password changed successfully");
+
+    for response in responses {
+        if let s::Response::XCryBackupFile(file) = response.response {
+            println!(
+                "\
+In case you need to undo this, a backup file has been created with the
+following name inside the 'tmp' directory of your Crymap account:
+  {}
+If you need to undo the password change, you or an administrator can replace
+'user.toml' in your Crymap account with that file. The backup file will be
+deleted on the next successful login 24 hours from now.",
+                file
+            );
+            break;
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug)]

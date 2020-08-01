@@ -211,12 +211,26 @@ pub(super) enum RemoteSubcommand {
     /// This cannot detect problems that require deeper inspection of the user
     /// account, such as file system corruption.
     Test(RemoteCommonOptions),
+    /// Change the user's Crymap password.
+    ///
+    /// The change takes effect immediately; the old password will no longer be
+    /// accepted. However, a backup file containing the information needed for
+    /// the old password to work is created and retained until the next
+    /// successful login at least 24 hours later. If you want to undo this
+    /// change, you or an administrator can simply replace the user
+    /// configuration file with the backup file.
+    ///
+    /// There is no way to change a user's password without knowing the current
+    /// password. If a user's password is forgotten, their data is lost
+    /// forever.
+    Chpw(RemoteCommonOptions),
 }
 
 impl RemoteSubcommand {
     pub(super) fn common_options(&mut self) -> RemoteCommonOptions {
         match *self {
-            RemoteSubcommand::Test(ref mut c) => mem::take(c),
+            RemoteSubcommand::Test(ref mut c)
+            | RemoteSubcommand::Chpw(ref mut c) => mem::take(c),
         }
     }
 }
