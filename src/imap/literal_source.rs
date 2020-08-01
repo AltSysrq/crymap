@@ -62,6 +62,7 @@ impl fmt::Debug for LiteralSource {
 }
 
 impl LiteralSource {
+    #[cfg(test)]
     pub fn of_data(data: &'static [u8], binary: bool) -> Self {
         LiteralSource {
             data: Box::new(data),

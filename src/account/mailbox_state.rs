@@ -241,45 +241,6 @@ impl MailboxState {
         ))
     }
 
-    /// Generate a new `Cid` for the given transaction so that it can be
-    /// retried.
-    ///
-    /// This only fails if there are no more CIDs available.
-    ///
-    /// Panics if the mailbox is still in primordial state or if `cid` is
-    /// already newer than the latest `Modseq`.
-    pub fn retry_tx(&self, cid: Cid) -> Result<Cid, Error> {
-        let m = self
-            .max_modseq
-            .expect("retry_tx with no messages")
-            .next()
-            .ok_or(Error::MailboxFull)?;
-
-        assert!(m.cid() > cid);
-        Ok(m.cid())
-    }
-
-    /// Determine whether the given transaction is safe to commit by comparing
-    /// the `Modseq` on messages it affects with the given `starting_cid`.
-    pub fn check(&self, tx: &StateTransaction, starting_cid: Cid) -> bool {
-        for op in &tx.ops {
-            use self::StateMutation::*;
-            match op {
-                &AddFlag(uid, _) | &RmFlag(uid, _) | &Expunge(_, uid) => {
-                    if let Some(status) = self.message_status.get(&uid) {
-                        if status.last_modified.cid() >= starting_cid {
-                            return false;
-                        }
-                    } else {
-                        return false;
-                    }
-                }
-            }
-        }
-
-        true
-    }
-
     /// Commit the given transaction.
     ///
     /// This is used for both things from the local process and for events from
@@ -524,24 +485,6 @@ impl MailboxState {
             .is_ok()
     }
 
-    /// Ensure `uid` is valid.
-    ///
-    /// If it references an expunged message, return
-    /// `Err(Error::ExpungedMessage)`. If it references an unallocated UID,
-    /// return `Err(Error::NxMessage)`.
-    ///
-    /// This will accept UIDs which are not currently addressable by sequence
-    /// number.
-    pub fn validate_uid(&self, uid: Uid) -> Result<(), Error> {
-        if self.max_modseq.map(|m| uid > m.uid()).unwrap_or(true) {
-            Err(Error::NxMessage)
-        } else if !self.message_status.contains_key(&uid) {
-            Err(Error::ExpungedMessage)
-        } else {
-            Ok(())
-        }
-    }
-
     /// Return the appropriate error code for a UID, given that it the message
     /// it represents was just found to be missing.
     pub fn missing_uid_error(&self, uid: Uid) -> Error {
@@ -592,6 +535,7 @@ impl MailboxState {
     }
 
     /// Convenience for invoking `test_flag` with a `Flag`.
+    #[cfg(test)]
     pub fn test_flag_o(&self, flag: &Flag, message: Uid) -> bool {
         self.flag_id(flag)
             .map(|f| self.test_flag(f, message))
@@ -635,11 +579,6 @@ impl MailboxState {
         self.uids()
             .enumerate()
             .map(|(ix, uid)| (Seqnum::from_index(ix), uid))
-    }
-
-    /// Return the `Modseq` for the given message.
-    pub fn message_modseq(&self, message: Uid) -> Option<Modseq> {
-        self.message_status.get(&message).map(|m| m.last_modified)
     }
 
     /// Return the true maximum `Modseq`
@@ -1204,32 +1143,6 @@ mod test {
     }
 
     #[test]
-    fn test_validate_uid() {
-        let mut state = MailboxState::new();
-        state.seen(Uid::u(3));
-        state.flush();
-
-        let (cid, mut tx) = state.start_tx().unwrap();
-        tx.expunge(Utc::now(), Uid::u(2));
-        state.commit(cid, tx);
-        state.seen(Uid::u(4));
-
-        assert!(matches!(state.validate_uid(Uid::u(1)), Ok(())));
-        assert!(matches!(state.validate_uid(Uid::u(4)), Ok(())));
-        assert!(matches!(state.validate_uid(Uid::u(2)), Ok(())));
-        assert!(matches!(
-            state.validate_uid(Uid::u(5)),
-            Err(Error::NxMessage)
-        ));
-
-        state.flush();
-        assert!(matches!(
-            state.validate_uid(Uid::u(2)),
-            Err(Error::ExpungedMessage)
-        ));
-    }
-
-    #[test]
     fn different_tx_uid_orders_produce_consistent_results() {
         let mut state1 = MailboxState::new();
         let mut state2 = MailboxState::new();
@@ -1292,7 +1205,7 @@ mod test {
             let mut all_expunged = BTreeSet::<Uid>::new();
             for uid in expunge_before {
                 let uid = Uid::u(uid);
-                state.seen(uid.saturating_next());
+                state.seen(uid.next().unwrap());
                 all_expunged.insert(uid);
 
                 let (cid, mut tx) = state.start_tx().unwrap();
@@ -1309,7 +1222,7 @@ mod test {
 
             for uid in expunge_after {
                 let uid = Uid::u(uid);
-                state.seen(uid.saturating_next());
+                state.seen(uid.next().unwrap());
                 all_expunged.insert(uid);
 
                 let (cid, mut tx) = state.start_tx().unwrap();

@@ -362,7 +362,7 @@ mod test {
     use crate::test_data::*;
 
     struct FetchSetup {
-        root: TempDir,
+        _root: TempDir,
         mb1: StatefulMailbox,
         mb2: StatefulMailbox,
         uids: Vec<Uid>,
@@ -398,7 +398,7 @@ mod test {
         let (mb2, _) = setup.stateless.select().unwrap();
 
         FetchSetup {
-            root: setup.root,
+            _root: setup.root,
             mb1,
             mb2,
             uids,

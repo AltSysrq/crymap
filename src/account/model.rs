@@ -132,10 +132,6 @@ impl Uid {
         }
     }
 
-    pub fn saturating_next(self) -> Self {
-        self.next().unwrap_or(Uid::MAX)
-    }
-
     #[cfg(test)]
     pub fn u(uid: u32) -> Self {
         Uid::of(uid).unwrap()
@@ -195,8 +191,6 @@ impl Default for Seqnum {
 impl Seqnum {
     // Unsafe because new() isn't const for some reason
     pub const MIN: Self = unsafe { Seqnum(NonZeroU32::new_unchecked(1)) };
-    pub const MAX: Self =
-        unsafe { Seqnum(NonZeroU32::new_unchecked(u32::MAX)) };
 
     pub fn of(seqnum: u32) -> Option<Self> {
         NonZeroU32::new(seqnum).map(Seqnum)
@@ -360,6 +354,7 @@ impl<T> SeqRange<T> {
 
 impl<T: TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync> SeqRange<T> {
     /// Create a range containing just the given item.
+    #[cfg(test)]
     pub fn just(item: T) -> Self {
         let mut this = SeqRange::new();
         this.append(item);

@@ -719,7 +719,7 @@ mod test {
     use super::*;
 
     struct Setup {
-        root: TempDir,
+        _root: TempDir,
         account: Account,
     }
 
@@ -745,7 +745,10 @@ mod test {
         account.key_store.lock().unwrap().set_rsa_bits(1024);
         account.provision(b"hunter2").unwrap();
 
-        Setup { root, account }
+        Setup {
+            _root: root,
+            account,
+        }
     }
 
     fn list_formatted(account: &Account, request: ListRequest) -> String {

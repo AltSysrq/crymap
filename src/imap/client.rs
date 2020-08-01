@@ -25,6 +25,7 @@
 //! not request to extract this to a separate crate.
 //!
 //! Besides the CLI subset, this is mainly used for internal integration tests.
+#![allow(dead_code)]
 
 use std::borrow::Cow;
 use std::io::{self, BufRead, Read, Write};

@@ -17,7 +17,7 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
 use crate::account::hier_id_scheme::HierIdScheme;
@@ -95,11 +95,6 @@ impl StatelessMailbox {
     /// Return the underlying `MailboxPath`.
     pub fn path(&self) -> &MailboxPath {
         &self.path
-    }
-
-    /// Return the data directory root for this mailbox instance.
-    pub fn root(&self) -> &Path {
-        &self.root
     }
 
     /// Return the UID validity of this mailbox instance.

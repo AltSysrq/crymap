@@ -20,6 +20,7 @@
 //!
 //! Relevant for things that use the sendmail/procmail/etc conventions for MTA
 //! exit codes.
+#![allow(dead_code)]
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Sysexit(pub i32);

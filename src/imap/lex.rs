@@ -122,6 +122,7 @@ impl<W: Write> LexWriter<W> {
         }
     }
 
+    #[cfg(test)]
     pub fn into_inner(self) -> W {
         self.writer
     }
@@ -142,10 +143,6 @@ impl<W: Write> LexWriter<W> {
 
     pub fn censored_astring(&mut self, s: &str) -> io::Result<()> {
         self.astring(&self.censor(s))
-    }
-
-    pub fn encoded_astring(&mut self, s: &str) -> io::Result<()> {
-        self.astring(&self.encode(s))
     }
 
     pub fn unicode_astring(&mut self, s: &str) -> io::Result<()> {
@@ -174,10 +171,6 @@ impl<W: Write> LexWriter<W> {
 
     pub fn censored_string(&mut self, s: &str) -> io::Result<()> {
         self.string(&self.censor(s))
-    }
-
-    pub fn encoded_string(&mut self, s: &str) -> io::Result<()> {
-        self.string(&self.encode(s))
     }
 
     pub fn mailbox(&mut self, mn: &MailboxName<'_>) -> io::Result<()> {
@@ -327,30 +320,6 @@ impl<W: Write> LexWriter<W> {
             })
     }
 
-    fn is_liberal_atom(&self, s: &str) -> bool {
-        !s.is_empty()
-            && s.as_bytes()
-                .iter()
-                .copied()
-                .all(|b| self.is_liberal_atom_char(b))
-    }
-
-    fn is_liberal_atom_char(&self, b: u8) -> bool {
-        match b {
-            0..=b' '
-            | 127..=255
-            | b'('
-            | b')'
-            | b'{'
-            | b'*'
-            | b'%'
-            | b'\\'
-            | b'"'
-            | b']' => false,
-            _ => true,
-        }
-    }
-
     fn is_quotable(&self, s: &str) -> bool {
         s.len() < 100
             && s.as_bytes().iter().copied().all(|b| match b {
@@ -427,53 +396,6 @@ mod test {
     }
 
     #[test]
-    fn encoded_astring_non_unicode() {
-        let mut l = LexWriter::new(Vec::<u8>::new(), false, false);
-        l.encoded_astring("foo").unwrap();
-        l.verbatim(" ").unwrap();
-        l.censored_astring("nil").unwrap();
-        l.verbatim(" ").unwrap();
-        l.encoded_astring("foo bar").unwrap();
-        l.verbatim(" ").unwrap();
-        l.encoded_astring("foo\\ bar").unwrap();
-        l.verbatim(" ").unwrap();
-        l.encoded_astring("föö").unwrap();
-        l.verbatim(" ").unwrap();
-        l.encoded_astring("一緒に一番許されないことをしよう")
-            .unwrap();
-
-        assert_eq!(
-            "foo \"nil\" \"foo bar\" {8}\r\nfoo\\ bar =?utf-8?b?ZsO2w7Y?= \
-                    \"=?utf-8?b?5LiA57eS44Gr5LiA55Wq6Kix44GV44KM44Gq44GE4\
-                    4GT44Go44KS44GX?= =?utf-8?b?44KI44GG?=\"",
-            to_str(l)
-        );
-    }
-
-    #[test]
-    fn encoded_astring_unicode() {
-        let mut l = LexWriter::new(Vec::<u8>::new(), true, false);
-        l.encoded_astring("foo").unwrap();
-        l.verbatim(" ").unwrap();
-        l.censored_astring("nil").unwrap();
-        l.verbatim(" ").unwrap();
-        l.encoded_astring("foo bar").unwrap();
-        l.verbatim(" ").unwrap();
-        l.encoded_astring("foo\\ bar").unwrap();
-        l.verbatim(" ").unwrap();
-        l.encoded_astring("föö").unwrap();
-        l.verbatim(" ").unwrap();
-        l.encoded_astring("一緒に一番許されないことをしよう")
-            .unwrap();
-
-        assert_eq!(
-            "foo \"nil\" \"foo bar\" {8}\r\nfoo\\ bar \"föö\" \
-                    \"一緒に一番許されないことをしよう\"",
-            to_str(l)
-        );
-    }
-
-    #[test]
     fn mailbox_non_unicode() {
         let mut l = LexWriter::new(Vec::<u8>::new(), false, false);
         l.mailbox(&MailboxName::of_utf8(Cow::Borrowed("INBOX")))
@@ -538,7 +460,10 @@ mod test {
     #[test]
     fn encoded_words_are_decodable() {
         let mut l = LexWriter::new(Vec::<u8>::new(), false, false);
-        l.encoded_astring("föö").unwrap();
-        assert_eq!(Some("föö".to_owned()), encoded_word::ew_decode(&to_str(l)));
+        l.encoded_nstring(&Some("föö")).unwrap();
+        assert_eq!(
+            Some("föö".to_owned()),
+            encoded_word::ew_decode(to_str(l).trim_matches('"'))
+        );
     }
 }

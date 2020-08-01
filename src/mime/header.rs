@@ -51,11 +51,13 @@ pub fn parse_datetime(date_str: &str) -> Option<DateTime<FixedOffset>> {
 }
 
 /// Parse a singular mailbox, as defined by RFC 5322.
+#[cfg(test)]
 pub fn parse_mailbox(i: &[u8]) -> Option<Mailbox<'_>> {
     mailbox(i).ok().map(|r| r.1)
 }
 
 /// Parse a mailbox list, as defined by RFC 5322.
+#[cfg(test)]
 pub fn parse_mailbox_list(i: &[u8]) -> Option<Vec<Mailbox<'_>>> {
     mailbox_list(i).ok().map(|r| r.1)
 }
@@ -435,14 +437,20 @@ fn atom(i: &[u8]) -> IResult<&[u8], &[u8]> {
 }
 
 // RFC 5322 3.2.3 "Dot atom text"
+// We don't use this since it's a subset of obsolete syntax
+/*
 fn dot_atom_text(i: &[u8]) -> IResult<&[u8], Vec<&[u8]>> {
     multi::separated_nonempty_list(tag(b"."), atext)(i)
 }
+*/
 
 // RFC 5322 3.2.3 "Dot atom"
+// We don't use this since it's a subset of obsolete syntax
+/*
 fn dot_atom(i: &[u8]) -> IResult<&[u8], Vec<&[u8]>> {
     sequence::delimited(ocfws, dot_atom_text, ocfws)(i)
 }
+*/
 
 // RFC 5322 3.2.4 "Quoted [string] text"
 // Amended by RFC 6532 to include all non-ASCII characters

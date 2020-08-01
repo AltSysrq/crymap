@@ -121,6 +121,7 @@
 //! - `0*(sep)`: Repetition into a `Vec`, at least one occurrence. `sep` (a
 //!   `&[u8]`) is inserted between items.
 //! - `box`: Wrap/unwrap a `Box`.
+#![allow(dead_code)]
 
 use std::borrow::Cow;
 use std::io::{self, Write};

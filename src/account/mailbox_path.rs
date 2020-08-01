@@ -105,11 +105,6 @@ impl MailboxPath {
         &self.name
     }
 
-    /// Return the root of the mailbox data.
-    pub fn data_path(&self) -> &Path {
-        &self.data_path
-    }
-
     /// Return the *current* UID validity, i.e., that which would be used if
     /// the mailbox were opened right now.
     pub fn current_uid_validity(&self) -> Result<u32, Error> {
@@ -165,14 +160,6 @@ impl MailboxPath {
     /// existence status.
     pub fn children<'a>(&'a self) -> impl Iterator<Item = MailboxPath> + 'a {
         self.children_impl(&self.base_path)
-    }
-
-    /// Return an iterator to the shadow children of this mailbox (used for
-    /// subscriptions), regardless of existence status.
-    pub fn shadow_children<'a>(
-        &'a self,
-    ) -> impl Iterator<Item = MailboxPath> + 'a {
-        self.children_impl(&self.shadow_path)
     }
 
     fn children_impl<'a>(

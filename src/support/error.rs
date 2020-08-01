@@ -52,8 +52,6 @@ pub enum Error {
     NxMessage,
     #[error("Unsupported/unknown flag")]
     NxFlag,
-    #[error("Corrupted flag bitmap")]
-    CorruptFlag,
     #[error("Gave up atomic insertion after too many retries")]
     GaveUpInsertion,
     #[error("File/directory layout is corrupt")]

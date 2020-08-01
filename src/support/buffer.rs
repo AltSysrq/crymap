@@ -61,6 +61,7 @@ impl BufferWriter {
     }
 
     /// Returns the length, in bytes, of the buffer.
+    #[cfg(test)]
     pub fn len(&self) -> u64 {
         self.len
     }

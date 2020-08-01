@@ -53,7 +53,6 @@ use secstr::SecBox;
 use serde::{Deserialize, Serialize};
 use tiny_keccak::{Hasher, Kmac};
 
-use super::AES_BLOCK;
 use crate::support::user_config::b64;
 
 const MASTER_SIZE: usize = 32;
@@ -120,18 +119,6 @@ impl MasterKey {
             key.unsecure_mut()[i] = OsRng.gen();
         }
         MasterKey { master_key: key }
-    }
-
-    /// Return the symmetric AES encryption key to use for the given filename.
-    ///
-    /// The filename should be bare and OS-independent.
-    pub fn aes_key(&self, filename: &str) -> [u8; AES_BLOCK] {
-        let mut k = Kmac::v128(self.master_key.unsecure(), b"aes");
-        k.update(filename.as_bytes());
-
-        let mut ret = [0u8; AES_BLOCK];
-        k.finalize(&mut ret);
-        ret
     }
 
     /// Return the PEM passphrase to use for an RSA private key of the given
