@@ -224,6 +224,7 @@ pub(super) enum RemoteSubcommand {
     /// password. If a user's password is forgotten, their data is lost
     /// forever.
     Chpw(RemoteCommonOptions),
+    Config(RemoteConfigSubcommand),
 }
 
 impl RemoteSubcommand {
@@ -231,8 +232,35 @@ impl RemoteSubcommand {
         match *self {
             RemoteSubcommand::Test(ref mut c)
             | RemoteSubcommand::Chpw(ref mut c) => mem::take(c),
+
+            RemoteSubcommand::Config(ref mut c) => mem::take(&mut c.common),
         }
     }
+}
+
+/// Get or set Crymap user configuration.
+///
+/// Without any configuration options, fetch and display the current
+/// configuration. Otherwise, update the requested options.
+///
+/// Options that are date patterns use the pattern syntax supported by the Rust
+/// crate "chrono". Refer to this URL for a table of supported formatting
+/// specifiers:
+/// https://docs.rs/chrono/0.4.13/chrono/format/strftime/index.html
+#[derive(StructOpt)]
+pub(super) struct RemoteConfigSubcommand {
+    #[structopt(flatten)]
+    pub(super) common: RemoteCommonOptions,
+
+    /// Change the pattern used to derive the names of keys used for encrypting
+    /// messages and operations originating from the logged in user.
+    #[structopt(long)]
+    pub(super) internal_key_pattern: Option<String>,
+
+    /// Change the pattern used to derive the names of keys used for encrypting
+    /// messages and operations originating from the system.
+    #[structopt(long)]
+    pub(super) external_key_pattern: Option<String>,
 }
 
 pub fn main() {

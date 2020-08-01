@@ -16,6 +16,7 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::io::{self, BufRead, Read, Write};
 use std::net::{self, ToSocketAddrs};
@@ -57,6 +58,9 @@ fn main_impl(mut cmd: RemoteSubcommand) -> Result<(), Error> {
         }
         RemoteSubcommand::Chpw(_) => {
             change_password(&mut client)?;
+        }
+        RemoteSubcommand::Config(cmd) => {
+            config(&mut client, cmd)?;
         }
     }
 
@@ -260,6 +264,80 @@ deleted on the next successful login 24 hours from now.",
     }
 
     Ok(())
+}
+
+fn config(
+    client: &mut RemoteClient,
+    cmd: RemoteConfigSubcommand,
+) -> Result<(), Error> {
+    let mut buffer = Vec::new();
+    let mut responses = client.command(
+        s::Command::Simple(s::SimpleCommand::XCryGetUserConfig),
+        &mut buffer,
+    )?;
+    die_if_not_success("GET-USER-CONFIG", responses.pop().unwrap());
+
+    let current_config = responses
+        .into_iter()
+        .filter_map(|r| match r.response {
+            s::Response::XCryUserConfig(c) => Some(c),
+            _ => None,
+        })
+        .next()
+        .unwrap_or_else(|| die!(EX_PROTOCOL, "No user config returned"));
+
+    let mut configs = Vec::<s::XCryUserConfigOption<'_>>::new();
+
+    if let Some(ikp) = cmd.internal_key_pattern {
+        require_configurable(&current_config, "INTERNAL-KEY-PATTERN");
+        configs
+            .push(s::XCryUserConfigOption::InternalKeyPattern(Cow::Owned(ikp)));
+    }
+
+    if let Some(ekp) = cmd.external_key_pattern {
+        require_configurable(&current_config, "EXTERNAL-KEY-PATTERN");
+        configs
+            .push(s::XCryUserConfigOption::ExternalKeyPattern(Cow::Owned(ekp)));
+    }
+
+    if configs.is_empty() {
+        println!(
+            "Current configuration:\n\
+             \tinternal-key-pattern: {}\n\
+             \texternal-key-pattern: {}\n\
+             \tpassword last changed: {}",
+            current_config.internal_key_pattern,
+            current_config.external_key_pattern,
+            current_config
+                .password_changed
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_else(|| "never".to_owned())
+        );
+    } else {
+        let mut buffer = Vec::new();
+        let mut responses = client
+            .command(s::Command::XCrySetUserConfig(configs), &mut buffer)?;
+        die_if_not_success("SET-USER-CONFIG", responses.pop().unwrap());
+    }
+
+    Ok(())
+}
+
+fn require_configurable(
+    current_config: &s::XCryUserConfigData<'_>,
+    required: &str,
+) {
+    for cap in &current_config.capabilities {
+        if required.eq_ignore_ascii_case(cap) {
+            return;
+        }
+    }
+
+    die!(
+        EX_SOFTWARE,
+        "{} is not configurable on this server",
+        required
+    );
 }
 
 #[derive(Debug)]

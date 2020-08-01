@@ -1,7 +1,5 @@
 LMTP
 
-CLI commands to change user configuration/password
-
 Make tmp cleaning consider both ctime and mtime so that configuration backups
 don't get deleted prematurely.
 
