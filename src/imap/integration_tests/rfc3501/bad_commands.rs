@@ -92,7 +92,7 @@ fn unknown_commands() {
     }
     client.write_raw("x".repeat(100000).as_bytes()).unwrap();
     // Server may hang up on this one
-    let _ = client.write_raw("6 ".repeat(50000).as_bytes()).unwrap();
+    let _ = client.write_raw("6 ".repeat(50000).as_bytes());
     // Now we get a BYE due to rejecting the continuation line
     let mut buffer = Vec::new();
     let r = client.read_one_response(&mut buffer).unwrap();
