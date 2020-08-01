@@ -677,7 +677,16 @@ fn clean_tmp(log_prefix: &str, tmp: &Path) -> Result<(), io::Error> {
         if entry
             .metadata()
             .ok()
-            .and_then(|md| md.modified().ok())
+            // Take the latest of mtime and ctime for considering whether to
+            // remove. Files in active use (mtime) should be retained, but we
+            // also want to avoid collecting config backups too early (ctime
+            // gets reset when the file is link()ed into the backup location).
+            .and_then(|md| match (md.modified(), md.created()) {
+                (Err(_), Err(_)) => None,
+                (Ok(mtime), Err(_)) => Some(mtime),
+                (Err(_), Ok(ctime)) => Some(ctime),
+                (Ok(mtime), Ok(ctime)) => Some(mtime.max(ctime)),
+            })
             .and_then(|mtime| mtime.elapsed().ok())
             .map_or(false, |elapsed| elapsed.as_secs() > 24 * 3600)
         {

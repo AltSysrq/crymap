@@ -1,6 +1,3 @@
 LMTP
 
-Make tmp cleaning consider both ctime and mtime so that configuration backups
-don't get deleted prematurely.
-
 Documentation
