@@ -18,6 +18,7 @@
 
 use std::fs;
 use std::io::Read;
+use std::mem;
 use std::path::{Path, PathBuf};
 
 use structopt::StructOpt;
@@ -29,7 +30,7 @@ use crate::support::system_config::SystemConfig;
 #[structopt(max_term_width = 80)]
 enum Command {
     /// Commands to be run on the Crymap server system.
-    Server(ServerCommand),
+    Server(ServerSubcommand),
     /// Commands used in the development or testing of Crymap.
     #[cfg(feature = "dev-tools")]
     Dev(DevSubcommand),
@@ -54,15 +55,12 @@ enum DevSubcommand {
     ImapTest,
 }
 
-#[derive(StructOpt)]
-struct ServerCommand {
-    /// The directory containing `crymap.toml` etc.
-    /// Default: `/etc/crymap` or `/usr/local/etc/crymap`
+#[derive(StructOpt, Default)]
+pub(super) struct ServerCommonOptions {
+    /// The directory containing `crymap.toml` etc
+    /// [default: /etc/crymap or /usr/local/etc/crymap]
     #[structopt(long, parse(from_os_str))]
     root: Option<PathBuf>,
-
-    #[structopt(subcommand)]
-    subcommand: ServerSubcommand,
 }
 
 #[derive(StructOpt)]
@@ -74,7 +72,19 @@ enum ServerSubcommand {
     ///
     /// This is intended to be used with inetd, xinetd, etc. It is the main way
     /// to run Crymap in production.
-    ServeImaps,
+    ServeImaps(ServerCommonOptions),
+}
+
+impl ServerSubcommand {
+    fn common_options(&mut self) -> ServerCommonOptions {
+        match *self {
+            ServerSubcommand::Deliver(ref mut c) => mem::take(&mut c.common),
+            ServerSubcommand::User(ServerUserSubcommand::Add(ref mut c)) => {
+                mem::take(&mut c.common)
+            }
+            ServerSubcommand::ServeImaps(ref mut c) => mem::take(c),
+        }
+    }
 }
 
 #[derive(StructOpt)]
@@ -85,6 +95,9 @@ enum ServerUserSubcommand {
 
 #[derive(StructOpt)]
 pub(super) struct ServerUserAddSubcommand {
+    #[structopt(flatten)]
+    pub(super) common: ServerCommonOptions,
+
     /// Prompt for the password instead of generating one.
     #[structopt(long)]
     pub(super) prompt_password: bool,
@@ -130,6 +143,9 @@ pub(super) struct ServerUserAddSubcommand {
 /// This command cannot be used to import mbox files.
 #[derive(StructOpt)]
 pub(super) struct ServerDeliverSubcommand {
+    #[structopt(flatten)]
+    pub(super) common: ServerCommonOptions,
+
     /// Deliver to this user instead of yourself.
     #[structopt(short, long)]
     pub(super) user: Option<String>,
@@ -194,8 +210,9 @@ pub fn main() {
     }
 }
 
-fn server(cmd: ServerCommand) {
-    let root = cmd.root.unwrap_or_else(|| {
+fn server(mut cmd: ServerSubcommand) {
+    let common = cmd.common_options();
+    let root = common.root.unwrap_or_else(|| {
         if Path::new("/etc/crymap/crymap.toml").is_file() {
             "/etc/crymap".to_owned().into()
         } else if Path::new("/usr/local/etc/crymap/crymap.toml").is_file() {
@@ -283,14 +300,14 @@ fn server(cmd: ServerCommand) {
         }
     }
 
-    match cmd.subcommand {
+    match cmd {
         ServerSubcommand::Deliver(cmd) => {
             super::deliver::deliver(system_config, cmd, users_root);
         }
         ServerSubcommand::User(ServerUserSubcommand::Add(cmd)) => {
             super::user::add(cmd, users_root);
         }
-        ServerSubcommand::ServeImaps => {
+        ServerSubcommand::ServeImaps(_) => {
             super::serve::serve(system_config, root, users_root);
         }
     }

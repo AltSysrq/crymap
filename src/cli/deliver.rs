@@ -547,6 +547,7 @@ mod test {
     fn deliver_unix_from_stdin() {
         let flags = vec![Flag::Answered, Flag::Keyword("plugh".to_owned())];
         let cmd = ServerDeliverSubcommand {
+            common: Default::default(),
             user: None,
             mailbox: "INBOX".to_owned(),
             create: false,
@@ -577,6 +578,7 @@ mod test {
     fn deliver_dos_from_stdin() {
         let flags = vec![Flag::Answered, Flag::Keyword("plugh".to_owned())];
         let cmd = ServerDeliverSubcommand {
+            common: Default::default(),
             user: None,
             mailbox: "INBOX".to_owned(),
             create: false,
@@ -621,6 +623,7 @@ mod test {
         let flags = vec![Flag::Flagged];
 
         let cmd = ServerDeliverSubcommand {
+            common: Default::default(),
             user: None,
             mailbox: "INBOX".to_owned(),
             create: false,
