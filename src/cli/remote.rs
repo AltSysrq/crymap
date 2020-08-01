@@ -198,7 +198,7 @@ fn die_if_not_success(what: &str, response: s::ResponseLine<'_>) {
         s::Response::Cond(s::CondResponse { cond, quip, .. }) => {
             die!(
                 EX_PROTOCOL,
-                "{} failed: {:?} {}",
+                "{} failed; condition: {:?}; text: {}",
                 what,
                 cond,
                 quip.unwrap_or_default()
