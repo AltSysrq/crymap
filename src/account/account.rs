@@ -219,7 +219,7 @@ impl Account {
             .master_key
             .as_ref()
             .ok_or(Error::MasterKeyUnavailable)?;
-        let now = Utc::now().naive_local();
+        let now = Utc::now();
 
         if let Some(internal_key_pattern) = request.internal_key_pattern {
             // We need to format the keys with some date to check the patterns
@@ -252,8 +252,9 @@ impl Account {
             config.master_key = master_key
                 .make_config(password.as_bytes())
                 .expect("argon2 hash failed");
-            config.master_key.last_changed =
-                Some(FixedOffset::east(0).from_utc_datetime(&now));
+            config.master_key.last_changed = Some(
+                FixedOffset::east(0).from_utc_datetime(&now.naive_local()),
+            );
         }
 
         let config_toml =
@@ -263,7 +264,7 @@ impl Account {
             tempfile::NamedTempFile::new_in(&self.common_paths.tmp)?;
         tmpfile.write_all(&config_toml)?;
 
-        let backup_name = format!("config-backup-{}.toml", now);
+        let backup_name = format!("config-backup-{}.toml", now.to_rfc3339());
         let backup_file = self.common_paths.tmp.join(&backup_name);
         nix::unistd::linkat(
             None,
