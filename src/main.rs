@@ -35,6 +35,7 @@ mod account;
 mod cli;
 mod crypt;
 mod imap;
+mod lmtp;
 mod mime;
 mod support;
 

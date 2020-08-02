@@ -40,11 +40,7 @@ pub fn imap_test() {
 
     let system_config = Arc::new(SystemConfig {
         security: SecurityConfig::default(),
-        tls: TlsConfig {
-            private_key: PathBuf::new(),
-            certificate_chain: PathBuf::new(),
-        },
-        identification: std::collections::BTreeMap::new(),
+        ..SystemConfig::default()
     });
 
     fs::DirBuilder::new()

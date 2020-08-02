@@ -1,3 +1,6 @@
 LMTP
 
+Socket markers need to operate on the basis of name instead of symlinks, since
+the symlinks don't work when some processes are chrooted and others are not.
+
 Documentation

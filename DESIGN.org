@@ -1018,3 +1018,33 @@ but we should have something that's actually binary-safe.
 LMTP seems fairly reasonable. It's more work to implement, but since it
 absolves us of needing to do any kind of mail queueing (as we would with SMTP),
 it shouldn't be too big a deal.
+
+** LMTP in more detail
+
+Relevant RFCs:
+
+RFC 5321, latest SMTP base standard (obsoleting the original RFC 821 and its
+successor RFC 2821), incorporates extension mechanisms from RFC 1869.
+
+RFC 2033, LMTP
+
+RFC 1854, PIPELINING extension
+
+RFC 1652, 8BITMIME extension
+
+RFC 2034, ENHANCEDSTATUSCODES extension. The actual codes are in RFC 1893.
+
+RFC 1830, BINARY extension
+
+RFC 3207, STARTTLS for SMTP
+
+RFC 6531, allow UTF-8 everywhere
+
+The PIPELINING, 8BITMIME, and SMTPUTF8 extensions are trivial; they require
+doing literally nothing (at least for the subset of SMTP that makes sense for
+LMTP). ENHANCEDSTATUSCODES simply adds an extra, parallel set of status codes
+to SMTP so that every error has two status codes, but that's just something to
+build in as we go along.
+
+BINARY adds a simple means of transferring binary data. It's not required, but
+it's simple enough and supporting binary is a good thing.

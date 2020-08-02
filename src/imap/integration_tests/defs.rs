@@ -96,14 +96,7 @@ impl Setup {
         std::thread::spawn(move || {
             let processor = CommandProcessor::new(
                 name.to_owned(),
-                Arc::new(SystemConfig {
-                    security: SecurityConfig::default(),
-                    tls: TlsConfig {
-                        private_key: PathBuf::new(),
-                        certificate_chain: PathBuf::new(),
-                    },
-                    identification: std::collections::BTreeMap::new(),
-                }),
+                Arc::new(SystemConfig::default()),
                 data_root,
             );
             let mut server = Server::new(

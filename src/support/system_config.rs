@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// This is stored in a file named `crymap.toml` under the Crymap system root,
 /// which is typically `/usr/local/etc/crymap` or `/etc/crymap`.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct SystemConfig {
     /// Options relating to operational security of Crymap.
     #[serde(default)]
@@ -38,6 +38,12 @@ pub struct SystemConfig {
     /// The main useful value here is `support-url`.
     #[serde(default)]
     pub identification: BTreeMap<String, String>,
+
+    /// Configuration for the LMTP server.
+    ///
+    /// The defaults are reasonable for most installations.
+    #[serde(default)]
+    pub lmtp: LmtpConfig,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -78,10 +84,42 @@ pub struct SecurityConfig {
     pub system_user: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+// The Default implementation of TlsConfig is not useful in the real world, but
+// is helpful for tests.
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct TlsConfig {
     /// The path to the TLS private key, which must be in PEM format.
     pub private_key: PathBuf,
     /// The path to the TLS certificate chain, which must be in PEM format.
     pub certificate_chain: PathBuf,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LmtpConfig {
+    /// The host name to report as.
+    ///
+    /// If unset, the system host name is used.
+    pub host_name: String,
+
+    /// If true, the domain part of destination email addresses is kept.
+    ///
+    /// When false, `user@foo.com` and `user@bar.com` are both delivered to a
+    /// user named `user`. When true, they are delivered to separate users
+    /// called `user@foo.com` and `user@bar.com`, respectively.
+    pub keep_recipient_domain: bool,
+
+    /// If true, no modification of the user name is performed. This puts the
+    /// burden of user resolution and normalisation on the SMTP gateway.
+    ///
+    /// By default, all periods are removed, everything after and including a
+    /// `+` is deleted, and the user name is converted to Unicode lower case.
+    ///
+    /// When false, `foo.bar`, `FooBar`, and `foobar+anything` all resolve to
+    /// the user `foobar`. When true, all are distinct users.
+    ///
+    /// When `keep_recipient_domain` is true, this option does not interact
+    /// with the domain part of the email, which is always lower-cased and
+    /// retains its periods.
+    pub verbatim_user_names: bool,
 }
