@@ -20,6 +20,7 @@ pub mod buffer;
 pub mod compression;
 pub mod error;
 pub mod file_ops;
+pub mod rcio;
 pub mod safe_name;
 pub mod small_bitset;
 pub mod sysexits;

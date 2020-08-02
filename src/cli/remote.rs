@@ -17,10 +17,8 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
-use std::cell::RefCell;
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead, Write};
 use std::net::{self, ToSocketAddrs};
-use std::rc::Rc;
 
 use openssl::ssl::{HandshakeError, SslConnector, SslMethod, SslVerifyMode};
 use thiserror::Error;
@@ -28,6 +26,7 @@ use thiserror::Error;
 use super::main::*;
 use crate::imap::client::Client;
 use crate::imap::syntax as s;
+use crate::support::rcio::*;
 
 type RemoteClient = Client<Box<dyn BufRead>, Box<dyn Write>>;
 
@@ -113,7 +112,7 @@ fn connect(options: RemoteCommonOptions) -> Result<RemoteClient, Error> {
             HandshakeError::WouldBlock(_) => unreachable!(),
         })?;
 
-    let write = RcIo(Rc::new(RefCell::new(ssl_stream)));
+    let write = RcIo::wrap(ssl_stream);
     let read = io::BufReader::new(write.clone());
 
     let mut client: RemoteClient = Client::new(
@@ -334,29 +333,4 @@ fn require_configurable(
         "{} is not configurable on this server",
         required
     );
-}
-
-#[derive(Debug)]
-struct RcIo<T>(Rc<RefCell<T>>);
-
-impl<T> Clone for RcIo<T> {
-    fn clone(&self) -> Self {
-        RcIo(Rc::clone(&self.0))
-    }
-}
-
-impl<T: Read> Read for RcIo<T> {
-    fn read(&mut self, dst: &mut [u8]) -> io::Result<usize> {
-        self.0.borrow_mut().read(dst)
-    }
-}
-
-impl<T: Write> Write for RcIo<T> {
-    fn write(&mut self, src: &[u8]) -> io::Result<usize> {
-        self.0.borrow_mut().write(src)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.0.borrow_mut().flush()
-    }
 }
