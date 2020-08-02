@@ -1040,6 +1040,9 @@ RFC 3207, STARTTLS for SMTP
 
 RFC 6531, allow UTF-8 everywhere
 
+RFC 1870, SIZE extension (allow client to indicate message size so it can be
+rejected quickly if too large)
+
 The PIPELINING, 8BITMIME, and SMTPUTF8 extensions are trivial; they require
 doing literally nothing (at least for the subset of SMTP that makes sense for
 LMTP). ENHANCEDSTATUSCODES simply adds an extra, parallel set of status codes

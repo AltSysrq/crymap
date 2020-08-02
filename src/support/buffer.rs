@@ -61,7 +61,6 @@ impl BufferWriter {
     }
 
     /// Returns the length, in bytes, of the buffer.
-    #[cfg(test)]
     pub fn len(&self) -> u64 {
         self.len
     }
@@ -134,6 +133,16 @@ impl BufferReader {
     /// Returns the length, in bytes, of the buffer.
     pub fn len(&self) -> u64 {
         self.len
+    }
+
+    /// Rewind to position 0.
+    pub fn rewind(&mut self) -> io::Result<()> {
+        self.off = 0;
+        if let Some(ref mut on_disk) = self.on_disk {
+            on_disk.file.seek(io::SeekFrom::Start(0))?;
+        }
+
+        Ok(())
     }
 }
 

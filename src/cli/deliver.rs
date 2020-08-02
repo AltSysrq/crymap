@@ -78,6 +78,7 @@ pub(super) fn deliver(
         &log_prefix,
         system_config.security.chroot_system,
         &mut user_root,
+        false,
     ) {
         exit.exit();
     }

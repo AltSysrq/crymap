@@ -61,8 +61,8 @@ pub mod pc {
 #[repr(u8)]
 pub enum ClassCode {
     Success = 2,
-    TransientFailure = 4,
-    PermanentFailure = 5,
+    TempFail = 4,
+    PermFail = 5,
 }
 
 pub mod cc {

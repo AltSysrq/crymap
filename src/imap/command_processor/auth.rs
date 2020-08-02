@@ -228,6 +228,7 @@ impl CommandProcessor {
             &self.log_prefix,
             self.system_config.security.chroot_system,
             user_dir,
+            false,
         )
         .is_ok()
         {

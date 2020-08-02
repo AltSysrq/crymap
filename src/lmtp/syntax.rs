@@ -68,6 +68,21 @@ lazy_static! {
         Regex::new("^(?i)RCPT TO:<(?:@[^:]+:)?([^>]+)>$").unwrap();
     static ref RX_BDAT: Regex =
         Regex::new("^(?i)BDAT ([0-9]+)( LAST)?$").unwrap();
+    static ref RX_KNOWN_COMMANDS: Regex = Regex::new(
+        "^(?i)(DATA|RSET|VRFY|EXPN|HELP|NOOP|QUIT|\
+                    STARTTLS|LHLO|MAIL|RCPT|BDAT)( .*)?$"
+    )
+    .unwrap();
+    static ref RX_HELO_EHLO: Regex =
+        Regex::new("^(?i)(HELO|EHLO)( .*)?$").unwrap();
+}
+
+pub fn looks_like_known_command(s: &str) -> bool {
+    RX_KNOWN_COMMANDS.is_match(s)
+}
+
+pub fn looks_like_smtp_helo(s: &str) -> bool {
+    RX_HELO_EHLO.is_match(s)
 }
 
 impl FromStr for Command {

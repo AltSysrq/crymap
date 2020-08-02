@@ -63,6 +63,7 @@ pub fn assume_system(
 
     if let Some(ref system_user) = system_user {
         if system_user.uid != nix::unistd::getuid() {
+            // TODO This also needs to call setgroups() below
             if let Err(e) = nix::unistd::initgroups(
                 &std::ffi::CString::new(system_user.name.clone()).unwrap(),
                 system_user.gid,
@@ -120,12 +121,16 @@ pub fn assume_system(
 /// that directory and chroot into it. If this happens, `user_dir` is mutated
 /// to hold the new path after the chroot.
 ///
+/// If `effective_only` is true, this will not chroot or reset auxiliary
+/// groups, and will only change the effective UID and GID.
+///
 /// On failure, returns a status code appropriate to use if the process is
 /// about to exit in response.
 pub fn assume_user_privileges(
     log_prefix: &str,
     chroot_system: bool,
     user_dir: &mut PathBuf,
+    effective_only: bool,
 ) -> Result<(), Sysexit> {
     // Nothing to do if we aren't root
     if nix::unistd::ROOT != nix::unistd::getuid() {
@@ -151,18 +156,22 @@ pub fn assume_user_privileges(
     let (has_user_groups, target_gid) =
         match nix::unistd::User::from_uid(target_uid) {
             Ok(Some(user)) => {
-                match nix::unistd::initgroups(
-                    &std::ffi::CString::new(user.name.to_owned())
-                        .expect("Got UNIX user name with NUL?"),
-                    user.gid,
-                ) {
-                    Ok(()) => (true, user.gid),
-                    Err(e) => {
-                        warn!(
-                            "{} Failed to init groups for user: {}",
-                            log_prefix, e
-                        );
-                        (false, user.gid)
+                if effective_only {
+                    (false, user.gid)
+                } else {
+                    match nix::unistd::initgroups(
+                        &std::ffi::CString::new(user.name.to_owned())
+                            .expect("Got UNIX user name with NUL?"),
+                        user.gid,
+                    ) {
+                        Ok(()) => (true, user.gid),
+                        Err(e) => {
+                            warn!(
+                                "{} Failed to init groups for user: {}",
+                                log_prefix, e
+                            );
+                            (false, user.gid)
+                        }
                     }
                 }
             }
@@ -202,17 +211,19 @@ pub fn assume_user_privileges(
             }
         };
 
-    if let Err(e) = nix::unistd::chdir(user_dir)
-        .and_then(|()| nix::unistd::chroot(user_dir))
-    {
-        error!(
-            "{} Chroot (forced because Crymap is running as root) \
-             into '{}' failed: {}",
-            log_prefix,
-            user_dir.display(),
-            e
-        );
-        return Err(EX_OSERR);
+    if !effective_only {
+        if let Err(e) = nix::unistd::chdir(user_dir)
+            .and_then(|()| nix::unistd::chroot(user_dir))
+        {
+            error!(
+                "{} Chroot (forced because Crymap is running as root) \
+                 into '{}' failed: {}",
+                log_prefix,
+                user_dir.display(),
+                e
+            );
+            return Err(EX_OSERR);
+        }
     }
 
     // Chroot successful, adjust the path to reflect that
@@ -224,9 +235,20 @@ pub fn assume_user_privileges(
     } else {
         nix::unistd::setgroups(&[target_gid])
     }
-    .and_then(|()| nix::unistd::setgid(target_gid))
-    .and_then(|()| nix::unistd::setuid(target_uid))
-    {
+    .and_then(|()| {
+        if effective_only {
+            nix::unistd::setegid(target_gid)
+        } else {
+            nix::unistd::setgid(target_gid)
+        }
+    })
+    .and_then(|()| {
+        if effective_only {
+            nix::unistd::seteuid(target_uid)
+        } else {
+            nix::unistd::setuid(target_uid)
+        }
+    }) {
         error!(
             "{} Failed to drop privileges to {}:{}: {}",
             log_prefix, target_uid, target_gid, e
