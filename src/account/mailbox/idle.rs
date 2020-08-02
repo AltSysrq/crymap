@@ -22,10 +22,11 @@
 //!
 //! Notifications are implemented by "one-shot" UNIX sockets. When a process
 //! goes into idle, it binds a UNIX datagram socket named `$pid.$serno` in the
-//! account's `tmp` directory and symlinks it from the mailbox's `socks`
-//! directory. It then waits until a packet is received. The content of
-//! transmitted data is irrelevant; it is used only as a wakeup. On wakeup, the
-//! socket is unlinked if it is still there.
+//! account's `tmp` directory and symlinks it (using the bare name only, not
+//! the full path) from the mailbox's `socks` directory under exactly the same
+//! name. It then waits until a packet is received. The content of transmitted
+//! data is irrelevant; it is used only as a wakeup. On wakeup, the socket is
+//! unlinked if it is still there.
 //!
 //! Sockets are allocated in the `tmp` directory instead of directly under
 //! `socks` since the path within the mailbox could easily exceed the maximum
@@ -188,10 +189,7 @@ impl StatelessMailbox {
             symlink_path,
         };
 
-        std::os::unix::fs::symlink(
-            &listener.sock_path,
-            &listener.symlink_path,
-        )?;
+        std::os::unix::fs::symlink(&sock_name, &listener.symlink_path)?;
         Ok(listener)
     }
 
@@ -210,10 +208,11 @@ impl StatelessMailbox {
             let entry = entry?;
 
             let path = entry.path();
-            if let Ok(destination) = path.canonicalize() {
-                let _ = sock.send_to(&[0], &destination);
-                let _ = fs::remove_file(&destination);
-            }
+            // We don't read the symlink since it doesn't point to the absolute
+            // path.
+            let destination = self.common_paths.tmp.join(entry.file_name());
+            let _ = sock.send_to(&[0], &destination);
+            let _ = fs::remove_file(&destination);
             let _ = fs::remove_file(&path);
         }
 
