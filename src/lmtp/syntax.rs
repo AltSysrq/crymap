@@ -62,8 +62,11 @@ static SIMPLE_COMMANDS: &[(&str, Command, bool)] = &[
 
 lazy_static! {
     static ref RX_LHLO: Regex = Regex::new("^(?i)LHLO ([^ ]*)").unwrap();
-    static ref RX_MAIL: Regex =
-        Regex::new("^(?i)MAIL FROM:<([^>]*)>$").unwrap();
+    static ref RX_MAIL: Regex = Regex::new(
+        "^(?i)MAIL FROM:<([^>]*)>\
+                    (?: BODY=(?:7BIT|8BIT|BINARYMIME))*$"
+    )
+    .unwrap();
     static ref RX_RCPT: Regex =
         Regex::new("^(?i)RCPT TO:<(?:@[^:]+:)?([^>]+)>$").unwrap();
     static ref RX_BDAT: Regex =
@@ -136,6 +139,18 @@ mod test {
         assert_eq!(
             Ok(Command::MailFrom("foo@bar.com".to_owned())),
             "MAIL FROM:<foo@bar.com>".parse()
+        );
+        assert_eq!(
+            Ok(Command::MailFrom("foo@bar.com".to_owned())),
+            "MAIL FROM:<foo@bar.com> BODY=BiNaRyMiMe".parse()
+        );
+        assert_eq!(
+            Ok(Command::MailFrom("foo@bar.com".to_owned())),
+            "MAIL FROM:<foo@bar.com> body=8bit".parse()
+        );
+        assert_eq!(
+            Ok(Command::MailFrom("foo@bar.com".to_owned())),
+            "MAIL FROM:<foo@bar.com> body=7bit".parse()
         );
         assert_eq!(
             Ok(Command::MailFrom(String::new())),

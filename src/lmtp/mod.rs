@@ -20,3 +20,6 @@ mod codes;
 mod syntax;
 
 pub mod server;
+
+#[cfg(test)]
+mod integration_tests;

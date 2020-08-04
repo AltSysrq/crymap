@@ -309,7 +309,11 @@ impl Server {
     fn cmd_mail_from(&mut self, return_path: String) -> Result<(), Error> {
         require!(self, need_lhlo = true, need_return_path = false);
 
-        self.peer_id = Some(return_path);
+        // Ensure there is no buffered data (or anything else).
+        // This can happen due to an out-of-sequence BDAT chunk.
+        self.reset();
+
+        self.return_path = Some(return_path);
         self.send_response(
             Final,
             pc::Ok,
@@ -375,13 +379,8 @@ impl Server {
     }
 
     fn cmd_binary_data(&mut self, len: u64, last: bool) -> Result<(), Error> {
-        require!(
-            self,
-            need_lhlo = true,
-            need_return_path = true,
-            need_recipients = true
-        );
-
+        // We need to transfer the data *first*, because it must happen
+        // unconditionally.
         let nread =
             io::copy(&mut self.read.by_ref().take(len), &mut self.data_buffer)?;
         if nread != len {
@@ -390,6 +389,13 @@ impl Server {
                 "EOF before end of BDAT",
             )));
         }
+
+        require!(
+            self,
+            need_lhlo = true,
+            need_return_path = true,
+            need_recipients = true
+        );
 
         if last {
             self.deliver()
