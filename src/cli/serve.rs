@@ -237,16 +237,13 @@ fn configure_system(
         warn!("{} Unable to configure timeouts: {}", log_prefix, e);
     }
 
-    if let Err(e) = nix::sys::socket::setsockopt(
+    // It is not unusual for stdio to be UNIX sockets instead of TCP, so don't
+    // complain if setting TCP_NODELAY fails.
+    let _ = nix::sys::socket::setsockopt(
         STDOUT,
         nix::sys::socket::sockopt::TcpNoDelay,
         &true,
-    ) {
-        warn!(
-            "{}{} Unable to configure TCP NODELAY on stdout: {}",
-            log_prefix, peer_name, e
-        );
-    }
+    );
 
     info!("{}{} Connection established", log_prefix, peer_name);
     peer_name
