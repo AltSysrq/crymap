@@ -95,7 +95,7 @@ impl Visitor for FlagsFetcher {
     }
 
     fn end(&mut self) -> FlagsInfo {
-        mem::replace(&mut self.info, FlagsInfo::default())
+        mem::take(&mut self.info)
     }
 }
 

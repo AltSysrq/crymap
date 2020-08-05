@@ -179,13 +179,12 @@ impl StatefulMailbox {
             unseen: this
                 .state
                 .seqnums_uids()
-                .filter(|&(_, uid)| {
+                .find(|&(_, uid)| {
                     this.state
                         .flag_id(&Flag::Seen)
                         .map(|fid| !this.state.test_flag(fid, uid))
                         .unwrap_or(true)
                 })
-                .next()
                 .map(|(s, _)| s),
             uidnext: this.state.next_uid().unwrap_or(Uid::MAX),
             uidvalidity: this.s.uid_validity()?,

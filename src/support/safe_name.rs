@@ -33,9 +33,9 @@ pub fn is_safe_name(name: &str) -> bool {
     !name.is_empty() &&
         // Block directory traversal through .. and creation of hidden files on
         // UNIX
-        !name.starts_with(".") &&
+        !name.starts_with('.') &&
         // Names beginning with # have special meaning in IMAP
-        !name.starts_with("#") &&
+        !name.starts_with('#') &&
         !name.chars().any(is_forbidden_char)
 }
 

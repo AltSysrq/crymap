@@ -329,7 +329,7 @@ impl<'a> HierIdScheme<'a> {
         }
 
         let rename_res = fs::rename(&stage, &path);
-        if !rename_res.is_ok() {
+        if rename_res.is_err() {
             let _ = fs::remove_file(&stage);
         }
 
@@ -646,7 +646,7 @@ impl<'a> HierIdScheme<'a> {
         let mut all_gone = true;
 
         // Iterate descending so that we find unallocated items more quickly
-        for i in (0..=255).into_iter().rev() {
+        for i in (0..=255).rev() {
             path.push(format!("{:02x}.{}", i, self.extension));
             let (allocated, mut exists) = match fs::metadata(&path) {
                 Ok(_) => (true, true),

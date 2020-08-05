@@ -16,7 +16,6 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-use openssl;
 use rand::{rngs::OsRng, Rng};
 
 use super::AES_BLOCK;

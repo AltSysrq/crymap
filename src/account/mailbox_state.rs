@@ -20,6 +20,7 @@
 //!
 //! Nothing here does I/O; it's simply the pure state management.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::mem;
@@ -215,7 +216,7 @@ impl MailboxState {
             self.max_modseq = Some(
                 self.max_modseq
                     .map(|m| m.with_uid(uid))
-                    .unwrap_or(Modseq::new(uid, Cid::GENESIS)),
+                    .unwrap_or_else(|| Modseq::new(uid, Cid::GENESIS)),
             );
         }
     }
@@ -326,22 +327,27 @@ impl MailboxState {
             self.extant_messages.retain(|&uid| loop {
                 let next_expunged =
                     expunged.peek().copied().unwrap_or(Uid::MAX);
-                if next_expunged < uid {
-                    expunged.next();
-                } else if next_expunged == uid {
-                    if index < max_index {
-                        expunged_pairs.push((Seqnum::from_index(index), uid));
-                    } else {
-                        // Account for the fact that we removed this one when
-                        // we later look for which messages are new.
-                        unapplied_create -= 1;
-                        stillborn.push(uid);
+                match next_expunged.cmp(&uid) {
+                    Ordering::Less => {
+                        expunged.next();
                     }
-                    index += 1;
-                    return false;
-                } else {
-                    index += 1;
-                    return true;
+                    Ordering::Equal => {
+                        if index < max_index {
+                            expunged_pairs
+                                .push((Seqnum::from_index(index), uid));
+                        } else {
+                            // Account for the fact that we removed this one
+                            // when we later look for which messages are new.
+                            unapplied_create -= 1;
+                            stillborn.push(uid);
+                        }
+                        index += 1;
+                        return false;
+                    }
+                    Ordering::Greater => {
+                        index += 1;
+                        return true;
+                    }
                 }
             });
         }
@@ -685,7 +691,6 @@ impl MailboxState {
 
             let mut s = SeqRange::new();
             for uid in (expunge_start.0.get()..=max_modseq.uid().0.get())
-                .into_iter()
                 .map(|uid| Uid::of(uid).unwrap())
                 .filter(|uid| !self.message_status.contains_key(uid))
                 .filter(&mut filter)
@@ -828,8 +833,7 @@ impl MailboxState {
         self.flags
             .iter()
             .enumerate()
-            .filter(|&(_, f)| f == flag)
-            .next()
+            .find(|&(_, f)| f == flag)
             .map(|(ix, _)| ix)
     }
 }

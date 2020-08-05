@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 use crate::account::key_store::KeyStoreConfig;
 use crate::crypt::master_key::MasterKeyConfig;
 
+#[allow(clippy::ptr_arg)]
 pub mod b64 {
-    use base64;
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(

@@ -309,17 +309,16 @@ impl StatefulMailbox {
 
                 // Ensure any section parts are OK
                 for part in &mut fetched {
-                    match part {
-                        &mut FetchedItem::BodySection((_, ref mut section)) => {
-                            if section.is_err() {
-                                return mem::replace(
-                                    section,
-                                    Err(Error::NxMessage),
-                                )
-                                .map(|_| unreachable!());
-                            }
+                    if let FetchedItem::BodySection((_, ref mut section)) =
+                        *part
+                    {
+                        if section.is_err() {
+                            return mem::replace(
+                                section,
+                                Err(Error::NxMessage),
+                            )
+                            .map(|_| unreachable!());
                         }
-                        _ => (),
                     }
                 }
 
@@ -327,7 +326,7 @@ impl StatefulMailbox {
             }
         });
 
-        if let &Err(Error::ExpungedMessage) = &result {
+        if let Err(Error::ExpungedMessage) = result {
             // If the client requested collect_vanished and we got here, that
             // means the expunge took place later than the latest Modseq we
             // currently know about. In a perfect world, we would report this

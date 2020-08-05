@@ -190,7 +190,7 @@ impl<R: Read> BufRead for Reader<R> {
                     return Ok(&[]);
                 }
                 Err(e) => {
-                    return Err(e.into());
+                    return Err(e);
                 }
             };
 

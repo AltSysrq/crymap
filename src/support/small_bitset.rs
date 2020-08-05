@@ -37,6 +37,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 #[derive(Clone)]
 pub struct SmallBitset {
     near: u64,
+    #[allow(clippy::box_vec)]
     far: Option<Box<Vec<u64>>>,
 }
 
@@ -89,18 +90,10 @@ impl SmallBitset {
     pub fn iter<'a>(&'a self) -> impl Iterator<Item = usize> + 'a {
         static EMPTY: Vec<u64> = Vec::new();
         iter::once(self.near)
-            .chain(
-                self.far
-                    .as_ref()
-                    .map(|v| &**v)
-                    .unwrap_or(&EMPTY)
-                    .iter()
-                    .copied(),
-            )
+            .chain(self.far.as_deref().unwrap_or(&EMPTY).iter().copied())
             .enumerate()
             .flat_map(move |(ix, word)| {
                 (0..64)
-                    .into_iter()
                     .filter(move |&bit| 0 != (word & (1 << bit)))
                     .map(move |bit| bit + ix * 64)
             })
@@ -137,8 +130,8 @@ impl Serialize for SmallBitset {
         &self,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        match &self.far {
-            &None => {
+        match self.far {
+            None => {
                 let near_array = [self.near];
                 if self.near == 0 {
                     &[] as &[u64]
@@ -147,7 +140,7 @@ impl Serialize for SmallBitset {
                 }
                 .serialize(serializer)
             }
-            &Some(ref far) => {
+            Some(ref far) => {
                 let mut elements = Vec::clone(far);
                 elements.push(self.near);
                 elements.serialize(serializer)

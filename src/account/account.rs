@@ -416,7 +416,7 @@ impl Account {
 
         if dst_parts.len() > src_parts.len()
             && !src_parts.is_empty()
-            && &dst_parts[..src_parts.len()] == &src_parts[..]
+            && dst_parts[..src_parts.len()] == src_parts[..]
         {
             return Err(Error::RenameIntoSelf);
         }
@@ -477,7 +477,7 @@ impl Account {
             return Ok(vec![]);
         }
 
-        if !pattern_prefix.is_empty() && !pattern_prefix.ends_with("/") {
+        if !pattern_prefix.is_empty() && !pattern_prefix.ends_with('/') {
             pattern_prefix.push('/');
         }
 

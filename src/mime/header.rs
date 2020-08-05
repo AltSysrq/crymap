@@ -982,7 +982,7 @@ fn mailbox(i: &[u8]) -> IResult<&[u8], Mailbox<'_>> {
             ),
             sequence::pair(
                 combinator::map(combinator::opt(phrase), |o| {
-                    o.unwrap_or(vec![])
+                    o.unwrap_or_default()
                 }),
                 angle_addr,
             ),
@@ -1021,7 +1021,7 @@ fn group(i: &[u8]) -> IResult<&[u8], Group<'_>> {
     // reasons, we don't handle semicolon here, but instead treat it as another
     // address list delimiter.
     let (i, boxes) = combinator::opt(mailbox_list)(i)?;
-    let boxes = boxes.unwrap_or(vec![]);
+    let boxes = boxes.unwrap_or_default();
     Ok((i, Group { name, boxes }))
 }
 

@@ -167,7 +167,7 @@ impl grovel::Visitor for EnvelopeFetcher {
     }
 
     fn end(&mut self) -> Envelope {
-        mem::replace(&mut self.envelope, Envelope::default())
+        mem::take(&mut self.envelope)
     }
 }
 
@@ -190,7 +190,7 @@ impl EnvelopeFetcher {
         value: &[u8],
     ) -> Result<(), Envelope> {
         let field = accessor(&mut self.envelope);
-        let addrlist = header::parse_address_list(value).unwrap_or(Vec::new());
+        let addrlist = header::parse_address_list(value).unwrap_or_default();
         for address in addrlist {
             match address {
                 header::Address::Mailbox(mailbox) => {

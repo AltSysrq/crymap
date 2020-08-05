@@ -83,10 +83,9 @@ fn connect(options: RemoteCommonOptions) -> Result<RemoteClient, Error> {
 
     let mut addresses =
         (&options.host as &str, options.port).to_socket_addrs()?;
-    let address = addresses.next().ok_or(Error::Io(io::Error::new(
-        io::ErrorKind::Other,
-        "Host not found",
-    )))?;
+    let address = addresses.next().ok_or_else(|| {
+        Error::Io(io::Error::new(io::ErrorKind::Other, "Host not found"))
+    })?;
 
     if options.trace {
         eprintln!("Opening connection to {}", address);

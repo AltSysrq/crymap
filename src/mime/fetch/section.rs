@@ -373,6 +373,8 @@ impl Visitor for SectionLocator {
         let next_level = if let Some(target) = self.target.as_ref() {
             self.curr_part_number += 1;
 
+            // "Identical" branches are working towards different semantics
+            #[allow(clippy::if_same_then_else)]
             if self.level >= target.subscripts.len() {
                 // If we are beyond the end of the subscript list, we are doing
                 // the `Headers` or `Text` special-case. In this case, we
@@ -533,10 +535,7 @@ impl SectionFetcher {
 
     fn end_buffer(&mut self) -> Result<FetchedBodySection, Error> {
         let buffer = self.buffer.take().unwrap();
-        let buffer = buffer
-            .into_inner()
-            .map_err(|e| io::Error::from(e))?
-            .flip()?;
+        let buffer = buffer.into_inner().map_err(io::Error::from)?.flip()?;
         Ok(FetchedBodySection {
             buffer,
             contains_nul: self.contains_nul,

@@ -212,7 +212,7 @@ impl Visitor for BodyStructureFetcher {
 
         self.bs.md5 = md5;
 
-        mem::replace(&mut self.bs, BodyStructure::default())
+        mem::take(&mut self.bs)
     }
 }
 

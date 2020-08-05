@@ -113,53 +113,53 @@ pub fn eval(ops: &[Op], data: &SearchData) -> Option<bool> {
     let mut s = Stack(0u64);
 
     for op in ops {
-        match op {
-            &Op::True => s.push(TRUE),
-            &Op::And => s.and(),
-            &Op::Or => s.or(),
-            &Op::Not => s.not(),
+        match *op {
+            Op::True => s.push(TRUE),
+            Op::And => s.and(),
+            Op::Or => s.or(),
+            Op::Not => s.not(),
             #[cfg(test)]
-            &Op::_Const(v) => s.push(v),
+            Op::_Const(v) => s.push(v),
 
-            &Op::Flag(ref flag) => {
+            Op::Flag(ref flag) => {
                 s.o(data.flags.as_ref().map(|f| f.contains(flag)))
             }
-            &Op::Recent => s.o(data.recent),
+            Op::Recent => s.o(data.recent),
             // RFC 7162 stipulates "equal to or greater than", even though it
             // seems strict inequality would be more sensible (as that would
             // mean "modified after")
-            &Op::Modseq(thresh) => {
+            Op::Modseq(thresh) => {
                 s.o(data.last_modified.map(|m| m.raw().get() >= thresh))
             }
             // RFC 8474 requires case-sensitive comparison
-            &Op::EmailId(ref email_id) => s.o(data
+            Op::EmailId(ref email_id) => s.o(data
                 .metadata
                 .as_ref()
                 .map(|md| md.format_email_id() == *email_id)),
 
-            &Op::From(ref r) => s.o(data.from.as_ref().map(|v| r.is_match(v))),
-            &Op::Cc(ref r) => s.o(data.cc.as_ref().map(|v| r.is_match(v))),
-            &Op::Bcc(ref r) => s.o(data.bcc.as_ref().map(|v| r.is_match(v))),
-            &Op::To(ref r) => s.o(data.to.as_ref().map(|v| r.is_match(v))),
-            &Op::Subject(ref r) => {
+            Op::From(ref r) => s.o(data.from.as_ref().map(|v| r.is_match(v))),
+            Op::Cc(ref r) => s.o(data.cc.as_ref().map(|v| r.is_match(v))),
+            Op::Bcc(ref r) => s.o(data.bcc.as_ref().map(|v| r.is_match(v))),
+            Op::To(ref r) => s.o(data.to.as_ref().map(|v| r.is_match(v))),
+            Op::Subject(ref r) => {
                 s.o(data.subject.as_ref().map(|v| r.is_match(v)))
             }
-            &Op::Header(ref name, ref r) => {
+            Op::Header(ref name, ref r) => {
                 s.o(data.headers.as_ref().map(|h| {
                     h.get(name).map(|v| r.is_match(v)).unwrap_or(false)
                 }));
             }
-            &Op::AnyHeader(ref r) => {
+            Op::AnyHeader(ref r) => {
                 s.o(data
                     .headers
                     .as_ref()
                     .map(|h| h.values().any(|v| r.is_match(v))));
             }
-            &Op::Content(ref r) => {
+            Op::Content(ref r) => {
                 s.o(data.content.as_ref().map(|v| r.is_match(v)))
             }
 
-            &Op::InternalDateCompare(ref relative, lt, eq, gt) => {
+            Op::InternalDateCompare(ref relative, lt, eq, gt) => {
                 s.o(cmp_date(
                     data.metadata.as_ref().map(|md| &md.internal_date),
                     relative,
@@ -168,10 +168,10 @@ pub fn eval(ops: &[Op], data: &SearchData) -> Option<bool> {
                     gt,
                 ));
             }
-            &Op::DateCompare(ref relative, lt, eq, gt) => {
+            Op::DateCompare(ref relative, lt, eq, gt) => {
                 s.o(cmp_date(data.date.as_ref(), relative, lt, eq, gt));
             }
-            &Op::SizeCompare(ref relative, lt, eq, gt) => {
+            Op::SizeCompare(ref relative, lt, eq, gt) => {
                 s.o(cmp(
                     data.metadata.as_ref().map(|md| &md.size),
                     relative,
@@ -181,7 +181,7 @@ pub fn eval(ops: &[Op], data: &SearchData) -> Option<bool> {
                 ));
             }
 
-            &Op::UidIn(ref set) => s.o(data.uid.map(|u| set.contains(u))),
+            Op::UidIn(ref set) => s.o(data.uid.map(|u| set.contains(u))),
         }
     }
 
@@ -223,33 +223,33 @@ pub fn want(ops: &[Op]) -> OptionalSearchParts {
     let mut accum = OptionalSearchParts::empty();
 
     for op in ops {
-        accum |= match op {
-            &Op::True
-            | &Op::And
-            | &Op::Or
-            | &Op::Not
-            | &Op::Content(..)
-            | &Op::InternalDateCompare(..)
-            | &Op::SizeCompare(..)
-            | &Op::UidIn(..)
-            | &Op::Modseq(..)
-            | &Op::EmailId(..) => OptionalSearchParts::empty(),
+        accum |= match *op {
+            Op::True
+            | Op::And
+            | Op::Or
+            | Op::Not
+            | Op::Content(..)
+            | Op::InternalDateCompare(..)
+            | Op::SizeCompare(..)
+            | Op::UidIn(..)
+            | Op::Modseq(..)
+            | Op::EmailId(..) => OptionalSearchParts::empty(),
 
             #[cfg(test)]
-            &Op::_Const(..) => OptionalSearchParts::empty(),
+            Op::_Const(..) => OptionalSearchParts::empty(),
 
-            &Op::Flag(..) | &Op::Recent => OptionalSearchParts::FLAGS,
+            Op::Flag(..) | Op::Recent => OptionalSearchParts::FLAGS,
 
-            &Op::From(..) => OptionalSearchParts::FROM,
-            &Op::Cc(..) => OptionalSearchParts::CC,
-            &Op::Bcc(..) => OptionalSearchParts::BCC,
-            &Op::To(..) => OptionalSearchParts::TO,
-            &Op::Subject(..) => OptionalSearchParts::SUBJECT,
-            &Op::Header(..) | &Op::AnyHeader(..) => {
+            Op::From(..) => OptionalSearchParts::FROM,
+            Op::Cc(..) => OptionalSearchParts::CC,
+            Op::Bcc(..) => OptionalSearchParts::BCC,
+            Op::To(..) => OptionalSearchParts::TO,
+            Op::Subject(..) => OptionalSearchParts::SUBJECT,
+            Op::Header(..) | Op::AnyHeader(..) => {
                 OptionalSearchParts::HEADER_MAP
             }
 
-            &Op::DateCompare(..) => OptionalSearchParts::DATE,
+            Op::DateCompare(..) => OptionalSearchParts::DATE,
         }
     }
 

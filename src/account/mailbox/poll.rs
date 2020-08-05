@@ -187,7 +187,7 @@ impl StatefulMailbox {
             } else {
                 None
             },
-            fetch: fetch,
+            fetch,
             max_modseq: if flush.max_modseq == reported_modseq {
                 None
             } else {

@@ -16,6 +16,14 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+#![allow(
+    clippy::collapsible_if,
+    clippy::module_inception,
+    clippy::type_complexity,
+    clippy::too_many_arguments,
+    clippy::needless_range_loop
+)]
+
 #[cfg(test)]
 macro_rules! assert_matches {
     ($expected:pat, $actual:expr) => {

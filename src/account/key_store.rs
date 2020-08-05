@@ -376,7 +376,9 @@ fn load_private_key<'a>(
     )?;
 
     Ok(Arc::clone(
-        cache.entry(name.to_owned()).or_insert(Arc::new(priv_key)),
+        cache
+            .entry(name.to_owned())
+            .or_insert_with(|| Arc::new(priv_key)),
     ))
 }
 

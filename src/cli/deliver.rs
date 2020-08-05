@@ -234,7 +234,7 @@ impl<R: Read> Read for NormaliseLineEnding<R> {
             return self.inner.read(dst);
         }
 
-        if 0 == dst.len() {
+        if dst.is_empty() {
             return Ok(0);
         }
 

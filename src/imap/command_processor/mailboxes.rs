@@ -434,10 +434,10 @@ impl CommandProcessor {
             ));
         }
         if let Some(uid) = response.uidnext {
-            atts.push(s::StatusResponseAtt::UidNext(uid.0.get().into()));
+            atts.push(s::StatusResponseAtt::UidNext(uid.0.get()));
         }
         if let Some(uidvalidity) = response.uidvalidity {
-            atts.push(s::StatusResponseAtt::UidValidity(uidvalidity.into()));
+            atts.push(s::StatusResponseAtt::UidValidity(uidvalidity));
         }
         if let Some(unseen) = response.unseen {
             atts.push(s::StatusResponseAtt::Unseen(

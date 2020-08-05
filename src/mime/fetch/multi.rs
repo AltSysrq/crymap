@@ -43,8 +43,8 @@ pub enum FetchedItem {
     InternalDate(DateTime<FixedOffset>),
     EmailId(String),
     ThreadIdNil,
-    Envelope(envelope::Envelope),
-    BodyStructure(bodystructure::BodyStructure),
+    Envelope(Box<envelope::Envelope>),
+    BodyStructure(Box<bodystructure::BodyStructure>),
     BodySection(
         (
             section::BodySection,
@@ -56,14 +56,14 @@ pub enum FetchedItem {
 impl FetchedItem {
     pub fn into_envelope(self) -> Option<envelope::Envelope> {
         match self {
-            FetchedItem::Envelope(e) => Some(e),
+            FetchedItem::Envelope(e) => Some(*e),
             _ => None,
         }
     }
 
     pub fn into_body_structure(self) -> Option<bodystructure::BodyStructure> {
         match self {
-            FetchedItem::BodyStructure(s) => Some(s),
+            FetchedItem::BodyStructure(s) => Some(*s),
             _ => None,
         }
     }
@@ -172,7 +172,7 @@ impl MultiFetcher {
     pub fn add_envelope(&mut self) {
         self.add_fetcher(Box::new(VisitorMap::new(
             Box::new(envelope::EnvelopeFetcher::new()),
-            FetchedItem::Envelope,
+            |e| FetchedItem::Envelope(Box::new(e)),
             FetchedItem::into_envelope,
         )));
     }
@@ -181,7 +181,7 @@ impl MultiFetcher {
     pub fn add_body_structure(&mut self) {
         self.add_fetcher(Box::new(VisitorMap::new(
             Box::new(bodystructure::BodyStructureFetcher::new()),
-            FetchedItem::BodyStructure,
+            |bs| FetchedItem::BodyStructure(Box::new(bs)),
             FetchedItem::into_body_structure,
         )));
     }

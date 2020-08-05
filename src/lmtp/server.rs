@@ -15,7 +15,6 @@
 //
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
-#![allow(dead_code)]
 
 use std::borrow::Cow;
 use std::fmt;
@@ -703,12 +702,14 @@ impl Server {
 
             let _restore_uid_gid = RestoreUidGid;
 
-            if let Err(_) = unix_privileges::assume_user_privileges(
+            if unix_privileges::assume_user_privileges(
                 &self.log_prefix,
                 self.config.security.chroot_system,
                 &mut user_dir,
                 true,
-            ) {
+            )
+            .is_err()
+            {
                 self.send_response(
                     response_kind,
                     pc::ActionNotTakenTemporary,

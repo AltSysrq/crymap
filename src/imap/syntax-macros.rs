@@ -142,8 +142,8 @@ macro_rules! syntax_rule {
                             -> io::Result<()> {
                 let this = self;
                 apply_write_modifiers!([$($whole_enum_mod)*], lex, this, {
-                    match this {
-                        $(&mut $enum_name::$case_name(ref mut inner) => {
+                    match *this {
+                        $($enum_name::$case_name(ref mut inner) => {
                             apply_write_modifiers!(
                                 [$($case_mod)*], lex, inner, {
                                     generate_field_writer!(
@@ -305,18 +305,18 @@ macro_rules! apply_write_modifiers {
     };
     ([marked_opt($marker:expr) $($rest:tt)*],
      $lex:expr, $var:ident, $inner:expr) => {
-        match $var {
-            &mut None => $lex.verbatim($marker)?,
-            &mut Some(ref mut $var) => {
+        match *$var {
+            None => $lex.verbatim($marker)?,
+            Some(ref mut $var) => {
                 apply_write_modifiers!([$($rest)*], $lex, $var, $inner);
             }
         }
     };
     ([nil $($rest:tt)*],
      $lex:expr, $var:ident, $inner:expr) => {
-        match $var {
-            &mut None => $lex.nil()?,
-            &mut Some(ref mut $var) => {
+        match *$var {
+            None => $lex.nil()?,
+            Some(ref mut $var) => {
                 apply_write_modifiers!([$($rest)*], $lex, $var, $inner);
             }
         }
@@ -331,9 +331,9 @@ macro_rules! apply_write_modifiers {
     };
     ([opt $($rest:tt)*],
      $lex:expr, $var:ident, $inner:expr) => {
-        match $var {
-            &mut None => (),
-            &mut Some(ref mut $var) => {
+        match *$var {
+            None => (),
+            Some(ref mut $var) => {
                 apply_write_modifiers!([$($rest)*], $lex, $var, $inner);
             }
         }

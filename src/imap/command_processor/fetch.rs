@@ -504,10 +504,10 @@ fn fetch_att_to_ast(
         FI::InternalDate(dt) => Some(s::MsgAtt::InternalDate(dt)),
         FI::EmailId(ei) => Some(s::MsgAtt::EmailId(Cow::Owned(ei))),
         FI::ThreadIdNil => Some(s::MsgAtt::ThreadIdNil(())),
-        FI::Envelope(env) => Some(s::MsgAtt::Envelope(envelope_to_ast(env))),
+        FI::Envelope(env) => Some(s::MsgAtt::Envelope(envelope_to_ast(*env))),
         FI::BodyStructure(bs) => {
             let converted = body_structure_to_ast(
-                bs,
+                *bs,
                 fetch_properties.extended_body_structure,
             );
             Some(if fetch_properties.extended_body_structure {

@@ -176,7 +176,7 @@ impl MailboxPath {
             .map(|it| {
                 Box::new(it) as Box<dyn Iterator<Item = MailboxPath> + 'a>
             })
-            .unwrap_or(Box::new(std::iter::empty()))
+            .unwrap_or_else(|| Box::new(std::iter::empty()))
     }
 
     /// Create this mailbox.
@@ -711,7 +711,7 @@ pub fn parse_uid_validity(path: impl AsRef<Path>) -> Result<u32, Error> {
         .to_str()
         .ok_or(Error::CorruptFileLayout)?;
 
-    if !name.starts_with("%") {
+    if !name.starts_with('%') {
         return Err(Error::CorruptFileLayout);
     }
 

@@ -227,7 +227,7 @@ fn configure_system(
 
     // On FreeBSD, getpeername() on a UNIX socket returns "@\0", which breaks
     // syslog if we log that.
-    if peer_name.contains("\0") {
+    if peer_name.contains('\0') {
         peer_name = "unknown-socket".to_owned();
     }
 

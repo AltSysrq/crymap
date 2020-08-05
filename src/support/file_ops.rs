@@ -79,7 +79,7 @@ pub fn delete_async(
                 break;
             }
             Err(e) if io::ErrorKind::AlreadyExists == e.kind() => continue,
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(e),
         }
     }
 
@@ -101,7 +101,7 @@ impl<R: Read> ReadUninterruptibly for R {
     /// propagated.
     fn read_uninteruptibly(&mut self, mut dst: &mut [u8]) -> io::Result<usize> {
         let mut total = 0;
-        while 0 != dst.len() {
+        while !dst.is_empty() {
             match self.read(dst) {
                 Ok(0) => break,
                 Ok(n) => {

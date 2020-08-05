@@ -461,7 +461,7 @@ impl<T: TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync> SeqRange<T> {
             .iter()
             .map(|(&start, &end)| (start, end))
             .filter(move |&(start, _)| start <= max)
-            .flat_map(move |(start, end)| (start..=end.min(max)).into_iter())
+            .flat_map(move |(start, end)| start..=end.min(max))
             .filter_map(|v| T::try_from(v).ok())
     }
 
@@ -583,13 +583,13 @@ pub enum Flag {
 
 impl fmt::Display for Flag {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &Flag::Answered => write!(f, "\\Answered"),
-            &Flag::Deleted => write!(f, "\\Deleted"),
-            &Flag::Draft => write!(f, "\\Draft"),
-            &Flag::Flagged => write!(f, "\\Flagged"),
-            &Flag::Seen => write!(f, "\\Seen"),
-            &Flag::Keyword(ref kw) => write!(f, "{}", kw),
+        match *self {
+            Flag::Answered => write!(f, "\\Answered"),
+            Flag::Deleted => write!(f, "\\Deleted"),
+            Flag::Draft => write!(f, "\\Draft"),
+            Flag::Flagged => write!(f, "\\Flagged"),
+            Flag::Seen => write!(f, "\\Seen"),
+            Flag::Keyword(ref kw) => write!(f, "{}", kw),
         }
     }
 }
@@ -614,7 +614,7 @@ impl FromStr for Flag {
             Ok(Flag::Flagged)
         } else if s.eq_ignore_ascii_case("\\seen") {
             Ok(Flag::Seen)
-        } else if s.starts_with("\\") {
+        } else if s.starts_with('\\') {
             Err(Error::NxFlag)
         } else if s.as_bytes().iter().copied().all(is_atom_char) {
             Ok(Flag::Keyword(s.to_owned()))
@@ -687,20 +687,20 @@ pub enum MailboxAttribute {
 
 impl MailboxAttribute {
     pub fn name(&self) -> &'static str {
-        match self {
-            &MailboxAttribute::Noselect => "\\Noselect",
-            &MailboxAttribute::Noinferiors => "\\Noinferiors",
-            &MailboxAttribute::HasChildren => "\\HasChildren",
-            &MailboxAttribute::HasNoChildren => "\\HasNoChildren",
-            &MailboxAttribute::NonExistent => "\\NonExistent",
-            &MailboxAttribute::Subscribed => "\\Subscribed",
-            &MailboxAttribute::Archive => "\\Archive",
-            &MailboxAttribute::Drafts => "\\Drafts",
-            &MailboxAttribute::Flagged => "\\Flagged",
-            &MailboxAttribute::Junk => "\\Junk",
-            &MailboxAttribute::Sent => "\\Sent",
-            &MailboxAttribute::Trash => "\\Trash",
-            &MailboxAttribute::Important => "\\Important",
+        match *self {
+            MailboxAttribute::Noselect => "\\Noselect",
+            MailboxAttribute::Noinferiors => "\\Noinferiors",
+            MailboxAttribute::HasChildren => "\\HasChildren",
+            MailboxAttribute::HasNoChildren => "\\HasNoChildren",
+            MailboxAttribute::NonExistent => "\\NonExistent",
+            MailboxAttribute::Subscribed => "\\Subscribed",
+            MailboxAttribute::Archive => "\\Archive",
+            MailboxAttribute::Drafts => "\\Drafts",
+            MailboxAttribute::Flagged => "\\Flagged",
+            MailboxAttribute::Junk => "\\Junk",
+            MailboxAttribute::Sent => "\\Sent",
+            MailboxAttribute::Trash => "\\Trash",
+            MailboxAttribute::Important => "\\Important",
         }
     }
 }

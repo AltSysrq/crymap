@@ -92,7 +92,7 @@ impl<'a> MailboxName<'a> {
     /// If the underlying string is already UTF-8 or `unicode_aware` indicates
     /// that the wire format is also UTF-8, returns the raw value. Otherwise,
     /// runs UTF-7 decoding on the value and returns that.
-    pub fn get_utf8<'b>(&'b self, unicode_aware: bool) -> Cow<'b, str> {
+    pub fn get_utf8(&self, unicode_aware: bool) -> Cow<'_, str> {
         if self.utf8 || unicode_aware {
             self.raw.clone()
         } else {

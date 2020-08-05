@@ -112,8 +112,7 @@ impl Utf7 {
                 .iter()
                 .copied()
                 .enumerate()
-                .filter(|&(_, ch)| !self.is_base64_char(ch))
-                .next();
+                .find(|&(_, ch)| !self.is_base64_char(ch));
 
             let (base64_end, unencoded_start) = match base64_end {
                 None => (chunk.len(), chunk.len()),
