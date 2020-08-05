@@ -63,7 +63,6 @@ pub fn assume_system(
 
     if let Some(ref system_user) = system_user {
         if system_user.uid != nix::unistd::getuid() {
-            // TODO This also needs to call setgroups() below
             if let Err(e) = nix::unistd::initgroups(
                 &std::ffi::CString::new(system_user.name.clone()).unwrap(),
                 system_user.gid,
@@ -96,6 +95,15 @@ pub fn assume_system(
 
     if let Some(system_user) = system_user {
         if system_user.uid != nix::unistd::getuid() {
+            if let Err(e) = nix::unistd::setgroups(&[system_user.gid]) {
+                fatal!(
+                    EX_OSERR,
+                    "Failed to set groups for UID {}: {}",
+                    system_user.uid,
+                    e
+                );
+            }
+
             if let Err(e) = nix::unistd::setgid(system_user.gid)
                 .and_then(|_| nix::unistd::setuid(system_user.uid))
             {
