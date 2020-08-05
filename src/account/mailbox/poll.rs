@@ -258,9 +258,10 @@ impl StatefulMailbox {
     }
 
     pub(super) fn see_cid(&mut self, cid: Cid) {
-        if 0 == cid.0 % 256 {
+        if 0 == cid.0 % 32 {
             // Changes are fairly slow to read in, so force rollup at end of
-            // the current or next poll cycle.
+            // the current or next poll cycle. This is also why we have a
+            // fairly small rollup interval --- 32 changes.
             self.suggest_rollup = 1;
         }
     }
@@ -547,7 +548,7 @@ mod test {
         let uid = simple_append(mb1.stateless());
         mb1.poll().unwrap();
 
-        for _ in 0..4000 {
+        for _ in 0..500 {
             mb1.store(&StoreRequest {
                 ids: &SeqRange::just(uid),
                 flags: &[Flag::Flagged],
@@ -567,7 +568,7 @@ mod test {
             })
             .unwrap();
             mb1.poll().unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(2));
+            std::thread::sleep(std::time::Duration::from_millis(16));
         }
 
         // The earliest change should get expunged
@@ -589,13 +590,13 @@ mod test {
         let uid = simple_append(&setup.stateless);
         mb1.poll().unwrap();
 
-        for _ in 0..4000 {
+        for _ in 0..500 {
             setup
                 .stateless
                 .set_flags_blind(vec![(uid, vec![(true, Flag::Flagged)])])
                 .unwrap();
             mb1.poll().unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(2));
+            std::thread::sleep(std::time::Duration::from_millis(16));
         }
 
         std::thread::sleep(std::time::Duration::from_secs(2));

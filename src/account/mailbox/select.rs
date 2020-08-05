@@ -487,7 +487,7 @@ mod test {
             })
             .unwrap();
 
-            for _ in 0..4000 {
+            for _ in 0..500 {
                 mb1.store(&StoreRequest {
                     ids: &SeqRange::just(uid),
                     flags: &[Flag::Flagged],
@@ -507,7 +507,7 @@ mod test {
                 })
                 .unwrap();
                 mb1.poll().unwrap();
-                std::thread::sleep(std::time::Duration::from_millis(2));
+                std::thread::sleep(std::time::Duration::from_millis(16));
             }
 
             // The earliest change should get expunged
