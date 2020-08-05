@@ -217,10 +217,19 @@ fn configure_system(
         _ => (),
     }
 
-    let peer_name = match nix::sys::socket::getpeername(STDIN) {
+    let mut peer_name = match nix::sys::socket::getpeername(STDIN) {
         Ok(addr) => addr.to_string(),
-        Err(e) => fatal!(EX_NOHOST, "Unable to determine peer name: {}", e),
+        Err(e) => {
+            warn!("Unable to determine peer name: {}", e);
+            "unknown-socket".to_owned()
+        }
     };
+
+    // On FreeBSD, getpeername() on a UNIX socket returns "@\0", which breaks
+    // syslog if we log that.
+    if peer_name.contains("\0") {
+        peer_name = "unknown-socket".to_owned();
+    }
 
     if let Err(e) = nix::sys::socket::setsockopt(
         STDIN,
