@@ -224,10 +224,10 @@ pub fn assume_user_privileges(
             );
             return Err(EX_OSERR);
         }
-    }
 
-    // Chroot successful, adjust the path to reflect that
-    user_dir.push("/"); // Clears everything but '/'
+        // Chroot successful, adjust the path to reflect that
+        user_dir.push("/"); // Clears everything but '/'
+    }
 
     // Now we can finish dropping privileges
     if let Err(e) = if has_user_groups {
@@ -256,7 +256,7 @@ pub fn assume_user_privileges(
         return Err(EX_OSERR);
     }
 
-    if nix::unistd::ROOT == nix::unistd::getuid() {
+    if nix::unistd::ROOT == nix::unistd::geteuid() {
         error!(
             "{} Crymap is still root! You must either \
              (a) Run Crymap as a non-root user; \
