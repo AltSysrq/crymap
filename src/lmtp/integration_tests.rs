@@ -411,8 +411,8 @@ fn large_delivery() {
 #[test]
 fn huge_message_rejected() {
     let setup = set_up();
-    let mut cxn = setup.connect("large_delivery");
-    skip_pleasantries(&mut cxn, "large_delivery");
+    let mut cxn = setup.connect("huge_delivery");
+    skip_pleasantries(&mut cxn, "huge_delivery");
 
     let large_content = format!(
         "Subject: Oversize\r\n\r\n{}\r\n",
@@ -432,6 +432,15 @@ fn huge_message_rejected() {
 
     assert!(!received_email(&setup, "dib", &large_content));
     assert!(!received_email(&setup, "gäz", &large_content));
+}
+
+#[test]
+fn huge_mail_from_size_rejected() {
+    let setup = set_up();
+    let mut cxn = setup.connect("huge_mail_from");
+    skip_pleasantries(&mut cxn, "huge_mail_from");
+
+    simple_command(&mut cxn, "MAIL FROM:<> SIZE=1222333444", "552 5.2.3");
 }
 
 #[test]

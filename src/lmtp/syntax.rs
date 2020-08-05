@@ -25,8 +25,8 @@ use regex::Regex;
 pub enum Command {
     /// LHLO origin-host ignored...
     Lhlo(String),
-    /// MAIL FROM:<return-path>
-    MailFrom(String),
+    /// MAIL FROM:<return-path> [SIZE=sz]
+    MailFrom(String, Option<u64>),
     /// RCPT TO:<ignored...:email>
     Recipient(String),
     /// DATA
@@ -64,7 +64,8 @@ lazy_static! {
     static ref RX_LHLO: Regex = Regex::new("^(?i)LHLO ([^ ]*)").unwrap();
     static ref RX_MAIL: Regex = Regex::new(
         "^(?i)MAIL FROM:<([^>]*)>\
-                    (?: BODY=(?:7BIT|8BIT|BINARYMIME))*$"
+         (?: BODY=(?:7BIT|8BIT|BINARYMIME)\
+         | SIZE=([0-9]+))*$"
     )
     .unwrap();
     static ref RX_RCPT: Regex =
@@ -105,7 +106,16 @@ impl FromStr for Command {
         if let Some(cap) = RX_LHLO.captures(s) {
             Ok(Command::Lhlo(cap.get(1).unwrap().as_str().to_owned()))
         } else if let Some(cap) = RX_MAIL.captures(s) {
-            Ok(Command::MailFrom(cap.get(1).unwrap().as_str().to_owned()))
+            let size = match cap.get(2).map(|s| s.as_str().parse::<u64>()) {
+                None => None,
+                Some(Err(_)) => return Err(()),
+                Some(Ok(sz)) => Some(sz),
+            };
+
+            Ok(Command::MailFrom(
+                cap.get(1).unwrap().as_str().to_owned(),
+                size,
+            ))
         } else if let Some(cap) = RX_RCPT.captures(s) {
             Ok(Command::Recipient(cap.get(1).unwrap().as_str().to_owned()))
         } else if let Some(cap) = RX_BDAT.captures(s) {
@@ -137,24 +147,40 @@ mod test {
         );
 
         assert_eq!(
-            Ok(Command::MailFrom("foo@bar.com".to_owned())),
+            Ok(Command::MailFrom("foo@bar.com".to_owned(), None)),
             "MAIL FROM:<foo@bar.com>".parse()
         );
         assert_eq!(
-            Ok(Command::MailFrom("foo@bar.com".to_owned())),
+            Ok(Command::MailFrom("foo@bar.com".to_owned(), None)),
             "MAIL FROM:<foo@bar.com> BODY=BiNaRyMiMe".parse()
         );
         assert_eq!(
-            Ok(Command::MailFrom("foo@bar.com".to_owned())),
+            Ok(Command::MailFrom("foo@bar.com".to_owned(), None)),
             "MAIL FROM:<foo@bar.com> body=8bit".parse()
         );
         assert_eq!(
-            Ok(Command::MailFrom("foo@bar.com".to_owned())),
+            Ok(Command::MailFrom("foo@bar.com".to_owned(), None)),
             "MAIL FROM:<foo@bar.com> body=7bit".parse()
         );
         assert_eq!(
-            Ok(Command::MailFrom(String::new())),
+            Ok(Command::MailFrom("foo@bar.com".to_owned(), Some(42))),
+            "MAIL FROM:<foo@bar.com> SIZE=42".parse()
+        );
+        assert_eq!(
+            Ok(Command::MailFrom("foo@bar.com".to_owned(), Some(42))),
+            "MAIL FROM:<foo@bar.com> body=7bit size=42".parse()
+        );
+        assert_eq!(
+            Ok(Command::MailFrom("foo@bar.com".to_owned(), Some(42))),
+            "MAIL FROM:<foo@bar.com> size=42 body=7bit".parse()
+        );
+        assert_eq!(
+            Ok(Command::MailFrom(String::new(), None)),
             "mail from:<>".parse()
+        );
+        assert_eq!(
+            Err(()),
+            "MAIL FROM:<foo@bar.com> size=-1".parse::<Command>()
         );
 
         assert_eq!(

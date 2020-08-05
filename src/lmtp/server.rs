@@ -64,6 +64,7 @@ static EXTENSIONS: &[&str] = &[
     "ENHANCEDSTATUSCODES",
     "HELP",
     "PIPELINING",
+    concat_appendlimit!("SIZE="),
     "SMTPUTF8",
 ];
 
@@ -267,7 +268,7 @@ impl Server {
 
         match command {
             Command::Lhlo(origin) => self.cmd_lhlo(origin),
-            Command::MailFrom(email) => self.cmd_mail_from(email),
+            Command::MailFrom(email, size) => self.cmd_mail_from(email, size),
             Command::Recipient(email) => self.cmd_recipient(email),
             Command::Data => self.cmd_data(),
             Command::BinaryData(len, last) => self.cmd_binary_data(len, last),
@@ -310,8 +311,24 @@ impl Server {
         Ok(())
     }
 
-    fn cmd_mail_from(&mut self, return_path: String) -> Result<(), Error> {
+    fn cmd_mail_from(
+        &mut self,
+        return_path: String,
+        approx_size: Option<u64>,
+    ) -> Result<(), Error> {
         require!(self, need_lhlo = true, need_return_path = false);
+
+        if approx_size.unwrap_or(0) > APPEND_SIZE_LIMIT as u64 {
+            return self.send_response(
+                Final,
+                pc::ExceededStorageAllocation,
+                Some((cc::PermFail, sc::MessageLengthExceedsLimit)),
+                Cow::Owned(format!(
+                    "Maximum message size is {} bytes",
+                    APPEND_SIZE_LIMIT
+                )),
+            );
+        }
 
         // Ensure there is no buffered data (or anything else).
         // This can happen due to an out-of-sequence BDAT chunk.
