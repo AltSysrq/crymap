@@ -340,7 +340,7 @@ const MAX_BUFFER: usize = 65536;
 pub(super) const MAX_BUFFER: usize = 256;
 
 const MAX_RECURSION: u32 = 20;
-const MAX_PARTS: u32 = 100;
+const MAX_PARTS: u32 = 1000;
 
 pub trait IntoBoxedVisitor<V> {
     fn into_boxed_visitor(self) -> Box<dyn Visitor<Output = V>>;

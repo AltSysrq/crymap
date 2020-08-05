@@ -858,7 +858,7 @@ Content-Type: multipart/alternative; boundary=inner{:02}
                 outer
             ));
 
-            for _inner in 0..20 {
+            for _inner in 0..200 {
                 content.push_str(&format!(
                     "\
 --inner{:02}
