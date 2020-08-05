@@ -1,5 +1,3 @@
-LMTP
-
 Rollup dumps triggered by maintenance fail due to read-only status.
 
 Documentation
