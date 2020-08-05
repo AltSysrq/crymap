@@ -52,8 +52,6 @@ impl StatelessMailbox {
         &self,
         data: &impl Serialize,
     ) -> Result<NamedTempFile, Error> {
-        self.not_read_only()?;
-
         let mut buffer_file = NamedTempFile::new_in(&self.common_paths.tmp)?;
         {
             let compression = Compression::DEFAULT_FOR_STATE;

@@ -296,8 +296,13 @@ impl StatefulMailbox {
         self.rollups_since_gc += 1;
         if self.rollups_since_gc > START_GC_AFTER_ROLLUPS {
             self.rollups_since_gc = 0;
-            if let Err(e) = self.schedule_gc(false) {
-                warn!("{} Failed to schedule GC: {}", self.s.log_prefix, e);
+            match self.schedule_gc(false) {
+                // Ignore ReadOnly errors since they only occur if a rollup is
+                // triggered by background maintenance.
+                Ok(_) | Err(Error::MailboxReadOnly) => (),
+                Err(e) => {
+                    warn!("{} Failed to schedule GC: {}", self.s.log_prefix, e);
+                }
             }
         }
 
