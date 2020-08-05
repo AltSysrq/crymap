@@ -135,7 +135,7 @@ impl Setup {
 
             let mut server = Server::new(
                 Box::new(io::BufReader::new(server_io.clone())),
-                Box::new(server_io),
+                Box::new(io::BufWriter::new(server_io)),
                 Arc::new(SystemConfig::default()),
                 cxn_name.to_owned(),
                 ssl_acceptor,

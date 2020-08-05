@@ -575,7 +575,7 @@ impl Server {
 
         let ssl_stream = RcIo::wrap(ssl_stream);
         self.read = Box::new(io::BufReader::new(ssl_stream.clone()));
-        self.write = Box::new(ssl_stream);
+        self.write = Box::new(io::BufWriter::new(ssl_stream));
 
         self.reset();
         self.peer_id = None;

@@ -136,7 +136,7 @@ pub fn lmtp(
 
     let mut server = crate::lmtp::server::Server::new(
         Box::new(io::BufReader::new(Stdio)),
-        Box::new(Stdio),
+        Box::new(io::BufWriter::new(Stdio)),
         Arc::new(system_config),
         format!("lmtp:{}", peer_name),
         ssl_acceptor,
