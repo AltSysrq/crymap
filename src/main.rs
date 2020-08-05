@@ -31,13 +31,15 @@ macro_rules! assert_matches {
     };
 }
 
+#[macro_use]
+mod support;
+
 mod account;
 mod cli;
 mod crypt;
 mod imap;
 mod lmtp;
 mod mime;
-mod support;
 
 #[cfg(test)]
 mod test_data;

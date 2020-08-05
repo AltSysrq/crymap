@@ -34,6 +34,7 @@ use super::syntax::*;
 use crate::account::account::Account;
 use crate::account::model::CommonPaths;
 use crate::support::{
+    append_limit::APPEND_SIZE_LIMIT,
     buffer::BufferWriter,
     error::Error,
     rcio::RcIo,
@@ -664,9 +665,23 @@ impl Server {
         for (ix, recipient) in
             mem::take(&mut self.recipients).into_iter().enumerate()
         {
+            let response_kind = Urgent.or_final(ix + 1 == num_recipients);
+
+            if data_buffer.len() > APPEND_SIZE_LIMIT as u64 {
+                self.send_response(
+                    response_kind,
+                    pc::ExceededStorageAllocation,
+                    Some((cc::PermFail, sc::MessageLengthExceedsLimit)),
+                    Cow::Owned(format!(
+                        "Maximum message size is {} bytes",
+                        APPEND_SIZE_LIMIT
+                    )),
+                )?;
+                continue;
+            }
+
             data_buffer.rewind()?;
 
-            let response_kind = Urgent.or_final(ix + 1 == num_recipients);
             let mut user_dir = self.users_dir.join(&recipient.normalised);
 
             let _restore_uid_gid = RestoreUidGid;

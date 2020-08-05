@@ -35,9 +35,10 @@ use super::server::*;
 use crate::account::account::Account;
 use crate::account::model::Uid;
 use crate::crypt::master_key::MasterKey;
-use crate::support::error::Error;
-use crate::support::rcio::RcIo;
-use crate::support::system_config::SystemConfig;
+use crate::support::{
+    append_limit::APPEND_SIZE_LIMIT, error::Error, rcio::RcIo,
+    system_config::SystemConfig,
+};
 
 // Similar to the IMAP integration tests, we share a system directory between
 // the tests since accounts are expensive to set up, and the sharing works as
@@ -405,6 +406,32 @@ fn large_delivery() {
 
     assert!(received_email(&setup, "dib", &large_content));
     assert!(received_email(&setup, "gäz", &large_content));
+}
+
+#[test]
+fn huge_message_rejected() {
+    let setup = set_up();
+    let mut cxn = setup.connect("large_delivery");
+    skip_pleasantries(&mut cxn, "large_delivery");
+
+    let large_content = format!(
+        "Subject: Oversize\r\n\r\n{}\r\n",
+        "x".repeat(APPEND_SIZE_LIMIT as usize)
+    );
+
+    simple_command(&mut cxn, "MAIL FROM:<tallest@irk>", "250 2.0.0");
+    simple_command(&mut cxn, "RCPT TO:<dib@localhost>", "250 2.1.5");
+    simple_command(&mut cxn, "RCPT TO:<gäz@localhost>", "250 2.1.5");
+    simple_command(&mut cxn, "DATA", "354 ");
+
+    writeln!(cxn, "{}.\r", large_content).unwrap();
+    let responses = read_responses(&mut cxn);
+    assert_eq!(2, responses.len());
+    assert!(responses[0].starts_with("552-5.2.3"));
+    assert!(responses[1].starts_with("552 5.2.3"));
+
+    assert!(!received_email(&setup, "dib", &large_content));
+    assert!(!received_email(&setup, "gäz", &large_content));
 }
 
 #[test]

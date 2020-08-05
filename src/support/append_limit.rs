@@ -16,18 +16,10 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-pub mod buffer;
-pub mod compression;
-pub mod error;
-pub mod file_ops;
-pub mod rcio;
-pub mod safe_name;
-pub mod small_bitset;
-pub mod sysexits;
-pub mod system_config;
-pub mod threading;
-pub mod un64;
-pub mod unix_privileges;
-pub mod user_config;
-#[macro_use]
-pub mod append_limit;
+pub const APPEND_SIZE_LIMIT: u32 = 67108864; // 64 MB
+#[macro_export]
+macro_rules! concat_appendlimit {
+    ($prefix:tt) => {
+        concat!($prefix, "67108864")
+    };
+}

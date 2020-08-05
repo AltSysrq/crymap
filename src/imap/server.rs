@@ -30,11 +30,10 @@ use super::command_processor::CommandProcessor;
 use super::lex::LexWriter;
 use super::syntax as s;
 use crate::account::mailbox::IdleNotifier;
+use crate::support::append_limit::APPEND_SIZE_LIMIT;
 use crate::support::error::Error;
 
 const MAX_CMDLINE: usize = 65536;
-// If this is changed, the APPENDLIMIT= capability must also be updated.
-const APPEND_SIZE_LIMIT: u32 = 64 * 1024 * 1024;
 
 lazy_static! {
     static ref LITERAL_AT_EOL: Regex =

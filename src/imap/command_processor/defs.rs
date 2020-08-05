@@ -39,7 +39,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     // We don't advertise it as IMAP4rev2 since that is not yet a standard
     // capability.
     "XIMAP4rev2",
-    "APPENDLIMIT=67108864",
+    concat_appendlimit!("APPENDLIMIT="),
     "AUTH=PLAIN",
     "BINARY",
     "CHILDREN",
