@@ -75,6 +75,10 @@ enum ServerSubcommand {
     /// This is intended to be used with inetd, xinetd, etc. It is the main way
     /// to run Crymap in production.
     ServeImaps(ServerCommonOptions),
+    /// Serve a single LMTP session over standard IO.
+    ///
+    /// This is intended to be used with inetd, xinetd, etc.
+    ServeLmtp(ServerCommonOptions),
 }
 
 impl ServerSubcommand {
@@ -85,6 +89,7 @@ impl ServerSubcommand {
                 mem::take(&mut c.common)
             }
             ServerSubcommand::ServeImaps(ref mut c) => mem::take(c),
+            ServerSubcommand::ServeLmtp(ref mut c) => mem::take(c),
         }
     }
 }
@@ -399,7 +404,10 @@ fn server(mut cmd: ServerSubcommand) {
             super::user::add(cmd, users_root);
         }
         ServerSubcommand::ServeImaps(_) => {
-            super::serve::serve(system_config, root, users_root);
+            super::serve::imaps(system_config, root, users_root);
+        }
+        ServerSubcommand::ServeLmtp(_) => {
+            super::serve::lmtp(system_config, root, users_root);
         }
     }
 }

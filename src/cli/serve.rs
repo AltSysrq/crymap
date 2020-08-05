@@ -18,7 +18,7 @@
 
 use std::io::{self, Read, Write};
 use std::os::unix::io::RawFd;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use log::{error, info, warn};
@@ -42,104 +42,20 @@ macro_rules! fatal {
     }}
 }
 
-pub fn serve(
+pub fn imaps(
     system_config: SystemConfig,
     system_root: PathBuf,
     mut users_root: PathBuf,
 ) {
     let system_config = Arc::new(system_config);
 
-    let mut acceptor =
-        match SslAcceptor::mozilla_intermediate_v5(SslMethod::tls_server()) {
-            Ok(a) => a,
-            Err(e) => fatal!(
-                EX_SOFTWARE,
-                "Failed to initialise OpenSSL acceptor: {}",
-                e
-            ),
-        };
-
-    let private_key_path = system_root.join(&system_config.tls.private_key);
-    if let Err(e) =
-        acceptor.set_private_key_file(&private_key_path, SslFiletype::PEM)
-    {
-        fatal!(
-            EX_CONFIG,
-            "Unable to load TLS private key from '{}': {}",
-            private_key_path.display(),
-            e
-        );
-    }
-
-    let certificate_path =
-        system_root.join(&system_config.tls.certificate_chain);
-    if let Err(e) = acceptor.set_certificate_chain_file(&certificate_path) {
-        fatal!(
-            EX_CONFIG,
-            "Unable to load TLS certificate chain from '{}': {}",
-            certificate_path.display(),
-            e
-        );
-    }
-
-    if let Err(e) = acceptor.check_private_key() {
-        fatal!(EX_CONFIG, "TLS key seems to be invalid: {}", e);
-    }
+    let acceptor = create_ssl_acceptor(&system_config, &system_root);
 
     // We've opened access to everything on the main system we need; now we can
     // apply chroot and privilege deescalation.
+    let peer_name = configure_system("", &system_config, &mut users_root);
 
-    if let Err(exit) =
-        unix_privileges::assume_system(&system_config.security, &mut users_root)
-    {
-        exit.exit();
-    }
-
-    // We've dropped all privileges we can; it's now safe to start talking to
-    // the client.
-    match (nix::unistd::isatty(STDIN), nix::unistd::isatty(STDOUT)) {
-        (Ok(true), _) | (_, Ok(true)) => {
-            // In this case, we *do* want to use die!() since we're on a
-            // terminal.
-            die!(EX_USAGE, "stdin and stdout must not be a terminal")
-        }
-        _ => (),
-    }
-
-    let peer_name = match nix::sys::socket::getpeername(STDIN) {
-        Ok(addr) => addr.to_string(),
-        Err(e) => fatal!(EX_NOHOST, "Unable to determine peer name: {}", e),
-    };
-
-    if let Err(e) = nix::sys::socket::setsockopt(
-        STDIN,
-        nix::sys::socket::sockopt::ReceiveTimeout,
-        &nix::sys::time::TimeVal::minutes(30),
-    )
-    .and_then(|_| {
-        nix::sys::socket::setsockopt(
-            STDOUT,
-            nix::sys::socket::sockopt::SendTimeout,
-            &nix::sys::time::TimeVal::minutes(30),
-        )
-    }) {
-        warn!("{} Unable to configure timeouts: {}", peer_name, e);
-    }
-
-    if let Err(e) = nix::sys::socket::setsockopt(
-        STDOUT,
-        nix::sys::socket::sockopt::TcpNoDelay,
-        &true,
-    ) {
-        warn!(
-            "{} Unable to configure TCP NODELAY on stdout: {}",
-            peer_name, e
-        );
-    }
-
-    info!("{} Connection established", peer_name);
-
-    let ssl_stream = match acceptor.build().accept(Stdio) {
+    let ssl_stream = match acceptor.accept(Stdio) {
         Ok(ss) => ss,
         Err(e) => {
             warn!("{} SSL handshake failed: {}", peer_name, e);
@@ -184,6 +100,156 @@ pub fn serve(
         Ok(_) => info!("{} Normal client disconnect", peer_name),
         Err(e) => warn!("{} Abnormal client disconnect: {}", peer_name, e),
     }
+}
+
+pub fn lmtp(
+    system_config: SystemConfig,
+    system_root: PathBuf,
+    mut users_root: PathBuf,
+) {
+    let host_name = if system_config.lmtp.host_name.is_empty() {
+        let mut buf = [0u8; 256];
+        let host_name_cstr =
+            nix::unistd::gethostname(&mut buf).unwrap_or_else(|e| {
+                fatal!(
+                    EX_OSERR,
+                    "Failed to determine host name; you may \
+                     need to explicitly configure it: {}",
+                    e
+                )
+            });
+        host_name_cstr
+            .to_str()
+            .unwrap_or_else(|_| {
+                fatal!(EX_OSERR, "System host name is not UTF-8")
+            })
+            .to_owned()
+    } else {
+        system_config.lmtp.host_name.clone()
+    };
+
+    let ssl_acceptor = create_ssl_acceptor(&system_config, &system_root);
+
+    // We've opened access to everything on the main system we need; now we can
+    // apply chroot and privilege deescalation.
+    let peer_name = configure_system("lmtp:", &system_config, &mut users_root);
+
+    let mut server = crate::lmtp::server::Server::new(
+        Box::new(io::BufReader::new(Stdio)),
+        Box::new(Stdio),
+        Arc::new(system_config),
+        format!("lmtp:{}", peer_name),
+        ssl_acceptor,
+        users_root,
+        host_name,
+        peer_name.clone(),
+    );
+
+    match server.run() {
+        Ok(_) => info!("lmtp:{} Normal client disconnect", peer_name),
+        Err(e) => warn!("lmtp:{} Abnormal client disconnect: {}", peer_name, e),
+    }
+}
+
+fn create_ssl_acceptor(
+    system_config: &SystemConfig,
+    system_root: &Path,
+) -> SslAcceptor {
+    let mut acceptor =
+        match SslAcceptor::mozilla_intermediate_v5(SslMethod::tls_server()) {
+            Ok(a) => a,
+            Err(e) => fatal!(
+                EX_SOFTWARE,
+                "Failed to initialise OpenSSL acceptor: {}",
+                e
+            ),
+        };
+
+    let private_key_path = system_root.join(&system_config.tls.private_key);
+    if let Err(e) =
+        acceptor.set_private_key_file(&private_key_path, SslFiletype::PEM)
+    {
+        fatal!(
+            EX_CONFIG,
+            "Unable to load TLS private key from '{}': {}",
+            private_key_path.display(),
+            e
+        );
+    }
+
+    let certificate_path =
+        system_root.join(&system_config.tls.certificate_chain);
+    if let Err(e) = acceptor.set_certificate_chain_file(&certificate_path) {
+        fatal!(
+            EX_CONFIG,
+            "Unable to load TLS certificate chain from '{}': {}",
+            certificate_path.display(),
+            e
+        );
+    }
+
+    if let Err(e) = acceptor.check_private_key() {
+        fatal!(EX_CONFIG, "TLS key seems to be invalid: {}", e);
+    }
+
+    acceptor.build()
+}
+
+fn configure_system(
+    log_prefix: &str,
+    system_config: &SystemConfig,
+    users_root: &mut PathBuf,
+) -> String {
+    if let Err(exit) =
+        unix_privileges::assume_system(&system_config.security, users_root)
+    {
+        exit.exit();
+    }
+
+    // We've dropped all privileges we can; it's now safe to start talking to
+    // the client.
+    match (nix::unistd::isatty(STDIN), nix::unistd::isatty(STDOUT)) {
+        (Ok(true), _) | (_, Ok(true)) => {
+            // In this case, we *do* want to use die!() since we're on a
+            // terminal.
+            die!(EX_USAGE, "stdin and stdout must not be a terminal")
+        }
+        _ => (),
+    }
+
+    let peer_name = match nix::sys::socket::getpeername(STDIN) {
+        Ok(addr) => addr.to_string(),
+        Err(e) => fatal!(EX_NOHOST, "Unable to determine peer name: {}", e),
+    };
+
+    if let Err(e) = nix::sys::socket::setsockopt(
+        STDIN,
+        nix::sys::socket::sockopt::ReceiveTimeout,
+        &nix::sys::time::TimeVal::minutes(30),
+    )
+    .and_then(|_| {
+        nix::sys::socket::setsockopt(
+            STDOUT,
+            nix::sys::socket::sockopt::SendTimeout,
+            &nix::sys::time::TimeVal::minutes(30),
+        )
+    }) {
+        warn!("{} Unable to configure timeouts: {}", log_prefix, e);
+    }
+
+    if let Err(e) = nix::sys::socket::setsockopt(
+        STDOUT,
+        nix::sys::socket::sockopt::TcpNoDelay,
+        &true,
+    ) {
+        warn!(
+            "{}{} Unable to configure TCP NODELAY on stdout: {}",
+            log_prefix, peer_name, e
+        );
+    }
+
+    info!("{}{} Connection established", log_prefix, peer_name);
+    peer_name
 }
 
 // Read and write to the stdio FDs without buffering
