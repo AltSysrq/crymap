@@ -742,7 +742,7 @@ impl Server {
                 env!("CARGO_PKG_VERSION_MAJOR"),
                 env!("CARGO_PKG_VERSION_MINOR"),
                 env!("CARGO_PKG_VERSION_PATCH"),
-                if self.started_tls { "TMTP+TLS" } else { "TMTP" },
+                if self.started_tls { "LMTP+TLS" } else { "LMTP" },
                 recipient.smtp,
                 smtp_date
             );
