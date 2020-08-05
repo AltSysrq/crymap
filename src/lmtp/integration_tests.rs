@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex, Weak};
 use lazy_static::lazy_static;
 use openssl::{
     pkey,
-    ssl::{SslAcceptor, SslMethod},
+    ssl::{SslAcceptor, SslConnector, SslMethod, SslVerifyMode},
     x509,
 };
 use rayon::prelude::*;
@@ -100,6 +100,13 @@ lazy_static! {
                 &CERTIFICATE_PRIVATE_KEY,
                 openssl::hash::MessageDigest::sha3_256(),
             )
+            .unwrap();
+        builder.set_version(2).unwrap();
+        builder
+            .set_not_before(&openssl::asn1::Asn1Time::from_unix(0).unwrap())
+            .unwrap();
+        builder
+            .set_not_after(&openssl::asn1::Asn1Time::days_from_now(2).unwrap())
             .unwrap();
         builder.build()
     };
@@ -372,4 +379,169 @@ fn bdat_delivery() {
 
     assert!(!received_email(&setup, "dib", email_followup));
     assert!(received_email(&setup, "gäz", email_followup));
+}
+
+// This specifically tests that spilled buffers are reset properly when
+// delivering to multiple accounts.
+#[test]
+fn large_delivery() {
+    let setup = set_up();
+    let mut cxn = setup.connect("large_delivery");
+    skip_pleasantries(&mut cxn, "large_delivery");
+
+    let large_content =
+        format!("Subject: Large\r\n\r\n{}\r\n", "x".repeat(1024 * 1024));
+
+    simple_command(&mut cxn, "MAIL FROM:<tallest@irk>", "250 2.0.0");
+    simple_command(&mut cxn, "RCPT TO:<dib@localhost>", "250 2.1.5");
+    simple_command(&mut cxn, "RCPT TO:<gäz@localhost>", "250 2.1.5");
+    simple_command(&mut cxn, "DATA", "354 ");
+
+    writeln!(cxn, "{}.\r", large_content).unwrap();
+    let responses = read_responses(&mut cxn);
+    assert_eq!(2, responses.len());
+    assert!(responses[0].starts_with("250-2.0.0"));
+    assert!(responses[1].starts_with("250 2.0.0"));
+
+    assert!(received_email(&setup, "dib", &large_content));
+    assert!(received_email(&setup, "gäz", &large_content));
+}
+
+#[test]
+fn failed_delivery() {
+    let setup = set_up();
+    let mut cxn = setup.connect("failed_delivery");
+    skip_pleasantries(&mut cxn, "failed_delivery");
+
+    let failed_email = "Subject: Failed to deliver to gir\r\n\r\ngir\r\n";
+
+    simple_command(&mut cxn, "MAIL FROM:<tallest@irk>", "250 2.0.0");
+    simple_command(&mut cxn, "RCPT TO:<gir@localhost>", "250 2.1.5");
+    simple_command(&mut cxn, "RCPT TO:<zim@localhost>", "250 2.1.5");
+    simple_command(&mut cxn, "DATA", "354 ");
+
+    // Now, between verifying gir@localhost above and actually receiving the
+    // content, something comes along and removes the gir account.
+    fs::remove_dir_all(setup.system_dir.path().join("gir")).unwrap();
+
+    writeln!(cxn, "{}.\r", failed_email).unwrap();
+    let responses = read_responses(&mut cxn);
+    // We still get both responses; the first one indicates failure
+    assert_eq!(2, responses.len());
+    assert!(responses[0].starts_with("450-"));
+    assert!(responses[1].starts_with("250 2.0.0"));
+
+    // The email was still delivered to zim, though
+    assert!(received_email(&setup, "zim", failed_email));
+}
+
+#[test]
+fn failed_rcpt_to() {
+    let setup = set_up();
+    let mut cxn = setup.connect("failed_rcpt_to");
+    skip_pleasantries(&mut cxn, "failed_rcpt_to");
+
+    simple_command(&mut cxn, "MAIL FROM:<>", "250 2.0.0");
+    simple_command(&mut cxn, "RCPT TO:<nobody@localhost>", "550 5.1.1");
+    simple_command(&mut cxn, "RCPT TO:<..@localhost>", "550 5.1.1");
+}
+
+#[test]
+fn out_of_order_commands() {
+    let setup = set_up();
+    let mut cxn = setup.connect("out_of_order_commands");
+    read_responses(&mut cxn); // Skip greeting
+
+    // Things that shouldn't work before LHLO
+    simple_command(&mut cxn, "MAIL FROM:<>", "503 5.5.1");
+    simple_command(&mut cxn, "RCPT TO:<dib@localhost>", "503 5.5.1");
+    simple_command(&mut cxn, "DATA", "503 5.5.1");
+    // 5 = "foo\r\n".len()
+    simple_command(&mut cxn, "BDAT 5\r\nfoo", "503 5.5.1");
+
+    writeln!(cxn, "LHLO out_of_order_commands\r").unwrap();
+    let responses = read_responses(&mut cxn);
+    assert!(responses.last().unwrap().starts_with("250 "));
+
+    // LHLO not allowed after LHLO
+    simple_command(&mut cxn, "LHLO out_of_order_commands", "503 5.5.1");
+
+    // Things that shouldn't work before MAIL FROM
+    simple_command(&mut cxn, "RCPT TO:<dib@localhost>", "503 5.5.1");
+    simple_command(&mut cxn, "DATA", "503 5.5.1");
+    simple_command(&mut cxn, "BDAT 5\r\nfoo", "503 5.5.1");
+
+    simple_command(&mut cxn, "MAIL FROM:<>", "250 2.0.0");
+    simple_command(&mut cxn, "MAIL FROM:<>", "503 5.5.1");
+
+    // DATA and BDAT don't work without recipients
+    simple_command(&mut cxn, "DATA", "503 5.5.1");
+    simple_command(&mut cxn, "BDAT 5\r\nfoo", "503 5.5.1");
+
+    // Finish up and send an email to ensure that the data we sent through BDAT
+    // didn't stay in the buffer.
+    let ooo_email = "Subject: Out of order\r\n\r\n";
+    // If any BDAT chunks were improperly saved, they manifest as a prefix on
+    // the email we're sending now
+    let unexpected_email = format!("foo\r\n{}", ooo_email);
+
+    simple_command(&mut cxn, "RCPT TO:<dib@localhost>", "250 2.1.5");
+    simple_command(&mut cxn, "DATA", "354 ");
+    writeln!(cxn, "{}.\r", ooo_email).unwrap();
+    let responses = read_responses(&mut cxn);
+    assert_eq!(1, responses.len());
+    assert!(responses[0].starts_with("250 2.0.0"));
+
+    assert!(received_email(&setup, "dib", ooo_email));
+    assert!(!received_email(&setup, "dib", &unexpected_email));
+
+    simple_command(&mut cxn, "MAIL FROM:<>", "250 2.0.0");
+    simple_command(&mut cxn, "RCPT TO:<dib@localhost>", "250 2.1.5");
+    simple_command(&mut cxn, "BDAT 5\r\nfoo", "250 2.0.0");
+    // Things not allowed after BDAT
+    simple_command(&mut cxn, "RCPT TO:<gäz@localhost>", "503 5.5.1");
+    simple_command(&mut cxn, "DATA", "503 5.5.1");
+
+    // RSET resets everything
+    simple_command(&mut cxn, "RSET", "250 2.0.0");
+    simple_command(&mut cxn, "MAIL FROM:<>", "250 2.0.0");
+    simple_command(&mut cxn, "RCPT TO:<dib@localhost>", "250 2.1.5");
+    simple_command(&mut cxn, "DATA", "354 ");
+    writeln!(cxn, "{}.\r", ooo_email).unwrap();
+    let responses = read_responses(&mut cxn);
+    assert_eq!(1, responses.len());
+    assert!(responses[0].starts_with("250 2.0.0"));
+
+    // Ensure the BDAT above wasn't saved.
+    assert!(!received_email(&setup, "dib", &unexpected_email));
+}
+
+#[test]
+fn start_tls() {
+    let setup = set_up();
+    let mut cxn = setup.connect("starttls");
+    skip_pleasantries(&mut cxn, "starttls");
+
+    simple_command(&mut cxn, "STARTTLS", "220 2.0.0");
+
+    let mut connector = SslConnector::builder(SslMethod::tls()).unwrap();
+    connector.set_verify(SslVerifyMode::NONE);
+
+    let mut cxn = connector
+        .build()
+        .connect("localhost", cxn)
+        .map_err(|_| "SSL handshake failed")
+        .unwrap();
+    skip_pleasantries(&mut cxn, "starttls");
+
+    let tls_email = "Subject: TLS\r\n\r\nThis message was sent over TLS.\r\n";
+    simple_command(&mut cxn, "MAIL FROM:<>", "250 2.0.0");
+    simple_command(&mut cxn, "RCPT TO:<dib@localhost>", "250 2.1.5");
+    simple_command(&mut cxn, "DATA", "354 ");
+    writeln!(cxn, "{}.\r", tls_email).unwrap();
+    let responses = read_responses(&mut cxn);
+    assert_eq!(1, responses.len());
+    assert!(responses[0].starts_with("250 2.0.0"));
+
+    assert!(received_email(&setup, "dib", tls_email));
 }

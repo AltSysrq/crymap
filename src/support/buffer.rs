@@ -140,6 +140,7 @@ impl BufferReader {
         self.off = 0;
         if let Some(ref mut on_disk) = self.on_disk {
             on_disk.file.seek(io::SeekFrom::Start(0))?;
+            on_disk.cryptor = on_disk.context.decryptor();
         }
 
         Ok(())

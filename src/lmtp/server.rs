@@ -43,9 +43,12 @@ use crate::support::{
 };
 
 macro_rules! require {
+    ($this:expr, $($fns:ident = $arg:expr,)* @else $el:block) => {
+        $(if let Some(r) = $this.$fns($arg) { $el; return r; })*
+    };
     ($this:expr, $($fns:ident = $arg:expr),*) => {
-        $(if let Some(r) = $this.$fns($arg) { return r; })*
-    }
+        require!($this, $($fns = $arg,)* @else {})
+    };
 }
 
 const MAX_LINE: usize = 1024;
@@ -323,7 +326,12 @@ impl Server {
     }
 
     fn cmd_recipient(&mut self, forward_path: String) -> Result<(), Error> {
-        require!(self, need_lhlo = true, need_return_path = true);
+        require!(
+            self,
+            need_lhlo = true,
+            need_return_path = true,
+            need_data = false
+        );
 
         match Recipient::normalise(&self.config.lmtp, forward_path.clone()) {
             None => self.send_response(
@@ -379,8 +387,25 @@ impl Server {
     }
 
     fn cmd_binary_data(&mut self, len: u64, last: bool) -> Result<(), Error> {
-        // We need to transfer the data *first*, because it must happen
-        // unconditionally.
+        require!(
+            self,
+            need_lhlo = true,
+            need_return_path = true,
+            need_recipients = true,
+            @else {
+                // Discard the chunk
+                let nread =
+                    io::copy(&mut self.read.by_ref().take(len), &mut io::sink())?;
+                if nread != len {
+                    return Err(Error::Io(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "EOF before end of BDAT",
+                    )));
+                }
+
+            }
+        );
+
         let nread =
             io::copy(&mut self.read.by_ref().take(len), &mut self.data_buffer)?;
         if nread != len {
@@ -389,13 +414,6 @@ impl Server {
                 "EOF before end of BDAT",
             )));
         }
-
-        require!(
-            self,
-            need_lhlo = true,
-            need_return_path = true,
-            need_recipients = true
-        );
 
         if last {
             self.deliver()
@@ -717,7 +735,7 @@ impl Server {
                         response_kind,
                         pc::Ok,
                         Some((cc::Success, sc::Undefined)),
-                        Cow::Borrowed("Ok"),
+                        Cow::Borrowed("OK"),
                     )?;
                 }
                 Err(Error::NxMailbox) => {
