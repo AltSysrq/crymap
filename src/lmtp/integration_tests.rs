@@ -99,7 +99,7 @@ lazy_static! {
         builder
             .sign(
                 &CERTIFICATE_PRIVATE_KEY,
-                openssl::hash::MessageDigest::sha3_256(),
+                openssl::hash::MessageDigest::sha256(),
             )
             .unwrap();
         builder.set_version(2).unwrap();
