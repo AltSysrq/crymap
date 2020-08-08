@@ -1,3 +1,7 @@
+This document is not maintained. It may be useful as a "how we got here" kind
+of thing. Descriptions of Crymap's design may not reflect what was actually
+built, and musings on IMAP (particularly early on) may not reflect reality.
+
 Crymap -- A simple, secure IMAP server with encrypted data at rest
 
 * Motivation
