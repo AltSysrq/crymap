@@ -30,9 +30,10 @@ Crymap and statically linked, but this is not recommended since you won't be
 able to get OpenSSL updates with your OS and this process is not described in
 this manual.)
 
-Each release of Crymap has pre-built binaries for AMD64 Debian and FreeBSD.
-TODO Link once URL exists. Simply download the appropriate one of these and
-save it in a place you consider appropriate; for example (`#` means "as root"):
+Each [https://github.com/AltSysrq/crymap/releases/] release of Crymap has
+pre-built binaries for AMD64 Debian and FreeBSD. Simply download the
+appropriate one of these and save it in a place you consider appropriate; for
+example (`#` means "as root"):
 
 ```text
 # cp crymap-$version-$os-amd64 /usr/local/bin/crymap
