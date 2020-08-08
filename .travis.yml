@@ -1,5 +1,4 @@
 language: rust
-sudo: false
 dist: trusty
 rust:
 - stable
@@ -7,9 +6,8 @@ rust:
 cache: cargo
 
 script:
-  # It's a net time gain on Travis to build the tests in release mode. We also
-  # force the thread count to 2 to avoid swamping the VM's IOPS too much while
-  # still allowing the integration tests to run reasonably quickly.
+  # It's a net time gain on Travis to build the tests in release mode.
   - |
+      sudo mount none /tmp -t tmpfs &&
       cargo build --release &&
-      cargo test --release -- --test-threads 2
+      cargo test --release
