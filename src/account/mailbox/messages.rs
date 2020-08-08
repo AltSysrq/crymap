@@ -264,7 +264,7 @@ impl StatelessMailbox {
                 "{} Delivered messages to {}..={}",
                 self.log_prefix,
                 base_id,
-                base_id + src.len() as u32
+                base_id + (src.len() - 1) as u32
             );
             self.notify_all_best_effort();
             Ok(Uid::of(base_id).unwrap())
