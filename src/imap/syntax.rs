@@ -269,7 +269,7 @@ syntax_rule! {
 syntax_rule! {
     #[]
     enum RespTextCode<'a> {
-        // RFC 3507
+        // RFC 3501
         #[]
         #[tag("ALERT")]
         Alert(()),
@@ -750,10 +750,8 @@ syntax_rule! {
 syntax_rule! {
     #[]
     struct BodyFields<'a> {
-        // TODO Move this to a better documentation location
-        //
         // These parameters, as well as those on `Content-Disposition`, present
-        // us with quite the conundrum. RFC 2331 describes a way to split one
+        // us with quite the conundrum. RFC 2184 describes a way to split one
         // parameter into pieces, as well as a way to do percent-encoding to
         // embed non-ASCII characters. A small corner of the RFC underhands a
         // soft requirement at us:

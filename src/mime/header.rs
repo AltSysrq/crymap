@@ -103,13 +103,13 @@ pub fn parse_content_transfer_encoding_raw(i: &[u8]) -> Option<&str> {
     token(i).ok().and_then(|r| str::from_utf8(r.1).ok())
 }
 
-/// Parse the `Content-Language` header as per the intersection of RFC 3306 and
+/// Parse the `Content-Language` header as per the intersection of RFC 3066 and
 /// RFC 3282.
 pub fn parse_content_language(i: &[u8]) -> Option<&[u8]> {
     // RFC 3282 allows Content-Language to contain a list, but IMAP (RFC 3501)
-    // requires the value we parse out to conform to RFC 3306, which simply
+    // requires the value we parse out to conform to RFC 3066, which simply
     // describes a single language token. At the same time, this is more
-    // permissive than RFC 3306 in that it allows anything matching an RFC 2045
+    // permissive than RFC 3066 in that it allows anything matching an RFC 2045
     // "token" as a language. In general, though, the client can be expected to
     // ignore languages it cannot parse, so this way we return a valid language
     // if there is any and only an invalid string if the header itself is
@@ -646,7 +646,7 @@ fn time_colon(i: &[u8]) -> IResult<&[u8], ()> {
 fn time_of_day(i: &[u8]) -> IResult<&[u8], (u32, u32, u32)> {
     sequence::terminated(
         sequence::tuple((
-            // RFC 3522 does not permit the time elements to be single-digit,
+            // RFC 5322 does not permit the time elements to be single-digit,
             // but there are examples of that in the wild.
             one_two_digit,
             sequence::preceded(time_colon, one_two_digit),

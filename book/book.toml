@@ -1,0 +1,9 @@
+[book]
+authors = ["Jason Lingle"]
+multilingual = false
+src = "src"
+title = "Crymap"
+description = "Usage documentation for the Crymap IMAP server"
+
+[output.html]
+curly-quotes = true

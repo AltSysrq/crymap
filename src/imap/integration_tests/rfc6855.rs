@@ -16,8 +16,6 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-//! TODO: Move this to a proper documentation location.
-//!
 //! Note that the APPEND aspect of RFC 6855 isn't something we do, strictly
 //! speaking. We understand the syntax, but ignore it and treat it as a regular
 //! append. We don't enforce that literal8 syntax is used instead of regular
