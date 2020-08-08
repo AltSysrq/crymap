@@ -175,10 +175,10 @@ and `BINARY` extensions.
 If messages contain non-DOS line endings, the line endings are returned as-is,
 so as not to corrupt anything. Crymap understands both UNIX and DOS line
 endings in messages. This is expected to be a non-issue, given that GMail
-actually served messages exclusively with UNIX line endings before anyone
-noticed. (Note though that when acting as a UNIX MDA, Crymap _does_ convert
-line endings as they come in. This paragraph applies to messages that come in
-through IMAP or LMTP.)
+actually served messages exclusively with UNIX line endings for years before
+anyone noticed. (Note though that when acting as a UNIX MDA, Crymap _does_
+convert line endings as they come in. This paragraph applies to messages that
+come in through IMAP or LMTP.)
 
 Unsolicited `FETCH` responses always include `UID` and `FLAGS`. If `CONDSTORE`
 has been enabled, they include `MODSEQ` as well.
