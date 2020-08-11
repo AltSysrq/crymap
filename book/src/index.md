@@ -60,3 +60,5 @@ questions but cannot make commitments.
   destroying the user's data. It would be technologically feasible to make,
   e.g., a PAM module that delegates to Crymap, but this is not implemented nor
   are there any plans to ever do so.
+
+- The maximum size of an email is currently hard-coded to 64MB.
