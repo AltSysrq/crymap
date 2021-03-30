@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2021, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -122,7 +122,7 @@ fn error_conditions() {
     }
 
     client
-        .write_raw(b"STORE 1 +FLAGS (\\Nonstandard)\r\n")
+        .write_raw(b"N STORE 1 +FLAGS (\\Nonstandard)\r\n")
         .unwrap();
     let mut buffer = Vec::new();
     let response = client.read_one_response(&mut buffer).unwrap();
