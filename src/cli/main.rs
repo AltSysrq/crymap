@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2022, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -274,17 +274,13 @@ pub fn main() {
     let cmd = Command::from_clap(&match Command::clap().get_matches_safe() {
         Ok(matches) => matches,
         Err(
-            e
-            @
-            clap::Error {
+            e @ clap::Error {
                 kind: clap::ErrorKind::HelpDisplayed,
                 ..
             },
         )
         | Err(
-            e
-            @
-            clap::Error {
+            e @ clap::Error {
                 kind: clap::ErrorKind::VersionDisplayed,
                 ..
             },
@@ -377,7 +373,7 @@ fn server(mut cmd: ServerSubcommand) {
         if log_config_file.is_file() {
             log4rs::init_file(
                 log_config_file,
-                log4rs::file::Deserializers::new(),
+                log4rs::config::Deserializers::new(),
             )
             .expect("Failed to initialise logging");
         } else {

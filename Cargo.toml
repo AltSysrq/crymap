@@ -54,7 +54,7 @@ toml = "0.5"
 zstd = "0.5"
 
 [dependencies.log4rs]
-version = "0.13"
+version = "1.2.0"
 default-features = false
 features = [
   "console_appender",
@@ -66,7 +66,7 @@ features = [
   "size_trigger",
   "threshold_filter",
   "toml_format",
-  "file",
+  "config_parsing",
 ]
 
 [dev-dependencies]
