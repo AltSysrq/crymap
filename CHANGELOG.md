@@ -1,4 +1,4 @@
-# Unreleased
+# 1.0.1
 
 - Rust 1.66.0 is now the earliest officially supported Rust version.
 - IMAP4rev2 is now officially supported.
