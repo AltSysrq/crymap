@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 
 use structopt::StructOpt;
 
+use crate::support::diagnostic;
 use crate::support::sysexits::*;
 use crate::support::system_config::SystemConfig;
 
@@ -340,6 +341,19 @@ fn server(mut cmd: ServerSubcommand) {
                 EX_CONFIG.exit()
             }
         };
+
+    if matches!(
+        cmd,
+        ServerSubcommand::Deliver(..)
+            | ServerSubcommand::ServeLmtp(..)
+            | ServerSubcommand::ServeImaps(..),
+    ) {
+        if let Err(exit) =
+            diagnostic::apply_diagnostics(&root, &system_config.diagnostic)
+        {
+            exit.exit();
+        }
+    }
 
     let users_root = root.join("users");
     if !users_root.is_dir() {

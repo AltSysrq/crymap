@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2022, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -44,6 +44,10 @@ pub struct SystemConfig {
     /// The defaults are reasonable for most installations.
     #[serde(default)]
     pub lmtp: LmtpConfig,
+
+    /// Configuration for server diagnostics.
+    #[serde(default)]
+    pub diagnostic: DiagnosticConfig,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -122,4 +126,19 @@ pub struct LmtpConfig {
     /// with the domain part of the email, which is always lower-cased and
     /// retains its periods.
     pub verbatim_user_names: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DiagnosticConfig {
+    /// On startup, redirect standard error to this file.
+    ///
+    /// This is applied before any part of the security configuration is
+    /// applied and before any communication with the remote host.
+    ///
+    /// This is useful if `inetd` (or equivalent) or your MTA runs Crymap such
+    /// that standard error goes to a less useful place, such as to the remote
+    /// host. If anything actually ends up in this file, it represents a bug in
+    /// Crymap, as actual errors should go through the logging system.
+    pub stderr: Option<PathBuf>,
 }

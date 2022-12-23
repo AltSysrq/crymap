@@ -73,6 +73,18 @@ keep_recipient_domain = false
 # normalisations you want. Most importantly, enabling this option will make
 # Crymap mail delivery CASE SENSITIVE TO USER NAMES.
 verbatim_user_names = false
+
+[diagnostic]
+# If set, redirect standard error to this file on startup.
+#
+# This is applied before any part of the security configuration is
+# applied and before any communication with the remote host.
+#
+# This is useful if `inetd` (or equivalent) or your MTA runs Crymap such
+# that standard error goes to a less useful place, such as to the remote
+# host. If anything actually ends up in this file, it represents a bug in
+# Crymap, as actual errors should go through the logging system.
+stderr = null
 ```
 
 ## Logging
