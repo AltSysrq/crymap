@@ -225,7 +225,11 @@ impl StatefulMailbox {
             return;
         }
 
-        if self.gc_in_progress.compare_and_swap(false, true, SeqCst) {
+        if Ok(false)
+            == self
+                .gc_in_progress
+                .compare_exchange(false, true, SeqCst, SeqCst)
+        {
             // Another GC is already in progress; do nothing
             return;
         }

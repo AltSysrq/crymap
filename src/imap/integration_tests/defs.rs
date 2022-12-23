@@ -254,7 +254,7 @@ pub fn examine_shared(client: &mut PipeClient) {
             let mut responses = client.finish_append(&mut buffer).unwrap();
             assert_tagged_ok_any(responses.pop().unwrap());
         }};
-    };
+    }
 
     append!(1, Some(vec![Flag::Answered]), CHRISTMAS_TREE);
     append!(2, Some(vec![Flag::Deleted]), TORTURE_TEST);
