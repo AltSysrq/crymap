@@ -794,10 +794,15 @@ impl Server {
         mut r: s::ResponseLine<'_>,
     ) -> Result<(), Error> {
         self.sent_bye |= matches!(
-            r, s::ResponseLine { response: s::Response::Cond(s::CondResponse {
-                cond: s::RespCondType::Bye,
+            r,
+            s::ResponseLine {
+                response: s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Bye,
+                    ..
+                }),
                 ..
-            }), .. });
+            }
+        );
 
         let mut w = self.write.lock().unwrap();
         {

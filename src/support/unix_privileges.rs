@@ -80,7 +80,7 @@ pub fn assume_system(
         if let Err(e) =
             // chroot, then chdir, since users_root could be relative
             nix::unistd::chroot(users_root)
-            .and_then(|_| nix::unistd::chdir("/"))
+                .and_then(|_| nix::unistd::chdir("/"))
         {
             fatal!(
                 EX_OSERR,

@@ -296,7 +296,9 @@ pub fn assert_tagged_ok(r: s::ResponseLine<'_>) {
                 code: None,
                 quip: _,
             }),
-        }, r);
+        },
+        r
+    );
 }
 
 pub fn assert_tagged_ok_any(r: s::ResponseLine<'_>) {
@@ -308,7 +310,9 @@ pub fn assert_tagged_ok_any(r: s::ResponseLine<'_>) {
                 code: _,
                 quip: _,
             }),
-        }, r);
+        },
+        r
+    );
 }
 
 pub fn assert_tagged_no(r: s::ResponseLine<'_>) {
@@ -320,7 +324,9 @@ pub fn assert_tagged_no(r: s::ResponseLine<'_>) {
                 code: None,
                 quip: _,
             }),
-        }, r);
+        },
+        r
+    );
 }
 
 pub fn assert_error_response(

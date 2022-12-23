@@ -69,10 +69,13 @@ fn test_idle() {
 
     buffer.clear();
     let response = idler.read_one_response(&mut buffer).unwrap();
-    assert_matches!(s::ResponseLine {
-        tag: None,
-        response: s::Response::Recent(_),
-    }, response);
+    assert_matches!(
+        s::ResponseLine {
+            tag: None,
+            response: s::Response::Recent(_),
+        },
+        response
+    );
 
     buffer.clear();
     let response = idler.read_one_response(&mut buffer).unwrap();
@@ -167,8 +170,11 @@ fn idle_works_with_extremely_long_paths() {
 
     buffer.clear();
     let response = client.read_one_response(&mut buffer).unwrap();
-    assert_matches!(s::ResponseLine {
-        tag: None,
-        response: s::Response::Exists(_),
-    }, response);
+    assert_matches!(
+        s::ResponseLine {
+            tag: None,
+            response: s::Response::Exists(_),
+        },
+        response
+    );
 }
