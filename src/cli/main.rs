@@ -342,12 +342,15 @@ fn server(mut cmd: ServerSubcommand) {
             }
         };
 
-    if matches!(
-        cmd,
-        ServerSubcommand::Deliver(..)
-            | ServerSubcommand::ServeLmtp(..)
-            | ServerSubcommand::ServeImaps(..),
-    ) && Ok(false) == nix::unistd::isatty(2)
+    let stderr_is_tty = Ok(true) == nix::unistd::isatty(2);
+
+    if !stderr_is_tty
+        && matches!(
+            cmd,
+            ServerSubcommand::Deliver(..)
+                | ServerSubcommand::ServeLmtp(..)
+                | ServerSubcommand::ServeImaps(..),
+        )
     {
         if let Err(exit) =
             diagnostic::apply_diagnostics(&root, &system_config.diagnostic)
@@ -374,7 +377,7 @@ fn server(mut cmd: ServerSubcommand) {
         }
     };
 
-    if Ok(true) == nix::unistd::isatty(2) {
+    if stderr_is_tty {
         // Running interactively; ignore logging configuration and just write
         // to stderr.
         crate::init_simple_log();
