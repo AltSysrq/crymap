@@ -5,9 +5,9 @@ lower-level IMAP details.
 
 ## Conformance
 
-Crymap fully conforms to the IMAP4rev1 (RFC 3501) standard and has provisional
-conformance to the upcoming IMAP4rev2 standard (as of the 2020-07-29 draft). It
-also conforms to a number of extensions detailed in later sections.
+Crymap fully conforms to the IMAP4rev1 (RFC 3501) and IMAP4rev2 (RFC 9051)
+standards. It also conforms to a number of extensions detailed in later
+sections.
 
 Crymap passes the full [Dovecot imaptest compliance
 suite](https://imapwiki.org/ImapTest) excepting tests for extensions that
@@ -68,6 +68,7 @@ conforms to the following standards:
 - RFC 8438 (STATUS=SIZE)
 - RFC 8457 IMAP "$Important" Keyword and "\Important" Special-Use Attribute
 - RFC 8474 (OBJECTID)
+- RFC 9051 (IMAP4rev2)
 
 ## Unicode support
 
@@ -138,6 +139,14 @@ with a `/` has no effect. Duplicate `/` characters in a name are ignored.
 Non-normalised MUTF7 is accepted in mailbox names. Mailbox names are always
 returned in normalised MUTF7. MUTF7 is not returned on output nor transformed
 on input when the client has enabled UTF-8 support.
+
+When UTF-8 support is enabled, including by way of IMAP4rev2, no normalisation
+of mailbox names occurs other than removal of extraneous path delimiters and
+the special case of `INBOX` being case-insensitive. IMAP4rev2 has a
+recommendation to send unsolicited `LIST` responses when a client uses a
+denormalised mailbox name. Due to the extremely limited utility of this feature
+in the context of Crymap's implementation, Crymap does not implement this
+recommendation.
 
 The `\Marked` and `\Unmarked` attributes are not used.
 

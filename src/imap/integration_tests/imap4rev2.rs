@@ -22,7 +22,7 @@ use super::defs::*;
 
 #[test]
 fn capability_declared() {
-    test_require_capability("i4r2capa", "XIMAP4rev2");
+    test_require_capability("i4r2capa", "IMAP4rev2");
 }
 
 #[test]

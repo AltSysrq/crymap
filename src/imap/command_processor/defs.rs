@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2022, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -35,10 +35,7 @@ pub(super) use crate::imap::syntax as s;
 
 pub(super) static CAPABILITIES: &[&str] = &[
     "IMAP4rev1",
-    // Our IMAP4rev2 support is current as of the 2020-07 draft
-    // We don't advertise it as IMAP4rev2 since that is not yet a standard
-    // capability.
-    "XIMAP4rev2",
+    "IMAP4rev2",
     concat_appendlimit!("APPENDLIMIT="),
     "AUTH=PLAIN",
     "BINARY",

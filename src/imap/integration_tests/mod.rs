@@ -162,6 +162,7 @@ macro_rules! has_msgatt_matching {
 
 mod defs;
 
+mod imap4rev2;
 mod rfc2177;
 mod rfc2342;
 mod rfc2971;
@@ -186,5 +187,4 @@ mod rfc7888;
 mod rfc8438;
 mod rfc8474;
 mod xcry;
-mod ximap4rev2;
 mod xlist;
