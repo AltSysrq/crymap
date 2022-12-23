@@ -347,7 +347,8 @@ fn server(mut cmd: ServerSubcommand) {
         ServerSubcommand::Deliver(..)
             | ServerSubcommand::ServeLmtp(..)
             | ServerSubcommand::ServeImaps(..),
-    ) {
+    ) && Ok(false) == nix::unistd::isatty(2)
+    {
         if let Err(exit) =
             diagnostic::apply_diagnostics(&root, &system_config.diagnostic)
         {
