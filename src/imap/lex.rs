@@ -303,7 +303,7 @@ impl<W: Write> LexWriter<W> {
     }
 
     fn is_conservative_atom(&self, s: &str) -> bool {
-        "nil" != s
+        !"nil".eq_ignore_ascii_case(s)
             && !s.is_empty()
             && s.as_bytes().iter().copied().all(|b| match b {
                 b'a'..=b'z'
@@ -367,13 +367,18 @@ mod test {
         l.verbatim(" ").unwrap();
         l.censored_astring("nil").unwrap();
         l.verbatim(" ").unwrap();
+        l.censored_astring("NIL").unwrap();
+        l.verbatim(" ").unwrap();
         l.censored_astring("foo bar").unwrap();
         l.verbatim(" ").unwrap();
         l.censored_astring("foo\\ bar").unwrap();
         l.verbatim(" ").unwrap();
         l.censored_astring("föö").unwrap();
 
-        assert_eq!("foo \"nil\" \"foo bar\" {8}\r\nfoo\\ bar fXX", to_str(l));
+        assert_eq!(
+            "foo \"nil\" \"NIL\" \"foo bar\" {8}\r\nfoo\\ bar fXX",
+            to_str(l),
+        );
     }
 
     #[test]
@@ -383,6 +388,8 @@ mod test {
         l.verbatim(" ").unwrap();
         l.censored_astring("nil").unwrap();
         l.verbatim(" ").unwrap();
+        l.censored_astring("NIL").unwrap();
+        l.verbatim(" ").unwrap();
         l.censored_astring("foo bar").unwrap();
         l.verbatim(" ").unwrap();
         l.censored_astring("foo\\ bar").unwrap();
@@ -390,8 +397,8 @@ mod test {
         l.censored_astring("föö").unwrap();
 
         assert_eq!(
-            "foo \"nil\" \"foo bar\" {8}\r\nfoo\\ bar \"föö\"",
-            to_str(l)
+            "foo \"nil\" \"NIL\" \"foo bar\" {8}\r\nfoo\\ bar \"föö\"",
+            to_str(l),
         );
     }
 
