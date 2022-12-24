@@ -48,24 +48,17 @@
 //! IMAP has many defects in which it arbitrarily makes it impossible to send
 //! certain byte ranges.
 //!
-//! 1. Keywords. They are required to be atoms, which means that even things
-//!    like ASCII space are not representable as keywords. There is no standard
-//!    way to deal with non-atom keywords. Our strategy here is to represent
-//!    them as quoted-printable encoded words (which means ASCII
-//!    case-insensitivity remains) and to send the resulting encoded word as an
-//!    atom.
-//!
-//! 2. Parsed strings containing Unicode. If the client is Unicode-aware, we
+//! 1. Parsed strings containing Unicode. If the client is Unicode-aware, we
 //!    just send the actual data. For other clients, we either use encoded
 //!    words to represent the text (if allowed) or censor the illegal bytes (in
 //!    the case of things like email addresses that may not contain encoded
 //!    words).
 //!
-//! 3. Mailbox names. RFC 3501 specifies modified UTF-7 here, which is exactly
+//! 2. Mailbox names. RFC 3501 specifies modified UTF-7 here, which is exactly
 //!    what we do for non-Unicode-aware clients. Unicode-aware clients get the
 //!    true mailbox names.
 //!
-//! 4. 8-bit MIME. RFC 3501 does not consider the possibility of 8-bit
+//! 3. 8-bit MIME. RFC 3501 does not consider the possibility of 8-bit
 //!    characters in MIME headers since that did not become a thing until 2007.
 //!    RFC 6855 (`UTF8=ACCEPT` extension) would have us in one way or another
 //!    downgrade the headers, which invalidates cryptographic signatures. In
@@ -73,7 +66,7 @@
 //!    data in the MIME headers without issue, so we consider violating RFC
 //!    6855 to be a far lesser sin than corrupting the user's mail.
 //!
-//! 5. Binary data, i.e., the NUL character. For reasons that are unclear, RFC
+//! 4. Binary data, i.e., the NUL character. For reasons that are unclear, RFC
 //!    3501 forbids the NUL byte to occur in literals. (Strangely, it
 //!    describes `binary` as a valid Content-Transfer-Encoding and requires
 //!    that the actual transfer encoding match what is declared, so it's not
@@ -90,11 +83,9 @@
 //!
 //! One fortunate thing about all this is that we don't need to worry about the
 //! repair strategies when reading stuff from the client, i.e., our parser does
-//! not need to know whether the client is Unicode-aware. The keyword strategy
-//! does need to be handled during parsing, but that is unaffected by Unicode
-//! awareness. Free-form strings passed in by the client always either have an
-//! explicit charset or a standard repair strategy, so we just follow the
-//! standards there.
+//! not need to know whether the client is Unicode-aware. Free-form strings
+//! passed in by the client always either have an explicit charset or a
+//! standard repair strategy, so we just follow the standards there.
 
 use std::borrow::Cow;
 use std::io::{self, Read, Write};
