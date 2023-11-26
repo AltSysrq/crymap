@@ -176,10 +176,10 @@ fn read_write_claim(root: &Path, max_uid: Uid) -> Option<Uid> {
                 return Uid::of(latest).and_then(Uid::next);
             },
             // ENOENT => we lost the race, try again with updated dir info
-            Err(nix::Error::Sys(nix::errno::Errno::ENOENT)) => continue,
+            Err(nix::errno::Errno::ENOENT) => continue,
             // EEXIST => we lost the race, and the other process claimed the
             // same range
-            Err(nix::Error::Sys(nix::errno::Errno::EEXIST)) => return None,
+            Err(nix::errno::Errno::EEXIST) => return None,
             Err(e) => {
                 error!(
                     "Failed to update recency token ({}); \

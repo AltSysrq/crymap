@@ -156,9 +156,7 @@ impl<R, E: Into<Error>> ErrorTransforms for Result<R, E> {
             Err(Error::Io(e)) if io::ErrorKind::AlreadyExists == e.kind() => {
                 Err(error)
             },
-            Err(Error::Nix(nix::Error::Sys(nix::errno::Errno::EEXIST))) => {
-                Err(error)
-            },
+            Err(Error::Nix(nix::errno::Errno::EEXIST)) => Err(error),
             s => s,
         }
     }
@@ -168,9 +166,7 @@ impl<R, E: Into<Error>> ErrorTransforms for Result<R, E> {
             Err(Error::Io(e)) if io::ErrorKind::NotFound == e.kind() => {
                 Err(error)
             },
-            Err(Error::Nix(nix::Error::Sys(nix::errno::Errno::ENOENT))) => {
-                Err(error)
-            },
+            Err(Error::Nix(nix::errno::Errno::ENOENT)) => Err(error),
             s => s,
         }
     }

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -108,19 +108,17 @@ pub fn lmtp(
     mut users_root: PathBuf,
 ) {
     let host_name = if system_config.lmtp.host_name.is_empty() {
-        let mut buf = [0u8; 256];
-        let host_name_cstr =
-            nix::unistd::gethostname(&mut buf).unwrap_or_else(|e| {
-                fatal!(
-                    EX_OSERR,
-                    "Failed to determine host name; you may \
+        let host_name_cstr = nix::unistd::gethostname().unwrap_or_else(|e| {
+            fatal!(
+                EX_OSERR,
+                "Failed to determine host name; you may \
                      need to explicitly configure it: {}",
-                    e
-                )
-            });
+                e
+            )
+        });
         host_name_cstr
             .to_str()
-            .unwrap_or_else(|_| {
+            .unwrap_or_else(|| {
                 fatal!(EX_OSERR, "System host name is not UTF-8")
             })
             .to_owned()
@@ -217,13 +215,19 @@ fn configure_system(
         _ => (),
     }
 
-    let mut peer_name = match nix::sys::socket::getpeername(STDIN) {
-        Ok(addr) => addr.to_string(),
-        Err(e) => {
-            warn!("Unable to determine peer name: {}", e);
-            "unknown-socket".to_owned()
-        },
-    };
+    let mut peer_name = nix::sys::socket::getpeername::<
+        nix::sys::socket::UnixAddr,
+    >(STDIN)
+    .map(|addr| addr.to_string())
+    .or_else(|_| {
+        nix::sys::socket::getpeername::<nix::sys::socket::SockaddrIn>(STDIN)
+            .map(|addr| addr.to_string())
+    })
+    .or_else(|_| {
+        nix::sys::socket::getpeername::<nix::sys::socket::SockaddrIn6>(STDIN)
+            .map(|addr| addr.to_string())
+    })
+    .unwrap_or_else(|_| "unknown-socket".to_owned());
 
     // On FreeBSD, getpeername() on a UNIX socket returns "@\0", which breaks
     // syslog if we log that.
@@ -232,13 +236,13 @@ fn configure_system(
     }
 
     if let Err(e) = nix::sys::socket::setsockopt(
-        STDIN,
+        &std::io::stdin(),
         nix::sys::socket::sockopt::ReceiveTimeout,
         &nix::sys::time::TimeVal::minutes(30),
     )
     .and_then(|_| {
         nix::sys::socket::setsockopt(
-            STDOUT,
+            &std::io::stdout(),
             nix::sys::socket::sockopt::SendTimeout,
             &nix::sys::time::TimeVal::minutes(30),
         )
@@ -249,7 +253,7 @@ fn configure_system(
     // It is not unusual for stdio to be UNIX sockets instead of TCP, so don't
     // complain if setting TCP_NODELAY fails.
     let _ = nix::sys::socket::setsockopt(
-        STDOUT,
+        &std::io::stdout(),
         nix::sys::socket::sockopt::TcpNoDelay,
         &true,
     );
@@ -264,17 +268,15 @@ struct Stdio;
 
 impl Read for Stdio {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        nix::unistd::read(STDIN, buf).map_err(|e| {
-            io::Error::from_raw_os_error(e.as_errno().unwrap() as i32)
-        })
+        nix::unistd::read(STDIN, buf)
+            .map_err(|e| io::Error::from_raw_os_error(e as i32))
     }
 }
 
 impl Write for Stdio {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        nix::unistd::write(STDOUT, buf).map_err(|e| {
-            io::Error::from_raw_os_error(e.as_errno().unwrap() as i32)
-        })
+        nix::unistd::write(STDOUT, buf)
+            .map_err(|e| io::Error::from_raw_os_error(e as i32))
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -330,16 +332,18 @@ impl WrappedIo {
     fn on_error(&mut self, e: openssl::ssl::Error) -> io::Result<()> {
         match e.code() {
             openssl::ssl::ErrorCode::WANT_READ => {
+                let stdin = std::io::stdin();
                 let mut stdin = [PollFd::new(
-                    STDIN,
+                    &stdin,
                     PollFlags::POLLIN | PollFlags::POLLERR,
                 )];
 
                 handle_poll_result(poll(&mut stdin, 30 * 60_000))
             },
             openssl::ssl::ErrorCode::WANT_WRITE => {
+                let stdout = std::io::stdout();
                 let mut stdout = [PollFd::new(
-                    STDOUT,
+                    &stdout,
                     PollFlags::POLLOUT | PollFlags::POLLERR,
                 )];
 
@@ -360,11 +364,11 @@ fn handle_poll_result(
             Err(io::Error::new(io::ErrorKind::TimedOut, "Socket timed out"))
         },
         Ok(_) => Ok(()),
-        Err(nix::Error::Sys(nix::errno::Errno::EINTR)) => Ok(()),
+        Err(nix::errno::Errno::EINTR) => Ok(()),
         Err(e) => Err(nix_to_io(e)),
     }
 }
 
 fn nix_to_io(e: nix::Error) -> io::Error {
-    io::Error::from_raw_os_error(e.as_errno().unwrap() as i32)
+    io::Error::from_raw_os_error(e as i32)
 }

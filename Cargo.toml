@@ -33,7 +33,6 @@ flate2 = { version = "1.0", default-features = false, features = ["zlib"] }
 lazy_static = "1.4"
 log = "0.4.8"
 memchr = "2.6.4"
-nix = "0.17"
 nom = { version = "5.1", default-features = false, features = ["regexp", "std"] }
 num_cpus = "1.13"
 openssl = "0.10.45"
@@ -74,6 +73,10 @@ features = [
   "toml_format",
   "config_parsing",
 ]
+
+[dependencies.nix]
+version = "0.27.1"
+features = [ "fs", "hostname", "net", "poll", "process", "user" ]
 
 [dev-dependencies]
 proptest = "0.10"

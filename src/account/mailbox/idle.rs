@@ -54,7 +54,6 @@
 use std::fs;
 use std::io;
 use std::os::unix::fs::DirBuilderExt;
-use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixDatagram;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
@@ -95,12 +94,9 @@ impl IdleListener {
 
     fn idle_impl(self, timeout: nix::libc::c_int) -> io::Result<()> {
         let mut pollfd = [
+            PollFd::new(&self.sock, PollFlags::POLLIN | PollFlags::POLLERR),
             PollFd::new(
-                self.sock.as_raw_fd(),
-                PollFlags::POLLIN | PollFlags::POLLERR,
-            ),
-            PollFd::new(
-                self.recv_self_notify.as_raw_fd(),
+                &self.recv_self_notify,
                 PollFlags::POLLIN | PollFlags::POLLERR,
             ),
         ];
@@ -119,11 +115,9 @@ impl IdleListener {
                     // There's something, and that's enough to wake up.
                     return Ok(());
                 },
-                Err(nix::Error::Sys(nix::errno::Errno::EINTR)) => continue,
+                Err(nix::errno::Errno::EINTR) => continue,
                 Err(e) => {
-                    return Err(io::Error::from_raw_os_error(
-                        e.as_errno().unwrap() as i32,
-                    ));
+                    return Err(io::Error::from_raw_os_error(e as i32));
                 },
             }
         }

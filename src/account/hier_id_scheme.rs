@@ -137,8 +137,9 @@ impl<'a> HierIdScheme<'a> {
             nix::unistd::LinkatFlags::SymlinkFollow,
         ) {
             Ok(_) => Ok(true),
-            Err(nix::Error::Sys(nix::errno::Errno::EEXIST))
-            | Err(nix::Error::Sys(nix::errno::Errno::ELOOP)) => Ok(false),
+            Err(nix::errno::Errno::EEXIST) | Err(nix::errno::Errno::ELOOP) => {
+                Ok(false)
+            },
             Err(e) => Err(e.into()),
         }
     }
