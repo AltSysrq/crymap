@@ -22,7 +22,7 @@ bitflags = "2.4.1"
 byteorder = "1.5.0"
 clap = { version = "2.33", default-features = false }
 crossbeam = "0.7"
-encoding_rs = "0.8"
+encoding_rs = "0.8.33"
 # Using the zlib backend and not miniz_oxide is a hard requirement currently
 # because with miniz_oxide, it sometimes blocks for more data when a full frame
 # is available. This is reproduceable by connecting thunderbird and doing a
