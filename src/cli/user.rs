@@ -90,21 +90,16 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
             },
             (_, Ok(Some(user))) => Some(user),
         }
+    } else if cmd.uid.is_some() {
+        die!(EX_NOPERM, "`-u` can only be used as root.")
     } else {
-        if cmd.uid.is_some() {
-            die!(EX_NOPERM, "`-u` can only be used as root.")
-        } else {
-            None
-        }
+        None
     };
 
     let password = if cmd.prompt_password {
-        match rpassword::prompt_password("Password: ").and_then(
-            |a| {
-                rpassword::prompt_password("Confirm: ")
-                    .map(|b| (a, b))
-            },
-        ) {
+        match rpassword::prompt_password("Password: ").and_then(|a| {
+            rpassword::prompt_password("Confirm: ").map(|b| (a, b))
+        }) {
             Err(e) => die!(EX_NOINPUT, "Failed to read password: {}", e),
             Ok((a, b)) if a != b => die!(EX_DATAERR, "Passwords don't match"),
             Ok((a, _)) if a.is_empty() => die!(EX_NOINPUT, "No password given"),
@@ -112,7 +107,7 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
         }
     } else {
         let data: [u8; 8] = OsRng.gen();
-        base64::encode(&data)
+        base64::encode(data)
     };
 
     if let Err(e) = fs::DirBuilder::new().mode(0o770).create(&actual_path) {

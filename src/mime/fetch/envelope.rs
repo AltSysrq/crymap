@@ -16,6 +16,10 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+// This warning occurs because we're abusing ? as a short-circuit-on-success
+// operator.
+#![allow(clippy::result_large_err)]
+
 use std::borrow::Cow;
 use std::mem;
 use std::str;

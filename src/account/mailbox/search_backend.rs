@@ -71,6 +71,7 @@ const TRUE: u64 = 1;
 
 struct Stack(u64);
 
+#[allow(clippy::unusual_byte_groupings)]
 impl Stack {
     fn push(&mut self, val: u64) {
         self.0 <<= 2;

@@ -161,7 +161,7 @@ impl CommandProcessor {
 
         let mut user_dir = self.data_root.join(&*cmd.userid);
         let user_data_file = account_config_file(&user_dir);
-        let (user_config, master_key) = fs::File::open(&user_data_file)
+        let (user_config, master_key) = fs::File::open(user_data_file)
             .ok()
             .and_then(|f| {
                 let mut buf = Vec::<u8>::new();

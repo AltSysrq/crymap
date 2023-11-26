@@ -84,7 +84,7 @@ impl BufferWriter {
 impl Write for BufferWriter {
     fn write(&mut self, src: &[u8]) -> io::Result<usize> {
         if self.on_disk.is_none() && src.len() + self.buf.len() > MAX_BUFFER {
-            let spill = mem::replace(&mut self.buf, Vec::new());
+            let spill = mem::take(&mut self.buf);
             let context = NakedCryptContext::new();
             let cryptor = context.encryptor();
             let file = tempfile::tempfile_in(&self.paths.tmp)?;

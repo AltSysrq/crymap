@@ -281,19 +281,14 @@ impl<'a> ContentType<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ContentTransferEncoding {
+    #[default]
     SevenBit,
     EightBit,
     Binary,
     QuotedPrintable,
     Base64,
-}
-
-impl Default for ContentTransferEncoding {
-    fn default() -> Self {
-        ContentTransferEncoding::SevenBit
-    }
 }
 
 impl ContentTransferEncoding {
@@ -406,6 +401,7 @@ fn ocfws(i: &[u8]) -> IResult<&[u8], ()> {
 
 // RFC 5322 3.2.3 "Atom text"
 // Amended by RFC 6532 to include all non-ASCII characters
+#[allow(clippy::manual_range_contains)]
 fn atext(i: &[u8]) -> IResult<&[u8], &[u8]> {
     bytes::complete::take_while1(|ch| {
         // RFC5322 ALPHA

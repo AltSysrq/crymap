@@ -291,7 +291,7 @@ pub(super) fn list_rollups(
                 let modseq = match entry
                     .file_name()
                     .to_str()
-                    .and_then(|n| u64::from_str_radix(n, 10).ok())
+                    .and_then(|n| n.parse::<u64>().ok())
                     .and_then(Modseq::of)
                 {
                     Some(ms) => ms,

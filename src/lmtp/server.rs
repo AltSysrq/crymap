@@ -560,6 +560,7 @@ impl Server {
             }
         }
 
+        #[allow(clippy::box_default)] // not helpful here
         let ssl_stream = match self.ssl_acceptor.accept(RecombinedIo {
             r: mem::replace(&mut self.read, Box::new(&[] as &[u8])),
             w: mem::replace(&mut self.write, Box::new(Vec::<u8>::new())),

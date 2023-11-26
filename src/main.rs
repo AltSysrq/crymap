@@ -21,8 +21,10 @@
     clippy::module_inception,
     clippy::type_complexity,
     clippy::too_many_arguments,
-    clippy::needless_range_loop
+    clippy::needless_range_loop,
+    clippy::needless_borrowed_reference
 )]
+#![deny(clippy::pattern_type_mismatch)]
 
 #[cfg(test)]
 macro_rules! assert_matches {

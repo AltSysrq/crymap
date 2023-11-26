@@ -326,16 +326,14 @@ impl<F: FnMut(&SearchData) -> Option<bool>> Visitor for SearchFetcher<F> {
         );
 
         self.eval()
-            .err()
-            .expect("Failed to eval() to something after all fields set")
+            .expect_err("Failed to eval() to something after all fields set")
     }
 }
 
 impl<F: FnMut(&SearchData) -> Option<bool>> SearchFetcher<F> {
     fn finish_headers(&mut self) {
         if self.data.headers.is_none() {
-            self.data.headers =
-                Some(mem::replace(&mut self.headers, HashMap::new()));
+            self.data.headers = Some(mem::take(&mut self.headers));
         }
         self.data.from.get_or_insert_with(String::new);
         self.data.cc.get_or_insert_with(String::new);
@@ -375,7 +373,7 @@ impl<F: FnMut(&SearchData) -> Option<bool>> SearchFetcher<F> {
         }
 
         let mut result = String::with_capacity(value.len() + 16);
-        let parsed = header::parse_address_list(value).unwrap_or_else(Vec::new);
+        let parsed = header::parse_address_list(value).unwrap_or_default();
         for address in parsed {
             match address {
                 header::Address::Mailbox(mailbox) => {

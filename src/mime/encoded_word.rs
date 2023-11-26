@@ -124,8 +124,8 @@ pub fn ew_decode(word: &str) -> Option<String> {
 
 fn decode_xfer<'a>(xfer: &str, content: &'a [u8]) -> Option<Cow<'a, [u8]>> {
     match xfer {
-        "q" | "Q" => Some(qp_decode(&content).0),
-        "b" | "B" => base64::decode(&content).ok().map(Cow::Owned),
+        "q" | "Q" => Some(qp_decode(content).0),
+        "b" | "B" => base64::decode(content).ok().map(Cow::Owned),
         _ => None,
     }
 }
@@ -140,13 +140,13 @@ fn decode_charset<'a>(
 
     // encoding-rs doesn't do UTF-7...
     if "utf-7".eq_ignore_ascii_case(charset) {
-        Some(utf7::STD.decode(str::from_utf8(&content).ok()?))
+        Some(utf7::STD.decode(str::from_utf8(content).ok()?))
     } else {
         // ... but it does everything else (at least everything else that
         // Thunderbird supports)
         Some(
             Encoding::for_label_no_replacement(charset.as_bytes())?
-                .decode_with_bom_removal(&content)
+                .decode_with_bom_removal(content)
                 .0,
         )
     }

@@ -184,9 +184,7 @@ fn deliver_single(
     Ok(())
 }
 
-fn extract_maildir_flags<'a>(
-    path: &'a Path,
-) -> impl Iterator<Item = Flag> + 'a {
+fn extract_maildir_flags(path: &Path) -> impl Iterator<Item = Flag> + '_ {
     path.extension()
         .and_then(|ext| ext.to_str())
         .unwrap_or("")

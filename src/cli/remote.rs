@@ -141,11 +141,10 @@ fn connect(options: RemoteCommonOptions) -> Result<RemoteClient, Error> {
         );
     }
 
-    let password =
-        match rpassword::prompt_password("Current password: ") {
-            Ok(p) => p,
-            Err(e) => die!(EX_NOINPUT, "Failed to read password: {}", e),
-        };
+    let password = match rpassword::prompt_password("Current password: ") {
+        Ok(p) => p,
+        Err(e) => die!(EX_NOINPUT, "Failed to read password: {}", e),
+    };
 
     let mut auth_string =
         base64::encode(format!("{}\0{}\0{}", user, user, password));
@@ -215,11 +214,9 @@ fn die_if_not_success(what: &str, response: s::ResponseLine<'_>) {
 
 fn change_password(client: &mut RemoteClient) -> Result<(), Error> {
     let new_password = loop {
-        match rpassword::prompt_password("New password: ")
-            .and_then(|a| {
-                rpassword::prompt_password("Confirm: ")
-                    .map(|b| (a, b))
-            }) {
+        match rpassword::prompt_password("New password: ").and_then(|a| {
+            rpassword::prompt_password("Confirm: ").map(|b| (a, b))
+        }) {
             Err(e) => die!(EX_NOINPUT, "Failed to read password: {}", e),
             Ok((a, b)) if a != b => {
                 eprintln!("Passwords don't match, try again");

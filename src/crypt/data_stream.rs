@@ -218,7 +218,7 @@ impl<R: Read> BufRead for Reader<R> {
                     .update(
                         &self.ciphertext_buffer
                             [AES_BLOCK..slab_size + AES_BLOCK],
-                        &mut self.cleartext_buffer.get_mut()
+                        self.cleartext_buffer.get_mut()
                     )
                     .map_err(to_ioerr)?
             );

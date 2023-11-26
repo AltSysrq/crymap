@@ -621,7 +621,7 @@ impl<V> Groveller<V> {
     }
 
     fn process_buffered_header(&mut self) -> Result<(), V> {
-        let mut bh = mem::replace(&mut self.buffered_header, Vec::new());
+        let mut bh = mem::take(&mut self.buffered_header);
         let ret = self.process_header(&bh);
         bh.clear();
         self.buffered_header = bh;
@@ -660,7 +660,7 @@ impl<V> Groveller<V> {
 
         self.seen_content_type = true;
 
-        self.visitor.content_type(&ct)?;
+        self.visitor.content_type(ct)?;
 
         if ct.is_type("multipart") {
             if let Some(bound) = ct.parm("boundary") {

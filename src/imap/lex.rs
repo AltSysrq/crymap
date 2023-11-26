@@ -296,7 +296,9 @@ impl<W: Write> LexWriter<W> {
     fn is_conservative_atom(&self, s: &str) -> bool {
         !"nil".eq_ignore_ascii_case(s)
             && !s.is_empty()
-            && s.as_bytes().iter().copied().all(|b| match b {
+            && s.as_bytes().iter().copied().all(|b| {
+                matches!(
+                b,
                 b'a'..=b'z'
                 | b'A'..=b'Z'
                 | b'0'..=b'9'
@@ -306,8 +308,7 @@ impl<W: Write> LexWriter<W> {
                 | b'+'
                 | b'_'
                 | b'.'
-                | b'-' => true,
-                _ => false,
+                    | b'-')
             })
     }
 

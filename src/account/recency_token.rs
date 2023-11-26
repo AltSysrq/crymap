@@ -205,7 +205,7 @@ fn get_current_tokens(token_dir: &Path) -> io::Result<Vec<u32>> {
         if let Some(val) = entry
             .file_name()
             .to_str()
-            .and_then(|n| u32::from_str_radix(n, 10).ok())
+            .and_then(|n| n.parse::<u32>().ok())
         {
             result.push(val);
         }

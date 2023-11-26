@@ -260,7 +260,7 @@ impl Server {
         literal_info: Option<(u32, bool)>,
     ) -> Result<(), Error> {
         if let (true, Ok((_, frag))) =
-            (initial, s::UnknownCommandFragment::parse(&cmdline))
+            (initial, s::UnknownCommandFragment::parse(cmdline))
         {
             self.send_response(s::ResponseLine {
                 // The RFC 3501 grammar doesn't allow tagged BYE, so if we're
@@ -352,10 +352,10 @@ impl Server {
 
     fn handle_complete_command(&mut self, cmdline: &[u8]) -> Result<(), Error> {
         if let Ok((b"", auth_start)) =
-            s::AuthenticateCommandStart::parse(&cmdline)
+            s::AuthenticateCommandStart::parse(cmdline)
         {
             self.handle_authenticate(auth_start)?;
-        } else if let Ok((b"", cmdline)) = s::CommandLine::parse(&cmdline) {
+        } else if let Ok((b"", cmdline)) = s::CommandLine::parse(cmdline) {
             match cmdline {
                 s::CommandLine {
                     tag,
@@ -378,7 +378,7 @@ impl Server {
                     self.send_response(r)?;
                 },
             }
-        } else if let Ok((_, frag)) = s::UnknownCommandFragment::parse(&cmdline)
+        } else if let Ok((_, frag)) = s::UnknownCommandFragment::parse(cmdline)
         {
             self.send_response(s::ResponseLine {
                 tag: Some(frag.tag),
@@ -479,7 +479,7 @@ impl Server {
             // If we just ended a UTF8 append item, check for the closing
             // parenthesis
             if utf8 {
-                if Some(&b')') != cmdline.get(0) {
+                if Some(&b')') != cmdline.first() {
                     // Recovering from the unmatched parenthesis is awkward and not
                     // that important to do, so just give up.
                     self.send_response(s::ResponseLine {
@@ -619,6 +619,7 @@ impl Server {
         Ok(())
     }
 
+    #[allow(clippy::box_default)] // Not a useful suggestion here
     fn handle_compress(&mut self, tag: Cow<'_, str>) -> Result<(), Error> {
         if self.compressing {
             self.send_response(s::ResponseLine {
@@ -816,10 +817,10 @@ impl Server {
     }
 }
 
-fn response_sender<'a>(
-    w: &'a Arc<Mutex<Box<dyn Write + Send>>>,
+fn response_sender(
+    w: &Arc<Mutex<Box<dyn Write + Send>>>,
     unicode_aware: bool,
-) -> impl Fn(s::Response<'_>) + Send + Sync + 'a {
+) -> impl Fn(s::Response<'_>) + Send + Sync + '_ {
     move |r| {
         let mut w = w.lock().unwrap();
         let mut w = LexWriter::new(&mut *w, unicode_aware, false);

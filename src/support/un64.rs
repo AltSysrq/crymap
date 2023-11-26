@@ -275,6 +275,7 @@ impl<W: FinishWrite> FinishWrite for Writer<W> {
     }
 }
 
+#[allow(clippy::manual_range_contains)]
 fn is_base64(b: u8) -> bool {
     (b >= b'a' && b <= b'z')
         || (b >= b'A' && b <= b'Z')

@@ -122,7 +122,11 @@
 //!   `&[u8]`) is inserted between items.
 //! - `box`: Wrap/unwrap a `Box`.
 #![allow(dead_code)]
-#![allow(clippy::large_enum_variant)]
+#![allow(
+    clippy::large_enum_variant,
+    clippy::derivable_impls,
+    clippy::match_like_matches_macro
+)]
 
 use std::borrow::Cow;
 use std::io::{self, Write};

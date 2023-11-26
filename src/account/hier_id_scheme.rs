@@ -216,7 +216,7 @@ impl<'a> HierIdScheme<'a> {
             if 0 == id % 256 {
                 // Try to allocate all 256 ids at once
                 let parent = gravestone.containing_directory();
-                self.mkdirs_bare(&parent)?;
+                self.mkdirs_bare(parent)?;
                 let success = match std::os::unix::fs::symlink(
                     parent.file_name().unwrap(),
                     parent,
@@ -311,7 +311,7 @@ impl<'a> HierIdScheme<'a> {
 
         // To avoid making a bunch of redundant writes to the FS, see if the
         // file is already a gravestone and short-circuit if it is.
-        match fs::metadata(&path) {
+        match fs::metadata(path) {
             Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
                 return Ok(())
             },
@@ -329,7 +329,7 @@ impl<'a> HierIdScheme<'a> {
             }
         }
 
-        let rename_res = fs::rename(&stage, &path);
+        let rename_res = fs::rename(&stage, path);
         if rename_res.is_err() {
             let _ = fs::remove_file(&stage);
         }
@@ -346,7 +346,7 @@ impl<'a> HierIdScheme<'a> {
     /// Return whether the given identifier is already allocated.
     pub fn is_allocated(&self, id: u32) -> bool {
         // Follow symlinks here to get ELOOP for expunged individual item
-        match fs::metadata(&self.allocation_path_for_id(id).0) {
+        match fs::metadata(self.allocation_path_for_id(id).0) {
             Ok(_) => true,
             Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => true,
             _ => false,
@@ -416,7 +416,7 @@ impl<'a> HierIdScheme<'a> {
             _ => (),
         }
 
-        let path = path.strip_prefix(&self.root).unwrap();
+        let path = path.strip_prefix(self.root).unwrap();
         let mut iter = path.parent().unwrap().iter();
 
         let mut cur_path =
@@ -588,7 +588,7 @@ impl<'a> HierIdScheme<'a> {
                 path.set_file_name(&name);
 
                 if can_remove {
-                    self.expunge_path(subprefix, &path, tmp)?;
+                    self.expunge_path(subprefix, path, tmp)?;
                     exists = false;
                 }
             }
@@ -659,7 +659,7 @@ impl<'a> HierIdScheme<'a> {
             };
 
             if exists && (id_prefix | i) < expunge_less_than {
-                self.expunge_path(id_prefix | i, &path, tmp)?;
+                self.expunge_path(id_prefix | i, path, tmp)?;
                 exists = false;
             }
 
@@ -689,7 +689,7 @@ impl<'a> HierIdScheme<'a> {
             // Ensure the whole directory is marked allocated
             if !fully_allocated {
                 path.push("alloc");
-                self.expunge_path(id_prefix, &path, tmp)?;
+                self.expunge_path(id_prefix, path, tmp)?;
                 path.pop();
             }
 

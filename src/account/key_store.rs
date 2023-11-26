@@ -352,11 +352,11 @@ impl KeyStore {
     }
 }
 
-fn load_private_key<'a>(
+fn load_private_key(
     master_key: &MasterKey,
     name: &str,
     root: &Path,
-    cache: &'a mut HashMap<String, Arc<Rsa<Private>>>,
+    cache: &mut HashMap<String, Arc<Rsa<Private>>>,
 ) -> Result<Arc<Rsa<Private>>, Error> {
     if !is_safe_name(name) {
         return Err(Error::UnsafeName);

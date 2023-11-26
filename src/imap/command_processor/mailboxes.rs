@@ -129,7 +129,7 @@ impl CommandProcessor {
         let return_opts = cmd.return_opts.unwrap_or_default();
         let mut return_stati: Option<Vec<s::StatusAtt>> = None;
         for opt in &return_opts {
-            if let s::ListReturnOpt::Status(ref stati) = opt {
+            if let s::ListReturnOpt::Status(ref stati) = *opt {
                 if return_stati.is_some() {
                     return Err(s::Response::Cond(s::CondResponse {
                         cond: s::RespCondType::Bad,

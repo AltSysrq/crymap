@@ -85,7 +85,7 @@ impl MailboxPath {
 
     /// Instantiate a `MailboxPath` inferior to this one.
     pub fn child(&self, name: &str) -> Result<Self, Error> {
-        if !is_safe_name(&name) {
+        if !is_safe_name(name) {
             return Err(Error::UnsafeName);
         }
 
@@ -107,6 +107,7 @@ impl MailboxPath {
 
     /// Return the *current* UID validity, i.e., that which would be used if
     /// the mailbox were opened right now.
+    #[allow(clippy::needless_borrows_for_generic_args)] // false positive
     pub fn current_uid_validity(&self) -> Result<u32, Error> {
         if !self.exists() {
             return Err(Error::NxMailbox);
@@ -158,7 +159,7 @@ impl MailboxPath {
 
     /// Return an iterator to the children of this mailbox, regardless of
     /// existence status.
-    pub fn children<'a>(&'a self) -> impl Iterator<Item = MailboxPath> + 'a {
+    pub fn children(&self) -> impl Iterator<Item = MailboxPath> + '_ {
         self.children_impl(&self.base_path)
     }
 
@@ -612,9 +613,7 @@ pub struct ChildListResult {
 /// case-insensitivity of the root `inbox` mailbox.
 ///
 /// It does not check for name safety.
-pub fn parse_mailbox_path<'a>(
-    path: &'a str,
-) -> impl Iterator<Item = &'a str> + 'a {
+pub fn parse_mailbox_path(path: &str) -> impl Iterator<Item = &str> + '_ {
     path.split('/')
         .filter(|s| !s.is_empty())
         .enumerate()
@@ -726,7 +725,7 @@ fn gen_mailbox_id() -> String {
     // important since the padding characters are not allowed in object ids.
     // (The set of allowed characters is exactly the set of "URL Safe" base64.)
     let data: [u8; 15] = OsRng.gen();
-    base64::encode_config(&data, base64::URL_SAFE)
+    base64::encode_config(data, base64::URL_SAFE)
 }
 
 #[cfg(test)]

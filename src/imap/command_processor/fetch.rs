@@ -46,7 +46,7 @@ impl CommandProcessor {
             false,
             false,
             StatefulMailbox::seqnum_store,
-            |mb, r| mb.prefetch(&r, &SeqRange::new()),
+            |mb, r| mb.prefetch(r, &SeqRange::new()),
             StatefulMailbox::seqnum_fetch,
         )
     }
@@ -64,7 +64,7 @@ impl CommandProcessor {
             true,
             true,
             StatefulMailbox::store,
-            |mb, r| mb.prefetch(&r, &r.ids),
+            |mb, r| mb.prefetch(r, &r.ids),
             |mb, r, f| mb.fetch(&r, f),
         )
     }
@@ -97,7 +97,7 @@ impl CommandProcessor {
             false,
             false,
             |_, _| panic!("Shouldn't STORE in background update"),
-            |mb, r| mb.prefetch(&r, &r.ids),
+            |mb, r| mb.prefetch(r, &r.ids),
             |mb, r, f| mb.fetch(&r, f),
         );
     }
@@ -403,9 +403,11 @@ where
                 }
             }
 
-            let mut section = BodySection::default();
-            section.report_as_binary = s::FetchAttBodyKind::Binary == body.kind;
-            section.size_only = body.size_only;
+            let mut section = BodySection {
+                report_as_binary: s::FetchAttBodyKind::Binary == body.kind,
+                size_only: body.size_only,
+                ..BodySection::default()
+            };
 
             match body.section {
                 None => (),
@@ -584,10 +586,7 @@ fn fetch_att_to_ast(
                     )),
                     (false, _) => {
                         Some(s::SectionSpec::Sub(s::SubSectionSpec {
-                            subscripts: mem::replace(
-                                &mut section.subscripts,
-                                vec![],
-                            ),
+                            subscripts: mem::take(&mut section.subscripts),
                             text: section_text_to_ast(section),
                         }))
                     },

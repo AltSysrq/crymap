@@ -34,17 +34,11 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// structure but with inferior characteristics.
 ///
 /// Serialises as a `[u64]`, with the "near" element *last*.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct SmallBitset {
     near: u64,
-    #[allow(clippy::box_vec)]
+    #[allow(clippy::box_collection)]
     far: Option<Box<Vec<u64>>>,
-}
-
-impl Default for SmallBitset {
-    fn default() -> Self {
-        SmallBitset { near: 0, far: None }
-    }
 }
 
 impl fmt::Debug for SmallBitset {
@@ -87,7 +81,7 @@ impl SmallBitset {
     }
 
     /// Iterate over all the values in the bitset.
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = usize> + 'a {
+    pub fn iter(&self) -> impl Iterator<Item = usize> + '_ {
         static EMPTY: Vec<u64> = Vec::new();
         iter::once(self.near)
             .chain(self.far.as_deref().unwrap_or(&EMPTY).iter().copied())
@@ -104,7 +98,7 @@ impl SmallBitset {
             (&mut self.near, 1 << val)
         } else {
             let ix = val / 64 - 1;
-            let far = self.far.get_or_insert_with(|| Box::new(Vec::new()));
+            let far = self.far.get_or_insert_with(Box::default);
             if far.len() <= ix {
                 far.resize(ix + 1, 0);
             }

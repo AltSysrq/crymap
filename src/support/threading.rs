@@ -171,7 +171,7 @@ impl ScatterGather {
                     for input in input_recv.iter() {
                         let output = mapper(input);
                         let mut reduce = reduce.lock().unwrap();
-                        (&mut *reduce)(output);
+                        (*reduce)(output);
                     }
                 });
                 current_threads += 1;

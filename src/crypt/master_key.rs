@@ -57,7 +57,9 @@ use crate::support::user_config::b64;
 
 const MASTER_SIZE: usize = 32;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
 #[allow(non_camel_case_types)]
 pub enum Algorithm {
     /// Use the Argon2i 1.3 algorithm with a memory cost of 4MB, time cost of
@@ -65,13 +67,8 @@ pub enum Algorithm {
     ///
     /// The final password hash is `KMAC256(salt, argon2_hash, 32, "check")`.
     /// The derived key is `KMAC256(salt, argon_hash, 32, "master")`
+    #[default]
     Argon2i_V13_M4096_T10_L1_Kmac256,
-}
-
-impl Default for Algorithm {
-    fn default() -> Self {
-        Algorithm::Argon2i_V13_M4096_T10_L1_Kmac256
-    }
 }
 
 /// Configuration which represents the derivation of the master key.
@@ -129,7 +126,7 @@ impl MasterKey {
 
         let mut hash = [0u8; 32];
         k.finalize(&mut hash);
-        base64::encode(&hash)
+        base64::encode(hash)
     }
 
     /// Given this key and a password, generate a `MasterKeyConfig` which can

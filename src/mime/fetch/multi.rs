@@ -207,7 +207,7 @@ impl MultiFetcher {
     ) -> Result<(), Vec<FetchedItem>> {
         for i in 0..self.fetchers.len() {
             let result =
-                self.fetchers[i].as_mut().map(|v| f(v)).unwrap_or(Ok(()));
+                self.fetchers[i].as_mut().map(&mut f).unwrap_or(Ok(()));
             if let Err(result) = result {
                 self.results[i] = result;
                 self.fetchers[i] = None;
@@ -216,7 +216,7 @@ impl MultiFetcher {
         }
 
         if 0 == self.remaining {
-            Err(mem::replace(&mut self.results, Vec::new()))
+            Err(mem::take(&mut self.results))
         } else {
             Ok(())
         }
@@ -283,11 +283,9 @@ impl Visitor for MultiFetcher {
     fn leaf_section(
         &mut self,
     ) -> Option<Box<dyn Visitor<Output = Self::Output>>> {
-        for fetcher in &mut self.fetchers {
-            if let Some(ref mut fetcher) = fetcher {
-                if let Some(new) = fetcher.leaf_section() {
-                    *fetcher = new;
-                }
+        for fetcher in self.fetchers.iter_mut().flatten() {
+            if let Some(new) = fetcher.leaf_section() {
+                *fetcher = new;
             }
         }
         None
@@ -344,7 +342,7 @@ impl Visitor for MultiFetcher {
         }
 
         if 0 == self.remaining {
-            Err(mem::replace(&mut self.results, Vec::new()))
+            Err(mem::take(&mut self.results))
         } else {
             Ok(())
         }
@@ -352,8 +350,7 @@ impl Visitor for MultiFetcher {
 
     fn end(&mut self) -> Self::Output {
         self.on_fetchers(|fetcher| Err(fetcher.end()))
-            .err()
-            .expect("Failed to complete MultiFetcher.end()")
+            .expect_err("Failed to complete MultiFetcher.end()")
     }
 }
 

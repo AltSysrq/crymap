@@ -37,7 +37,7 @@ pub mod b64 {
     ) -> Result<Vec<u8>, D::Error> {
         use serde::de::Error;
         String::deserialize(de).and_then(|s| {
-            base64::decode(&s).map_err(|err| Error::custom(err.to_string()))
+            base64::decode(s).map_err(|err| Error::custom(err.to_string()))
         })
     }
 }

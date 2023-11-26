@@ -382,7 +382,7 @@ impl MailboxState {
     pub fn take_changed_flags_uids(&mut self) -> Vec<Uid> {
         self.changed_flags_uids.sort_unstable();
         self.changed_flags_uids.dedup();
-        mem::replace(&mut self.changed_flags_uids, Vec::new())
+        mem::take(&mut self.changed_flags_uids)
     }
 
     /// Add the given UID to the next value that will be returned from
@@ -523,9 +523,7 @@ impl MailboxState {
     }
 
     /// Return an iterator to the flags in this state and their IDs.
-    pub fn flags<'a>(
-        &'a self,
-    ) -> impl Iterator<Item = (FlagId, &'a Flag)> + 'a {
+    pub fn flags(&self) -> impl Iterator<Item = (FlagId, &Flag)> + '_ {
         self.flags.iter().enumerate().map(|(ix, f)| (FlagId(ix), f))
     }
 
@@ -573,15 +571,13 @@ impl MailboxState {
     }
 
     /// Return an iterator to the UIDs within the current snapshot.
-    pub fn uids<'a>(&'a self) -> impl Iterator<Item = Uid> + 'a {
+    pub fn uids(&self) -> impl Iterator<Item = Uid> + '_ {
         self.extant_messages[..self.num_messages()].iter().copied()
     }
 
     /// Return an iterator to the UIDs and sequence numbers within the current
     /// snapshot.
-    pub fn seqnums_uids<'a>(
-        &'a self,
-    ) -> impl Iterator<Item = (Seqnum, Uid)> + 'a {
+    pub fn seqnums_uids(&'_ self) -> impl Iterator<Item = (Seqnum, Uid)> + '_ {
         self.uids()
             .enumerate()
             .map(|(ix, uid)| (Seqnum::from_index(ix), uid))
@@ -719,10 +715,10 @@ impl MailboxState {
     /// since the given `Modseq`.
     ///
     /// Returns `None` if this is not precisely known.
-    pub fn uids_expunged_since<'a>(
-        &'a self,
+    pub fn uids_expunged_since(
+        &self,
         since: Modseq,
-    ) -> Option<impl Iterator<Item = Uid> + 'a> {
+    ) -> Option<impl Iterator<Item = Uid> + '_> {
         if self
             .recent_expungements
             .front()
@@ -845,7 +841,7 @@ impl MessageStatus {
     }
 
     /// Returns the flags currently on this message.
-    pub fn flags<'a>(&'a self) -> impl Iterator<Item = FlagId> + 'a {
+    pub fn flags(&self) -> impl Iterator<Item = FlagId> + '_ {
         self.flags.iter().map(FlagId)
     }
 

@@ -59,6 +59,10 @@
 //! discussion on the mailing list, we do allow accessing a part's content with
 //! extraneous subscripts that would imply the part should be a multipart.
 
+// This warning occurs because we're abusing ? as a short-circuit-on-success
+// operator.
+#![allow(clippy::result_large_err)]
+
 use std::fmt;
 use std::io::{self, Write};
 use std::sync::Arc;

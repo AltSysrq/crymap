@@ -146,9 +146,9 @@ impl TryFrom<u32> for Uid {
     }
 }
 
-impl Into<u32> for Uid {
-    fn into(self) -> u32 {
-        self.0.get()
+impl From<Uid> for u32 {
+    fn from(uid: Uid) -> u32 {
+        uid.0.get()
     }
 }
 
@@ -219,9 +219,9 @@ impl TryFrom<u32> for Seqnum {
     }
 }
 
-impl Into<u32> for Seqnum {
-    fn into(self) -> u32 {
-        self.0.get()
+impl From<Seqnum> for u32 {
+    fn from(s: Seqnum) -> u32 {
+        s.0.get()
     }
 }
 
@@ -452,10 +452,7 @@ impl<T: TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync> SeqRange<T> {
     /// Invalid items and items greater than `max`. are silently excluded.
     ///
     /// Items are delivered in strictly ascending order.
-    pub fn items<'a>(
-        &'a self,
-        max: impl Into<u32>,
-    ) -> impl Iterator<Item = T> + 'a {
+    pub fn items(&self, max: impl Into<u32>) -> impl Iterator<Item = T> + '_ {
         let max: u32 = max.into();
         self.parts
             .iter()
@@ -625,12 +622,8 @@ impl FromStr for Flag {
 }
 
 fn is_atom_char(ch: u8) -> bool {
-    match ch {
-        0..=b' ' => false,
-        127..=255 => false,
-        b'(' | b')' | b'{' | b'*' | b'%' | b'\\' | b'"' | b']' => false,
-        _ => true,
-    }
+    !matches!(ch, 0..=b' ' | 127..=255 |
+              b'(' | b')' | b'{' | b'*' | b'%' | b'\\' | b'"' | b']')
 }
 
 impl PartialEq for Flag {
@@ -1285,7 +1278,7 @@ where
 /// worked well with clients.
 ///
 /// 4.1.2+loopbreaker is what we implement here.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum FetchResponseKind {
     /// Return OK.
     ///
@@ -1297,6 +1290,7 @@ pub enum FetchResponseKind {
     /// missing messages. This means that either `collect_vanished` was
     /// specified, or `changed_since` was given and had a UID greater than any
     /// expunged UID encountered.
+    #[default]
     Ok,
     /// Return NO.
     ///
@@ -1310,12 +1304,6 @@ pub enum FetchResponseKind {
     /// another FETCH request since the last poll and got a `No` for one or
     /// more of the same UIDs.
     Bye,
-}
-
-impl Default for FetchResponseKind {
-    fn default() -> Self {
-        FetchResponseKind::Ok
-    }
 }
 
 /// The part of a `FETCH` response that must be sent before the fetched items.
@@ -1561,7 +1549,7 @@ impl MessageMetadata {
     pub fn format_email_id(&self) -> String {
         format!(
             "E{}",
-            base64::encode_config(&self.email_id, base64::URL_SAFE)
+            base64::encode_config(self.email_id, base64::URL_SAFE)
         )
     }
 }

@@ -460,7 +460,7 @@ impl Account {
         // multiple patterns and one of them is "". Here, we just handle the ""
         // special case if there's exactly one pattern, and in other cases the
         // pattern is interpreted literally, i.e., matching an empty mailbox name.
-        if 1 == request.patterns.len() && "" == &request.patterns[0] {
+        if 1 == request.patterns.len() && request.patterns[0].is_empty() {
             return Ok(vec![ListResponse {
                 name: String::new(),
                 attributes: vec![MailboxAttribute::Noselect],
@@ -523,7 +523,7 @@ impl Account {
         request: &StatusRequest,
     ) -> Result<StatusResponse, Error> {
         let mailbox_path = self.mailbox_path(&request.name)?;
-        Ok(self.status_for(mailbox_path, request)?)
+        self.status_for(mailbox_path, request)
     }
 
     fn status_for(
