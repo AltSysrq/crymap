@@ -51,6 +51,7 @@ bitflags! {
     /// I.e., these are things that may be encountered naturally before inputs
     /// that actually contribute to the search result and can be usefully
     /// skipped.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct OptionalSearchParts: u32 {
         const FLAGS = 1 << 0;
         const HEADER_MAP = 1 << 1;

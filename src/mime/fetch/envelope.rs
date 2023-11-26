@@ -71,6 +71,7 @@ pub struct Envelope {
 }
 
 bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     struct EnvelopeParts: u32 {
         const DATE = 1 << 0;
         const SUBJECT = 1 << 1;
