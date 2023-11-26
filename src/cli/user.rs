@@ -99,9 +99,9 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
     };
 
     let password = if cmd.prompt_password {
-        match rpassword::read_password_from_tty(Some("Password: ")).and_then(
+        match rpassword::prompt_password("Password: ").and_then(
             |a| {
-                rpassword::read_password_from_tty(Some("Confirm: "))
+                rpassword::prompt_password("Confirm: ")
                     .map(|b| (a, b))
             },
         ) {

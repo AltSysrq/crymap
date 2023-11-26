@@ -142,7 +142,7 @@ fn connect(options: RemoteCommonOptions) -> Result<RemoteClient, Error> {
     }
 
     let password =
-        match rpassword::read_password_from_tty(Some("Current password: ")) {
+        match rpassword::prompt_password("Current password: ") {
             Ok(p) => p,
             Err(e) => die!(EX_NOINPUT, "Failed to read password: {}", e),
         };
@@ -215,9 +215,9 @@ fn die_if_not_success(what: &str, response: s::ResponseLine<'_>) {
 
 fn change_password(client: &mut RemoteClient) -> Result<(), Error> {
     let new_password = loop {
-        match rpassword::read_password_from_tty(Some("New password: "))
+        match rpassword::prompt_password("New password: ")
             .and_then(|a| {
-                rpassword::read_password_from_tty(Some("Confirm: "))
+                rpassword::prompt_password("Confirm: ")
                     .map(|b| (a, b))
             }) {
             Err(e) => die!(EX_NOINPUT, "Failed to read password: {}", e),
