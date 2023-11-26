@@ -376,7 +376,7 @@ impl Server {
                         ),
                     );
                     self.send_response(r)?;
-                }
+                },
             }
         } else if let Ok((_, frag)) = s::UnknownCommandFragment::parse(&cmdline)
         {
@@ -473,7 +473,7 @@ impl Server {
                 None => {
                     self.processor.cmd_append_abort();
                     break;
-                }
+                },
             };
 
             // If we just ended a UTF8 append item, check for the closing

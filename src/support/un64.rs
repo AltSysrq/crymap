@@ -82,10 +82,10 @@ impl<R: Read> BufRead for Reader<R> {
                 Ok(_) => (),
                 Err(e) if io::ErrorKind::UnexpectedEof == e.kind() => {
                     return Ok(&[]);
-                }
+                },
                 Err(e) => {
                     return Err(e);
-                }
+                },
             }
 
             is_encoded = self.next_is_encoded;

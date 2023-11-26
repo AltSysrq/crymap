@@ -330,7 +330,7 @@ impl MailboxState {
                 match next_expunged.cmp(&uid) {
                     Ordering::Less => {
                         expunged.next();
-                    }
+                    },
                     Ordering::Equal => {
                         if index < max_index {
                             expunged_pairs
@@ -343,11 +343,11 @@ impl MailboxState {
                         }
                         index += 1;
                         return false;
-                    }
+                    },
                     Ordering::Greater => {
                         index += 1;
                         return true;
-                    }
+                    },
                 }
             });
         }

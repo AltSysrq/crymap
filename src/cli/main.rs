@@ -88,7 +88,7 @@ impl ServerSubcommand {
             ServerSubcommand::Deliver(ref mut c) => mem::take(&mut c.common),
             ServerSubcommand::User(ServerUserSubcommand::Add(ref mut c)) => {
                 mem::take(&mut c.common)
-            }
+            },
             ServerSubcommand::ServeImaps(ref mut c) => mem::take(c),
             ServerSubcommand::ServeLmtp(ref mut c) => mem::take(c),
         }
@@ -288,11 +288,11 @@ pub fn main() {
         ) => {
             println!("{}", e.message);
             return;
-        }
+        },
         Err(e) => {
             eprintln!("{}", e.message);
             EX_USAGE.exit()
-        }
+        },
     });
 
     match cmd {
@@ -339,7 +339,7 @@ fn server(mut cmd: ServerSubcommand) {
                     e
                 );
                 EX_CONFIG.exit()
-            }
+            },
         };
 
     let stderr_is_tty = Ok(true) == nix::unistd::isatty(2);
@@ -374,7 +374,7 @@ fn server(mut cmd: ServerSubcommand) {
                 e
             );
             EX_IOERR.exit()
-        }
+        },
     };
 
     if stderr_is_tty {
@@ -413,15 +413,15 @@ fn server(mut cmd: ServerSubcommand) {
     match cmd {
         ServerSubcommand::Deliver(cmd) => {
             super::deliver::deliver(system_config, cmd, users_root);
-        }
+        },
         ServerSubcommand::User(ServerUserSubcommand::Add(cmd)) => {
             super::user::add(cmd, users_root);
-        }
+        },
         ServerSubcommand::ServeImaps(_) => {
             super::serve::imaps(system_config, root, users_root);
-        }
+        },
         ServerSubcommand::ServeLmtp(_) => {
             super::serve::lmtp(system_config, root, users_root);
-        }
+        },
     }
 }

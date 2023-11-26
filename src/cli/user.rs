@@ -83,11 +83,11 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
         match user_result {
             (q, Err(e)) => {
                 die!(EX_OSFILE, "Unable to look up UNIX user {}: {}", q, e)
-            }
+            },
             (q, Ok(None)) => die!(EX_NOUSER, "{} is not a UNIX user", q),
             (_, Ok(Some(user))) if user.uid == nix::unistd::ROOT => {
                 die!(EX_USAGE, "Creating account for root not allowed")
-            }
+            },
             (_, Ok(Some(user))) => Some(user),
         }
     } else {

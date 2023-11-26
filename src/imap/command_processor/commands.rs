@@ -76,53 +76,53 @@ impl CommandProcessor {
         let res = match command_line.cmd {
             s::Command::Simple(s::SimpleCommand::Capability) => {
                 self.cmd_capability(sender)
-            }
+            },
             s::Command::Simple(s::SimpleCommand::Check) => {
                 self.cmd_noop("Nothing exciting", sender)
-            }
+            },
             s::Command::Simple(s::SimpleCommand::Close) => {
                 self.cmd_close(sender)
-            }
+            },
             s::Command::Simple(s::SimpleCommand::Compress) => {
                 panic!("COMPRESS DEFLATE should be handled by server.rs")
-            }
+            },
             s::Command::Simple(s::SimpleCommand::Expunge) => {
                 staple_highest_modseq = self.qresync_enabled;
                 self.cmd_expunge(sender)
-            }
+            },
             s::Command::Simple(s::SimpleCommand::Idle) => {
                 panic!("IDLE should be dispatched by server.rs")
-            }
+            },
             s::Command::Simple(s::SimpleCommand::LogOut) => {
                 self.cmd_log_out(sender)
-            }
+            },
             s::Command::Simple(s::SimpleCommand::Namespace) => {
                 self.cmd_namespace(sender)
-            }
+            },
             s::Command::Simple(s::SimpleCommand::Noop) => {
                 self.cmd_noop("NOOP OK", sender)
-            }
+            },
             s::Command::Simple(s::SimpleCommand::StartTls) => {
                 self.cmd_start_tls(sender)
-            }
+            },
             s::Command::Simple(s::SimpleCommand::Unselect) => {
                 self.cmd_unselect(sender)
-            }
+            },
             s::Command::Simple(s::SimpleCommand::XCryPurge) => {
                 self.cmd_xcry_purge()
-            }
+            },
             s::Command::Simple(s::SimpleCommand::XCryGetUserConfig) => {
                 self.cmd_xcry_get_user_config(sender)
-            }
+            },
             s::Command::Simple(s::SimpleCommand::XCryZstdTrain) => {
                 self.cmd_xcry_zstd_train()
-            }
+            },
             s::Command::Simple(s::SimpleCommand::Xyzzy) => {
                 self.cmd_noop("Nothing happens", sender)
-            }
+            },
             s::Command::Simple(s::SimpleCommand::XAppendFinishedNoop) => {
                 self.cmd_noop("APPEND OK", sender)
-            }
+            },
 
             s::Command::Create(cmd) => self.cmd_create(cmd, sender),
             s::Command::Delete(cmd) => self.cmd_delete(cmd, sender),
@@ -142,28 +142,28 @@ impl CommandProcessor {
             s::Command::Store(cmd) => self.cmd_store(cmd, sender),
             s::Command::Search(cmd) => {
                 self.cmd_search(cmd, &command_line.tag, sender)
-            }
+            },
             s::Command::XVanquish(uids) => self.cmd_vanquish(uids, sender),
 
             s::Command::Uid(s::UidCommand::Copy(cmd)) => {
                 self.cmd_uid_copy(cmd, sender)
-            }
+            },
             s::Command::Uid(s::UidCommand::Move(cmd)) => {
                 self.cmd_uid_move(cmd, sender)
-            }
+            },
             s::Command::Uid(s::UidCommand::Fetch(cmd)) => {
                 self.cmd_uid_fetch(cmd, sender)
-            }
+            },
             s::Command::Uid(s::UidCommand::Search(cmd)) => {
                 self.cmd_uid_search(cmd, &command_line.tag, sender)
-            }
+            },
             s::Command::Uid(s::UidCommand::Store(cmd)) => {
                 self.cmd_uid_store(cmd, sender)
-            }
+            },
             s::Command::Uid(s::UidCommand::Expunge(uids)) => {
                 staple_highest_modseq = self.qresync_enabled;
                 self.cmd_uid_expunge(uids, sender)
-            }
+            },
 
             s::Command::Id(parms) => self.cmd_id(parms, sender),
 
@@ -171,7 +171,7 @@ impl CommandProcessor {
 
             s::Command::XCrySetUserConfig(configs) => {
                 self.cmd_xcry_set_user_config(configs, sender)
-            }
+            },
         };
 
         if res.is_ok() {

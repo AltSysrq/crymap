@@ -486,14 +486,14 @@ impl<T: TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync> SeqRange<T> {
                 (Some(only), None, None) => {
                     let only = do_parse(only, splat)?;
                     this.insert_raw(only, only);
-                }
+                },
                 (Some(start), Some(end), None) => {
                     let start = do_parse(start, splat)?;
                     let end = do_parse(end, splat)?;
                     // RFC 3501 allows the endpoints to be in either order for
                     // some reason
                     this.insert_raw(start.min(end), end.max(start));
-                }
+                },
                 _ => return None,
             }
         }
@@ -647,7 +647,7 @@ impl PartialEq for Flag {
             // way to get Unicode flags within RFC 3501 anyway).
             (&Flag::Keyword(ref a), &Flag::Keyword(ref b)) => {
                 a.eq_ignore_ascii_case(b)
-            }
+            },
             _ => false,
         }
     }

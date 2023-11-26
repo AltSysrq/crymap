@@ -231,11 +231,11 @@ impl ContentDecoderImpl {
             CTE::Base64 => {
                 self.decode_base64(data);
                 &self.cte_buffer
-            }
+            },
             CTE::QuotedPrintable => {
                 self.decode_qp(data);
                 &self.cte_buffer
-            }
+            },
         };
 
         if self.decode_utf7 {
@@ -296,7 +296,7 @@ impl ContentDecoderImpl {
                 | b'=' => {
                     self.input_buffer.push(byte);
                     pushed_any = true;
-                }
+                },
                 _ => (),
             }
         }

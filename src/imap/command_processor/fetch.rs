@@ -150,7 +150,7 @@ impl CommandProcessor {
                     enable_condstore = true;
                     has_changedsince = true;
                     request.changed_since = Modseq::of(modseq);
-                }
+                },
                 s::FetchModifier::Vanished(_) => {
                     if !self.qresync_enabled {
                         return Err(s::Response::Cond(s::CondResponse {
@@ -183,7 +183,7 @@ impl CommandProcessor {
                     }
 
                     request.collect_vanished = true;
-                }
+                },
             }
         }
 
@@ -270,12 +270,12 @@ fn fetch_properties(target: &s::FetchCommandTarget<'_>) -> FetchProperties {
     match *target {
         s::FetchCommandTarget::Single(ref att) => {
             scan_fetch_properties(&mut props, att);
-        }
+        },
         s::FetchCommandTarget::Multi(ref atts) => {
             for att in atts {
                 scan_fetch_properties(&mut props, att);
             }
-        }
+        },
         _ => (),
     }
 
@@ -286,15 +286,15 @@ fn scan_fetch_properties(props: &mut FetchProperties, att: &s::FetchAtt<'_>) {
     match *att {
         s::FetchAtt::ExtendedBodyStructure(_) => {
             props.extended_body_structure = true;
-        }
+        },
         s::FetchAtt::Body(ref body) if !body.peek && !body.size_only => {
             props.set_seen = true;
-        }
+        },
         s::FetchAtt::Rfc822(Some(s::FetchAttRfc822::Size)) => (),
         s::FetchAtt::Rfc822(Some(s::FetchAttRfc822::Header)) => (),
         s::FetchAtt::Rfc822(_) => {
             props.set_seen = true;
-        }
+        },
         _ => (),
     }
 }
@@ -311,27 +311,27 @@ fn fetch_target_from_ast<T>(
             request.internal_date = true;
             request.rfc822size = true;
             request.envelope = true;
-        }
+        },
         s::FetchCommandTarget::Fast(()) => {
             request.flags = true;
             request.internal_date = true;
             request.rfc822size = true;
-        }
+        },
         s::FetchCommandTarget::Full(()) => {
             request.flags = true;
             request.internal_date = true;
             request.rfc822size = true;
             request.envelope = true;
             request.bodystructure = true;
-        }
+        },
         s::FetchCommandTarget::Single(att) => {
             fetch_att_from_ast(request, att);
-        }
+        },
         s::FetchCommandTarget::Multi(atts) => {
             for att in atts {
                 fetch_att_from_ast(request, att);
             }
-        }
+        },
     }
 }
 
@@ -345,11 +345,11 @@ where
         s::FetchAtt::InternalDate(()) => request.internal_date = true,
         s::FetchAtt::Rfc822(Some(s::FetchAttRfc822::Size)) => {
             request.rfc822size = true;
-        }
+        },
         s::FetchAtt::ExtendedBodyStructure(())
         | s::FetchAtt::ShortBodyStructure(()) => {
             request.bodystructure = true;
-        }
+        },
         s::FetchAtt::Uid(()) => request.uid = true,
         s::FetchAtt::Modseq(()) => request.modseq = true,
         s::FetchAtt::EmailId(()) => request.email_id = true,
@@ -360,21 +360,21 @@ where
                 report_as_legacy: Some(Imap2Section::Rfc822Header),
                 ..BodySection::default()
             });
-        }
+        },
         s::FetchAtt::Rfc822(Some(s::FetchAttRfc822::Text)) => {
             request.sections.push(BodySection {
                 leaf_type: LeafType::Content,
                 report_as_legacy: Some(Imap2Section::Rfc822Text),
                 ..BodySection::default()
             });
-        }
+        },
         s::FetchAtt::Rfc822(None) => {
             request.sections.push(BodySection {
                 leaf_type: LeafType::Full,
                 report_as_legacy: Some(Imap2Section::Rfc822),
                 ..BodySection::default()
             });
-        }
+        },
         s::FetchAtt::Body(body) => {
             fn apply_section_text(
                 section: &mut BodySection,
@@ -389,16 +389,16 @@ where
                             .into_iter()
                             .map(Cow::into_owned)
                             .collect();
-                    }
+                    },
                     Some(s::SectionText::Header(())) => {
                         section.leaf_type = LeafType::Headers;
-                    }
+                    },
                     Some(s::SectionText::Text(())) => {
                         section.leaf_type = LeafType::Text;
-                    }
+                    },
                     Some(s::SectionText::Mime(())) => {
                         section.leaf_type = LeafType::Mime;
-                    }
+                    },
                     None => section.leaf_type = LeafType::Content,
                 }
             }
@@ -413,14 +413,14 @@ where
                     // We don't set decode_cte here --- BINARY[] is exactly
                     // equivalent to BODY[]
                     apply_section_text(&mut section, Some(spec));
-                }
+                },
                 Some(s::SectionSpec::Sub(spec)) => {
                     section.subscripts = spec.subscripts;
                     // With subscripts, we decode the CTE if this is a BINARY
                     // command
                     section.decode_cte = section.report_as_binary;
                     apply_section_text(&mut section, spec.text);
-                }
+                },
             }
             if let Some(slice) = body.slice {
                 let start: u64 = slice.start.into();
@@ -430,7 +430,7 @@ where
             }
 
             request.sections.push(section);
-        }
+        },
     }
 }
 
@@ -515,7 +515,7 @@ fn fetch_att_to_ast(
             } else {
                 s::MsgAtt::ShortBodyStructure(converted)
             })
-        }
+        },
         FI::BodySection((mut section, fetched_result)) => {
             let data = match fetched_result {
                 Ok(fetched) => {
@@ -525,26 +525,26 @@ fn fetch_att_to_ast(
                         len,
                         section.report_as_binary && fetched.contains_nul,
                     )
-                }
+                },
                 Err(e) => {
                     // Should never happen since the `fetch` implementation
                     // lifts all fetch errors up to top-level.
                     error!("Dropping unfetchable body section: {}", e);
                     return None;
-                }
+                },
             };
 
             match section.report_as_legacy {
                 None => (),
                 Some(Imap2Section::Rfc822) => {
                     return Some(s::MsgAtt::Rfc822Full(data));
-                }
+                },
                 Some(Imap2Section::Rfc822Header) => {
                     return Some(s::MsgAtt::Rfc822Header(data));
-                }
+                },
                 Some(Imap2Section::Rfc822Text) => {
                     return Some(s::MsgAtt::Rfc822Text(data));
-                }
+                },
             }
 
             fn section_text_to_ast(
@@ -557,7 +557,7 @@ fn fetch_att_to_ast(
                     LeafType::Mime => Some(s::SectionText::Mime(())),
                     LeafType::Headers if section.header_filter.is_empty() => {
                         Some(s::SectionText::Header(()))
-                    }
+                    },
                     LeafType::Headers => Some(s::SectionText::HeaderFields(
                         s::SectionTextHeaderField {
                             negative: section.discard_matching_headers,
@@ -590,7 +590,7 @@ fn fetch_att_to_ast(
                             ),
                             text: section_text_to_ast(section),
                         }))
-                    }
+                    },
                 };
 
             if size_only {
@@ -613,7 +613,7 @@ fn fetch_att_to_ast(
                     data,
                 }))
             }
-        }
+        },
     }
 }
 

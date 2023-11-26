@@ -118,7 +118,7 @@ impl CommandProcessor {
         let patterns = match cmd.pattern {
             s::MboxOrPat::Single(pat) => {
                 vec![pat.get_utf8(self.unicode_aware).into_owned()]
-            }
+            },
             s::MboxOrPat::Multi(pats) => pats
                 .into_iter()
                 .map(|pat| pat.get_utf8(self.unicode_aware).into_owned())
@@ -520,7 +520,7 @@ impl CommandProcessor {
                     }
 
                     enable_condstore = true;
-                }
+                },
                 s::SelectModifier::Qresync(qr) => {
                     if !self.qresync_enabled {
                         return Err(s::Response::Cond(s::CondResponse {
@@ -577,7 +577,7 @@ impl CommandProcessor {
                         known_uids,
                         mapping_reference,
                     });
-                }
+                },
             }
         }
 

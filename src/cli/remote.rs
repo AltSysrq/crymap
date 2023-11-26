@@ -54,13 +54,13 @@ fn main_impl(mut cmd: RemoteSubcommand) -> Result<(), Error> {
     match cmd {
         RemoteSubcommand::Test(_) => {
             println!("Server looks OK");
-        }
+        },
         RemoteSubcommand::Chpw(_) => {
             change_password(&mut client)?;
-        }
+        },
         RemoteSubcommand::Config(cmd) => {
             config(&mut client, cmd)?;
-        }
+        },
     }
 
     let mut buffer = Vec::new();
@@ -77,7 +77,7 @@ fn connect(options: RemoteCommonOptions) -> Result<RemoteClient, Error> {
             Ok(None) => die!(EX_NOUSER, "No passwd entry for current user"),
             Err(e) => {
                 die!(EX_OSFILE, "Failed to look up current UNIX user: {}", e)
-            }
+            },
         },
     };
 
@@ -201,7 +201,7 @@ fn die_if_not_success(what: &str, response: s::ResponseLine<'_>) {
                 cond,
                 quip.unwrap_or_default()
             );
-        }
+        },
         r => {
             die!(
                 EX_PROTOCOL,
@@ -209,7 +209,7 @@ fn die_if_not_success(what: &str, response: s::ResponseLine<'_>) {
                 what,
                 r
             );
-        }
+        },
     }
 }
 
@@ -223,7 +223,7 @@ fn change_password(client: &mut RemoteClient) -> Result<(), Error> {
             Err(e) => die!(EX_NOINPUT, "Failed to read password: {}", e),
             Ok((a, b)) if a != b => {
                 eprintln!("Passwords don't match, try again");
-            }
+            },
             Ok((a, _)) if a.is_empty() => die!(EX_NOINPUT, "No password given"),
             Ok((a, _)) => break a,
         }

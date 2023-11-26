@@ -231,7 +231,7 @@ impl MailboxPath {
                     } else {
                         return Err(Error::GaveUpInsertion);
                     }
-                }
+                },
                 Err(e) => return Err(e.into()),
             }
         }
@@ -282,7 +282,7 @@ impl MailboxPath {
                     if Some(nix::libc::ENOTEMPTY) == e.raw_os_error() =>
                 {
                     Error::MailboxExists
-                }
+                },
                 e => e,
             })?;
 
@@ -330,7 +330,7 @@ impl MailboxPath {
                 Err(Error::MailboxUnselectable) => false,
                 Err(Error::Io(e)) if io::ErrorKind::NotFound == e.kind() => {
                     false
-                }
+                },
                 Err(e) => return Err(e),
             };
 
@@ -362,7 +362,7 @@ impl MailboxPath {
                     if Some(nix::libc::ENOTEMPTY) == e.raw_os_error() =>
                 {
                     Error::MailboxExists
-                }
+                },
                 e => e,
             })?;
 

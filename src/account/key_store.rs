@@ -243,18 +243,18 @@ impl KeyStore {
                     self.log_prefix, filename
                 );
                 Ok(Some(generated_key))
-            }
+            },
             Err(e) if io::ErrorKind::AlreadyExists == e.kind() => {
                 info!("{} Lost race to create '{}'", self.log_prefix, filename);
                 Ok(None)
-            }
+            },
             Err(e) => {
                 warn!(
                     "{} Failed to create '{}': {}",
                     self.log_prefix, filename, e
                 );
                 Err(e.into())
-            }
+            },
         }
     }
 
@@ -340,7 +340,7 @@ impl KeyStore {
             Ok(k) => Ok(k),
             Err(Error::Io(e)) if io::ErrorKind::NotFound == e.kind() => {
                 Err(Error::NamedKeyNotFound)
-            }
+            },
             Err(e) => Err(e),
         }
     }

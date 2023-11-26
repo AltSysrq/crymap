@@ -60,7 +60,7 @@ pub fn imaps(
         Err(e) => {
             warn!("{} SSL handshake failed: {}", peer_name, e);
             std::process::exit(0)
-        }
+        },
     };
 
     info!("{} SSL handshake succeeded", peer_name);
@@ -213,7 +213,7 @@ fn configure_system(
             // In this case, we *do* want to use die!() since we're on a
             // terminal.
             die!(EX_USAGE, "stdin and stdout must not be a terminal")
-        }
+        },
         _ => (),
     }
 
@@ -222,7 +222,7 @@ fn configure_system(
         Err(e) => {
             warn!("Unable to determine peer name: {}", e);
             "unknown-socket".to_owned()
-        }
+        },
     };
 
     // On FreeBSD, getpeername() on a UNIX socket returns "@\0", which breaks
@@ -336,7 +336,7 @@ impl WrappedIo {
                 )];
 
                 handle_poll_result(poll(&mut stdin, 30 * 60_000))
-            }
+            },
             openssl::ssl::ErrorCode::WANT_WRITE => {
                 let mut stdout = [PollFd::new(
                     STDOUT,
@@ -344,7 +344,7 @@ impl WrappedIo {
                 )];
 
                 handle_poll_result(poll(&mut stdout, 30 * 60_000))
-            }
+            },
             _ => Err(e
                 .into_io_error()
                 .unwrap_or_else(|e| io::Error::new(io::ErrorKind::Other, e))),
@@ -358,7 +358,7 @@ fn handle_poll_result(
     match result {
         Ok(0) => {
             Err(io::Error::new(io::ErrorKind::TimedOut, "Socket timed out"))
-        }
+        },
         Ok(_) => Ok(()),
         Err(nix::Error::Sys(nix::errno::Errno::EINTR)) => Ok(()),
         Err(e) => Err(nix_to_io(e)),

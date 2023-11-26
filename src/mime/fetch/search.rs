@@ -378,7 +378,7 @@ impl<F: FnMut(&SearchData) -> Option<bool>> SearchFetcher<F> {
             match address {
                 header::Address::Mailbox(mailbox) => {
                     push_mailbox(&mut result, mailbox);
-                }
+                },
                 header::Address::Group(group) => {
                     result.push('"');
                     result.push_str(&decode_phrase(group.name));
@@ -387,7 +387,7 @@ impl<F: FnMut(&SearchData) -> Option<bool>> SearchFetcher<F> {
                         push_mailbox(&mut result, mailbox);
                     }
                     result.push_str("; ");
-                }
+                },
             }
         }
 

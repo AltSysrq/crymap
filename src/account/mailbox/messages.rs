@@ -59,7 +59,7 @@ impl StatelessMailbox {
                     || io::ErrorKind::NotFound == e.kind() =>
             {
                 return Err(Error::ExpungedMessage)
-            }
+            },
             Err(e) => return Err(e.into()),
         };
 
@@ -248,7 +248,7 @@ impl StatelessMailbox {
                             || io::ErrorKind::NotFound == e.kind() =>
                     {
                         return Err(Error::ExpungedMessage);
-                    }
+                    },
                     Err(e) => return Err(e.into()),
                 }
             }

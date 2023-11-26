@@ -91,7 +91,7 @@ impl CommandProcessor {
                         quip: Some(Cow::Borrowed("Bad base64 or UTF-8")),
                     }),
                 }
-            }
+            },
         };
 
         // All we currently support is RFC 2595 PLAIN
@@ -128,7 +128,7 @@ impl CommandProcessor {
                     tag: Some(cmd.tag),
                     response: r,
                 }
-            }
+            },
             _ => s::ResponseLine {
                 tag: Some(cmd.tag),
                 response: s::Response::Cond(s::CondResponse {

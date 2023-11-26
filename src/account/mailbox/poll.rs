@@ -119,7 +119,7 @@ impl StatefulMailbox {
                             || io::ErrorKind::NotFound == e.kind() =>
                     {
                         self.state.silent_expunge(Uid::of(uid).unwrap());
-                    }
+                    },
                     _ => (),
                 }
             }
@@ -303,7 +303,7 @@ impl StatefulMailbox {
                 Ok(_) | Err(Error::MailboxReadOnly) => (),
                 Err(e) => {
                     warn!("{} Failed to schedule GC: {}", self.s.log_prefix, e);
-                }
+                },
             }
         }
 

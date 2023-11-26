@@ -112,7 +112,7 @@ impl Setup {
                         || Some(nix::libc::EPIPE) == e.raw_os_error() =>
                 {
                     ()
-                }
+                },
                 Err(e) => panic!("Unexpected server error: {}", e),
             }
         });
@@ -399,7 +399,7 @@ pub fn list_results_to_str(lines: Vec<s::ResponseLine<'_>>) -> String {
                 }
 
                 ret.push('\n');
-            }
+            },
 
             line => panic!("Unexpected response line: {:?}", line),
         }
@@ -426,7 +426,7 @@ pub fn lsub_results_to_str(lines: Vec<s::ResponseLine<'_>>) -> String {
                     ret.push_str(&flag);
                 }
                 ret.push('\n');
-            }
+            },
 
             line => panic!("Unexpected response line: {:?}", line),
         }

@@ -351,7 +351,7 @@ impl Account {
                         );
                     }
                 }
-            }
+            },
             Err(e) => warn!(
                 "{} Error opening {} for maintenance: {}",
                 self.log_prefix,

@@ -113,18 +113,18 @@ impl IdleListener {
                         io::ErrorKind::TimedOut,
                         "IDLE timed out",
                     ))
-                }
+                },
                 Ok(_) => {
                     // We don't care about what data we're going to receive.
                     // There's something, and that's enough to wake up.
                     return Ok(());
-                }
+                },
                 Err(nix::Error::Sys(nix::errno::Errno::EINTR)) => continue,
                 Err(e) => {
                     return Err(io::Error::from_raw_os_error(
                         e.as_errno().unwrap() as i32,
                     ));
-                }
+                },
             }
         }
     }

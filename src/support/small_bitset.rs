@@ -139,12 +139,12 @@ impl Serialize for SmallBitset {
                     &near_array as &[u64]
                 }
                 .serialize(serializer)
-            }
+            },
             Some(ref far) => {
                 let mut elements = Vec::clone(far);
                 elements.push(self.near);
                 elements.serialize(serializer)
-            }
+            },
         }
     }
 }

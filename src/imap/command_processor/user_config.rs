@@ -58,13 +58,13 @@ impl CommandProcessor {
             match config {
                 s::XCryUserConfigOption::InternalKeyPattern(ikp) => {
                     request.internal_key_pattern = Some(ikp.into_owned());
-                }
+                },
                 s::XCryUserConfigOption::ExternalKeyPattern(ekp) => {
                     request.external_key_pattern = Some(ekp.into_owned());
-                }
+                },
                 s::XCryUserConfigOption::Password(pw) => {
                     request.password = Some(pw.into_owned());
-                }
+                },
             }
         }
 

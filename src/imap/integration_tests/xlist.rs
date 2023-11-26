@@ -36,7 +36,7 @@ fn xlist_results_to_str(lines: Vec<s::ResponseLine<'_>>) -> String {
                     ret.push_str(&flag);
                 }
                 ret.push('\n');
-            }
+            },
 
             line => panic!("Unexpected response line: {:?}", line),
         }

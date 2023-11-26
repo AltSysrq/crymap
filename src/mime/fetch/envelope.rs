@@ -195,7 +195,7 @@ impl EnvelopeFetcher {
             match address {
                 header::Address::Mailbox(mailbox) => {
                     field.push(to_envelope_address(mailbox))
-                }
+                },
                 header::Address::Group(group) => {
                     field.push(EnvelopeAddress {
                         name: None,
@@ -215,7 +215,7 @@ impl EnvelopeFetcher {
                         local: None,
                         domain: None,
                     });
-                }
+                },
             }
         }
 

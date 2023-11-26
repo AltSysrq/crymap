@@ -207,16 +207,16 @@ impl StatefulMailbox {
                     SingleFetchResponse::Fetched(seqnum, fetched) => {
                         receiver(seqnum, fetched);
                         Ok(StrippedFetchResponse::Nil)
-                    }
+                    },
 
                     SingleFetchResponse::NotModified
                     | SingleFetchResponse::SilentExpunge => {
                         Ok(StrippedFetchResponse::Nil)
-                    }
+                    },
 
                     SingleFetchResponse::UnexpectedExpunge => {
                         Ok(StrippedFetchResponse::UnexpectedExpunge(uid))
-                    }
+                    },
                 }
             },
             |r| fetched.push(r),
@@ -235,7 +235,7 @@ impl StatefulMailbox {
                     };
 
                     response.kind = response.kind.max(r);
-                }
+                },
             }
         }
 
@@ -252,12 +252,12 @@ impl StatefulMailbox {
             Err(Error::ExpungedMessage) => {
                 // Silently drop requests for unaddressable UIDs
                 return Ok(SingleFetchResponse::SilentExpunge);
-            }
+            },
             Err(Error::NxMessage) => {
                 // Similar to the above, silently drop UIDs outside the
                 // addressable range.
                 return Ok(SingleFetchResponse::SilentExpunge);
-            }
+            },
             Err(e) => return Err(e),
         };
 
@@ -506,7 +506,7 @@ mod test {
         match &fetched[0].1[0] {
             FetchedItem::Envelope(e) => {
                 assert_eq!("Fwd: failure delivery", e.subject.as_ref().unwrap())
-            }
+            },
             f => panic!("Unexpected item: {:?}", f),
         }
 
@@ -514,7 +514,7 @@ mod test {
         match &fetched[1].1[0] {
             FetchedItem::Envelope(e) => {
                 assert_eq!("Entex apr 3 noms", e.subject.as_ref().unwrap())
-            }
+            },
             f => panic!("Unexpected item: {:?}", f),
         }
     }

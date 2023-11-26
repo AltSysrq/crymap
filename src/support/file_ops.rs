@@ -77,7 +77,7 @@ pub fn delete_async(
                     }
                 });
                 break;
-            }
+            },
             Err(e) if io::ErrorKind::AlreadyExists == e.kind() => continue,
             Err(e) => return Err(e),
         }
@@ -107,7 +107,7 @@ impl<R: Read> ReadUninterruptibly for R {
                 Ok(n) => {
                     total += n;
                     dst = &mut dst[n..];
-                }
+                },
                 Err(e) if io::ErrorKind::Interrupted == e.kind() => continue,
                 Err(e) => return Err(e),
             }
@@ -128,7 +128,7 @@ impl<R: Default> IgnoreKinds for Result<R, io::Error> {
             Ok(r) => Ok(r),
             Err(e) if io::ErrorKind::AlreadyExists == e.kind() => {
                 Ok(R::default())
-            }
+            },
             Err(e) => Err(e),
         }
     }
@@ -155,10 +155,10 @@ impl<R, E: Into<Error>> ErrorTransforms for Result<R, E> {
         match self.map_err(|e| e.into()) {
             Err(Error::Io(e)) if io::ErrorKind::AlreadyExists == e.kind() => {
                 Err(error)
-            }
+            },
             Err(Error::Nix(nix::Error::Sys(nix::errno::Errno::EEXIST))) => {
                 Err(error)
-            }
+            },
             s => s,
         }
     }
@@ -167,10 +167,10 @@ impl<R, E: Into<Error>> ErrorTransforms for Result<R, E> {
         match self.map_err(|e| e.into()) {
             Err(Error::Io(e)) if io::ErrorKind::NotFound == e.kind() => {
                 Err(error)
-            }
+            },
             Err(Error::Nix(nix::Error::Sys(nix::errno::Errno::ENOENT))) => {
                 Err(error)
-            }
+            },
             s => s,
         }
     }

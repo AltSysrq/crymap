@@ -146,7 +146,7 @@ impl CommandProcessor {
                         tag: Some(tag),
                         response,
                     };
-                }
+                },
             };
 
         // Fall through to a NOOP to get the rest of the post-command

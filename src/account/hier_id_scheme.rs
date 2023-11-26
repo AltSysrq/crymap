@@ -184,10 +184,10 @@ impl<'a> HierIdScheme<'a> {
                     Ok(_) => return Err(Error::GaveUpInsertion),
                     Err(e) if io::ErrorKind::NotFound == e.kind() => {
                         return Err(Error::NxMessage);
-                    }
+                    },
                     Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
                         return Err(Error::ExpungedMessage);
-                    }
+                    },
                     Err(e) => return Err(e.into()),
                 }
             }
@@ -223,7 +223,7 @@ impl<'a> HierIdScheme<'a> {
                     Ok(_) => true,
                     Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
                         true
-                    }
+                    },
 
                     // Ignore other problems; anything fatal we'll encounter
                     // again below.
@@ -313,7 +313,7 @@ impl<'a> HierIdScheme<'a> {
         match fs::metadata(&path) {
             Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
                 return Ok(())
-            }
+            },
             _ => (),
         }
 
@@ -411,7 +411,7 @@ impl<'a> HierIdScheme<'a> {
             Ok(_) => return Ok(()),
             Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
                 return Ok(())
-            }
+            },
             _ => (),
         }
 
@@ -434,7 +434,7 @@ impl<'a> HierIdScheme<'a> {
                 // so there's nothing left to do.
                 Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
                     return Ok(());
-                }
+                },
 
                 Err(e) if io::ErrorKind::NotFound == e.kind() => {
                     cur_path.set_extension("d");
@@ -450,7 +450,7 @@ impl<'a> HierIdScheme<'a> {
                             if Some(nix::libc::ELOOP) == e.raw_os_error() =>
                         {
                             return Ok(());
-                        }
+                        },
                         // Other errors unexpected (we already ignored EEXIST)
                         Err(e) => return Err(e),
                     }
@@ -467,7 +467,7 @@ impl<'a> HierIdScheme<'a> {
                             Some(nix::libc::ELOOP) == e.raw_os_error() => (),
                         Err(e) => return Err(e),
                     }
-                }
+                },
 
                 Err(e) => return Err(e),
             }
@@ -553,7 +553,7 @@ impl<'a> HierIdScheme<'a> {
                 Ok(_) => (true, true),
                 Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
                     (true, false)
-                }
+                },
                 Err(e) if io::ErrorKind::NotFound == e.kind() => (false, false),
                 Err(e) => return Err(e.into()),
             };
@@ -652,7 +652,7 @@ impl<'a> HierIdScheme<'a> {
                 Ok(_) => (true, true),
                 Err(e) if Some(nix::libc::ELOOP) == e.raw_os_error() => {
                     (true, false)
-                }
+                },
                 Err(e) if io::ErrorKind::NotFound == e.kind() => (false, false),
                 Err(e) => return Err(e.into()),
             };

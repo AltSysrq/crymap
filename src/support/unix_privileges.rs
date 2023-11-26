@@ -158,7 +158,7 @@ pub fn assume_user_privileges(
                 e
             );
             return Err(EX_NOUSER);
-        }
+        },
     };
     let target_uid = nix::unistd::Uid::from_raw(md.uid() as nix::libc::uid_t);
     let (has_user_groups, target_gid) =
@@ -179,10 +179,10 @@ pub fn assume_user_privileges(
                                 log_prefix, e
                             );
                             (false, user.gid)
-                        }
+                        },
                     }
                 }
-            }
+            },
             Ok(None) => {
                 // Failure to access /etc/group is expected if we chroot'ed
                 // into the system data directory already
@@ -198,7 +198,7 @@ pub fn assume_user_privileges(
                     false,
                     nix::unistd::Gid::from_raw(md.gid() as nix::libc::gid_t),
                 )
-            }
+            },
             Err(e) => {
                 // Failure to access /etc/group is expected if we chroot'ed
                 // into the system data directory already
@@ -216,7 +216,7 @@ pub fn assume_user_privileges(
                     false,
                     nix::unistd::Gid::from_raw(md.gid() as nix::libc::gid_t),
                 )
-            }
+            },
         };
 
     if !effective_only {

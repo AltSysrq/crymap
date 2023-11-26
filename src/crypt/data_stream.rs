@@ -158,7 +158,7 @@ impl<R: Read> Reader<R> {
                 let mut k = [0u8; AES_BLOCK];
                 k.copy_from_slice(&buf[..AES_BLOCK]);
                 k
-            }
+            },
         };
 
         Ok(Reader {
@@ -188,10 +188,10 @@ impl<R: Read> BufRead for Reader<R> {
                 Ok(i) => i as usize,
                 Err(e) if io::ErrorKind::UnexpectedEof == e.kind() => {
                     return Ok(&[]);
-                }
+                },
                 Err(e) => {
                     return Err(e);
-                }
+                },
             };
 
             self.ciphertext_buffer.resize(slab_size + 2 * AES_BLOCK, 0);

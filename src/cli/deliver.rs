@@ -94,10 +94,10 @@ pub(super) fn deliver(
             Err(Error::MailboxExists) => (),
             Err(Error::UnsafeName) | Err(Error::BadOperationOnInbox) => {
                 die!(EX_CANTCREAT, "{}: Bad mailbox name", cmd.mailbox);
-            }
+            },
             Err(e) => {
                 die!(EX_CANTCREAT, "Failed to create {}: {}", cmd.mailbox, e);
-            }
+            },
         }
     }
 
@@ -105,7 +105,7 @@ pub(super) fn deliver(
         Ok(mb) => mb,
         Err(Error::NxMailbox) | Err(Error::UnsafeName) => {
             die!(EX_CANTCREAT, "{}: Non-existent mailbox", cmd.mailbox)
-        }
+        },
         Err(e) => die!(EX_SOFTWARE, "Failed to open {}: {}", cmd.mailbox, e),
     };
 
@@ -153,11 +153,11 @@ fn run_delivery(
                 return Err(match e {
                     Error::Io(e) if io::ErrorKind::NotFound == e.kind() => {
                         EX_NOINPUT
-                    }
+                    },
                     Error::Io(_) | Error::GaveUpInsertion => EX_UNAVAILABLE,
                     _ => EX_SOFTWARE,
                 });
-            }
+            },
         }
     }
 

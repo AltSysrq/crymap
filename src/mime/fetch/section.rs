@@ -347,7 +347,7 @@ impl Visitor for SectionLocator {
                 )
                 .expect("leaf.header() returned early");
                 Some(leaf)
-            }
+            },
             _ => None,
         }
     }

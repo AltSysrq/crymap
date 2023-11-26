@@ -138,7 +138,7 @@ impl StatefulMailbox {
                     e
                 );
                 false
-            }
+            },
         }
     }
 
@@ -164,7 +164,7 @@ impl StatefulMailbox {
                 let uids =
                     self.state.seqnum_range_to_uid(seqnums, false).unwrap();
                 dst.push(Op::UidIn(uids));
-            }
+            },
 
             SearchQuery::All => dst.push(Op::True),
 
@@ -172,19 +172,19 @@ impl StatefulMailbox {
 
             SearchQuery::Bcc(ref pat) => {
                 dst.push(Op::Bcc(to_regex(pat)));
-            }
+            },
 
             SearchQuery::Before(date) => {
                 dst.push(Op::InternalDateCompare(date, true, false, false));
-            }
+            },
 
             SearchQuery::Body(ref pat) => {
                 dst.push(Op::Content(Arc::new(to_regex(pat))));
-            }
+            },
 
             SearchQuery::Cc(ref pat) => {
                 dst.push(Op::Cc(to_regex(pat)));
-            }
+            },
 
             SearchQuery::Deleted => dst.push(Op::Flag(Flag::Deleted)),
 
@@ -194,48 +194,48 @@ impl StatefulMailbox {
 
             SearchQuery::From(ref pat) => {
                 dst.push(Op::From(to_regex(pat)));
-            }
+            },
 
             SearchQuery::Header(ref name, ref value) => {
                 let mut name = name.to_owned();
                 name.make_ascii_lowercase();
                 dst.push(Op::Header(name, to_regex(value)));
-            }
+            },
 
             SearchQuery::Keyword(ref name) => {
                 dst.push(Op::Flag(Flag::Keyword(name.to_owned())));
-            }
+            },
 
             SearchQuery::Larger(thresh) => {
                 dst.push(Op::SizeCompare(thresh, false, false, true));
-            }
+            },
 
             SearchQuery::New => {
                 dst.push(Op::Recent);
                 dst.push(Op::Flag(Flag::Seen));
                 dst.push(Op::Not);
                 dst.push(Op::And);
-            }
+            },
 
             SearchQuery::Not(ref sub) => {
                 self.compile_one(dst, sub);
                 dst.push(Op::Not);
-            }
+            },
 
             SearchQuery::Old => {
                 dst.push(Op::Recent);
                 dst.push(Op::Not);
-            }
+            },
 
             SearchQuery::On(date) => {
                 dst.push(Op::InternalDateCompare(date, false, true, false));
-            }
+            },
 
             SearchQuery::Or(ref a, ref b) => {
                 self.compile_one(dst, a);
                 self.compile_one(dst, b);
                 dst.push(Op::Or);
-            }
+            },
 
             SearchQuery::Recent => dst.push(Op::Recent),
 
@@ -243,90 +243,90 @@ impl StatefulMailbox {
 
             SearchQuery::SentBefore(date) => {
                 dst.push(Op::DateCompare(date, true, false, false));
-            }
+            },
 
             SearchQuery::SentOn(date) => {
                 dst.push(Op::DateCompare(date, false, true, false));
-            }
+            },
 
             SearchQuery::SentSince(date) => {
                 // RFC 3501 specifies >=, not >
                 dst.push(Op::DateCompare(date, false, true, true));
-            }
+            },
 
             SearchQuery::Since(date) => {
                 // RFC 3501 specifies >=, not >
                 dst.push(Op::InternalDateCompare(date, false, true, true));
-            }
+            },
 
             SearchQuery::Smaller(thresh) => {
                 dst.push(Op::SizeCompare(thresh, true, false, false));
-            }
+            },
 
             SearchQuery::Subject(ref pat) => {
                 dst.push(Op::Subject(to_regex(pat)));
-            }
+            },
 
             SearchQuery::Text(ref pat) => {
                 let regex = Arc::new(to_regex(pat));
                 dst.push(Op::AnyHeader(Arc::clone(&regex)));
                 dst.push(Op::Content(regex));
                 dst.push(Op::Or);
-            }
+            },
 
             SearchQuery::To(ref pat) => {
                 dst.push(Op::To(to_regex(pat)));
-            }
+            },
 
             SearchQuery::UidSet(ref uids) => {
                 dst.push(Op::UidIn(uids.to_owned()))
-            }
+            },
 
             SearchQuery::Unanswered => {
                 dst.push(Op::Flag(Flag::Answered));
                 dst.push(Op::Not);
-            }
+            },
 
             SearchQuery::Undeleted => {
                 dst.push(Op::Flag(Flag::Deleted));
                 dst.push(Op::Not);
-            }
+            },
 
             SearchQuery::Undraft => {
                 dst.push(Op::Flag(Flag::Draft));
                 dst.push(Op::Not);
-            }
+            },
 
             SearchQuery::Unflagged => {
                 dst.push(Op::Flag(Flag::Flagged));
                 dst.push(Op::Not);
-            }
+            },
 
             SearchQuery::Unkeyword(ref name) => {
                 dst.push(Op::Flag(Flag::Keyword(name.to_owned())));
                 dst.push(Op::Not);
-            }
+            },
 
             SearchQuery::Unseen => {
                 dst.push(Op::Flag(Flag::Seen));
                 dst.push(Op::Not);
-            }
+            },
 
             SearchQuery::And(ref queries) => self.compile_and(dst, queries),
 
             SearchQuery::Modseq(ms) => {
                 dst.push(Op::Modseq(ms));
-            }
+            },
 
             SearchQuery::EmailId(ref email_id) => {
                 dst.push(Op::EmailId(email_id.clone()));
-            }
+            },
 
             SearchQuery::ThreadId(_) => {
                 // We don't support THREADID, so this never matches
                 dst.push(Op::True);
                 dst.push(Op::Not);
-            }
+            },
         }
     }
 }

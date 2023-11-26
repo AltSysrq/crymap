@@ -151,7 +151,7 @@ impl Setup {
                         || Some(nix::libc::EPIPE) == e.raw_os_error() =>
                 {
                     ()
-                }
+                },
                 Err(e) => panic!("Unexpected server error: {}", e),
             }
         });

@@ -84,7 +84,7 @@ fn run_background_work() {
                 None => {
                     *work = None;
                     break;
-                }
+                },
             }
         };
 
@@ -182,7 +182,7 @@ impl ScatterGather {
                     None => {
                         drop(input_send);
                         return;
-                    }
+                    },
                     Some(input) => input_send.send(input).unwrap(),
                 }
             }

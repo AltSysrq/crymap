@@ -177,7 +177,7 @@ impl StatefulMailbox {
                         // See the docs of `StoreResponse.ok`
                         ok = false;
                         continue;
-                    }
+                    },
                 };
 
                 // RFC 7162 UNCHANGEDSINCE handling

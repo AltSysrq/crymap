@@ -44,7 +44,7 @@ fn login_basic() {
         } => {
             assert!(caps.capabilities.contains(&Cow::Borrowed("IMAP4rev1")));
             assert!(caps.capabilities.contains(&Cow::Borrowed("LITERAL+")));
-        }
+        },
         r => panic!("Unexpected response: {:?}", r),
     }
 }

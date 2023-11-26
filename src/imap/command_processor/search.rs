@@ -261,7 +261,7 @@ impl CommandProcessor {
                     s::TextSearchKeyType::Text => SearchQuery::Text(val),
                     s::TextSearchKeyType::To => SearchQuery::To(val),
                 })
-            }
+            },
             s::SearchKey::Date(date_key) => {
                 let date = date_key.date;
                 Ok(match date_key.typ {
@@ -270,19 +270,19 @@ impl CommandProcessor {
                     s::DateSearchKeyType::Since => SearchQuery::Since(date),
                     s::DateSearchKeyType::SentBefore => {
                         SearchQuery::SentBefore(date)
-                    }
+                    },
                     s::DateSearchKeyType::SentOn => SearchQuery::SentOn(date),
                     s::DateSearchKeyType::SentSince => {
                         SearchQuery::SentSince(date)
-                    }
+                    },
                 })
-            }
+            },
             s::SearchKey::Keyword(flag) => {
                 Ok(SearchQuery::Keyword(flag.to_string()))
-            }
+            },
             s::SearchKey::Unkeyword(flag) => {
                 Ok(SearchQuery::Unkeyword(flag.to_string()))
-            }
+            },
             s::SearchKey::Header(header) => Ok(SearchQuery::Header(
                 header.header.into_owned(),
                 header.value.into_owned(),
@@ -298,10 +298,10 @@ impl CommandProcessor {
             s::SearchKey::Smaller(thresh) => Ok(SearchQuery::Smaller(thresh)),
             s::SearchKey::Uid(ss) => {
                 Ok(SearchQuery::UidSet(self.parse_uid_range(&ss)?))
-            }
+            },
             s::SearchKey::Seqnum(ss) => {
                 Ok(SearchQuery::SequenceSet(self.parse_seqnum_range(&ss)?))
-            }
+            },
             s::SearchKey::And(parts) => Ok(SearchQuery::And(
                 parts
                     .into_iter()
@@ -311,13 +311,13 @@ impl CommandProcessor {
             s::SearchKey::Modseq(m) => {
                 *has_modseq = true;
                 Ok(SearchQuery::Modseq(m.modseq))
-            }
+            },
             s::SearchKey::EmailId(id) => {
                 Ok(SearchQuery::EmailId(id.into_owned()))
-            }
+            },
             s::SearchKey::ThreadId(id) => {
                 Ok(SearchQuery::ThreadId(id.into_owned()))
-            }
+            },
         }
     }
 }

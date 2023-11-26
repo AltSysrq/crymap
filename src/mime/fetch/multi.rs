@@ -432,7 +432,7 @@ mod test {
         match &result[0] {
             &FetchedItem::Envelope(ref envelope) => {
                 assert_eq!("RFC 3501", envelope.subject.as_ref().unwrap());
-            }
+            },
             r => panic!("Unexpected envelope result: {:#?}", r),
         }
 
@@ -441,7 +441,7 @@ mod test {
                 let mut content = String::new();
                 bs.buffer.read_to_string(&mut content).unwrap();
                 assert_eq!("Part 3.1\r\n", content);
-            }
+            },
             r => panic!("Unexpected [3.1] result: {:#?}", r),
         }
 
@@ -450,7 +450,7 @@ mod test {
                 let mut content = String::new();
                 bs.buffer.read_to_string(&mut content).unwrap();
                 assert!(content.starts_with("Content-Id: 2"));
-            }
+            },
             r => panic!("Unexpected [2] result: {:#?}", r),
         }
 
@@ -459,7 +459,7 @@ mod test {
                 let mut content = String::new();
                 bs.buffer.read_to_string(&mut content).unwrap();
                 assert_eq!("Part 4.2.2.1\r\n", content);
-            }
+            },
             r => panic!("Unexpected [4.2.2.1] result: {:#?}", r),
         }
 
@@ -477,7 +477,7 @@ mod test {
             &FetchedItem::Flags(ref f) => {
                 assert!(f.recent);
                 assert_eq!(vec![Flag::Deleted], f.flags);
-            }
+            },
             r => panic!("Unexpected Flags result: {:#?}", r),
         }
 
@@ -489,14 +489,14 @@ mod test {
         match &result[8] {
             &FetchedItem::InternalDate(id) => {
                 assert_eq!(FixedOffset::east(0).timestamp_millis(1000), id)
-            }
+            },
             r => panic!("Unexpected internal date result: {:#?}", r),
         }
 
         match &result[9] {
             &FetchedItem::EmailId(ref id) => {
                 assert_eq!("EAQIDBAUGBwgJCgsMDQ4P", id);
-            }
+            },
             r => panic!("Unexpected email id result: {:#?}", r),
         }
     }

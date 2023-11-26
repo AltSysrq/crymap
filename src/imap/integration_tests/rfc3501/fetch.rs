@@ -419,7 +419,7 @@ fn check_torture_test_body_structure(bs: &s::Body<'_>, extended: bool) {
         s::ClassifiedBodyType1Part::Basic(ref p23c) => p23c,
         ref p23c => {
             panic!("Unexpected core structure for Part 2.3: {:#?}", p23c)
-        }
+        },
     };
     assert_eq!("application", p23_core.media_type);
     assert_eq!("andrew-inset", p23_core.media_subtype);
@@ -874,7 +874,7 @@ fn implicit_seen() {
 
             // Also ensure this is the fetch response we think it is
             has_msgatt_matching! { s::MsgAtt::Body(..) in fr };
-        }
+        },
         r => panic!("Unexpected response: {:?}", r),
     }
 }

@@ -123,14 +123,14 @@ pub fn eval(ops: &[Op], data: &SearchData) -> Option<bool> {
 
             Op::Flag(ref flag) => {
                 s.o(data.flags.as_ref().map(|f| f.contains(flag)))
-            }
+            },
             Op::Recent => s.o(data.recent),
             // RFC 7162 stipulates "equal to or greater than", even though it
             // seems strict inequality would be more sensible (as that would
             // mean "modified after")
             Op::Modseq(thresh) => {
                 s.o(data.last_modified.map(|m| m.raw().get() >= thresh))
-            }
+            },
             // RFC 8474 requires case-sensitive comparison
             Op::EmailId(ref email_id) => s.o(data
                 .metadata
@@ -143,21 +143,21 @@ pub fn eval(ops: &[Op], data: &SearchData) -> Option<bool> {
             Op::To(ref r) => s.o(data.to.as_ref().map(|v| r.is_match(v))),
             Op::Subject(ref r) => {
                 s.o(data.subject.as_ref().map(|v| r.is_match(v)))
-            }
+            },
             Op::Header(ref name, ref r) => {
                 s.o(data.headers.as_ref().map(|h| {
                     h.get(name).map(|v| r.is_match(v)).unwrap_or(false)
                 }));
-            }
+            },
             Op::AnyHeader(ref r) => {
                 s.o(data
                     .headers
                     .as_ref()
                     .map(|h| h.values().any(|v| r.is_match(v))));
-            }
+            },
             Op::Content(ref r) => {
                 s.o(data.content.as_ref().map(|v| r.is_match(v)))
-            }
+            },
 
             Op::InternalDateCompare(ref relative, lt, eq, gt) => {
                 s.o(cmp_date(
@@ -167,10 +167,10 @@ pub fn eval(ops: &[Op], data: &SearchData) -> Option<bool> {
                     eq,
                     gt,
                 ));
-            }
+            },
             Op::DateCompare(ref relative, lt, eq, gt) => {
                 s.o(cmp_date(data.date.as_ref(), relative, lt, eq, gt));
-            }
+            },
             Op::SizeCompare(ref relative, lt, eq, gt) => {
                 s.o(cmp(
                     data.metadata.as_ref().map(|md| &md.size),
@@ -179,7 +179,7 @@ pub fn eval(ops: &[Op], data: &SearchData) -> Option<bool> {
                     eq,
                     gt,
                 ));
-            }
+            },
 
             Op::UidIn(ref set) => s.o(data.uid.map(|u| set.contains(u))),
         }
@@ -247,7 +247,7 @@ pub fn want(ops: &[Op]) -> OptionalSearchParts {
             Op::Subject(..) => OptionalSearchParts::SUBJECT,
             Op::Header(..) | Op::AnyHeader(..) => {
                 OptionalSearchParts::HEADER_MAP
-            }
+            },
 
             Op::DateCompare(..) => OptionalSearchParts::DATE,
         }

@@ -232,7 +232,7 @@ impl Server {
                     Cow::Borrowed("Malformed UTF-8"),
                 )?;
                 return Ok(());
-            }
+            },
         };
 
         let command = match command_line.parse::<Command>() {
@@ -262,7 +262,7 @@ impl Server {
                 }
 
                 return Ok(());
-            }
+            },
         };
 
         match command {
@@ -380,7 +380,7 @@ impl Server {
                         Cow::Owned(format!("no such user - {}", forward_path)),
                     )
                 }
-            }
+            },
         }
     }
 
@@ -569,7 +569,7 @@ impl Server {
                     io::ErrorKind::Other,
                     format!("SSL handshake failed: {}", e),
                 )))
-            }
+            },
         };
 
         let ssl_stream = RcIo::wrap(ssl_stream);
@@ -770,7 +770,7 @@ impl Server {
                         Some((cc::Success, sc::Undefined)),
                         Cow::Borrowed("OK"),
                     )?;
-                }
+                },
                 Err(Error::NxMailbox) => {
                     self.send_response(
                         response_kind,
@@ -778,7 +778,7 @@ impl Server {
                         Some((cc::TempFail, sc::MailboxDisabled)),
                         Cow::Borrowed("INBOX seems to be missing"),
                     )?;
-                }
+                },
                 Err(Error::MailboxFull) => {
                     self.send_response(
                         response_kind,
@@ -786,7 +786,7 @@ impl Server {
                         Some((cc::TempFail, sc::MailboxFull)),
                         Cow::Borrowed("INBOX is full"),
                     )?;
-                }
+                },
                 Err(Error::GaveUpInsertion) => {
                     self.send_response(
                         response_kind,
@@ -794,7 +794,7 @@ impl Server {
                         Some((cc::TempFail, sc::MailSystemCongestion)),
                         Cow::Borrowed("INBOX is too busy"),
                     )?;
-                }
+                },
                 Err(e) => {
                     error!(
                         "{} Unexpected error delivering to {}: {}",
@@ -809,7 +809,7 @@ impl Server {
                                        see LMTP server logs for details",
                         ),
                     )?;
-                }
+                },
             }
         }
 
@@ -879,7 +879,7 @@ impl Recipient {
                 (Some(l), None, _) => (l.to_owned(), None),
                 (Some(l), Some(d), None) => {
                     (l.to_owned(), Some(d.to_lowercase()))
-                }
+                },
                 _ => return None,
             };
 

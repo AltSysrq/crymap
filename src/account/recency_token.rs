@@ -123,7 +123,7 @@ fn read_write_claim(root: &Path, max_uid: Uid) -> Option<Uid> {
                     );
                 }
                 return Some(Uid::MIN);
-            }
+            },
             Err(e) if io::ErrorKind::NotFound == e.kind() => {
                 if let Err(err) = init_token_dir(&tdir, max_uid) {
                     error!(
@@ -134,7 +134,7 @@ fn read_write_claim(root: &Path, max_uid: Uid) -> Option<Uid> {
                     );
                 }
                 return Some(Uid::MIN);
-            }
+            },
             Err(e) => {
                 error!(
                     "Failed to list {}; \
@@ -143,7 +143,7 @@ fn read_write_claim(root: &Path, max_uid: Uid) -> Option<Uid> {
                     e
                 );
                 return Some(Uid::MIN);
-            }
+            },
         };
 
         for superfluous in &current[..current.len() - 1] {
@@ -174,7 +174,7 @@ fn read_write_claim(root: &Path, max_uid: Uid) -> Option<Uid> {
                 // Remove our old link before celebrating
                 let _ = fs::remove_file(&latest_path);
                 return Uid::of(latest).and_then(Uid::next);
-            }
+            },
             // ENOENT => we lost the race, try again with updated dir info
             Err(nix::Error::Sys(nix::errno::Errno::ENOENT)) => continue,
             // EEXIST => we lost the race, and the other process claimed the
@@ -188,7 +188,7 @@ fn read_write_claim(root: &Path, max_uid: Uid) -> Option<Uid> {
                     e
                 );
                 return Some(Uid::MIN);
-            }
+            },
         }
     }
 }

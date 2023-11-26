@@ -134,7 +134,7 @@ impl StatefulMailbox {
                         e
                     );
                     None
-                }
+                },
             })
             .unwrap_or_else(MailboxState::new);
 
@@ -322,7 +322,7 @@ pub(super) fn list_rollups(
 
             classify_rollups(&mut ret);
             Ok(ret)
-        }
+        },
     }
 }
 

@@ -90,7 +90,7 @@ impl Compression {
             ))),
             Compression::Zstd => {
                 Ok(box_r(io::BufReader::new(zstd::Decoder::new(reader)?)))
-            }
+            },
         }
     }
 
