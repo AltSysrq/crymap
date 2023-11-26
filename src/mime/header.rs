@@ -480,7 +480,7 @@ fn quoted_string(i: &[u8]) -> IResult<&[u8], Cow<'_, [u8]>> {
         sequence::pair(ocfws, tag(b"\"")),
         multi::fold_many0(
             qcontent,
-            Cow::Borrowed(&[] as &[u8]),
+            || Cow::Borrowed(&[] as &[u8]),
             |mut acc: Cow<[u8]>, item| {
                 if acc.is_empty() {
                     acc = Cow::Borrowed(item);
@@ -755,10 +755,10 @@ fn local_part(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
     combinator::map(
         sequence::tuple((
             // Need to parse leading dots in separately because
-            // separated_nonempty_list won't allow the first element to be
+            // separated_list1 won't allow the first element to be
             // empty.
             local_leading_dots,
-            multi::separated_nonempty_list(
+            multi::separated_list1(
                 local_separator,
                 combinator::map(
                     combinator::opt(combinator::map(word, |(_, w)| w)),
@@ -808,10 +808,7 @@ fn local_separator(i: &[u8]) -> IResult<&[u8], &[u8]> {
 
 // RFC 5322 4.4 obsolete domain format
 fn obs_domain(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
-    multi::separated_nonempty_list(
-        tag(b"."),
-        combinator::map(atom, Cow::Borrowed),
-    )(i)
+    multi::separated_list1(tag(b"."), combinator::map(atom, Cow::Borrowed))(i)
 }
 
 // RFC 5322 3.4.1 domain name text
@@ -832,10 +829,14 @@ fn domain_literal(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
     combinator::map(
         sequence::delimited(
             sequence::pair(ocfws, tag(b"[")),
-            multi::fold_many0(dcontent, vec![b'['], |mut acc, item| {
-                acc.extend_from_slice(item);
-                acc
-            }),
+            multi::fold_many0(
+                dcontent,
+                || vec![b'['],
+                |mut acc, item| {
+                    acc.extend_from_slice(item);
+                    acc
+                },
+            ),
             sequence::pair(tag(b"]"), ocfws),
         ),
         |mut res| {
@@ -874,14 +875,14 @@ fn addr_spec(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
 fn conservative_addr_spec(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
     let (i, local) = sequence::preceded(
         ocfws,
-        multi::separated_nonempty_list(
+        multi::separated_list1(
             tag(b"."),
             combinator::map(atext, Cow::Borrowed),
         ),
     )(i)?;
     let (i, domain) = sequence::preceded(
         tag(b"@"),
-        multi::separated_nonempty_list(
+        multi::separated_list1(
             tag(b"."),
             combinator::map(atext, Cow::Borrowed),
         ),
@@ -911,7 +912,7 @@ fn obs_display_name(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
 // apparently felt --- even in 2007 --- that this is still important enough to
 // put in the IMAP compliance tester.
 fn obs_domain_list(i: &[u8]) -> IResult<&[u8], Vec<Vec<Cow<'_, [u8]>>>> {
-    multi::separated_nonempty_list(
+    multi::separated_list1(
         multi::many1_count(branch::alt((
             cfws,
             combinator::map(tag(b","), |_| ()),
@@ -1005,7 +1006,7 @@ fn obs_list_delim(i: &[u8]) -> IResult<&[u8], ()> {
 fn mailbox_list(i: &[u8]) -> IResult<&[u8], Vec<Mailbox<'_>>> {
     sequence::delimited(
         combinator::opt(obs_list_delim),
-        multi::separated_nonempty_list(obs_list_delim, mailbox),
+        multi::separated_list1(obs_list_delim, mailbox),
         combinator::opt(obs_list_delim),
     )(i)
 }
@@ -1045,7 +1046,7 @@ fn address(i: &[u8]) -> IResult<&[u8], Address<'_>> {
 fn address_list(i: &[u8]) -> IResult<&[u8], Vec<Address<'_>>> {
     sequence::delimited(
         combinator::opt(obs_addr_list_delim),
-        multi::separated_nonempty_list(obs_addr_list_delim, address),
+        multi::separated_list1(obs_addr_list_delim, address),
         combinator::opt(obs_addr_list_delim),
     )(i)
 }

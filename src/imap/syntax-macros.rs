@@ -187,7 +187,7 @@ macro_rules! apply_nom_modifiers {
         ))
     };
     ([0*($sep:expr) $($rest:tt)*], $inner:expr) => {
-        multi::separated_list(
+        multi::separated_list0(
             kw($sep),
             apply_nom_modifiers!([$($rest)*], $inner))
     };
@@ -196,7 +196,7 @@ macro_rules! apply_nom_modifiers {
             apply_nom_modifiers!([$($rest)*], $inner))
     };
     ([1*($sep:expr) $($rest:tt)*], $inner:expr) => {
-        multi::separated_nonempty_list(
+        multi::separated_list1(
             kw($sep),
             apply_nom_modifiers!([$($rest)*], $inner))
     };

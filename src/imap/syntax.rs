@@ -2097,7 +2097,7 @@ fn quoted(i: &[u8]) -> IResult<&[u8], Cow<str>> {
         tag("\""),
         multi::fold_many0(
             map(quoted_string_content, String::from_utf8_lossy),
-            Cow::Owned(String::new()),
+            || Cow::Owned(String::new()),
             |mut accum: Cow<str>, piece| {
                 if accum.is_empty() {
                     piece

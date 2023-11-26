@@ -33,7 +33,7 @@ flate2 = { version = "1.0", default-features = false, features = ["zlib"] }
 lazy_static = "1.4"
 log = "0.4.8"
 memchr = "2.6.4"
-nom = { version = "5.1", default-features = false, features = ["regexp", "std"] }
+nom = { version = "7.1.3" }
 num_cpus = "1.13"
 openssl = "0.10.45"
 rand = "0.7"
