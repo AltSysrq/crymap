@@ -32,7 +32,7 @@ pub trait FinishWrite: Write {
     fn finish(&mut self) -> io::Result<()>;
 }
 
-impl<W: Write> FinishWrite for zstd::Encoder<W> {
+impl<W: Write> FinishWrite for zstd::Encoder<'_, W> {
     fn finish(&mut self) -> io::Result<()> {
         self.do_finish()
     }
@@ -67,9 +67,9 @@ static ZSTD_DICT_20200725_RAW: &[u8] = include_bytes!("zstd-dict-20200725.dat");
 
 lazy_static! {
     static ref ZSTD_DICT_20200725_ENC: zstd::dict::EncoderDictionary<'static> =
-        zstd::dict::EncoderDictionary::new(ZSTD_DICT_20200725_RAW, 5);
+        zstd::dict::EncoderDictionary::copy(ZSTD_DICT_20200725_RAW, 5);
     static ref ZSTD_DICT_20200725_DEC: zstd::dict::DecoderDictionary<'static> =
-        zstd::dict::DecoderDictionary::new(ZSTD_DICT_20200725_RAW);
+        zstd::dict::DecoderDictionary::copy(ZSTD_DICT_20200725_RAW);
 }
 
 impl Compression {
