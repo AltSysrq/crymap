@@ -364,6 +364,7 @@ mod test {
 
     use super::*;
     use crate::mime::grovel;
+    use crate::support::chronox::*;
 
     #[test]
     fn test_multi_fetch() {
@@ -407,7 +408,8 @@ mod test {
 
         let uid = Uid::u(42);
         let modseq = Modseq::new(Uid::u(56), Cid(100));
-        let internal_date = FixedOffset::east(0).timestamp_millis(1000);
+        let internal_date =
+            FixedOffset::zero().timestamp_millis_opt(1000).unwrap();
         let mut result = grovel::grovel(
             &grovel::SimpleAccessor {
                 data: crate::test_data::RFC3501_P56.to_owned().into(),
@@ -488,7 +490,10 @@ mod test {
 
         match &result[8] {
             &FetchedItem::InternalDate(id) => {
-                assert_eq!(FixedOffset::east(0).timestamp_millis(1000), id)
+                assert_eq!(
+                    FixedOffset::zero().timestamp_millis_opt(1000).unwrap(),
+                    id
+                )
             },
             r => panic!("Unexpected internal date result: {:#?}", r),
         }

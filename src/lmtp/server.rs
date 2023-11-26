@@ -35,6 +35,7 @@ use crate::account::model::CommonPaths;
 use crate::support::{
     append_limit::APPEND_SIZE_LIMIT,
     buffer::BufferWriter,
+    chronox::*,
     error::Error,
     rcio::RcIo,
     safe_name::is_safe_name,
@@ -667,7 +668,7 @@ impl Server {
         let now = Utc::now();
         let smtp_date = now.to_rfc2822();
         let internal_date =
-            FixedOffset::east(0).from_utc_datetime(&now.naive_local());
+            FixedOffset::zero().from_utc_datetime(&now.naive_local());
         let mut data_buffer = mem::replace(
             &mut self.data_buffer,
             BufferWriter::new(Arc::clone(&self.common_paths)),

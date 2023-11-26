@@ -22,7 +22,7 @@ use log::warn;
 
 use super::defs::*;
 use crate::account::model::*;
-use crate::support::error::Error;
+use crate::support::{chronox::*, error::Error};
 
 impl StatefulMailbox {
     /// Expunge all messages with the `\Deleted` flag in the current snapshot.
@@ -148,10 +148,7 @@ impl StatefulMailbox {
 
     /// Convenience for calling `purge()` with a date far in the future.
     pub fn purge_all(&mut self) -> u32 {
-        self.purge(
-            Date::<Utc>::from_utc(NaiveDate::from_ymd(9999, 12, 31), Utc)
-                .and_hms(23, 59, 59),
-        )
+        self.purge(NaiveDate::from_ymdx(9999, 12, 31).and_hmsx_utc(23, 59, 59))
     }
 }
 

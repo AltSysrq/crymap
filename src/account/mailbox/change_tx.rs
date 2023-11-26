@@ -131,6 +131,7 @@ mod test {
     use super::super::test_prelude::*;
     use super::*;
     use crate::account::model::*;
+    use crate::support::chronox::*;
 
     #[test]
     fn write_and_read_state_files() {
@@ -168,7 +169,7 @@ mod test {
         let uid = mb1
             .stateless()
             .append(
-                FixedOffset::east(0)
+                FixedOffset::zero()
                     .from_utc_datetime(&Utc::now().naive_local()),
                 vec![Flag::Flagged, Flag::Keyword("foo".to_owned())],
                 &mut "foobar".as_bytes(),

@@ -22,7 +22,7 @@ use chrono::prelude::*;
 
 use super::super::defs::*;
 use crate::account::model::Flag;
-use crate::support::error::Error;
+use crate::support::{chronox::*, error::Error};
 use crate::test_data::*;
 
 #[test]
@@ -962,7 +962,7 @@ fn wrapped_headers_not_mangled() {
                 // get the bytes to line up in the right way to trigger the
                 // bug.
                 internal_date: Some(
-                    FixedOffset::east(0).ymd(2003, 2, 26).and_hms(10, 58, 31),
+                    FixedOffset::zero().ymd_hmsx(2003, 2, 26, 10, 58, 31),
                 ),
                 ..s::AppendFragment::default()
             },

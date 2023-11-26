@@ -20,6 +20,7 @@ use chrono::prelude::*;
 
 use super::defs::*;
 use crate::account::model::Flag;
+use crate::support::chronox::*;
 use crate::test_data::*;
 
 #[test]
@@ -70,7 +71,7 @@ fn happy_paths() {
             s::AppendFragment {
                 flags: Some(vec![Flag::Answered]),
                 internal_date: Some(
-                    FixedOffset::east(0)
+                    FixedOffset::zero()
                         .from_utc_datetime(&Utc::now().naive_local()),
                 ),
                 ..s::AppendFragment::default()

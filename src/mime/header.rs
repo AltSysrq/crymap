@@ -737,9 +737,10 @@ fn date_time(i: &[u8]) -> IResult<&[u8], Option<DateTime<FixedOffset>>> {
     let (i, (year, month, day)) = date(i)?;
     let (i, ((hour, minute, second), zone)) = time(i)?;
 
-    let res = FixedOffset::east_opt(zone * 60)
-        .and_then(|off| off.ymd_opt(year as i32, month, day).latest())
-        .and_then(|date| date.and_hms_opt(hour, minute, second));
+    let res = FixedOffset::east_opt(zone * 60).and_then(|off| {
+        off.with_ymd_and_hms(year as i32, month, day, hour, minute, second)
+            .latest()
+    });
 
     Ok((i, res))
 }

@@ -36,8 +36,7 @@ use crate::imap::command_processor::CommandProcessor;
 use crate::imap::literal_source::LiteralSource;
 use crate::imap::mailbox_name::MailboxName;
 use crate::imap::server::Server;
-use crate::support::error::Error;
-use crate::support::system_config::*;
+use crate::support::{chronox::*, error::Error, system_config::*};
 use crate::test_data::*;
 
 pub(super) use crate::imap::syntax as s;
@@ -234,7 +233,7 @@ pub fn examine_shared(client: &mut PipeClient) {
     quick_select(client, MBOX);
 
     fn internal_date_for_uid(uid: u32) -> Option<DateTime<FixedOffset>> {
-        Some(FixedOffset::east(0).ymd(2020, 1, uid).and_hms(0, 0, 0))
+        Some(FixedOffset::zero().ymd_hmsx(2020, 1, uid, 0, 0, 0))
     }
 
     macro_rules! append {

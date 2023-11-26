@@ -362,6 +362,7 @@ mod test {
 
     use super::super::test_prelude::*;
     use super::*;
+    use crate::support::chronox::*;
     use crate::test_data::*;
 
     #[test]
@@ -489,7 +490,7 @@ mod test {
             }
         }
 
-        let today = Utc::today().naive_utc();
+        let today = Utc::now().date_naive();
 
         assert_eq!(
             uids![4, 6, 7],
@@ -503,11 +504,11 @@ mod test {
         assert_eq!(uids![0], search!(Bcc("bcc@example.com".to_owned())));
         assert_eq!(uids![], search!(Bcc("foo@bar.com".to_owned())));
 
-        assert_eq!(uids![], search!(Before(NaiveDate::from_ymd(2000, 1, 1))));
+        assert_eq!(uids![], search!(Before(NaiveDate::from_ymdx(2000, 1, 1))));
         assert_eq!(uids![], search!(Before(today)));
         assert_eq!(
             uids_compl![5],
-            search!(Before(NaiveDate::from_ymd(3000, 1, 1)))
+            search!(Before(NaiveDate::from_ymdx(3000, 1, 1)))
         );
 
         assert_eq!(uids![2, 3], search!(Body("prezo".to_owned())));
@@ -551,8 +552,8 @@ mod test {
         assert_eq!(uids![0, 1], search!(Old));
 
         assert_eq!(uids_compl![5], search!(On(today)));
-        assert_eq!(uids![], search!(On(NaiveDate::from_ymd(2000, 1, 1))));
-        assert_eq!(uids![], search!(On(NaiveDate::from_ymd(3000, 1, 1))));
+        assert_eq!(uids![], search!(On(NaiveDate::from_ymdx(2000, 1, 1))));
+        assert_eq!(uids![], search!(On(NaiveDate::from_ymdx(3000, 1, 1))));
 
         assert_eq!(
             uids![2, 3, 6],
@@ -568,23 +569,23 @@ mod test {
 
         assert_eq!(
             uids![0, 1],
-            search!(SentBefore(NaiveDate::from_ymd(2001, 4, 2)))
+            search!(SentBefore(NaiveDate::from_ymdx(2001, 4, 2)))
         );
         assert_eq!(
             uids![4, 6, 7],
-            search!(SentOn(NaiveDate::from_ymd(2001, 4, 2)))
+            search!(SentOn(NaiveDate::from_ymdx(2001, 4, 2)))
         );
         assert_eq!(
             uids_compl![0, 1, 5],
-            search!(SentSince(NaiveDate::from_ymd(2001, 4, 2)))
+            search!(SentSince(NaiveDate::from_ymdx(2001, 4, 2)))
         );
 
         assert_eq!(uids_compl![5], search!(Since(today)));
         assert_eq!(
             uids_compl![5],
-            search!(Since(NaiveDate::from_ymd(1970, 1, 1)))
+            search!(Since(NaiveDate::from_ymdx(1970, 1, 1)))
         );
-        assert_eq!(uids![], search!(Since(NaiveDate::from_ymd(3000, 1, 1))));
+        assert_eq!(uids![], search!(Since(NaiveDate::from_ymdx(3000, 1, 1))));
 
         // There's a message with size 1245, so this also tests exclusion of
         // equality

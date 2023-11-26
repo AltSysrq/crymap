@@ -42,6 +42,7 @@ use crate::account::model::*;
 use crate::mime::content_encoding::ContentDecoder;
 use crate::mime::grovel::Visitor;
 use crate::mime::header;
+use crate::support::chronox::*;
 
 const READ_LIMIT: usize = 131072;
 
@@ -313,7 +314,7 @@ impl<F: FnMut(&SearchData) -> Option<bool>> Visitor for SearchFetcher<F> {
         self.data.recent.get_or_insert(false);
         self.data.metadata.get_or_insert_with(|| MessageMetadata {
             size: 0,
-            internal_date: FixedOffset::east(0).timestamp_millis(0),
+            internal_date: FixedOffset::zero().timestamp0(),
             email_id: Default::default(),
         });
         self.finish_headers();
@@ -342,7 +343,7 @@ impl<F: FnMut(&SearchData) -> Option<bool>> SearchFetcher<F> {
         self.data.to.get_or_insert_with(String::new);
         self.data
             .date
-            .get_or_insert_with(|| FixedOffset::east(0).timestamp_millis(0));
+            .get_or_insert_with(|| FixedOffset::zero().timestamp0());
         self.data.subject.get_or_insert_with(String::new);
     }
 
@@ -461,7 +462,9 @@ mod test {
             flags: vec![Flag::Flagged],
             metadata: MessageMetadata {
                 size: 12345,
-                internal_date: FixedOffset::east(3600).timestamp_millis(1000),
+                internal_date: FixedOffset::eastx(3600)
+                    .timestamp_millis_opt(1000)
+                    .unwrap(),
                 email_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
             },
             data: message.into(),

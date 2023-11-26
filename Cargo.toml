@@ -20,7 +20,6 @@ travis-ci = { repository = "AltSysrq/crymap" }
 base64 = "0.12"
 bitflags = "2.4.1"
 byteorder = "1.5.0"
-chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "2.33", default-features = false }
 crossbeam = "0.7"
 encoding_rs = "0.8"
@@ -54,6 +53,11 @@ thiserror = "1.0"
 tiny-keccak = { version = "2.0", features = ["sha3", "kmac"] }
 toml = "0.5"
 zstd = "0.5"
+
+[dependencies.chrono]
+version = "0.4.31"
+default-features = false
+features = [ "std", "clock", "serde" ]
 
 [dependencies.log4rs]
 version = "1.2.0"

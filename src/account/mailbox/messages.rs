@@ -388,6 +388,7 @@ mod test {
     use super::super::test_prelude::*;
     use super::*;
     use crate::account::mailbox_path::MailboxPath;
+    use crate::support::chronox::*;
 
     fn destination(setup: &Setup) -> StatelessMailbox {
         let mbox2_path = MailboxPath::root(
@@ -411,7 +412,7 @@ mod test {
     fn write_and_read_messages() {
         let setup = set_up();
 
-        let zone = FixedOffset::east(3600);
+        let zone = FixedOffset::eastx(3600);
         let now = zone.from_utc_datetime(&Utc::now().naive_local());
 
         assert_eq!(
@@ -755,7 +756,7 @@ mod test {
         let (mut mb1, _) = setup.stateless.select().unwrap();
 
         let internal_date =
-            FixedOffset::east(0).from_utc_datetime(&Utc::now().naive_local());
+            FixedOffset::zero().from_utc_datetime(&Utc::now().naive_local());
         let mut append_request = AppendRequest::default();
         append_request.items.push(AppendItem {
             buffer_file: mb1

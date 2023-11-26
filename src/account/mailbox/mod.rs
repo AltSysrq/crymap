@@ -272,6 +272,7 @@ mod test_prelude {
     use crate::account::mailbox_path::MailboxPath;
     use crate::account::model::*;
     use crate::crypt::master_key::MasterKey;
+    use crate::support::chronox::*;
 
     pub(super) struct Setup {
         pub root: TempDir,
@@ -328,7 +329,7 @@ mod test_prelude {
         data: &[u8],
     ) -> Uid {
         dst.append(
-            FixedOffset::east(0).from_utc_datetime(&Utc::now().naive_local()),
+            FixedOffset::zero().from_utc_datetime(&Utc::now().naive_local()),
             iter::empty(),
             data,
         )

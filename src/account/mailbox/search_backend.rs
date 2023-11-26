@@ -261,6 +261,7 @@ mod test {
     use std::collections::HashMap;
 
     use super::*;
+    use crate::support::chronox::*;
 
     fn singleton_map(key: &str, value: &str) -> HashMap<String, String> {
         let mut map = HashMap::new();
@@ -568,7 +569,7 @@ mod test {
             DateTime::parse_from_rfc3339("2020-06-29T23:12:01-12:34").unwrap();
         let datetime2 =
             DateTime::parse_from_rfc3339("2020-06-30T08:04:02-23:59").unwrap();
-        let date1 = NaiveDate::from_ymd(2020, 6, 29);
+        let date1 = NaiveDate::from_ymdx(2020, 6, 29);
 
         let ops = &[Op::InternalDateCompare(date1, true, false, false)];
         assert_eq!(None, eval(ops, &SearchData::default()));

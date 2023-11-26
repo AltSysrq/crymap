@@ -1614,9 +1614,10 @@ mod email_id_ser {
 #[cfg(test)]
 impl Default for MessageMetadata {
     fn default() -> Self {
+        use crate::support::chronox::*;
         MessageMetadata {
             size: 0,
-            internal_date: FixedOffset::east(0).timestamp_millis(0),
+            internal_date: FixedOffset::zero().timestamp0(),
             email_id: Default::default(),
         }
     }

@@ -2276,6 +2276,7 @@ fn datetime(i: &[u8]) -> IResult<&[u8], DateTime<FixedOffset>> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::support::chronox::*;
 
     macro_rules! assert_reversible {
         ($ty:ty, $expected_text:expr, $value:expr) => {
@@ -3414,7 +3415,7 @@ mod test {
             MsgAtt,
             "INTERNALDATE \" 4-Jul-2020 16:31:00 +0100\"",
             MsgAtt::InternalDate(
-                FixedOffset::east(3600).ymd(2020, 7, 4).and_hms(16, 31, 0)
+                FixedOffset::eastx(3600).ymd_hmsx(2020, 7, 4, 16, 31, 0),
             )
         );
 
@@ -3680,7 +3681,7 @@ mod test {
             "BEFORE \"4-Jul-2020\"",
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::Before,
-                date: NaiveDate::from_ymd(2020, 7, 4),
+                date: NaiveDate::from_ymdx(2020, 7, 4),
             })
         );
         assert_reversible!(
@@ -3737,7 +3738,7 @@ mod test {
             "ON \"4-Jul-2020\"",
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::On,
-                date: NaiveDate::from_ymd(2020, 7, 4),
+                date: NaiveDate::from_ymdx(2020, 7, 4),
             })
         );
         assert_reversible!(
@@ -3755,7 +3756,7 @@ mod test {
             "SINCE \"4-Jul-2020\"",
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::Since,
-                date: NaiveDate::from_ymd(2020, 7, 4),
+                date: NaiveDate::from_ymdx(2020, 7, 4),
             })
         );
         assert_reversible!(
@@ -3840,7 +3841,7 @@ mod test {
             "SENTBEFORE \"4-Jul-2020\"",
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::SentBefore,
-                date: NaiveDate::from_ymd(2020, 7, 4),
+                date: NaiveDate::from_ymdx(2020, 7, 4),
             })
         );
         assert_reversible!(
@@ -3848,7 +3849,7 @@ mod test {
             "SENTON \"4-Jul-2020\"",
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::SentOn,
-                date: NaiveDate::from_ymd(2020, 7, 4),
+                date: NaiveDate::from_ymdx(2020, 7, 4),
             })
         );
         assert_reversible!(
@@ -3856,7 +3857,7 @@ mod test {
             "SENTSINCE \"4-Jul-2020\"",
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::SentSince,
-                date: NaiveDate::from_ymd(2020, 7, 4),
+                date: NaiveDate::from_ymdx(2020, 7, 4),
             })
         );
         assert_reversible!(SearchKey, "SMALLER 42", SearchKey::Smaller(42));
@@ -5104,9 +5105,8 @@ mod test {
                 first_fragment: AppendFragment {
                     flags: None,
                     internal_date: Some(
-                        FixedOffset::east(3600)
-                            .ymd(2020, 7, 4)
-                            .and_hms(16, 31, 0)
+                        FixedOffset::eastx(3600)
+                            .ymd_hmsx(2020, 7, 4, 16, 31, 0),
                     ),
                     utf8: false,
                 }
@@ -5121,9 +5121,8 @@ mod test {
                 first_fragment: AppendFragment {
                     flags: Some(vec![Flag::Deleted]),
                     internal_date: Some(
-                        FixedOffset::east(3600)
-                            .ymd(2020, 7, 4)
-                            .and_hms(16, 31, 0)
+                        FixedOffset::eastx(3600)
+                            .ymd_hmsx(2020, 7, 4, 16, 31, 0)
                     ),
                     utf8: false,
                 }

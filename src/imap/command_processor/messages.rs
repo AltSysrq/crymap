@@ -25,7 +25,7 @@ use super::defs::*;
 use crate::account::mailbox::{StatefulMailbox, StatelessMailbox};
 use crate::account::model::*;
 use crate::imap::mailbox_name::MailboxName;
-use crate::support::error::Error;
+use crate::support::{chronox::*, error::Error};
 
 impl CommandProcessor {
     /// Start an append command.
@@ -110,7 +110,7 @@ impl CommandProcessor {
             .dst
             .buffer_message(
                 cmd.internal_date.unwrap_or_else(|| {
-                    FixedOffset::east(0)
+                    FixedOffset::zero()
                         .from_utc_datetime(&Utc::now().naive_local())
                 }),
                 item_data,

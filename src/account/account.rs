@@ -32,8 +32,8 @@ use crate::account::mailbox_path::*;
 use crate::account::model::*;
 use crate::crypt::master_key::MasterKey;
 use crate::support::{
-    error::Error, file_ops::IgnoreKinds, safe_name::is_safe_name, threading,
-    user_config::UserConfig,
+    chronox::*, error::Error, file_ops::IgnoreKinds, safe_name::is_safe_name,
+    threading, user_config::UserConfig,
 };
 
 // Like format!, but returns None if the formatter fails instead of panicking.
@@ -252,9 +252,8 @@ impl Account {
             config.master_key = master_key
                 .make_config(password.as_bytes())
                 .expect("argon2 hash failed");
-            config.master_key.last_changed = Some(
-                FixedOffset::east(0).from_utc_datetime(&now.naive_local()),
-            );
+            config.master_key.last_changed =
+                Some(FixedOffset::zero().from_utc_datetime(&now.naive_local()));
         }
 
         let config_toml =
@@ -1511,7 +1510,7 @@ mod test {
             .mailbox("INBOX", false)
             .unwrap()
             .append(
-                FixedOffset::east(0).timestamp_millis(0),
+                FixedOffset::zero().timestamp0(),
                 vec![],
                 &b"this is a test message"[..],
             )
@@ -1641,7 +1640,7 @@ mod test {
             // Adjust inbox to have 1 recent, 2 unseen, 3 messages.
             mb.stateless()
                 .append(
-                    FixedOffset::east(0).timestamp_millis(0),
+                    FixedOffset::zero().timestamp0(),
                     vec![],
                     &b"this is a test message"[..],
                 )
@@ -1649,7 +1648,7 @@ mod test {
             let uid2 = mb
                 .stateless()
                 .append(
-                    FixedOffset::east(0).timestamp_millis(0),
+                    FixedOffset::zero().timestamp0(),
                     vec![],
                     &b"this is a test message"[..],
                 )
@@ -1670,7 +1669,7 @@ mod test {
             let uid3 = mb
                 .stateless()
                 .append(
-                    FixedOffset::east(0).timestamp_millis(0),
+                    FixedOffset::zero().timestamp0(),
                     vec![],
                     &b"this is a test message"[..],
                 )
@@ -1764,7 +1763,7 @@ mod test {
 
             // Adjust Archive to have 1 recent, 1 unseen, 1 message.
             mb.append(
-                FixedOffset::east(0).timestamp_millis(0),
+                FixedOffset::zero().timestamp0(),
                 vec![],
                 &b"this is a test message"[..],
             )

@@ -958,6 +958,7 @@ mod test {
     use proptest::prelude::*;
 
     use super::*;
+    use crate::support::chronox::*;
 
     #[test]
     fn seqnum_mapping() {
@@ -1303,25 +1304,27 @@ mod test {
         state.seen(Uid::u(10));
         state.flush();
 
-        let date = Date::<Utc>::from_utc(NaiveDate::from_ymd(2020, 1, 1), Utc);
+        let date = NaiveDate::from_ymdx(2020, 1, 1);
 
         let (cid, mut tx) = state.start_tx().unwrap();
-        tx.expunge(date.and_hms(1, 1, 1), Uid::u(2));
-        tx.expunge(date.and_hms(2, 2, 2), Uid::u(3));
-        tx.expunge(date.and_hms(3, 3, 3), Uid::u(1));
+        tx.expunge(date.and_hmsx_utc(1, 1, 1), Uid::u(2));
+        tx.expunge(date.and_hmsx_utc(2, 2, 2), Uid::u(3));
+        tx.expunge(date.and_hmsx_utc(3, 3, 3), Uid::u(1));
         state.commit(cid, tx);
 
-        let mut se = state.drain_soft_expunged(date.and_hms(2, 59, 59));
+        let mut se = state.drain_soft_expunged(date.and_hmsx_utc(2, 59, 59));
         se.sort();
         assert_eq!(vec![Uid::u(2), Uid::u(3)], se);
         assert!(state
-            .drain_soft_expunged(date.and_hms(2, 59, 59))
+            .drain_soft_expunged(date.and_hmsx_utc(2, 59, 59))
             .is_empty());
 
-        assert!(state.drain_soft_expunged(date.and_hms(3, 3, 3)).is_empty());
+        assert!(state
+            .drain_soft_expunged(date.and_hmsx_utc(3, 3, 3))
+            .is_empty());
         assert_eq!(
             vec![Uid::u(1)],
-            state.drain_soft_expunged(date.and_hms(3, 3, 4))
+            state.drain_soft_expunged(date.and_hmsx_utc(3, 3, 4))
         );
     }
 }

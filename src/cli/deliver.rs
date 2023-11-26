@@ -28,11 +28,10 @@ use super::main::ServerDeliverSubcommand;
 use crate::account::account::Account;
 use crate::account::mailbox::StatelessMailbox;
 use crate::account::model::*;
-use crate::support::error::Error;
-use crate::support::safe_name::is_safe_name;
-use crate::support::sysexits::*;
-use crate::support::system_config::SystemConfig;
-use crate::support::unix_privileges;
+use crate::support::{
+    chronox::*, error::Error, safe_name::is_safe_name, sysexits::*,
+    system_config::SystemConfig, unix_privileges,
+};
 
 pub(super) fn deliver(
     system_config: SystemConfig,
@@ -133,7 +132,7 @@ impl DeliveryTarget for StatelessMailbox {
         data: R,
     ) -> Result<(), Error> {
         let internal_date =
-            FixedOffset::east(0).from_utc_datetime(&Utc::now().naive_local());
+            FixedOffset::zero().from_utc_datetime(&Utc::now().naive_local());
         self.append(internal_date, flags, data)?;
         Ok(())
     }
