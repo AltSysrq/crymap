@@ -492,6 +492,7 @@ impl CommandProcessor {
 
     #[cfg(feature = "dev-tools")]
     fn cmd_xcry_zstd_train(&mut self) -> CmdResult {
+        use crate::support::chronox::*;
         use chrono::prelude::*;
 
         let data = selected!(self)?.zstd_train().map_err(map_error!(self))?;
@@ -533,7 +534,7 @@ Content-Transfer-Encoding: base64
             .mailbox("INBOX", false)
             .map_err(map_error!(self))?
             .append(
-                FixedOffset::east(0)
+                FixedOffset::zero()
                     .from_utc_datetime(&Utc::now().naive_local()),
                 vec![],
                 message.replace('\n', "\r\n").as_bytes(),

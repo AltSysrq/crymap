@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use log::{info, warn};
 
-use crate::account::account::Account;
+use crate::account::v1::account::Account;
 use crate::crypt::master_key::MasterKey;
 use crate::imap::command_processor::CommandProcessor;
 use crate::imap::server::Server;
