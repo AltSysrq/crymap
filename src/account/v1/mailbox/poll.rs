@@ -23,7 +23,7 @@ use std::os::unix::fs::DirBuilderExt;
 use chrono::prelude::*;
 use log::warn;
 
-use super::super::recency_token;
+use super::super::{model::*, recency_token};
 use super::defs::*;
 use crate::account::model::*;
 use crate::support::error::Error;
@@ -69,7 +69,7 @@ impl StatefulMailbox {
     pub fn poll(&mut self) -> Result<PollResponse, Error> {
         let reported_modseq = self.state.report_max_modseq();
         let first_unchecked_uid = reported_modseq
-            .map(Modseq::uid)
+            .map(V1Modseq::uid)
             .map_or(Uid::MIN, |uid| uid.next().unwrap_or(Uid::MAX));
 
         self.fetch_loopbreaker.clear();
@@ -98,7 +98,7 @@ impl StatefulMailbox {
         self.poll_for_new_changes()?;
 
         let last_unchecked_uid =
-            self.state.max_modseq().map_or(Uid::MIN, Modseq::uid);
+            self.state.max_modseq().map_or(Uid::MIN, V1Modseq::uid);
 
         // Check if any new UIDs are gravestones so we don't report them as
         // real messages, even if there is no Expunge event for them. This is
@@ -133,7 +133,7 @@ impl StatefulMailbox {
         fetch.dedup();
 
         // If there are new UIDs, see if we can claim \Recent on any of them.
-        if let Some(max_recent_uid) = flush.max_modseq.map(Modseq::uid) {
+        if let Some(max_recent_uid) = flush.max_modseq.map(V1Modseq::uid) {
             let min_recent_uid = self
                 .recency_frontier
                 .and_then(Uid::next)
@@ -191,7 +191,7 @@ impl StatefulMailbox {
             max_modseq: if flush.max_modseq == reported_modseq {
                 None
             } else {
-                flush.max_modseq
+                Some(flush.max_modseq.into())
             },
         })
     }
@@ -327,7 +327,7 @@ mod test {
         assert_eq!(None, select_res.unseen);
         assert_eq!(Uid::MIN, select_res.uidnext);
         assert!(!select_res.read_only);
-        assert_eq!(None, select_res.max_modseq);
+        assert_eq!(Modseq::MIN, select_res.max_modseq);
 
         assert_eq!(Uid::u(1), simple_append(mb.stateless()));
 
@@ -336,7 +336,10 @@ mod test {
         assert_eq!(Some(1), poll.exists);
         assert_eq!(Some(1), poll.recent);
         assert_eq!(vec![Uid::u(1)], poll.fetch);
-        assert_eq!(Some(Modseq::new(Uid::u(1), Cid::GENESIS)), poll.max_modseq);
+        assert_eq!(
+            Some(V1Modseq::new(Uid::u(1), Cid::GENESIS)),
+            poll.max_modseq.and_then(V1Modseq::import)
+        );
 
         assert_eq!(Uid::u(2), simple_append(mb.stateless()));
         assert_eq!(Uid::u(3), simple_append(mb.stateless()));
@@ -346,7 +349,10 @@ mod test {
         assert_eq!(Some(3), poll.exists);
         assert_eq!(Some(3), poll.recent);
         assert_eq!(vec![Uid::u(2), Uid::u(3)], poll.fetch);
-        assert_eq!(Some(Modseq::new(Uid::u(3), Cid::GENESIS)), poll.max_modseq);
+        assert_eq!(
+            Some(V1Modseq::new(Uid::u(3), Cid::GENESIS)),
+            poll.max_modseq.and_then(V1Modseq::import)
+        );
 
         mb.store(&StoreRequest {
             ids: &SeqRange::just(Uid::u(2)),
@@ -368,7 +374,10 @@ mod test {
         assert_eq!(None, poll.exists);
         assert_eq!(None, poll.recent);
         assert_eq!(Vec::<Uid>::new(), poll.fetch);
-        assert_ne!(Cid::GENESIS, poll.max_modseq.unwrap().cid());
+        assert_ne!(
+            Cid::GENESIS,
+            V1Modseq::import(poll.max_modseq.unwrap()).unwrap().cid()
+        );
     }
 
     #[test]
@@ -385,7 +394,10 @@ mod test {
         assert_eq!(Some(1), poll.exists);
         assert_eq!(Some(1), poll.recent);
         assert_eq!(vec![Uid::u(1)], poll.fetch);
-        assert_eq!(Some(Modseq::new(Uid::u(1), Cid::GENESIS)), poll.max_modseq);
+        assert_eq!(
+            Some(V1Modseq::new(Uid::u(1), Cid::GENESIS)),
+            poll.max_modseq.and_then(V1Modseq::import)
+        );
 
         let poll = mb2.poll().unwrap();
         assert_eq!(Vec::<(Seqnum, Uid)>::new(), poll.expunge);
@@ -394,7 +406,10 @@ mod test {
         // UID 1
         assert_eq!(Some(0), poll.recent);
         assert_eq!(vec![Uid::u(1)], poll.fetch);
-        assert_eq!(Some(Modseq::new(Uid::u(1), Cid::GENESIS)), poll.max_modseq);
+        assert_eq!(
+            Some(V1Modseq::new(Uid::u(1), Cid::GENESIS)),
+            poll.max_modseq.and_then(V1Modseq::import)
+        );
 
         mb1.store(&StoreRequest {
             ids: &SeqRange::just(Uid::u(1)),
@@ -411,7 +426,10 @@ mod test {
         assert_eq!(None, poll.exists);
         assert_eq!(None, poll.recent);
         assert_eq!(vec![Uid::u(1)], poll.fetch);
-        assert_eq!(Some(Modseq::new(Uid::u(1), Cid(1))), poll.max_modseq);
+        assert_eq!(
+            Some(V1Modseq::new(Uid::u(1), Cid(1))),
+            poll.max_modseq.and_then(V1Modseq::import)
+        );
 
         assert!(mb1.state.test_flag_o(&Flag::Deleted, Uid::u(1)));
 
@@ -422,7 +440,10 @@ mod test {
         assert_eq!(None, poll.exists);
         assert_eq!(None, poll.recent);
         assert_eq!(Vec::<Uid>::new(), poll.fetch);
-        assert_eq!(Some(Modseq::new(Uid::u(1), Cid(2))), poll.max_modseq);
+        assert_eq!(
+            Some(V1Modseq::new(Uid::u(1), Cid(2))),
+            poll.max_modseq.and_then(V1Modseq::import)
+        );
     }
 
     #[test]
@@ -484,8 +505,8 @@ mod test {
         }
 
         assert_eq!(
-            Some(Modseq::new(uid, Cid(600))),
-            mb1.poll().unwrap().max_modseq
+            Some(V1Modseq::new(uid, Cid(600))),
+            mb1.poll().unwrap().max_modseq.and_then(V1Modseq::import)
         );
         assert_eq!(1, list_rollups(mb1.stateless()).unwrap().len());
 
@@ -519,8 +540,8 @@ mod test {
         }
 
         assert_eq!(
-            Some(Modseq::new(uid, Cid(300))),
-            mb1.poll().unwrap().max_modseq
+            Some(V1Modseq::new(uid, Cid(300))),
+            mb1.poll().unwrap().max_modseq.and_then(V1Modseq::import)
         );
         assert_eq!(1, list_rollups(mb1.stateless()).unwrap().len());
 

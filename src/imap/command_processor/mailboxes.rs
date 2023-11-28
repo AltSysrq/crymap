@@ -445,7 +445,7 @@ impl CommandProcessor {
             ));
         }
         if let Some(max_modseq) = response.max_modseq {
-            atts.push(s::StatusResponseAtt::HighestModseq(max_modseq));
+            atts.push(s::StatusResponseAtt::HighestModseq(max_modseq.raw()));
         }
         if let Some(mailbox_id) = response.mailbox_id {
             atts.push(s::StatusResponseAtt::MailboxId(Cow::Owned(mailbox_id)));
@@ -666,7 +666,7 @@ impl CommandProcessor {
             sender(s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::Ok,
                 code: Some(s::RespTextCode::HighestModseq(
-                    select.max_modseq.map_or(1, |m| m.raw().get()),
+                    select.max_modseq.raw(),
                 )),
                 quip: None,
             }));

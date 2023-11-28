@@ -128,6 +128,7 @@ impl StatefulMailbox {
 mod test {
     use chrono::prelude::*;
 
+    use super::super::super::model::*;
     use super::super::test_prelude::*;
     use super::*;
     use crate::account::model::*;
@@ -208,9 +209,12 @@ mod test {
             .unwrap();
 
         let poll = mb1.poll().unwrap();
-        assert_eq!(Some(Modseq::new(uid2, Cid(2))), poll.max_modseq);
         assert_eq!(
-            Modseq::new(uid2, Cid(2)),
+            Some(V1Modseq::new(uid2, Cid(2))),
+            poll.max_modseq.and_then(V1Modseq::import)
+        );
+        assert_eq!(
+            V1Modseq::new(uid2, Cid(2)),
             mb1.state.message_status(uid1).unwrap().last_modified()
         );
     }

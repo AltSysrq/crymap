@@ -18,7 +18,7 @@
 
 use log::warn;
 
-use super::super::mailbox_state::*;
+use super::super::{mailbox_state::*, model::*};
 use super::defs::*;
 use crate::account::model::*;
 use crate::support::error::Error;
@@ -185,7 +185,7 @@ impl StatefulMailbox {
                 // The RFC implies there is some special handling regarding
                 if request
                     .unchanged_since
-                    .map(|uc| uc < status.last_modified().raw().get())
+                    .map(|uc| uc < Modseq::from(status.last_modified()))
                     .unwrap_or(false)
                 {
                     // Per RFC 7162, we leave it up to the client whether they
@@ -358,7 +358,10 @@ mod test {
 
         assert_eq!(vec![uid1], mb.mini_poll());
         let poll = mb.poll().unwrap();
-        assert_eq!(Some(Modseq::new(uid1, Cid(1))), poll.max_modseq);
+        assert_eq!(
+            Some(V1Modseq::new(uid1, Cid(1))),
+            poll.max_modseq.and_then(V1Modseq::import)
+        );
         assert!(poll.fetch.is_empty());
 
         assert!(mb.state.test_flag_o(&Flag::Flagged, uid1));
@@ -443,7 +446,7 @@ mod test {
         mb.vanquish(&SeqRange::just(uid1)).unwrap();
         // Don't poll -- we want uid1 to still be in the snapshot, but do
         // ensure we brought the change into memory
-        assert_eq!(Some(Modseq::new(uid1, Cid(1))), mb.state.max_modseq());
+        assert_eq!(Some(V1Modseq::new(uid1, Cid(1))), mb.state.max_modseq());
 
         let res = mb
             .store(&StoreRequest {
@@ -468,7 +471,10 @@ mod test {
         assert_eq!(vec![uid1], mb.mini_poll());
         assert!(mb.state.test_flag_o(&Flag::Flagged, uid1));
         let poll = mb.poll().unwrap();
-        assert_eq!(Some(Modseq::new(uid1, Cid(2))), poll.max_modseq);
+        assert_eq!(
+            Some(V1Modseq::new(uid1, Cid(2))),
+            poll.max_modseq.and_then(V1Modseq::import)
+        );
         assert!(poll.fetch.is_empty());
     }
 
@@ -495,7 +501,10 @@ mod test {
 
         assert_eq!(vec![uid1], mb.mini_poll());
         let poll = mb.poll().unwrap();
-        assert_eq!(Some(Modseq::new(uid1, Cid(1))), poll.max_modseq);
+        assert_eq!(
+            Some(V1Modseq::new(uid1, Cid(1))),
+            poll.max_modseq.and_then(V1Modseq::import)
+        );
         assert!(poll.fetch.is_empty());
 
         assert!(mb.state.test_flag_o(&Flag::Flagged, uid1));
@@ -580,7 +589,7 @@ mod test {
         mb.vanquish(&SeqRange::just(uid1)).unwrap();
         // Don't poll -- we want uid1 to still be in the snapshot, but do
         // ensure we brought the change into memory
-        assert_eq!(Some(Modseq::new(uid1, Cid(1))), mb.state.max_modseq());
+        assert_eq!(Some(V1Modseq::new(uid1, Cid(1))), mb.state.max_modseq());
 
         let res = mb
             .store(&StoreRequest {
@@ -605,7 +614,10 @@ mod test {
         assert_eq!(vec![uid1], mb.mini_poll());
         assert!(mb.state.test_flag_o(&Flag::Flagged, uid1));
         let poll = mb.poll().unwrap();
-        assert_eq!(Some(Modseq::new(uid1, Cid(2))), poll.max_modseq);
+        assert_eq!(
+            Some(V1Modseq::new(uid1, Cid(2))),
+            poll.max_modseq.and_then(V1Modseq::import)
+        );
         assert!(poll.fetch.is_empty());
     }
 
@@ -627,9 +639,7 @@ mod test {
                 remove_listed: false,
                 remove_unlisted: false,
                 loud: false,
-                unchanged_since: Some(
-                    Modseq::new(uid2, Cid::GENESIS).raw().get(),
-                ),
+                unchanged_since: Some(V1Modseq::new(uid2, Cid::GENESIS).into()),
             })
             .unwrap();
         assert_eq!(
@@ -642,7 +652,10 @@ mod test {
 
         assert_eq!(vec![uid1], mb.mini_poll());
         let poll = mb.poll().unwrap();
-        assert_eq!(Some(Modseq::new(uid2, Cid(1))), poll.max_modseq);
+        assert_eq!(
+            Some(V1Modseq::new(uid2, Cid(1))),
+            poll.max_modseq.and_then(V1Modseq::import)
+        );
 
         // UNCHANGEDSINCE > last_modified
         let res = mb
@@ -652,7 +665,7 @@ mod test {
                 remove_listed: false,
                 remove_unlisted: false,
                 loud: false,
-                unchanged_since: Some(poll.max_modseq.unwrap().raw().get()),
+                unchanged_since: poll.max_modseq,
             })
             .unwrap();
         assert_eq!(
@@ -665,7 +678,10 @@ mod test {
 
         assert_eq!(vec![uid2], mb.mini_poll());
         let poll = mb.poll().unwrap();
-        assert_eq!(Some(Modseq::new(uid2, Cid(2))), poll.max_modseq);
+        assert_eq!(
+            Some(V1Modseq::new(uid2, Cid(2))),
+            poll.max_modseq.and_then(V1Modseq::import)
+        );
 
         assert!(mb.state.test_flag_o(&Flag::Seen, uid2));
     }
@@ -701,9 +717,7 @@ mod test {
                 remove_listed: false,
                 remove_unlisted: false,
                 loud: false,
-                unchanged_since: Some(
-                    Modseq::new(uid1, Cid::GENESIS).raw().get(),
-                ),
+                unchanged_since: Some(V1Modseq::new(uid1, Cid::GENESIS).into()),
             })
             .unwrap();
         assert_eq!(
@@ -731,8 +745,8 @@ mod test {
         let uid2 = simple_append(mb.stateless());
         let uid3 = simple_append(mb.stateless());
         assert_eq!(
-            Some(Modseq::new(uid3, Cid::GENESIS)),
-            mb.poll().unwrap().max_modseq
+            Some(V1Modseq::new(uid3, Cid::GENESIS)),
+            mb.poll().unwrap().max_modseq.and_then(V1Modseq::import)
         );
 
         let res = mb
@@ -754,8 +768,8 @@ mod test {
         );
         // Discard pending notifications
         assert_eq!(
-            Some(Modseq::new(uid3, Cid(1))),
-            mb.poll().unwrap().max_modseq
+            Some(V1Modseq::new(uid3, Cid(1))),
+            mb.poll().unwrap().max_modseq.and_then(V1Modseq::import)
         );
 
         let res = mb
@@ -765,9 +779,7 @@ mod test {
                 remove_listed: false,
                 remove_unlisted: false,
                 loud: false,
-                unchanged_since: Some(
-                    Modseq::new(uid3, Cid::GENESIS).raw().get(),
-                ),
+                unchanged_since: Some(V1Modseq::new(uid3, Cid::GENESIS).into()),
             })
             .unwrap();
         assert_eq!(
@@ -805,9 +817,7 @@ mod test {
                 remove_listed: false,
                 remove_unlisted: false,
                 loud: false,
-                unchanged_since: Some(
-                    Modseq::new(uid1, Cid::GENESIS).raw().get(),
-                ),
+                unchanged_since: Some(V1Modseq::new(uid1, Cid::GENESIS).into()),
             })
             .unwrap();
         assert_eq!(
@@ -840,7 +850,7 @@ mod test {
                 remove_listed: false,
                 remove_unlisted: false,
                 loud: false,
-                unchanged_since: Some(0),
+                unchanged_since: Some(Modseq::of(0)),
             })
             .unwrap();
         assert_eq!(
@@ -952,8 +962,8 @@ mod test {
         mb.poll().unwrap();
         mb.vanquish(&SeqRange::just(uid1)).unwrap();
         assert_eq!(
-            Some(Modseq::new(uid3, Cid(1))),
-            mb.poll().unwrap().max_modseq
+            Some(V1Modseq::new(uid3, Cid(1))),
+            mb.poll().unwrap().max_modseq.and_then(V1Modseq::import)
         );
 
         let res = mb
@@ -975,8 +985,8 @@ mod test {
         );
         // Discard pending notifications
         assert_eq!(
-            Some(Modseq::new(uid3, Cid(2))),
-            mb.poll().unwrap().max_modseq
+            Some(V1Modseq::new(uid3, Cid(2))),
+            mb.poll().unwrap().max_modseq.and_then(V1Modseq::import)
         );
 
         let res = mb
@@ -986,7 +996,7 @@ mod test {
                 remove_listed: false,
                 remove_unlisted: false,
                 loud: false,
-                unchanged_since: Some(Modseq::new(uid3, Cid(1)).raw().get()),
+                unchanged_since: Some(V1Modseq::new(uid3, Cid(1)).into()),
             })
             .unwrap();
         assert_eq!(

@@ -95,16 +95,16 @@ impl StatefulMailbox {
             first_modseq: hits
                 .first()
                 .and_then(|&uid| self.state.message_status(uid))
-                .map(|ms| ms.last_modified()),
+                .map(|ms| ms.last_modified().into()),
             last_modseq: hits
                 .last()
                 .and_then(|&uid| self.state.message_status(uid))
-                .map(|ms| ms.last_modified()),
+                .map(|ms| ms.last_modified().into()),
             max_modseq: hits
                 .iter()
                 .copied()
                 .filter_map(|uid| self.state.message_status(uid))
-                .map(|m| m.last_modified())
+                .map(|m| m.last_modified().into())
                 .max(),
             hit_uids: hits.clone(),
             hits,
@@ -317,7 +317,7 @@ impl StatefulMailbox {
             SearchQuery::And(ref queries) => self.compile_and(dst, queries),
 
             SearchQuery::Modseq(ms) => {
-                dst.push(Op::Modseq(ms));
+                dst.push(Op::Modseq(ms.raw()));
             },
 
             SearchQuery::EmailId(ref email_id) => {
@@ -362,6 +362,7 @@ fn to_regex(pat: &str) -> Regex {
 mod test {
     use chrono::prelude::*;
 
+    use super::super::super::model::*;
     use super::super::test_prelude::*;
     use super::*;
     use crate::support::chronox::*;
@@ -758,14 +759,17 @@ mod test {
             })
             .unwrap();
         assert_eq!(
-            Some(Modseq::new(uids[0], Cid::GENESIS)),
-            result.first_modseq
+            Some(V1Modseq::new(uids[0], Cid::GENESIS)),
+            result.first_modseq.and_then(V1Modseq::import),
         );
         assert_eq!(
-            Some(Modseq::new(uids[4], Cid::GENESIS)),
-            result.last_modseq
+            Some(V1Modseq::new(uids[4], Cid::GENESIS)),
+            result.last_modseq.and_then(V1Modseq::import),
         );
-        assert_eq!(Some(Modseq::new(uids[4], Cid(1))), result.max_modseq);
+        assert_eq!(
+            Some(V1Modseq::new(uids[4], Cid(1))),
+            result.max_modseq.and_then(V1Modseq::import),
+        );
 
         let result = mb
             .search(&SearchRequest {

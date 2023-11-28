@@ -171,7 +171,7 @@ impl CommandProcessor {
             }
 
             if has_modseq {
-                r.modseq = modseq.map(|m| m.raw().get());
+                r.modseq = modseq.map(|m| m.raw());
             }
 
             s::Response::Esearch(r)
@@ -182,7 +182,7 @@ impl CommandProcessor {
                 // Only return the MODSEQ item if the client specified a MODSEQ
                 // criterion.
                 max_modseq: if has_modseq {
-                    response.max_modseq.map(|m| m.raw().get())
+                    response.max_modseq.map(|m| m.raw())
                 } else {
                     None
                 },
@@ -310,7 +310,7 @@ impl CommandProcessor {
             )),
             s::SearchKey::Modseq(m) => {
                 *has_modseq = true;
-                Ok(SearchQuery::Modseq(m.modseq))
+                Ok(SearchQuery::Modseq(Modseq::of(m.modseq)))
             },
             s::SearchKey::EmailId(id) => {
                 Ok(SearchQuery::EmailId(id.into_owned()))

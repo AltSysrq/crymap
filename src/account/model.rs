@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::marker::PhantomData;
-use std::num::{NonZeroU32, NonZeroU64};
+use std::num::NonZeroU32;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -31,53 +31,6 @@ use tempfile::TempPath;
 
 use crate::mime::fetch;
 use crate::support::error::Error;
-
-/// A change identifier.
-///
-/// Change identifiers are assigned sequentially, starting from 1, for all
-/// metadata changes in a mailbox. They are one of two components of a
-/// `Modseq`.
-///
-/// Cid 0, while not assigned to any specific change, represents the creation
-/// of a message.
-///
-/// Though this contains a `u32`, only values between `MIN` and `MAX` are valid
-/// (and `GENESIS` when referring to the instant a UID is allocated) since RFC
-/// 5162 felt the need to accommodate defective environments lacking proper
-/// 64-bit integers.
-#[derive(
-    Deserialize,
-    Serialize,
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-)]
-#[serde(transparent)]
-pub struct Cid(pub u32);
-
-impl Cid {
-    pub const GENESIS: Self = Cid(0);
-    pub const MIN: Self = Cid(1);
-    /// This could be increased to `(1 << 32)`, but the overhead of using
-    /// real multiplication and division is pretty small, and this way the
-    /// base-10 integers IMAP sends over the wire are readable (in combination
-    /// with a `Uid` to form a `Modseq`).
-    pub const END: Self = Cid(4_000_000_000);
-    pub const MAX: Self = Cid(Cid::END.0 - 1);
-
-    pub fn next(self) -> Option<Self> {
-        if self < Cid::MAX {
-            Some(Cid(self.0 + 1))
-        } else {
-            None
-        }
-    }
-}
 
 /// Uniquely identifies a message within a single mailbox.
 ///
@@ -112,13 +65,11 @@ impl Default for Uid {
 impl Uid {
     // Unsafe because new() isn't const for some reason
     pub const MIN: Self = unsafe { Uid(NonZeroU32::new_unchecked(1)) };
-    // The maximum possible UID value is limited by the 63-bit `Modseq` space
-    // and the value the UID is multiplied with.
-    pub const MAX: Self = unsafe {
-        Uid(NonZeroU32::new_unchecked(
-            (((1u64 << 63) - 1) / (Cid::END.0 as u64)) as u32,
-        ))
-    };
+    // The maximum possible UID value in the V1 data store is limited by the
+    // 63-bit `Modseq` space and the value the UID is multiplied with, but we
+    // don't care about enforcing that anymore, so we can just use u32::MAX, as
+    // V2 has no such limit.
+    pub const MAX: Self = unsafe { Uid(NonZeroU32::new_unchecked(u32::MAX)) };
 
     pub fn of(uid: u32) -> Option<Self> {
         NonZeroU32::new(uid).map(Uid).filter(|&u| u <= Uid::MAX)
@@ -233,95 +184,37 @@ impl fmt::Debug for Seqnum {
 
 /// A CONDSTORE/QRESYNC "modifier sequence" number.
 ///
-/// In this implementation, this is a 2-element vector clock of a UID and a
-/// CID, which allows message insertions to be more weakly-ordered with respect
-/// to metadata changes (which is important so that mail delivery does not need
-/// to deal with loading the metadata just to add its message).
-///
-/// A message with a given UID is said to come into existence at the moment
-/// identified by `Modseq::new(uid, Cid::GENESIS)`. Each change takes place
-/// with a UID equalling the largest known UID at the time and the CID assigned
-/// to that particular change.
-///
-/// While this is modelled as a vector clock, it is actually strictly ordered
-/// with respect to its integer value, as required by QRESYNC. That is, given
-/// any two `Modseq` values in the same mailbox, there will never be a case
-/// where `a.uid() > b.uid()` but `a.cid() < b.cid()`, except for the case of
-/// message insertions whose CID is 0. While those are technically "concurrent"
-/// with all metadata updates, we do not need to handle that according to
-/// vector clock interpretation because the client will never be given a
-/// `HIGHESTMODSEQ` with a CID of 0 unless there have been no metadata
-/// operations at all.
-///
-/// The reported `HIGHESTMODSEQ` always has the UID of the last seen message
-/// and the CID of the last seen metadata operation.
-///
-/// The "primordial" modifier sequence number, used for a brand new mailbox, is
-/// not representable by this structure. It is sent over the wire as 1.
+/// This is just a wrapper around a 64-bit integer. While we never generate
+/// `Modseq` values of 0 (and, in fact, CONDSTORE requires that 0 refers to a
+/// time before anything ever happened), we do need to understand a client
+/// talking about Modseq 0.
 #[derive(
-    Deserialize, Serialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
+    Deserialize,
+    Serialize,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
 )]
 #[serde(transparent)]
-pub struct Modseq(NonZeroU64);
+pub struct Modseq(u64);
 
 impl Modseq {
-    // Unsafe because NonZeroU64::new() is non-const.
-    pub const MIN: Self =
-        unsafe { Modseq(NonZeroU64::new_unchecked(Cid::END.0 as u64)) };
+    /// The minimum real `Modseq`.
+    ///
+    /// The value less than this can still occur if requested by the client.
+    pub const MIN: Self = Self(1);
 
-    pub fn of(raw: u64) -> Option<Self> {
-        NonZeroU64::new(raw)
-            .map(Modseq)
-            .filter(|&m| m >= Modseq::MIN)
+    pub fn of(raw: u64) -> Self {
+        Self(raw)
     }
 
-    pub fn new(uid: Uid, cid: Cid) -> Self {
-        Modseq(
-            NonZeroU64::new(
-                (uid.0.get() as u64) * (Cid::END.0 as u64) + cid.0 as u64,
-            )
-            .unwrap(),
-        )
-    }
-
-    pub fn raw(self) -> NonZeroU64 {
+    pub fn raw(self) -> u64 {
         self.0
-    }
-
-    pub fn uid(self) -> Uid {
-        Uid::of((self.0.get() / (Cid::END.0 as u64)) as u32).unwrap()
-    }
-
-    pub fn cid(self) -> Cid {
-        Cid((self.0.get() % (Cid::END.0 as u64)) as u32)
-    }
-
-    pub fn combine(self, other: Self) -> Self {
-        Modseq::new(self.uid().max(other.uid()), self.cid().max(other.cid()))
-    }
-
-    pub fn with_uid(self, uid: Uid) -> Self {
-        Modseq::new(uid, self.cid())
-    }
-
-    pub fn with_cid(self, cid: Cid) -> Self {
-        Modseq::new(self.uid(), cid)
-    }
-
-    pub fn next(self) -> Option<Self> {
-        self.cid().next().map(|cid| self.with_cid(cid))
-    }
-}
-
-impl fmt::Debug for Modseq {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Modseq({}:{}={})",
-            self.uid().0.get(),
-            self.cid().0,
-            self.0.get()
-        )
     }
 }
 
@@ -788,7 +681,7 @@ pub struct StatusResponse {
     pub uidvalidity: Option<u32>,
     pub unseen: Option<usize>,
     // ==================== RFC 7162 ====================
-    pub max_modseq: Option<u64>,
+    pub max_modseq: Option<Modseq>,
     // ==================== RFC 8474 ====================
     pub mailbox_id: Option<String>,
     // ==================== RFC 8438 ====================
@@ -917,11 +810,10 @@ pub struct SelectResponse {
     /// `TAG OK [READ-WRITE|READ-ONLY]`
     pub read_only: bool,
     // ==================== RFC 7162 ====================
-    /// The greatest `Modseq` currently in the mailbox, or `None` if
-    /// primordial.
+    /// The greatest `Modseq` currently in the mailbox.
     ///
-    /// `* OK [HIGHESTMODSEQ max_modseq.unwrap_or(1)]`
-    pub max_modseq: Option<Modseq>,
+    /// `* OK [HIGHESTMODSEQ max_modseq]`
+    pub max_modseq: Modseq,
 }
 
 /// Unsolicited responses that can be sent after commands (other than `FETCH`,
@@ -955,8 +847,8 @@ pub struct PollResponse {
     /// UIDs of messages that should be sent in unsolicited `FETCH` responses
     /// because their metadata changed or they recently came into existence.
     pub fetch: Vec<Uid>,
-    /// The new `HIGHESTMODSEQ`, or `None` if still primordial or hasn't
-    /// changed since the last poll.
+    /// The new `HIGHESTMODSEQ`, or `None` if it hasn't changed since the last
+    /// poll.
     pub max_modseq: Option<Modseq>,
 }
 
@@ -965,10 +857,8 @@ pub struct PollResponse {
 pub struct QresyncRequest {
     /// The last known UID validity value for the mailbox.
     pub uid_validity: u32,
-    /// If set, only consider changes that may have occurred after this point.
-    ///
-    /// If clear, consider changes from all time.
-    pub resync_from: Option<Modseq>,
+    /// Only consider changes that may have occurred after this point.
+    pub resync_from: Modseq,
     /// If set, only return information for UIDs in this set.
     pub known_uids: Option<SeqRange<Uid>>,
     /// If set and `resync_from` is earlier than the last known expungement,
@@ -1039,17 +929,17 @@ where
     ///
     /// This corresponds to `UNCHANGEDSINCE`.
     ///
-    /// This is a raw value that nominally should be a `Modseq`. This is
-    /// because we must allow clients to submit values less than `Modseq::MIN`,
-    /// even though they are doomed to failure. At that, RFC 7162 *requires*
-    /// that an `UNCHANGEDSINCE` of 0 MUST fail (Page 12, Example 6):
+    /// This is the weird case that requires us to be able to represent
+    /// `Modseq(0)`, even though requests with `unchanged_since: 0` are doomed
+    /// to failure. At that, RFC 7162 *requires* that an `UNCHANGEDSINCE` of 0
+    /// MUST fail (Page 12, Example 6):
     ///
     /// > Use of UNCHANGEDSINCE with a modification sequence of 0 always fails
     /// > if the metadata item exists.  A system flag MUST always be considered
     /// > existent, whether it was set or not.
     ///
     /// (Hooray for novel hard requirements set out in examples...)
-    pub unchanged_since: Option<u64>,
+    pub unchanged_since: Option<Modseq>,
 }
 
 /// Response information for `STORE` and `UID STORE`.
@@ -1170,8 +1060,6 @@ where
     pub modseq: bool,
     /// If set, filter out messages which have not been changed since the given
     /// time.
-    ///
-    /// If the client requests a `Modseq` less than `Modseq::MIN`, pass `None`.
     pub changed_since: Option<Modseq>,
     /// Should the fetch process gather UIDs which were expunged for a
     /// `VANISHED` response? If `changed_since` is greater than the earliest
@@ -1409,7 +1297,7 @@ pub enum SearchQuery {
     Unkeyword(String),
     Unseen,
     And(Vec<SearchQuery>),
-    Modseq(u64),
+    Modseq(Modseq),
     EmailId(String),
     ThreadId(String),
 }

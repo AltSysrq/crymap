@@ -404,7 +404,7 @@ mod test {
         fetcher.add_email_id();
 
         let uid = Uid::u(42);
-        let modseq = Modseq::new(Uid::u(56), Cid(100));
+        let modseq = Modseq::of(56100);
         let internal_date =
             FixedOffset::zero().timestamp_millis_opt(1000).unwrap();
         let mut result = grovel::grovel(

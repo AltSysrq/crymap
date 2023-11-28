@@ -565,8 +565,7 @@ impl Account {
         }
 
         if request.max_modseq {
-            response.max_modseq =
-                Some(select.max_modseq.map_or(1, |m| m.raw().get()));
+            response.max_modseq = Some(select.max_modseq.into());
         }
 
         if request.mailbox_id {

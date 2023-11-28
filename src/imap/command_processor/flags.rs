@@ -65,7 +65,7 @@ impl CommandProcessor {
             remove_listed: s::StoreCommandType::Minus == cmd.typ,
             remove_unlisted: s::StoreCommandType::Eq == cmd.typ,
             loud: !cmd.silent,
-            unchanged_since: cmd.unchanged_since,
+            unchanged_since: cmd.unchanged_since.map(Modseq::of),
         };
 
         let resp = f(selected!(self)?, &request).map_err(map_error! {

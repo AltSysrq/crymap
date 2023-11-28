@@ -31,4 +31,5 @@ mod hier_id_scheme;
 pub mod mailbox;
 pub mod mailbox_path;
 mod mailbox_state;
+mod model;
 mod recency_token;

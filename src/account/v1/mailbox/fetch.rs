@@ -22,7 +22,7 @@ use std::io::BufRead;
 use std::mem;
 use std::sync::Arc;
 
-use super::super::mailbox_state::*;
+use super::super::{mailbox_state::*, model::*};
 use super::defs::*;
 use crate::account::model::*;
 use crate::mime::fetch::multi::*;
@@ -47,7 +47,7 @@ impl<'a> MessageAccessor for MailboxMessageAccessor<'a> {
     }
 
     fn last_modified(&self) -> Modseq {
-        self.message_status.last_modified()
+        self.message_status.last_modified().into()
     }
 
     fn is_recent(&self) -> bool {
@@ -129,7 +129,11 @@ impl StatefulMailbox {
         if request.collect_vanished {
             let precise_expunged = request
                 .changed_since
-                .and_then(|since| self.state.uids_expunged_since(since))
+                .and_then(|since| {
+                    self.state.uids_expunged_since(
+                        V1Modseq::import(since).unwrap_or(V1Modseq::MIN),
+                    )
+                })
                 .map(|it| it.collect::<HashSet<Uid>>());
             for uid in uids.items(self.state.max_uid_val()) {
                 if precise_expunged
@@ -264,7 +268,10 @@ impl StatefulMailbox {
         let result = self.access_message(uid).and_then(|accessor| {
             if request
                 .changed_since
-                .map(|since| accessor.message_status.last_modified() <= since)
+                .map(|since| {
+                    Modseq::from(accessor.message_status.last_modified())
+                        <= since
+                })
                 .unwrap_or(false)
             {
                 Ok(SingleFetchResponse::NotModified)

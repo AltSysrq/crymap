@@ -149,7 +149,7 @@ impl CommandProcessor {
 
                     enable_condstore = true;
                     has_changedsince = true;
-                    request.changed_since = Modseq::of(modseq);
+                    request.changed_since = Some(Modseq::of(modseq));
                 },
                 s::FetchModifier::Vanished(_) => {
                     if !self.qresync_enabled {
@@ -496,7 +496,7 @@ fn fetch_att_to_ast(
     match item {
         FI::Nil => panic!("Nil FetchedItem"),
         FI::Uid(uid) => Some(s::MsgAtt::Uid(uid.0.get())),
-        FI::Modseq(modseq) => Some(s::MsgAtt::Modseq(modseq.raw().get())),
+        FI::Modseq(modseq) => Some(s::MsgAtt::Modseq(modseq.raw())),
         FI::Flags(flags) => Some(s::MsgAtt::Flags(if flags.recent {
             s::FlagsFetch::Recent(flags.flags)
         } else {

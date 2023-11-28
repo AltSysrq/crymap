@@ -455,7 +455,7 @@ mod test {
         let message = message.replace('\n', "\r\n");
         let accessor = grovel::SimpleAccessor {
             uid: Uid::u(42),
-            last_modified: Modseq::new(Uid::u(56), Cid(100)),
+            last_modified: Modseq::of(56100),
             recent: true,
             flags: vec![Flag::Flagged],
             metadata: MessageMetadata {
@@ -506,10 +506,7 @@ This is the content.
         );
 
         assert_eq!(Some(Uid::u(42)), result.uid);
-        assert_eq!(
-            Some(Modseq::new(Uid::u(56), Cid(100))),
-            result.last_modified
-        );
+        assert_eq!(Some(Modseq::of(56100)), result.last_modified);
         assert_eq!(Some(true), result.recent);
         assert_eq!(Some(vec![Flag::Flagged]), result.flags);
         assert_eq!(12345, result.metadata.as_ref().unwrap().size);

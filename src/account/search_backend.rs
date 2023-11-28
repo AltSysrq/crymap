@@ -130,7 +130,7 @@ pub fn eval(ops: &[Op], data: &SearchData) -> Option<bool> {
             // seems strict inequality would be more sensible (as that would
             // mean "modified after")
             Op::Modseq(thresh) => {
-                s.o(data.last_modified.map(|m| m.raw().get() >= thresh))
+                s.o(data.last_modified.map(|m| m.raw() >= thresh))
             },
             // RFC 8474 requires case-sensitive comparison
             Op::EmailId(ref email_id) => s.o(data
@@ -354,7 +354,7 @@ mod test {
             )
         );
 
-        let modseq = Modseq::new(Uid::u(4), Cid(56));
+        let modseq = Modseq::of(12345);
         assert_eq!(None, eval(&[Op::Modseq(0)], &SearchData::default()));
         assert_eq!(
             Some(true),
@@ -369,7 +369,7 @@ mod test {
         assert_eq!(
             Some(true),
             eval(
-                &[Op::Modseq(modseq.raw().get())],
+                &[Op::Modseq(modseq.raw())],
                 &SearchData {
                     last_modified: Some(modseq),
                     ..SearchData::default()
@@ -379,7 +379,7 @@ mod test {
         assert_eq!(
             Some(false),
             eval(
-                &[Op::Modseq(modseq.raw().get() + 1)],
+                &[Op::Modseq(modseq.raw() + 1)],
                 &SearchData {
                     last_modified: Some(modseq),
                     ..SearchData::default()

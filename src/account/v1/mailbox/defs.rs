@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
 use super::super::{
-    hier_id_scheme::HierIdScheme, mailbox_path::*, mailbox_state::*,
+    hier_id_scheme::HierIdScheme, mailbox_path::*, mailbox_state::*, model::*,
 };
 use crate::account::{key_store::KeyStore, model::*};
 use crate::support::error::Error;
@@ -168,14 +168,14 @@ impl StatefulMailbox {
     }
 
     /// Return the HIGHESTMODSEQ to report to the client.
-    pub fn report_max_modseq(&self) -> Option<Modseq> {
+    pub fn report_max_modseq(&self) -> Option<V1Modseq> {
         self.state.report_max_modseq()
     }
 
     /// If the reported HIGHESTMODSEQ is different from the actual maximum
     /// modseq, and it is possible for the client to have observed this, return
     /// the value to report.
-    pub fn divergent_modseq(&self) -> Option<Modseq> {
+    pub fn divergent_modseq(&self) -> Option<V1Modseq> {
         if self.state.report_max_modseq() != self.state.max_modseq() {
             // This will, in practise, always be Some if the value will
             // eventually be returned to the client, since we only consider

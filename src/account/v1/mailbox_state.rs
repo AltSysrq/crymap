@@ -28,6 +28,7 @@ use std::mem;
 use chrono::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::model::{Cid, V1Modseq};
 use crate::account::model::*;
 use crate::support::error::Error;
 use crate::support::small_bitset::SmallBitset;
@@ -101,13 +102,13 @@ pub struct MailboxState {
     ///
     /// The UID is always the greatest UID seen so far, and the CID is the
     /// greatest CID seen so far.
-    max_modseq: Option<Modseq>,
+    max_modseq: Option<V1Modseq>,
 
     /// The greatest `Modseq` currently seen through a transaction.
     ///
     /// This may be less than `max_modseq` when the latest transaction did not
     /// include the latest UID.
-    max_tx_modseq: Option<Modseq>,
+    max_tx_modseq: Option<V1Modseq>,
 
     /// The most recent expungements.
     ///
@@ -118,7 +119,7 @@ pub struct MailboxState {
     /// This is used for `QRESYNC` requests to be able to return compact
     /// `VANISHED (EARLIER)` lists when the client isn't excessively out of
     /// date.
-    recent_expungements: VecDeque<(Modseq, Uid)>,
+    recent_expungements: VecDeque<(V1Modseq, Uid)>,
 
     /// Messages that have been marked expunged but may still be resident on
     /// disk.
@@ -147,7 +148,7 @@ pub struct MailboxState {
     /// to send the client that information until it performs a command type
     /// that allows it.
     #[serde(skip)]
-    report_max_modseq: Option<Modseq>,
+    report_max_modseq: Option<V1Modseq>,
 
     /// UIDs which have seen flag changes that should be passed on to the
     /// client once possible.
@@ -170,7 +171,7 @@ pub struct MessageStatus {
     flags: SmallBitset,
     /// The `Modseq` of the last point at which this message was modified.
     #[serde(rename = "m")]
-    last_modified: Modseq,
+    last_modified: V1Modseq,
     /// The per-session recency status.
     #[serde(skip)]
     recent: bool,
@@ -207,7 +208,7 @@ impl MailboxState {
                     uid,
                     MessageStatus {
                         flags: SmallBitset::new(),
-                        last_modified: Modseq::new(uid, Cid::GENESIS),
+                        last_modified: V1Modseq::new(uid, Cid::GENESIS),
                         recent: false,
                     },
                 );
@@ -216,7 +217,7 @@ impl MailboxState {
             self.max_modseq = Some(
                 self.max_modseq
                     .map(|m| m.with_uid(uid))
-                    .unwrap_or_else(|| Modseq::new(uid, Cid::GENESIS)),
+                    .unwrap_or_else(|| V1Modseq::new(uid, Cid::GENESIS)),
             );
         }
     }
@@ -274,7 +275,7 @@ impl MailboxState {
         self.seen(tx.max_uid);
 
         // Advance our own idea of the maximum modseq
-        let nominal_modseq = Modseq::new(tx.max_uid, cid);
+        let nominal_modseq = V1Modseq::new(tx.max_uid, cid);
         let canonical_modseq = self
             .max_tx_modseq
             .map(|m| m.combine(nominal_modseq))
@@ -584,12 +585,12 @@ impl MailboxState {
     }
 
     /// Return the true maximum `Modseq`
-    pub fn max_modseq(&self) -> Option<Modseq> {
+    pub fn max_modseq(&self) -> Option<V1Modseq> {
         self.max_modseq
     }
 
     /// Return the `Modseq` to report to the client through `HIGHESTMODSEQ`.
-    pub fn report_max_modseq(&self) -> Option<Modseq> {
+    pub fn report_max_modseq(&self) -> Option<V1Modseq> {
         self.report_max_modseq
     }
 
@@ -610,7 +611,7 @@ impl MailboxState {
     /// Return the maximum UID currently in the snapshot, including expunged
     /// messages.
     pub fn max_uid(&self) -> Option<Uid> {
-        self.max_modseq.map(Modseq::uid)
+        self.max_modseq.map(V1Modseq::uid)
     }
 
     /// Return the maximum sequence number currently in the snapshot.
@@ -634,7 +635,7 @@ impl MailboxState {
     /// point to look for expunged messages.
     pub fn qresync(
         &self,
-        resync_from: Option<Modseq>,
+        resync_from: Option<V1Modseq>,
         mut filter: impl FnMut(&Uid) -> bool,
         seqnum_reference: impl IntoIterator<Item = Seqnum>,
         uid_reference: impl IntoIterator<Item = Uid>,
@@ -717,7 +718,7 @@ impl MailboxState {
     /// Returns `None` if this is not precisely known.
     pub fn uids_expunged_since(
         &self,
-        since: Modseq,
+        since: V1Modseq,
     ) -> Option<impl Iterator<Item = Uid> + '_> {
         if self
             .recent_expungements
@@ -769,7 +770,7 @@ impl MailboxState {
     fn set_flag(
         &mut self,
         uid: Uid,
-        canonical_modseq: Modseq,
+        canonical_modseq: V1Modseq,
         flag: Flag,
         val: bool,
     ) {
@@ -792,7 +793,7 @@ impl MailboxState {
         &mut self,
         deadline: DateTime<Utc>,
         uid: Uid,
-        canonical_modseq: Modseq,
+        canonical_modseq: V1Modseq,
     ) {
         self.soft_expungements
             .push(SoftExpungement { deadline, uid });
@@ -851,7 +852,7 @@ impl MessageStatus {
     }
 
     /// Returns the last `Modseq` of this message.
-    pub fn last_modified(&self) -> Modseq {
+    pub fn last_modified(&self) -> V1Modseq {
         self.last_modified
     }
 }
@@ -940,7 +941,7 @@ pub struct FlushResponse {
     /// place gravestones over the files for these UIDs.
     pub stillborn: Vec<Uid>,
     /// The new `HIGHESTMODSEQ`, or `None` if still primordial.
-    pub max_modseq: Option<Modseq>,
+    pub max_modseq: Option<V1Modseq>,
 }
 
 /// An interned ID for a flag, valid in one `MailboxState`.
@@ -976,7 +977,7 @@ mod test {
         );
         assert!(flush.expunged.is_empty());
         assert_eq!(
-            Some(Modseq::new(Uid::u(3), Cid::GENESIS)),
+            Some(V1Modseq::new(Uid::u(3), Cid::GENESIS)),
             flush.max_modseq
         );
 
@@ -1012,7 +1013,7 @@ mod test {
         assert_eq!(Some(Seqnum::u(3)), state.uid_to_seqnum(Uid::u(3)).ok());
         assert_eq!(None, state.uid_to_seqnum(Uid::u(4)).ok());
         assert_eq!(
-            Some(Modseq::new(Uid::u(3), Cid::GENESIS)),
+            Some(V1Modseq::new(Uid::u(3), Cid::GENESIS)),
             state.report_max_modseq()
         );
 
@@ -1022,7 +1023,7 @@ mod test {
             flush.new
         );
         assert_eq!(vec![(Seqnum::u(2), Uid::u(2))], flush.expunged);
-        assert_eq!(Some(Modseq::new(Uid::u(5), cid)), flush.max_modseq);
+        assert_eq!(Some(V1Modseq::new(Uid::u(5), cid)), flush.max_modseq);
 
         // New UID-seqnum mapping has come into effect
         assert_eq!(4, state.num_messages());
@@ -1038,7 +1039,7 @@ mod test {
         assert_eq!(Some(Seqnum::u(4)), state.uid_to_seqnum(Uid::u(5)).ok());
         assert_eq!(None, state.uid_to_seqnum(Uid::u(6)).ok());
         assert_eq!(
-            Some(Modseq::new(Uid::u(5), cid)),
+            Some(V1Modseq::new(Uid::u(5), cid)),
             state.report_max_modseq()
         );
     }

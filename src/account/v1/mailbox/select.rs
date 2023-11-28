@@ -28,7 +28,7 @@ use std::time::{Duration, SystemTime};
 
 use log::{error, warn};
 
-use super::super::mailbox_state::*;
+use super::super::{mailbox_state::*, model::*};
 use super::defs::*;
 use crate::account::model::*;
 use crate::support::error::Error;
@@ -139,7 +139,7 @@ impl StatefulMailbox {
             .unwrap_or_else(MailboxState::new);
 
         let mut this = Self {
-            recency_frontier: state.max_modseq().map(Modseq::uid),
+            recency_frontier: state.max_modseq().map(V1Modseq::uid),
             s,
             state,
             fetch_loopbreaker: HashSet::new(),
@@ -189,7 +189,7 @@ impl StatefulMailbox {
             uidnext: this.state.next_uid().unwrap_or(Uid::MAX),
             uidvalidity: this.s.uid_validity()?,
             read_only: this.s.read_only,
-            max_modseq: this.state.report_max_modseq(),
+            max_modseq: this.state.report_max_modseq().into(),
         };
         Ok((this, select_response))
     }
@@ -211,7 +211,7 @@ impl StatefulMailbox {
         let known_uids = request.known_uids;
 
         let response = self.state.qresync(
-            request.resync_from,
+            V1Modseq::import(request.resync_from),
             |&uid| known_uids.as_ref().map_or(true, |k| k.contains(uid)),
             seqnum_reference.items(u32::MAX),
             uid_reference.items(u32::MAX),
@@ -292,7 +292,7 @@ pub(super) fn list_rollups(
                     .file_name()
                     .to_str()
                     .and_then(|n| n.parse::<u64>().ok())
-                    .and_then(Modseq::of)
+                    .and_then(V1Modseq::of)
                 {
                     Some(ms) => ms,
                     // Ignore inscrutable filenames

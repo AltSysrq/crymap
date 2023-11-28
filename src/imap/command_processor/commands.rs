@@ -582,7 +582,7 @@ Content-Transfer-Encoding: base64
                 sender(s::Response::Cond(s::CondResponse {
                     cond: s::RespCondType::Ok,
                     code: Some(s::RespTextCode::HighestModseq(
-                        max_modseq.raw().get(),
+                        max_modseq.raw(),
                     )),
                     quip: None,
                 }));
