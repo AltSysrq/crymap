@@ -22,8 +22,10 @@ use log::warn;
 use regex::{self, Regex};
 
 use super::defs::*;
-use super::search_backend::{self, Op};
-use crate::account::model::*;
+use crate::account::{
+    model::*,
+    search_backend::{self, Op},
+};
 use crate::mime::fetch::search::{OptionalSearchParts, SearchFetcher};
 use crate::mime::grovel;
 use crate::support::error::Error;

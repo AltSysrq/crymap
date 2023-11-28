@@ -25,8 +25,8 @@ use log::{error, warn};
 
 use super::defs::*;
 use crate::account::{
-    mailbox::{FetchReceiver, StatefulMailbox},
     model::*,
+    v1::mailbox::{FetchReceiver, StatefulMailbox},
 };
 use crate::imap::literal_source::LiteralSource;
 use crate::mime::fetch::{self, section::*};

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, Jason Lingle
+// Copyright (c) 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -16,13 +16,19 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-//! This module contains everything to do with a single user's data: their
-//! mailboxes, their settings, their keys.
+//! The storage system that was used in Crymap before version 2.0.
 //!
-//! Unversioned submodules are not storage-implementation-specific.
+//! V1 storage uses a complex and delicate "filesystem as a database" model,
+//! described in more detail in each module.
+//!
+//! The code here is the entire storage layer from Crymap 1.x. In the binary
+//! build, it is used in a read-only manner to migrate to the V2 model. Tests
+//! do use the write support to generate scenarios to test the migration path.
+#![allow(dead_code)]
 
-pub mod key_store;
-pub mod model;
-mod search_backend;
-
-pub mod v1;
+pub mod account;
+mod hier_id_scheme;
+pub mod mailbox;
+pub mod mailbox_path;
+mod mailbox_state;
+mod recency_token;

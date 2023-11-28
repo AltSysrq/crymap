@@ -28,7 +28,7 @@ use std::mem;
 use chrono::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::model::*;
+use crate::account::model::*;
 use crate::support::error::Error;
 use crate::support::small_bitset::SmallBitset;
 

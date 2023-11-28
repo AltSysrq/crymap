@@ -22,8 +22,8 @@ use std::io::BufRead;
 use std::mem;
 use std::sync::Arc;
 
+use super::super::mailbox_state::*;
 use super::defs::*;
-use crate::account::mailbox_state::*;
 use crate::account::model::*;
 use crate::mime::fetch::multi::*;
 use crate::mime::grovel::{grovel, MessageAccessor};

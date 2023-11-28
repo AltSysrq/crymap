@@ -68,7 +68,7 @@ use std::path::{Path, PathBuf};
 
 use log::error;
 
-use super::model::Uid;
+use crate::account::model::Uid;
 use crate::support::file_ops::IgnoreKinds;
 
 /// Go through the recency claim process.

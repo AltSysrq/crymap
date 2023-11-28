@@ -20,7 +20,7 @@ use std::borrow::Cow;
 use std::fmt;
 
 use super::defs::*;
-use crate::account::{mailbox::StatefulMailbox, model::*};
+use crate::account::{model::*, v1::mailbox::StatefulMailbox};
 use crate::support::error::Error;
 
 impl CommandProcessor {

@@ -26,10 +26,11 @@ use std::sync::{Arc, Mutex};
 use chrono::prelude::*;
 use log::{error, info, warn};
 
-use crate::account::key_store::{KeyStore, KeyStoreConfig};
-use crate::account::mailbox::StatelessMailbox;
-use crate::account::mailbox_path::*;
-use crate::account::model::*;
+use super::{mailbox::StatelessMailbox, mailbox_path::*};
+use crate::account::{
+    key_store::{KeyStore, KeyStoreConfig},
+    model::*,
+};
 use crate::crypt::master_key::MasterKey;
 use crate::support::{
     chronox::*, error::Error, file_ops::IgnoreKinds, safe_name::is_safe_name,

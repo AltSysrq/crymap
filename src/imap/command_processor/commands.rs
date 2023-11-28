@@ -22,8 +22,8 @@ use std::convert::TryInto;
 use log::{error, info};
 
 use super::defs::*;
-use crate::account::mailbox::IdleListener;
 use crate::account::model::SeqRange;
+use crate::account::v1::mailbox::IdleListener;
 use crate::support::error::Error;
 
 impl CommandProcessor {

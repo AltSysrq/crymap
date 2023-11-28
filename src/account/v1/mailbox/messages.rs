@@ -25,7 +25,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::prelude::*;
 use log::info;
 use rand::{rngs::OsRng, Rng};
-use tempfile::{NamedTempFile, TempPath};
+use tempfile::NamedTempFile;
 
 use super::defs::*;
 use crate::account::model::*;
@@ -33,9 +33,6 @@ use crate::crypt::data_stream;
 use crate::support::compression::{Compression, FinishWrite};
 use crate::support::error::Error;
 use crate::support::file_ops;
-
-#[derive(Debug)]
-pub struct BufferedMessage(TempPath);
 
 impl StatelessMailbox {
     /// Open the identified message for reading.
@@ -385,9 +382,9 @@ mod test {
 
     use chrono::prelude::*;
 
+    use super::super::super::mailbox_path::MailboxPath;
     use super::super::test_prelude::*;
     use super::*;
-    use crate::account::mailbox_path::MailboxPath;
     use crate::support::chronox::*;
 
     fn destination(setup: &Setup) -> StatelessMailbox {

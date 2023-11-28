@@ -25,9 +25,9 @@ use chrono::prelude::*;
 use log::error;
 
 use super::main::ServerDeliverSubcommand;
-use crate::account::account::Account;
-use crate::account::mailbox::StatelessMailbox;
 use crate::account::model::*;
+use crate::account::v1::account::Account;
+use crate::account::v1::mailbox::StatelessMailbox;
 use crate::support::{
     chronox::*, error::Error, safe_name::is_safe_name, sysexits::*,
     system_config::SystemConfig, unix_privileges,

@@ -234,7 +234,6 @@ mod defs;
 // Internal support --- R/W of messages and state transactions
 mod change_tx;
 mod messages; // Also includes low-level APPEND-like operation
-mod search_backend;
 
 // IMAP commands
 // Methods are not 1:1 in cases where the IMAP model does not naturally fit the
@@ -256,7 +255,6 @@ mod zstd_train;
 pub use defs::{StatefulMailbox, StatelessMailbox};
 pub use fetch::{FetchReceiver, MailboxMessageAccessor};
 pub use idle::{IdleListener, IdleNotifier};
-pub use messages::BufferedMessage;
 
 #[cfg(test)]
 mod test_prelude {
@@ -268,8 +266,8 @@ mod test_prelude {
     use chrono::prelude::*;
     use tempfile::TempDir;
 
+    use super::super::mailbox_path::MailboxPath;
     use crate::account::key_store::{KeyStore, KeyStoreConfig};
-    use crate::account::mailbox_path::MailboxPath;
     use crate::account::model::*;
     use crate::crypt::master_key::MasterKey;
     use crate::support::chronox::*;

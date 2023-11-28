@@ -30,8 +30,8 @@ use openssl::ssl::SslAcceptor;
 
 use super::codes::*;
 use super::syntax::*;
-use crate::account::account::Account;
 use crate::account::model::CommonPaths;
+use crate::account::v1::account::Account;
 use crate::support::{
     append_limit::APPEND_SIZE_LIMIT,
     buffer::BufferWriter,

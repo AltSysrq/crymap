@@ -27,8 +27,8 @@ use std::str::FromStr;
 
 use chrono::prelude::*;
 use serde::{Deserialize, Serialize};
+use tempfile::TempPath;
 
-use crate::account::mailbox::BufferedMessage;
 use crate::mime::fetch;
 use crate::support::error::Error;
 
@@ -1610,6 +1610,9 @@ impl Default for MessageMetadata {
         }
     }
 }
+
+#[derive(Debug)]
+pub struct BufferedMessage(pub TempPath);
 
 #[cfg(test)]
 mod test {

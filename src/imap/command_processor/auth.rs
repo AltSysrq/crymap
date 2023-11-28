@@ -25,7 +25,7 @@ use std::sync::Arc;
 use log::{info, warn};
 
 use super::defs::*;
-use crate::account::account::{account_config_file, Account};
+use crate::account::v1::account::{account_config_file, Account};
 use crate::crypt::master_key::MasterKey;
 use crate::support::{
     safe_name::is_safe_name, unix_privileges, user_config::UserConfig,

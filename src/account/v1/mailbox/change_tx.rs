@@ -23,8 +23,8 @@ use std::path::Path;
 use serde::{de::DeserializeOwned, Serialize};
 use tempfile::NamedTempFile;
 
+use super::super::mailbox_state::*;
 use super::defs::*;
-use crate::account::mailbox_state::*;
 use crate::crypt::data_stream;
 use crate::support::compression::{Compression, FinishWrite};
 use crate::support::error::Error;

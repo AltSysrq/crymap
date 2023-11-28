@@ -23,9 +23,9 @@ use std::os::unix::fs::DirBuilderExt;
 use chrono::prelude::*;
 use log::warn;
 
+use super::super::recency_token;
 use super::defs::*;
 use crate::account::model::*;
-use crate::account::recency_token;
 use crate::support::error::Error;
 use crate::support::file_ops::{self, IgnoreKinds};
 

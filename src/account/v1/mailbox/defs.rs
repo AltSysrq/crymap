@@ -20,11 +20,10 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
-use crate::account::hier_id_scheme::HierIdScheme;
-use crate::account::key_store::KeyStore;
-use crate::account::mailbox_path::*;
-use crate::account::mailbox_state::*;
-use crate::account::model::*;
+use super::super::{
+    hier_id_scheme::HierIdScheme, mailbox_path::*, mailbox_state::*,
+};
+use crate::account::{key_store::KeyStore, model::*};
 use crate::support::error::Error;
 
 /// A stateless view of a mailbox.

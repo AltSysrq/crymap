@@ -32,8 +32,8 @@ use rayon::prelude::*;
 use tempfile::TempDir;
 
 use super::server::*;
-use crate::account::account::Account;
 use crate::account::model::Uid;
+use crate::account::v1::account::Account;
 use crate::crypt::master_key::MasterKey;
 use crate::support::{
     append_limit::APPEND_SIZE_LIMIT, error::Error, rcio::RcIo,

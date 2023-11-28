@@ -28,8 +28,8 @@ use lazy_static::lazy_static;
 use regex::bytes::Regex;
 use tempfile::TempDir;
 
-use crate::account::account::Account;
 use crate::account::model::Flag;
+use crate::account::v1::account::Account;
 use crate::crypt::master_key::MasterKey;
 use crate::imap::client::Client;
 use crate::imap::command_processor::CommandProcessor;

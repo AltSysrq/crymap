@@ -25,9 +25,11 @@ use std::sync::Arc;
 use log::error;
 
 use crate::account::{
-    account::Account,
-    mailbox::{StatefulMailbox, StatelessMailbox},
     model::*,
+    v1::{
+        account::Account,
+        mailbox::{StatefulMailbox, StatelessMailbox},
+    },
 };
 use crate::support::{error::Error, system_config::SystemConfig};
 

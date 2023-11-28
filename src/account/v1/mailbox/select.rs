@@ -28,8 +28,8 @@ use std::time::{Duration, SystemTime};
 
 use log::{error, warn};
 
+use super::super::mailbox_state::*;
 use super::defs::*;
-use crate::account::mailbox_state::*;
 use crate::account::model::*;
 use crate::support::error::Error;
 use crate::support::file_ops::IgnoreKinds;

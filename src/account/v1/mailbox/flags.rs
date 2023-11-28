@@ -18,8 +18,8 @@
 
 use log::warn;
 
+use super::super::mailbox_state::*;
 use super::defs::*;
-use crate::account::mailbox_state::*;
 use crate::account::model::*;
 use crate::support::error::Error;
 

@@ -20,8 +20,8 @@ use std::borrow::Cow;
 use std::convert::TryFrom;
 
 use super::defs::*;
-use crate::account::mailbox::StatefulMailbox;
 use crate::account::model::*;
+use crate::account::v1::mailbox::StatefulMailbox;
 use crate::support::error::Error;
 
 impl CommandProcessor {

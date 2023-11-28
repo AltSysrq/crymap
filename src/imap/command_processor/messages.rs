@@ -22,8 +22,8 @@ use std::io::Read;
 use chrono::prelude::*;
 
 use super::defs::*;
-use crate::account::mailbox::{StatefulMailbox, StatelessMailbox};
 use crate::account::model::*;
+use crate::account::v1::mailbox::{StatefulMailbox, StatelessMailbox};
 use crate::imap::mailbox_name::MailboxName;
 use crate::support::{chronox::*, error::Error};
 

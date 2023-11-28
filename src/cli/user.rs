@@ -24,7 +24,7 @@ use std::sync::Arc;
 use rand::{rngs::OsRng, Rng};
 
 use super::main::ServerUserAddSubcommand;
-use crate::account::account::Account;
+use crate::account::v1::account::Account;
 use crate::crypt::master_key::MasterKey;
 use crate::support::safe_name::is_safe_name;
 
