@@ -33,3 +33,4 @@ pub mod unix_privileges;
 pub mod user_config;
 #[macro_use]
 pub mod append_limit;
+pub mod mailbox_paths;

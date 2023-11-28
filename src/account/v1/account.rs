@@ -33,8 +33,8 @@ use crate::account::{
 };
 use crate::crypt::master_key::MasterKey;
 use crate::support::{
-    chronox::*, error::Error, file_ops::IgnoreKinds, safe_name::is_safe_name,
-    threading, user_config::UserConfig,
+    chronox::*, error::Error, file_ops::IgnoreKinds, mailbox_paths::*,
+    safe_name::is_safe_name, threading, user_config::UserConfig,
 };
 
 // Like format!, but returns None if the formatter fails instead of panicking.
