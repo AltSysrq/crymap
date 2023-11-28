@@ -25,6 +25,9 @@ The new structure would look like this:
 
 - `messages` - This directory tree contains all messages.
 
+- `delivery.sqlite` - A cleartext database used for not-logged-in message
+  delivery processes to notify IMAP clients about new messages.
+
 - `meta.sqlite` - The user's database file.
 
 - `backups` - Stores backup copies of the database and user configuration (so
@@ -51,9 +54,10 @@ So what we do is:
 - Each message is stored at `messages/XX/XXX...`, where `XXXX...` is the
   hexadecimal representation of the SHA-3 of the file.
 
-- When a message is delivered by an external process, the SHA-3 hash (binary)
-  is appended to `messages/delivery`. When `INBOX` is polled, this file is read
-  to discover new messages and then truncated.
+- When a message is delivered by an external process, information about the
+  message is added to `delivery.sqlite`. When an IMAP process eventually
+  discovers the files, it adds them to the user database and removes them from
+  this one.
 
 - Once per 24 hours, when `INBOX` is opened, a full scan is made for
   unaccounted files.
@@ -64,13 +68,12 @@ The actual message format is unchanged from 1.0.
 
 All information about mailboxes and message metadata is stored in a single
 database file. The database uses SQLite's VFS layer to transparently encrypt
-the database in CTR mode with an explicit IV per block. This approach doubles
-the size of the database file, but means we can keep the sector size reported
-to SQLite the same (but probably divide by 2 if it is greater than 512) and can
-pass through an atomic write flag one power of two lower. It also keeps "SQLite
-sectors" aligned to actual FS sectors. It should also be sufficient to ensure
-that concurrent readers do not see partially-updated blocks (though that
-shouldn't happen anyway in the default read-xor-write SQLite mode).
+the database in XEX mode, which means we can keep the sector size reported to
+SQLite the same and can pass through all the atomic write flags. It also keeps
+"SQLite sectors" aligned to actual FS sectors. While we'll need to do
+read-modify-write operations if a write is not aligned to a block boundary, the
+SQLite docs imply that won't actually happen, and even if it does, SQLite
+doesn't actually use concurrent readers and writers on the same file.
 
 At most once per day, SQLite's built-in backup functionality is used to create
 a database backup under `backups`. All but the newest 7 backups are deleted
