@@ -53,6 +53,7 @@ use secstr::SecBox;
 use serde::{Deserialize, Serialize};
 use tiny_keccak::{Hasher, Kmac};
 
+use super::AES_BLOCK;
 use crate::support::user_config::b64;
 
 const MASTER_SIZE: usize = 32;
@@ -127,6 +128,26 @@ impl MasterKey {
         let mut hash = [0u8; 32];
         k.finalize(&mut hash);
         base64::encode(hash)
+    }
+
+    /// Generates the key to use for XEX mode on the given file.
+    pub(super) fn xex_key(&self, filename: &str) -> [u8; AES_BLOCK] {
+        let mut k = Kmac::v128(self.master_key.unsecure(), b"xex-key");
+        k.update(filename.as_bytes());
+
+        let mut hash = [0u8; AES_BLOCK];
+        k.finalize(&mut hash);
+        hash
+    }
+
+    /// Generates the nonce to use for XEX mode on the given file.
+    pub(super) fn xex_nonce(&self, filename: &str) -> [u8; AES_BLOCK] {
+        let mut k = Kmac::v128(self.master_key.unsecure(), b"xex-nonce");
+        k.update(filename.as_bytes());
+
+        let mut hash = [0u8; AES_BLOCK];
+        k.finalize(&mut hash);
+        hash
     }
 
     /// Given this key and a password, generate a `MasterKeyConfig` which can

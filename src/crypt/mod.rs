@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -17,9 +17,12 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 pub const AES_BLOCK: usize = 16;
+pub const AES_BLOCK64: u64 = AES_BLOCK as u64;
 
-pub(crate) mod data_stream;
-pub(crate) mod master_key;
-pub(crate) mod naked;
+pub mod data_stream;
+pub mod master_key;
+pub mod naked;
+pub mod xex;
+
 #[cfg(test)]
-pub(crate) mod test_keys;
+pub mod test_keys;
