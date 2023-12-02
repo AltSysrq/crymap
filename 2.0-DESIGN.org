@@ -90,6 +90,10 @@ Possible schema:
     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     path TEXT NOT NULL,
     special_use TEXT,
+    -- The next UID to provision for a message.
+    next_uid INTEGER NOT NULL,
+    -- The UID of the first message to mark as "recent".
+    recent_uid INTEGER NOT NULL,
     -- The first modification sequence number that has not been used in this
     -- mailbox. Unlike in Crymap 1.0, this is not a vector clock since we can
     -- globally coordinate increments. The modseq 1 is the initial state of the
@@ -115,11 +119,7 @@ Possible schema:
     -- The last time (UNIX timestamp) the message was expunged from any mailbox.
     --
     -- This is used to identify when it is safe to delete orphaned messages.
-    last_expunged INTEGER,
-    -- The next UID to provision for a message.
-    next_uid INTEGER NOT NULL,
-    -- The UID of the first message to mark as "recent".
-    recent_uid INTEGER NOT NULL
+    last_expunged INTEGER
   ) STRICT;
 
   CREATE TABLE mailbox_message (

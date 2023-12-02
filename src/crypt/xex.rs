@@ -403,7 +403,7 @@ impl Xex {
 
         // Process `dst` in chunks of `GROUP_STRIDE` blocks.
         for (block_group, offset) in dst
-            .chunks_mut(tmp.len())
+            .chunks_mut(tmp.len() - AES_BLOCK)
             .zip((offset..).step_by(AES_BLOCK * GROUP_STRIDE))
         {
             // Compute the tweaks we need for this group and apply them

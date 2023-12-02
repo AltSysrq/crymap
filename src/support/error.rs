@@ -76,6 +76,8 @@ pub enum Error {
     Cbor(#[from] serde_cbor::error::Error),
     #[error(transparent)]
     Toml(#[from] toml::de::Error),
+    #[error(transparent)]
+    Rusqlite(#[from] rusqlite::Error),
     #[error("unexpected SQLite error: {0}")]
     Sqlite(std::os::raw::c_int),
 }

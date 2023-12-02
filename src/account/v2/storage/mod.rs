@@ -25,4 +25,5 @@
 //! 1. Every operation is atomic unless otherwise noted.
 //! 2. The concept of a database transaction does not escape the storage layer.
 
+mod metadb;
 mod sqlite_xex_vfs;

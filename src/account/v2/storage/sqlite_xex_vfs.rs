@@ -18,15 +18,15 @@
 
 //! The SQLite XEX encryption shim VFS layer.
 
-use std::path::Path;
 use std::cell::UnsafeCell;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::os::raw::{c_int, c_void, c_char};
-use std::sync::{Arc, Weak};
-use std::ffi::{CString, CStr, OsStr};
-use std::mem::{self, ManuallyDrop};
 use std::convert::TryFrom;
+use std::ffi::{CStr, CString, OsStr};
+use std::mem::{self, ManuallyDrop};
+use std::os::raw::{c_char, c_int, c_void};
+use std::path::Path;
 use std::ptr;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
 
 use libsqlite3_sys::*;
 use log::error;
@@ -51,17 +51,13 @@ pub struct XexVfs {
 impl XexVfs {
     /// Sets up a new XEX VFS using the given master key for encryption.
     pub fn new(master_key: Arc<MasterKey>) -> Result<Self, Error> {
-        let delegate_vfs = unsafe {
-            sqlite3_vfs_find(ptr::null())
-        };
+        let delegate_vfs = unsafe { sqlite3_vfs_find(ptr::null()) };
         if delegate_vfs.is_null() {
             return Err(Error::Sqlite(SQLITE_NOTFOUND));
         }
 
         // Safety: we now know that the VFS is non-null.
-        let delegate_vfs = unsafe {
-            &mut *delegate_vfs
-        };
+        let delegate_vfs = unsafe { &mut *delegate_vfs };
 
         static SEQ: AtomicU64 = AtomicU64::new(0);
         let seq = SEQ.fetch_add(1, Ordering::Relaxed);
@@ -90,15 +86,22 @@ impl XexVfs {
             xDlError: None,
             xDlSym: None,
             xDlClose: None,
-            xRandomness: delegate_vfs.xRandomness.is_some()
+            xRandomness: delegate_vfs
+                .xRandomness
+                .is_some()
                 .then_some(vfs_randomness),
-            xSleep: delegate_vfs.xSleep.is_some()
-                .then_some(vfs_sleep),
-            xCurrentTime: delegate_vfs.xCurrentTime.is_some()
+            xSleep: delegate_vfs.xSleep.is_some().then_some(vfs_sleep),
+            xCurrentTime: delegate_vfs
+                .xCurrentTime
+                .is_some()
                 .then_some(vfs_current_time),
-            xGetLastError: delegate_vfs.xGetLastError.is_some()
+            xGetLastError: delegate_vfs
+                .xGetLastError
+                .is_some()
                 .then_some(vfs_get_last_error),
-            xCurrentTimeInt64: delegate_vfs.xCurrentTimeInt64.is_some()
+            xCurrentTimeInt64: delegate_vfs
+                .xCurrentTimeInt64
+                .is_some()
                 .then_some(vfs_current_time_int64),
             xSetSystemCall: None,
             xGetSystemCall: None,
@@ -125,9 +128,7 @@ impl XexVfs {
             return Err(Error::Sqlite(err));
         }
 
-        Ok(Self {
-            wrapper
-        })
+        Ok(Self { wrapper })
     }
 
     /// Returns the VFS name of this instance.
@@ -217,12 +218,10 @@ struct DelegateBacking {
 impl xex::Backing for DelegateBacking {
     type Error = c_int;
 
-    fn read(&mut self, dst: &mut [u8], offset: u64)
-            -> Result<(), c_int> {
-        let dst_len = c_int::try_from(dst.len())
-            .map_err(|_| SQLITE_IOERR_READ)?;
-        let offset = i64::try_from(offset)
-            .map_err(|_| SQLITE_IOERR_SEEK)?;
+    fn read(&mut self, dst: &mut [u8], offset: u64) -> Result<(), c_int> {
+        let dst_len =
+            c_int::try_from(dst.len()).map_err(|_| SQLITE_IOERR_READ)?;
+        let offset = i64::try_from(offset).map_err(|_| SQLITE_IOERR_SEEK)?;
 
         unsafe {
             zero_or_err(invoke_file_delegate!(self->xRead(
@@ -233,12 +232,10 @@ impl xex::Backing for DelegateBacking {
         }
     }
 
-    fn write(&mut self, src: &[u8], offset: u64)
-             -> Result<(), c_int> {
-        let src_len = c_int::try_from(src.len())
-            .map_err(|_| SQLITE_IOERR_WRITE)?;
-        let offset = i64::try_from(offset)
-            .map_err(|_| SQLITE_IOERR_SEEK)?;
+    fn write(&mut self, src: &[u8], offset: u64) -> Result<(), c_int> {
+        let src_len =
+            c_int::try_from(src.len()).map_err(|_| SQLITE_IOERR_WRITE)?;
+        let offset = i64::try_from(offset).map_err(|_| SQLITE_IOERR_SEEK)?;
 
         unsafe {
             zero_or_err(invoke_file_delegate!(self->xWrite(
@@ -255,8 +252,7 @@ impl xex::Backing for DelegateBacking {
             zero_or_err(invoke_file_delegate!(self->xFileSize(&mut size)))?;
         }
 
-        u64::try_from(size)
-            .map_err(|_| SQLITE_IOERR_FSTAT)
+        u64::try_from(size).map_err(|_| SQLITE_IOERR_FSTAT)
     }
 
     fn encryption_error() -> c_int {
@@ -289,7 +285,8 @@ unsafe extern "C" fn vfs_open(
         return SQLITE_IOERR_CONVPATH;
     };
 
-    let Some(name_str) = CStr::from_ptr(name.cast()).to_str()
+    let Some(name_str) = CStr::from_ptr(name.cast())
+        .to_str()
         .ok()
         .map(Path::new)
         .and_then(Path::file_name)
@@ -306,8 +303,8 @@ unsafe extern "C" fn vfs_open(
         },
     };
 
-    let child_file: *mut sqlite3_file = sqlite3_malloc(
-        (*app_data.delegate_vfs).szOsFile).cast();
+    let child_file: *mut sqlite3_file =
+        sqlite3_malloc((*app_data.delegate_vfs).szOsFile).cast();
 
     if child_file.is_null() {
         return SQLITE_NOMEM;
@@ -320,15 +317,18 @@ unsafe extern "C" fn vfs_open(
         return err;
     }
 
-    ptr::write(file.cast(), File {
-        base_class: sqlite3_file {
-            pMethods: &FILE_IO_METHODS,
+    ptr::write(
+        file.cast(),
+        File {
+            base_class: sqlite3_file {
+                pMethods: &FILE_IO_METHODS,
+            },
+            delegate_file: child_file,
+            delegate_vfs: app_data.delegate_vfs,
+            xex,
+            vfs_wrapper,
         },
-        delegate_file: child_file,
-        delegate_vfs: app_data.delegate_vfs,
-        xex,
-        vfs_wrapper,
-    });
+    );
 
     0
 }
@@ -371,10 +371,7 @@ unsafe extern "C" fn vfs_randomness(
     invoke_vfs_delegate!(app_data->xRandomness(n, out))
 }
 
-unsafe extern "C" fn vfs_sleep(
-    vfs: *mut sqlite3_vfs,
-    us: c_int,
-) -> c_int {
+unsafe extern "C" fn vfs_sleep(vfs: *mut sqlite3_vfs, us: c_int) -> c_int {
     let app_data = vfs_app_data(vfs);
     invoke_vfs_delegate!(app_data->xSleep(us))
 }
@@ -434,10 +431,7 @@ unsafe extern "C" fn file_read(
         return SQLITE_IOERR_SEEK;
     };
 
-    let dst = std::slice::from_raw_parts_mut(
-        dst.cast::<u8>(),
-        len,
-    );
+    let dst = std::slice::from_raw_parts_mut(dst.cast::<u8>(), len);
 
     let mut backing = DelegateBacking {
         delegate_file: f.delegate_file,
@@ -463,7 +457,9 @@ unsafe extern "C" fn file_read(
             let read_amount = usize::try_from(file_len.saturating_sub(offset))
                 .unwrap_or(dst.len())
                 .min(dst.len());
-            if let Err(err) = f.xex.read(&mut backing, &mut dst[..read_amount], offset) {
+            if let Err(err) =
+                f.xex.read(&mut backing, &mut dst[..read_amount], offset)
+            {
                 // SHORT_READ is entirely unexpected here. If we get it, we
                 // can't fulfil our duties, so give up entirely.
                 if SQLITE_IOERR_SHORT_READ == err {
@@ -496,10 +492,7 @@ unsafe extern "C" fn file_write(
         return SQLITE_IOERR_SEEK;
     };
 
-    let src = std::slice::from_raw_parts(
-        src.cast::<u8>(),
-        len,
-    );
+    let src = std::slice::from_raw_parts(src.cast::<u8>(), len);
 
     let mut backing = DelegateBacking {
         delegate_file: f.delegate_file,
@@ -508,7 +501,10 @@ unsafe extern "C" fn file_write(
     f.xex.write(&mut backing, src, offset).err().unwrap_or(0)
 }
 
-unsafe extern "C" fn file_truncate(f: *mut sqlite3_file, mut size: i64) -> c_int {
+unsafe extern "C" fn file_truncate(
+    f: *mut sqlite3_file,
+    mut size: i64,
+) -> c_int {
     // We can't truncate into the middle of a block; round up.
     let block_size = crate::crypt::AES_BLOCK as i64;
     size = (size + block_size - 1) / block_size * block_size;
@@ -522,7 +518,10 @@ unsafe extern "C" fn file_sync(f: *mut sqlite3_file, flags: c_int) -> c_int {
     invoke_file_delegate!(f->xSync(flags))
 }
 
-unsafe extern "C" fn file_file_size(f: *mut sqlite3_file, dst: *mut i64) -> c_int {
+unsafe extern "C" fn file_file_size(
+    f: *mut sqlite3_file,
+    dst: *mut i64,
+) -> c_int {
     let f: &mut File = &mut *f.cast();
     invoke_file_delegate!(f->xFileSize(dst))
 }
@@ -554,29 +553,29 @@ unsafe extern "C" fn file_file_control(
 
     match op {
         SQLITE_FCNTL_LOCKSTATE
-            | SQLITE_FCNTL_SIZE_HINT
-            | SQLITE_FCNTL_SIZE_LIMIT
-            | SQLITE_FCNTL_CHUNK_SIZE
-            | SQLITE_FCNTL_SYNC
-            | SQLITE_FCNTL_COMMIT_PHASETWO
-            | SQLITE_FCNTL_WIN32_AV_RETRY
-            | SQLITE_FCNTL_PERSIST_WAL
-            | SQLITE_FCNTL_POWERSAFE_OVERWRITE
-            | SQLITE_FCNTL_OVERWRITE
-            | SQLITE_FCNTL_PRAGMA
-            | SQLITE_FCNTL_BUSYHANDLER
-            | SQLITE_FCNTL_TRACE
-            | SQLITE_FCNTL_HAS_MOVED
-            | SQLITE_FCNTL_WAL_BLOCK
-            | SQLITE_FCNTL_BEGIN_ATOMIC_WRITE
-            | SQLITE_FCNTL_COMMIT_ATOMIC_WRITE
-            | SQLITE_FCNTL_ROLLBACK_ATOMIC_WRITE
-            | SQLITE_FCNTL_LOCK_TIMEOUT
-            | SQLITE_FCNTL_CKPT_START
-            | SQLITE_FCNTL_CKPT_DONE
-            | SQLITE_FCNTL_EXTERNAL_READER => {
-                invoke_file_delegate!(f->xFileControl(op, arg))
-            },
+        | SQLITE_FCNTL_SIZE_HINT
+        | SQLITE_FCNTL_SIZE_LIMIT
+        | SQLITE_FCNTL_CHUNK_SIZE
+        | SQLITE_FCNTL_SYNC
+        | SQLITE_FCNTL_COMMIT_PHASETWO
+        | SQLITE_FCNTL_WIN32_AV_RETRY
+        | SQLITE_FCNTL_PERSIST_WAL
+        | SQLITE_FCNTL_POWERSAFE_OVERWRITE
+        | SQLITE_FCNTL_OVERWRITE
+        | SQLITE_FCNTL_PRAGMA
+        | SQLITE_FCNTL_BUSYHANDLER
+        | SQLITE_FCNTL_TRACE
+        | SQLITE_FCNTL_HAS_MOVED
+        | SQLITE_FCNTL_WAL_BLOCK
+        | SQLITE_FCNTL_BEGIN_ATOMIC_WRITE
+        | SQLITE_FCNTL_COMMIT_ATOMIC_WRITE
+        | SQLITE_FCNTL_ROLLBACK_ATOMIC_WRITE
+        | SQLITE_FCNTL_LOCK_TIMEOUT
+        | SQLITE_FCNTL_CKPT_START
+        | SQLITE_FCNTL_CKPT_DONE
+        | SQLITE_FCNTL_EXTERNAL_READER => {
+            invoke_file_delegate!(f->xFileControl(op, arg))
+        },
 
         SQLITE_FCNTL_VFS_POINTER => {
             *arg.cast::<*mut sqlite3_vfs>() = f.delegate_vfs;
@@ -593,7 +592,7 @@ unsafe extern "C" fn file_file_control(
             SQLITE_NOTFOUND
         },
 
-        _ => SQLITE_NOTFOUND
+        _ => SQLITE_NOTFOUND,
     }
 }
 
@@ -602,7 +601,9 @@ unsafe extern "C" fn file_sector_size(f: *mut sqlite3_file) -> c_int {
     invoke_file_delegate!(f->xSectorSize())
 }
 
-unsafe extern "C" fn file_device_characteristics(f: *mut sqlite3_file) -> c_int {
+unsafe extern "C" fn file_device_characteristics(
+    f: *mut sqlite3_file,
+) -> c_int {
     let f: &mut File = &mut *f.cast();
     let mut dc = invoke_file_delegate!(f->xDeviceCharacteristics());
     // Only writes a multiple of the AES block size can be atomic.
