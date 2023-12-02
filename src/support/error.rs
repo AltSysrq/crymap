@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -76,4 +76,6 @@ pub enum Error {
     Cbor(#[from] serde_cbor::error::Error),
     #[error(transparent)]
     Toml(#[from] toml::de::Error),
+    #[error("unexpected SQLite error: {0}")]
+    Sqlite(std::os::raw::c_int),
 }

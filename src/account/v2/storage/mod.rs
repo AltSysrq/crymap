@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, Jason Lingle
+// Copyright (c) 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -16,14 +16,13 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-//! This module contains everything to do with a single user's data: their
-//! mailboxes, their settings, their keys.
+//! The storage layer for the V2 system.
 //!
-//! Unversioned submodules are not storage-implementation-specific.
+//! The storage layer is stateless (aside from SQLite connections themselves
+//! and the key cache) and provides the fundamental building blocks used to
+//! implement the state layer. The general guidelines are:
+//!
+//! 1. Every operation is atomic unless otherwise noted.
+//! 2. The concept of a database transaction does not escape the storage layer.
 
-pub mod key_store;
-pub mod model;
-mod search_backend;
-
-pub mod v1;
-mod v2;
+mod sqlite_xex_vfs;

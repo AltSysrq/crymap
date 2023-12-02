@@ -100,8 +100,6 @@ pub trait Backing {
     fn read(&mut self, dst: &mut [u8], offset: u64) -> Result<(), Self::Error>;
     /// Write the full contents of `src` at `offset`.
     fn write(&mut self, src: &[u8], offset: u64) -> Result<(), Self::Error>;
-    /// Truncate the backing to the given length.
-    fn trunc(&mut self, len: u64) -> Result<(), Self::Error>;
     /// Returns the length of the backing store.
     fn len(&mut self) -> Result<u64, Self::Error>;
     /// Returns an appropriate error representing an encryption error.
@@ -519,16 +517,6 @@ mod test {
 
         fn len(&mut self) -> Result<u64, &'static str> {
             Ok(Vec::len(self) as u64)
-        }
-
-        fn trunc(&mut self, len: u64) -> Result<(), &'static str> {
-            let len = usize::try_from(len).map_err(|_| "len too large")?;
-            if len > Vec::len(self) {
-                return Err("can't truncate to larger size");
-            }
-
-            self.truncate(len);
-            Ok(())
         }
 
         fn encryption_error() -> &'static str {

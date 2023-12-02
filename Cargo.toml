@@ -11,9 +11,6 @@ keywords = ["imap", "lmtp"]
 exclude = ["/gen-*.sh", "/readme-*.md", "book", "*.org"]
 description = "A simple, secure IMAP server with encrypted data at rest"
 
-[badges]
-travis-ci = { repository = "AltSysrq/crymap" }
-
 [dependencies]
 # Newer versions of base64 have a substantially inferior API in exchange for no
 # improvements useful to crymap.
@@ -52,6 +49,9 @@ thiserror = "1.0"
 tiny-keccak = { version = "2.0", features = ["sha3", "kmac"] }
 toml = "0.5"
 zstd = "0.13.0"
+
+libsqlite3-sys = { version = "0.27.0", features = ["bundled"] }
+rusqlite = { version = "0.30.0", features = ["backup", "bundled", "chrono"] }
 
 [dependencies.chrono]
 version = "0.4.31"

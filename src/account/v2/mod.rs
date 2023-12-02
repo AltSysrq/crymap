@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, Jason Lingle
+// Copyright (c) 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -16,14 +16,9 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-//! This module contains everything to do with a single user's data: their
-//! mailboxes, their settings, their keys.
-//!
-//! Unversioned submodules are not storage-implementation-specific.
+//! The V2 storage and state system was introduced with Crymap 2.0.0.
 
-pub mod key_store;
-pub mod model;
-mod search_backend;
+// TODO REMOVE
+#![allow(dead_code)]
 
-pub mod v1;
-mod v2;
+mod storage;
