@@ -61,10 +61,10 @@ impl Connection {
             )?;
 
             let current_version = txn
-                .query_row_and_then(
+                .query_row(
                     "SELECT MAX(`version`) FROM `migration`",
                     (),
-                    |row| row.get::<_, Option<u32>>(0),
+                    from_single::<Option<u32>>,
                 )?
                 .unwrap_or(0);
 
@@ -98,7 +98,7 @@ impl Connection {
         if 0 == txn.query_row(
             "SELECT COUNT(*) FROM `mailbox` WHERE `id` = ?",
             (parent,),
-            |row| row.get::<_, i64>(0),
+            from_single::<i64>,
         )? {
             return Err(Error::NxMailbox);
         }
@@ -107,7 +107,7 @@ impl Connection {
             "SELECT COUNT(*) FROM `mailbox` \
              WHERE `parent_id` = ? AND `name` = ?",
             (parent, name),
-            |row| row.get::<_, i64>(0),
+            from_single::<i64>,
         )? {
             return Err(Error::MailboxExists);
         }
@@ -138,9 +138,9 @@ impl Connection {
                 .cxn
                 .query_row(
                     "SELECT `id` FROM `mailbox` \
-                 WHERE `parent_id` = ? AND `name` = ?",
+                     WHERE `parent_id` = ? AND `name` = ?",
                     (id, part),
-                    |row| row.get(0),
+                    from_single,
                 )
                 .optional()?
                 .ok_or(Error::NxMailbox)?;
@@ -177,9 +177,9 @@ impl Connection {
                 .cxn
                 .query_row(
                     "SELECT `id` FROM `mailbox` \
-                 WHERE `parent_id` = ? AND `name` = ?",
+                     WHERE `parent_id` = ? AND `name` = ?",
                     (parent, part),
-                    |row| row.get(0),
+                    from_single,
                 )
                 .optional()?
                 .ok_or(Error::NxMailbox)?;
@@ -206,16 +206,11 @@ impl Connection {
     pub fn fetch_all_mailboxes(&mut self) -> Result<Vec<Mailbox>, Error> {
         self.cxn.enable_write(false)?;
 
-        let mut results = Vec::<Mailbox>::new();
-        for result in self
-            .cxn
+        self.cxn
             .prepare("SELECT * FROM `mailbox` WHERE `id` != 0")?
-            .query_map((), Mailbox::from_row)?
-        {
-            results.push(result?);
-        }
-
-        Ok(results)
+            .query_map((), from_row)?
+            .collect::<Result<Vec<Mailbox>, _>>()
+            .map_err(Into::into)
     }
 
     /// Moves and renames `mailbox_id` to have name `new_name` and be placed
@@ -233,11 +228,9 @@ impl Connection {
         let (current_parent, current_name) = txn
             .query_row(
                 "SELECT `parent_id`, `name` FROM `mailbox` \
-             WHERE `id` = ?",
+                 WHERE `id` = ?",
                 (mailbox_id,),
-                |row| {
-                    Ok((row.get::<_, MailboxId>(0)?, row.get::<_, String>(1)?))
-                },
+                from_row::<(MailboxId, String)>,
             )
             .optional()?
             .ok_or(Error::NxMailbox)?;
@@ -259,7 +252,7 @@ impl Connection {
                 .query_row(
                     "SELECT `parent_id` FROM `mailbox` WHERE `id` = ?",
                     (ancestor,),
-                    |row| row.get::<_, MailboxId>(0),
+                    from_single,
                 )
                 .optional()?
                 .ok_or(Error::NxMailbox)?;
@@ -270,7 +263,7 @@ impl Connection {
             "SELECT COUNT(*) FROM `mailbox` \
              WHERE `parent_id` = ? AND `name` = ?",
             (new_parent, new_name),
-            |row| row.get::<_, i64>(0),
+            from_single::<i64>,
         )? {
             return Err(Error::MailboxExists);
         }
@@ -302,9 +295,9 @@ impl Connection {
         let selectable = txn
             .query_row(
                 "SELECT `selectable` FROM `mailbox` \
-             WHERE `id` = ?",
+                 WHERE `id` = ?",
                 (id,),
-                |row| row.get::<_, bool>(0),
+                from_single::<bool>,
             )
             .optional()?
             .ok_or(Error::NxMailbox)?;
@@ -312,9 +305,9 @@ impl Connection {
         let has_inferiors = 0
             != txn.query_row(
                 "SELECT COUNT(*) FROM `mailbox` \
-             WHERE `parent_id` = ?",
+                 WHERE `parent_id` = ?",
                 (id,),
-                |row| row.get::<_, i64>(0),
+                from_single::<i64>,
             )?;
 
         if !selectable && has_inferiors {
@@ -382,7 +375,7 @@ pub struct Mailbox {
     pub expunge_modseq: Modseq,
 }
 
-impl Mailbox {
+impl FromRow for Mailbox {
     fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {
             id: row.get("id")?,

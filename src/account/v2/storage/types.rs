@@ -200,3 +200,37 @@ impl FromSql for MailboxAttribute {
         Self::from_str(as_str).map_err(|e| FromSqlError::Other(Box::new(e)))
     }
 }
+
+pub fn from_row<T: FromRow>(row: &rusqlite::Row<'_>) -> rusqlite::Result<T> {
+    T::from_row(row)
+}
+
+pub fn from_single<T: FromSql>(row: &rusqlite::Row<'_>) -> rusqlite::Result<T> {
+    row.get(0)
+}
+
+pub trait FromRow: Sized {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self>;
+}
+
+macro_rules! from_row_tuple {
+    ($($ix:tt: $t:ident),*) => {
+        impl<$($t: FromSql,)*> FromRow
+        for ($($t,)*) {
+            fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+                Ok(($(row.get($ix)?,)*))
+            }
+        }
+    }
+}
+
+from_row_tuple!(0: A);
+from_row_tuple!(0: A, 1: B);
+from_row_tuple!(0: A, 1: B, 2: C);
+from_row_tuple!(0: A, 1: B, 2: C, 3: D);
+from_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E);
+from_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F);
+from_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G);
+from_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H);
+from_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I);
+from_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I, 9: J);
