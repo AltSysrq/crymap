@@ -28,7 +28,7 @@
 
 #[cfg(test)]
 macro_rules! assert_matches {
-    ($expected:pat, $actual:expr) => {
+    ($expected:pat, $actual:expr $(,)*) => {
         match $actual {
             $expected => (),
             unexpected => panic!(

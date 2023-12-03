@@ -471,16 +471,22 @@ pub enum Flag {
     Keyword(String),
 }
 
+impl Flag {
+    pub fn as_str(&self) -> &str {
+        match *self {
+            Flag::Answered => "\\Answered",
+            Flag::Deleted => "\\Deleted",
+            Flag::Draft => "\\Draft",
+            Flag::Flagged => "\\Flagged",
+            Flag::Seen => "\\Seen",
+            Flag::Keyword(ref kw) => kw,
+        }
+    }
+}
+
 impl fmt::Display for Flag {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Flag::Answered => write!(f, "\\Answered"),
-            Flag::Deleted => write!(f, "\\Deleted"),
-            Flag::Draft => write!(f, "\\Draft"),
-            Flag::Flagged => write!(f, "\\Flagged"),
-            Flag::Seen => write!(f, "\\Seen"),
-            Flag::Keyword(ref kw) => write!(f, "{}", kw),
-        }
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -574,19 +580,75 @@ pub enum MailboxAttribute {
 impl MailboxAttribute {
     pub fn name(&self) -> &'static str {
         match *self {
-            MailboxAttribute::Noselect => "\\Noselect",
-            MailboxAttribute::Noinferiors => "\\Noinferiors",
-            MailboxAttribute::HasChildren => "\\HasChildren",
-            MailboxAttribute::HasNoChildren => "\\HasNoChildren",
-            MailboxAttribute::NonExistent => "\\NonExistent",
-            MailboxAttribute::Subscribed => "\\Subscribed",
-            MailboxAttribute::Archive => "\\Archive",
-            MailboxAttribute::Drafts => "\\Drafts",
-            MailboxAttribute::Flagged => "\\Flagged",
-            MailboxAttribute::Junk => "\\Junk",
-            MailboxAttribute::Sent => "\\Sent",
-            MailboxAttribute::Trash => "\\Trash",
-            MailboxAttribute::Important => "\\Important",
+            Self::Noselect => "\\Noselect",
+            Self::Noinferiors => "\\Noinferiors",
+            Self::HasChildren => "\\HasChildren",
+            Self::HasNoChildren => "\\HasNoChildren",
+            Self::NonExistent => "\\NonExistent",
+            Self::Subscribed => "\\Subscribed",
+            Self::Archive => "\\Archive",
+            Self::Drafts => "\\Drafts",
+            Self::Flagged => "\\Flagged",
+            Self::Junk => "\\Junk",
+            Self::Sent => "\\Sent",
+            Self::Trash => "\\Trash",
+            Self::Important => "\\Important",
+        }
+    }
+
+    pub fn is_special_use(self) -> bool {
+        matches!(
+            self,
+            Self::Archive
+                | Self::Drafts
+                | Self::Flagged
+                | Self::Junk
+                | Self::Sent
+                | Self::Trash
+                | Self::Important
+        )
+    }
+
+    pub fn special_use_from_str(special_use: &str) -> Result<Self, Error> {
+        Self::from_str(special_use)
+            .ok()
+            .filter(|attr| attr.is_special_use())
+            .ok_or(Error::UnsupportedSpecialUse)
+    }
+}
+
+impl FromStr for MailboxAttribute {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Error> {
+        if "\\Noselect".eq_ignore_ascii_case(s) {
+            Ok(Self::Noselect)
+        } else if "\\Noinferiors".eq_ignore_ascii_case(s) {
+            Ok(Self::Noinferiors)
+        } else if "\\HasChildren".eq_ignore_ascii_case(s) {
+            Ok(Self::HasChildren)
+        } else if "\\HasNoChildren".eq_ignore_ascii_case(s) {
+            Ok(Self::HasNoChildren)
+        } else if "\\NonExistent".eq_ignore_ascii_case(s) {
+            Ok(Self::NonExistent)
+        } else if "\\Subscribed".eq_ignore_ascii_case(s) {
+            Ok(Self::Subscribed)
+        } else if "\\archive".eq_ignore_ascii_case(s) {
+            Ok(MailboxAttribute::Archive)
+        } else if "\\drafts".eq_ignore_ascii_case(s) {
+            Ok(MailboxAttribute::Drafts)
+        } else if "\\flagged".eq_ignore_ascii_case(s) {
+            Ok(MailboxAttribute::Flagged)
+        } else if "\\junk".eq_ignore_ascii_case(s) {
+            Ok(MailboxAttribute::Junk)
+        } else if "\\sent".eq_ignore_ascii_case(s) {
+            Ok(MailboxAttribute::Sent)
+        } else if "\\trash".eq_ignore_ascii_case(s) {
+            Ok(MailboxAttribute::Trash)
+        } else if "\\important".eq_ignore_ascii_case(s) {
+            Ok(MailboxAttribute::Important)
+        } else {
+            Err(Error::UnknownMailboxAttribute)
         }
     }
 }

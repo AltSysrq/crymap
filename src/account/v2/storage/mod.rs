@@ -27,3 +27,4 @@
 
 mod metadb;
 mod sqlite_xex_vfs;
+mod types;

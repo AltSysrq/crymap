@@ -14,7 +14,7 @@
 -- details.
 --
 -- You should have received a copy of the GNU General Public License along with
--- Crymap. If not, see <http:--www.gnu.org/licenses/>.
+-- Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 -- Defines the mailboxes owned by the user.
 --
@@ -24,43 +24,51 @@ CREATE TABLE `mailbox` (
   -- The surrogate ID for this mailbox. This is also used for the MAILBOXID
   -- reported to the client.
   `id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-  -- The IMAP path for this mailbox. E.g. "INBOX"; "Archive/TPS Reports".
-  `path` TEXT NOT NULL,
+  -- The parent of this mailbox, or NULL if this is under the root.
+  `parent_id` INTEGER NOT NULL,
+  -- The IMAP name for this mailbox. E.g. "INBOX"; "TPS Reports".
+  `name` TEXT NOT NULL,
   -- Whether this mailbox is selectable. An unselectable mailbox is brought
   -- about by `DELETE`ing a mailbox which has children.
-  `selectable` INTEGER NOT NULL,
+  `selectable` INTEGER NOT NULL DEFAULT TRUE,
   -- If this is a special-use mailbox, the special use attribute (e.g.
   -- "\Sent").
   `special_use` TEXT,
   -- The next UID to provision for a message.
-  `next_uid` INTEGER NOT NULL,
+  `next_uid` INTEGER NOT NULL DEFAULT 1,
   -- The UID of the first message to mark as "recent".
-  `recent_uid` INTEGER NOT NULL,
+  `recent_uid` INTEGER NOT NULL DEFAULT 1,
   -- The first modification sequence number that has not been used in this
   -- mailbox. Modseq 1 is the initial state of the mailbox, so `next_modseq`
   -- starts at 2.
-  `next_modseq` INTEGER NOT NULL,
-  -- The modseq at which new flags were last defined for this mailbox.
-  `flags_modseq` INTEGER NOT NULL,
+  `next_modseq` INTEGER NOT NULL DEFAULT 2,
   -- The modseq at which a new message was last appended.
-  `append_modseq` INTEGER NOT NULL,
+  `append_modseq` INTEGER NOT NULL DEFAULT 1,
   -- The modseq at which a message was last expunged.
-  `expunge_modseq` INTEGER NOT NULL,
-  UNIQUE (`path`)
+  `expunge_modseq` INTEGER NOT NULL DEFAULT 1,
+  UNIQUE (`parent_id`, `name`),
+  FOREIGN KEY (`parent_id`) REFERENCES `mailbox` (`id`)
 ) STRICT;
 
--- Defines the known flags for a mailbox.
-CREATE TABLE `mailbox_flag` (
-  `mailbox_id` INTEGER NOT NULL,
-  -- The integer ID for this flag, scoped to the mailbox.
+-- Pre-seed the special root pseudo-mailbox.
+INSERT INTO `mailbox` (`id`, `parent_id`, `name`, `selectable`)
+VALUES (0, 0, '/', false);
+
+-- Defines the known flags for an account.
+--
+-- The set of extant flags is global across the whole account. This ensures
+-- that the flag table of a message doesn't need to be rewritten when it is
+-- moved to another mailbox and eliminates separate bookkeeping about which
+-- flags exist for each specific mailbox.
+CREATE TABLE `flag` (
+  -- The integer ID for this flag.
   --
-  -- In messages, this is the offset of the bit corresponding to the flag.
-  `local_id` INTEGER NOT NULL,
+  -- In messages, this is the offset + 1 of the bit corresponding to the flag
+  -- (because AUTOINCREMENT starts at 1).
+  `id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
   -- The flag itself. E.g. "\Deleted", "\Sent", "Keyword".
   `flag` TEXT NOT NULL,
-  PRIMARY KEY (`mailbox_id`, `local_id`),
-  UNIQUE (`mailbox_id`, `flag`),
-  FOREIGN KEY (`mailbox_id`) REFERENCES `mailbox` (`id`)
+  UNIQUE (`flag`)
 ) STRICT;
 
 -- Tracks all messages which exist in the user's account.
@@ -90,12 +98,12 @@ CREATE TABLE `message` (
   -- being orphaned.
   --
   -- This is used to identify when it is safe to delete orphaned messages.
-  `last_activity` INTEGER,
+  `last_activity` INTEGER NOT NULL,
   UNIQUE (`path`)
 ) STRICT;
 
 -- An instance of a message within a mailbox.
-CREATE TABLE `message_mailbox` (
+CREATE TABLE `mailbox_message` (
   -- The mailbox that contains the message.
   `mailbox_id` INTEGER NOT NULL,
   -- The UID of this instance within the mailbox.
@@ -117,13 +125,14 @@ CREATE TABLE `message_mailbox` (
 ) WITHOUT ROWID, STRICT;
 
 -- Associates flags with indices >63 with messages.
-CREATE TABLE `message_mailbox_far_flag` (
+CREATE TABLE `mailbox_message_far_flag` (
   `mailbox_id` INTEGER NOT NULL,
   `uid` INTEGER NOT NULL,
   `flag_id` INTEGER NOT NULL,
   PRIMARY KEY (`mailbox_id`, `uid`, `flag_id`),
   FOREIGN KEY (`mailbox_id`, `uid`)
-    REFERENCES `mailbox_message` (`mailbox_id`, `uid`)
+    REFERENCES `mailbox_message` (`mailbox_id`, `uid`),
+  FOREIGN KEY (`flag_id`) REFERENCES `flag` (`id`)
 ) WITHOUT ROWID, STRICT;
 
 CREATE TABLE `mailbox_message_expungement` (

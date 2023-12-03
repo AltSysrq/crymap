@@ -376,23 +376,12 @@ impl Account {
             return Err(Error::UnsupportedSpecialUse);
         }
 
-        let special_use = if let Some(mut special_use) =
-            request.special_use.into_iter().next()
-        {
-            special_use.make_ascii_lowercase();
-            Some(match &special_use as &str {
-                "\\archive" => MailboxAttribute::Archive,
-                "\\drafts" => MailboxAttribute::Drafts,
-                "\\flagged" => MailboxAttribute::Flagged,
-                "\\junk" => MailboxAttribute::Junk,
-                "\\sent" => MailboxAttribute::Sent,
-                "\\trash" => MailboxAttribute::Trash,
-                "\\important" => MailboxAttribute::Important,
-                _ => return Err(Error::UnsupportedSpecialUse),
-            })
-        } else {
-            None
-        };
+        let special_use =
+            if let Some(special_use) = request.special_use.into_iter().next() {
+                Some(MailboxAttribute::special_use_from_str(&special_use)?)
+            } else {
+                None
+            };
 
         self.mailbox_path_create_parents(&request.name)?
             .create(&self.common_paths.tmp, special_use)

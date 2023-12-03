@@ -58,6 +58,8 @@ pub enum Error {
     CorruptFileLayout,
     #[error("Unsupported special-use for CREATE")]
     UnsupportedSpecialUse,
+    #[error("Unknown mailbox attribute")]
+    UnknownMailboxAttribute,
     #[error("Rename source and destination are the same")]
     RenameToSelf,
     #[error("Rename destination is child of self")]
@@ -66,6 +68,8 @@ pub enum Error {
     BatchTooBig,
     #[error("Unknown Content-Transfer-Encoding")]
     UnknownCte,
+    #[error("0 generated as value for AUTOINCREMENT column")]
+    ZeroAutoincrement,
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]
