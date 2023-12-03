@@ -71,6 +71,16 @@ CREATE TABLE `flag` (
   UNIQUE (`flag`)
 ) STRICT;
 
+-- Pre-seed the database with the non-keyword flags. This ensures they have low
+-- IDs and also addresses the fact that AUTOINCREMENT starts at 1; this way, we
+-- can ensure bit 0 is used too without needing to do offsetting in code.
+INSERT INTO `flag` (`id`, `flag`) VALUES
+  (0, '\Answered'),
+  (1, '\Deleted'),
+  (2, '\Draft'),
+  (3, '\Flagged'),
+  (4, '\Seen');
+
 -- Tracks all messages which exist in the user's account.
 --
 -- Messages are not inherently associated with any mailbox, but are brought in

@@ -19,7 +19,6 @@
 //! Bindings for our model types to `rusqlite`, plus model types specific to
 //! the database itself.
 
-use std::num::{NonZeroI64, NonZeroUsize};
 use std::str::FromStr;
 
 use chrono::prelude::*;
@@ -64,12 +63,12 @@ impl MailboxId {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MessageId(pub NonZeroI64);
+pub struct MessageId(pub i64);
 transparent_to_sql!(MessageId);
 transparent_from_sql!(MessageId);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct FlagId(pub NonZeroUsize);
+pub struct FlagId(pub usize);
 transparent_to_sql!(FlagId);
 transparent_from_sql!(FlagId);
 

@@ -68,8 +68,6 @@ pub enum Error {
     BatchTooBig,
     #[error("Unknown Content-Transfer-Encoding")]
     UnknownCte,
-    #[error("0 generated as value for AUTOINCREMENT column")]
-    ZeroAutoincrement,
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]

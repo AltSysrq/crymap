@@ -17,6 +17,7 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::collections::BTreeSet;
+use std::convert::TryFrom;
 use std::path::Path;
 use std::time::Duration;
 
@@ -399,6 +400,60 @@ impl Connection {
             .collect::<Result<BTreeSet<_>, _>>()
             .map_err(Into::into)
     }
+
+    /// Finds the ID of the given flag, if it exists. Returns `None` without
+    /// modifying the database otherwise.
+    pub fn look_up_flag_id(
+        &mut self,
+        flag: &Flag,
+    ) -> Result<Option<FlagId>, Error> {
+        self.cxn.enable_write(false)?;
+        self.cxn
+            .query_row(
+                "SELECT `id` FROM `flag` WHERE `flag` = ?",
+                (flag,),
+                from_single,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Interns `flag` into the database.
+    ///
+    /// If `flag` is already defined, the database is not modified and the
+    /// existing ID is returned. Otherwise, `flag` is added to the database and
+    /// its new ID is returned.
+    pub fn intern_flag(&mut self, flag: &Flag) -> Result<FlagId, Error> {
+        let txn = self.cxn.write_tx()?;
+        if let Some(existing) = txn
+            .query_row(
+                "SELECT `id` FROM `flag` WHERE `flag` = ?",
+                (flag,),
+                from_single,
+            )
+            .optional()?
+        {
+            return Ok(existing);
+        }
+
+        txn.execute("INSERT INTO `flag` (`flag`) VALUES (?)", (flag,))?;
+        let flag_id = usize::try_from(txn.last_insert_rowid())
+            .map_err(|_| Error::MailboxFull)?;
+
+        txn.commit()?;
+
+        Ok(FlagId(flag_id))
+    }
+
+    /// Retrieves all flags that currently exist in the account.
+    pub fn fetch_all_flags(&mut self) -> Result<Vec<(FlagId, Flag)>, Error> {
+        self.cxn.enable_write(false)?;
+        self.cxn
+            .prepare("SELECT `id`, `flag` FROM `flag` ORDER BY `id`")?
+            .query_map((), from_row)?
+            .collect::<Result<_, _>>()
+            .map_err(Into::into)
+    }
 }
 
 /// All data pertaining to a particular mailbox.
@@ -725,5 +780,24 @@ mod test {
                 .into_iter()
                 .collect::<Vec<String>>(),
         );
+    }
+
+    #[test]
+    fn test_flag_interning() {
+        let mut fixture = Fixture::new();
+
+        let keyword = Flag::Keyword("Keyword".to_owned());
+        assert_eq!(None, fixture.cxn.look_up_flag_id(&keyword).unwrap());
+        assert_eq!(FlagId(5), fixture.cxn.intern_flag(&keyword).unwrap());
+        assert_eq!(
+            Some(FlagId(5)),
+            fixture.cxn.look_up_flag_id(&keyword).unwrap(),
+        );
+        assert_eq!(FlagId(5), fixture.cxn.intern_flag(&keyword).unwrap());
+        assert!(fixture
+            .cxn
+            .fetch_all_flags()
+            .unwrap()
+            .contains(&(FlagId(5), keyword.clone())));
     }
 }
