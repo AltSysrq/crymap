@@ -16,6 +16,7 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Duration;
 
@@ -358,6 +359,46 @@ impl Connection {
 
         Ok(())
     }
+
+    /// Adds `path` as a new subscription.
+    ///
+    /// No normalisation is applied to `path`; this is the responsibility of
+    /// the API layer of the state-storage system.
+    ///
+    /// If the subscription already exists, does nothing.
+    pub fn add_subscription(&mut self, path: &str) -> Result<(), Error> {
+        self.cxn.enable_write(true)?;
+        self.cxn.execute(
+            "INSERT OR IGNORE INTO `subscription` (`path`) VALUES (?)",
+            (path,),
+        )?;
+        Ok(())
+    }
+
+    /// Removes the subscription identified by `path`.
+    ///
+    /// If no such subscription exists, does nothing.
+    pub fn rm_subscription(&mut self, path: &str) -> Result<(), Error> {
+        self.cxn.enable_write(true)?;
+        self.cxn
+            .execute("DELETE FROM `subscription` WHERE `path` = ?", (path,))?;
+        Ok(())
+    }
+
+    /// Returns all subscriptions in the account.
+    ///
+    /// Unsubscribed parents of subscribed mailboxes are not represented here.
+    /// Their existence must be inferred from the results.
+    pub fn fetch_all_subscriptions(
+        &mut self,
+    ) -> Result<BTreeSet<String>, Error> {
+        self.cxn.enable_write(false)?;
+        self.cxn
+            .prepare("SELECT `path` FROM `subscription`")?
+            .query_map((), from_single)?
+            .collect::<Result<BTreeSet<_>, _>>()
+            .map_err(Into::into)
+    }
 }
 
 /// All data pertaining to a particular mailbox.
@@ -651,6 +692,38 @@ mod test {
         assert_matches!(
             Err(Error::NxMailbox),
             fixture.cxn.fetch_mailbox(foo_id),
+        );
+    }
+
+    #[test]
+    fn test_subscription_crud() {
+        let mut fixture = Fixture::new();
+
+        fixture.cxn.add_subscription("foo").unwrap();
+        fixture.cxn.add_subscription("bar").unwrap();
+        fixture.cxn.add_subscription("foo").unwrap();
+
+        assert_eq!(
+            vec!["bar".to_owned(), "foo".to_owned()],
+            fixture
+                .cxn
+                .fetch_all_subscriptions()
+                .unwrap()
+                .into_iter()
+                .collect::<Vec<String>>(),
+        );
+
+        fixture.cxn.rm_subscription("foo").unwrap();
+        fixture.cxn.rm_subscription("quux").unwrap();
+
+        assert_eq!(
+            vec!["bar".to_owned()],
+            fixture
+                .cxn
+                .fetch_all_subscriptions()
+                .unwrap()
+                .into_iter()
+                .collect::<Vec<String>>(),
         );
     }
 }
