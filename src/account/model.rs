@@ -208,6 +208,8 @@ impl Modseq {
     ///
     /// The value less than this can still occur if requested by the client.
     pub const MIN: Self = Self(1);
+    /// The maximum allowable `Modseq` value.
+    pub const MAX: Self = Self(i64::MAX as u64);
 
     pub fn of(raw: u64) -> Self {
         Self(raw)
@@ -215,6 +217,14 @@ impl Modseq {
 
     pub fn raw(self) -> u64 {
         self.0
+    }
+
+    pub fn next(self) -> Option<Self> {
+        if Self::MAX == self {
+            None
+        } else {
+            Some(Self(self.0 + 1))
+        }
     }
 }
 

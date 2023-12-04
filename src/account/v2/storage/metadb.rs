@@ -18,17 +18,20 @@
 
 use std::collections::BTreeSet;
 use std::convert::TryFrom;
+use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
 
-use chrono::prelude::*;
 use log::info;
 use rusqlite::OptionalExtension as _;
 
 use super::{sqlite_xex_vfs::XexVfs, types::*};
 use crate::{
     account::model::*,
-    support::{error::Error, mailbox_paths::parse_mailbox_path},
+    support::{
+        error::Error, mailbox_paths::parse_mailbox_path,
+        small_bitset::SmallBitset,
+    },
 };
 
 /// A connection to the encrypted `meta.sqlite.xex` database.
@@ -57,7 +60,7 @@ impl Connection {
             txn.execute(
                 "CREATE TABLE IF NOT EXISTS `migration` (\
                    `version` INTEGER NOT NULL PRIMARY KEY, \
-                   `applied_at` TEXT NOT NULL\
+                   `applied_at` INTEGER NOT NULL\
                  ) STRICT",
                 (),
             )?;
@@ -76,7 +79,7 @@ impl Connection {
                 txn.execute(
                     "INSERT INTO `migration` (`version`, `applied_at`) \
                      VALUES (1, ?)",
-                    (Utc::now(),),
+                    (UnixTimestamp::now(),),
                 )?;
             }
 
@@ -454,6 +457,443 @@ impl Connection {
             .collect::<Result<_, _>>()
             .map_err(Into::into)
     }
+
+    /// Interns each `path` as a message.
+    ///
+    /// Any created message is initially orphaned, so if the message is not
+    /// eventually added to a mailbox, it will be deleted instead of being
+    /// dropped into `INBOX`.
+    pub fn intern_messages_as_orphans(
+        &mut self,
+        paths: &mut dyn Iterator<Item = &str>,
+    ) -> Result<Vec<MessageId>, Error> {
+        let txn = self.cxn.write_tx()?;
+
+        let ret = paths
+            .map(|path| intern_message_as_orphan(&txn, path))
+            .collect::<Result<Vec<_>, _>>()?;
+        txn.commit()?;
+
+        Ok(ret)
+    }
+
+    /// Append already-interned messages into the given mailbox, with the given
+    /// initial flags if requested.
+    ///
+    /// Returns the UID of the first message so inserted. (If there are no
+    /// messages, this will be a UID of a non-existent message.) Each message
+    /// is assigned a UID 1 greater than the previous.
+    pub fn append_mailbox_messages(
+        &mut self,
+        mailbox_id: MailboxId,
+        messages: &mut dyn Iterator<Item = (MessageId, Option<&SmallBitset>)>,
+    ) -> Result<Uid, Error> {
+        let txn = self.cxn.write_tx()?;
+
+        require_selectable_mailbox(&txn, mailbox_id)?;
+        let uid =
+            append_mailbox_messages(&txn, mailbox_id, &mut messages.map(Ok))?;
+        txn.commit()?;
+
+        Ok(uid)
+    }
+
+    /// Atomically interns messages by path and then adds them to the given
+    /// mailbox with the set per-message flags.
+    pub fn intern_and_append_mailbox_messages(
+        &mut self,
+        mailbox_id: MailboxId,
+        messages: &mut dyn Iterator<Item = (&str, Option<&SmallBitset>)>,
+    ) -> Result<Uid, Error> {
+        let txn = self.cxn.write_tx()?;
+
+        require_selectable_mailbox(&txn, mailbox_id)?;
+
+        let mut messages = messages.map(|(path, flags)| {
+            intern_message_as_orphan(&txn, path).map(|id| (id, flags))
+        });
+
+        let uid = append_mailbox_messages(&txn, mailbox_id, &mut messages)?;
+        txn.commit()?;
+
+        Ok(uid)
+    }
+
+    /// Expunges the given messages by UID from the mailbox.
+    ///
+    /// This does not consider whether or not the messages have the `\Deleted`
+    /// flag. UIDs not present in the mailbox are silently ignored.
+    pub fn expunge_mailbox_messages(
+        &mut self,
+        mailbox_id: MailboxId,
+        messages: &mut dyn Iterator<Item = Uid>,
+    ) -> Result<(), Error> {
+        let txn = self.cxn.write_tx()?;
+
+        require_selectable_mailbox(&txn, mailbox_id)?;
+
+        {
+            let modseq = new_modseq(&txn, mailbox_id)?;
+            let now = UnixTimestamp::now();
+
+            let mut select_message_id = txn.prepare(
+                "SELECT `message_id` FROM `mailbox_message` \
+                 WHERE `mailbox_id` = ? AND `uid` = ?",
+            )?;
+            let mut delete_from_mailbox_message_far_flag = txn.prepare(
+                "DELETE FROM `mailbox_message_far_flag` \
+                 WHERE `mailbox_id` = ? AND `uid` = ?",
+            )?;
+            let mut delete_from_mailbox_message = txn.prepare(
+                "DELETE FROM `mailbox_message` \
+                 WHERE `mailbox_id` = ? AND `uid` = ?",
+            )?;
+            let mut update_last_activity = txn.prepare(
+                "UPDATE `message` SET `last_activity` = ?2 WHERE `id` = ?1",
+            )?;
+            let mut insert_mailbox_message_expungement = txn.prepare(
+                "INSERT INTO `mailbox_message_expungement` \
+                 (`mailbox_id`, `uid`, `expunged_modseq`) \
+                 VALUES (?, ?, ?)",
+            )?;
+
+            for uid in messages {
+                let Some(message_id) = select_message_id
+                    .query_row((mailbox_id, uid), from_single::<MessageId>)
+                    .optional()?
+                else {
+                    continue;
+                };
+
+                delete_from_mailbox_message_far_flag
+                    .execute((mailbox_id, uid))?;
+                delete_from_mailbox_message.execute((mailbox_id, uid))?;
+                update_last_activity.execute((message_id, now))?;
+                insert_mailbox_message_expungement
+                    .execute((mailbox_id, uid, modseq))?;
+            }
+
+            txn.execute(
+                "UPDATE `mailbox` SET `expunge_modseq` = ? WHERE `id` = ?",
+                (modseq, mailbox_id),
+            )?;
+        }
+
+        txn.commit()?;
+
+        Ok(())
+    }
+
+    /// Modifies the flags of the given sequence of messages in a mailbox.
+    ///
+    /// If `remove_listed` is true, flags found in `flags` are unset.
+    /// Otherwise, flags found in `flags` are set.
+    ///
+    /// If `remove_unlisted` is `true`, flags not found in `flags` are unset.
+    ///
+    /// Messages where `flags_modseq > unchanged_since` are skipped.
+    ///
+    /// Returns the messages that were actually modified.
+    ///
+    /// UIDs corresponding to no existing message are silently ignored.
+    pub fn modify_mailbox_message_flags(
+        &mut self,
+        mailbox_id: MailboxId,
+        flags: &SmallBitset,
+        remove_listed: bool,
+        remove_unlisted: bool,
+        unchanged_since: Modseq,
+        messages: &mut dyn Iterator<Item = Uid>,
+    ) -> Result<Vec<Uid>, Error> {
+        debug_assert!(!remove_listed || !remove_unlisted);
+
+        let mut modified = Vec::<Uid>::new();
+
+        let txn = self.cxn.write_tx()?;
+        require_selectable_mailbox(&txn, mailbox_id)?;
+
+        {
+            let modseq = new_modseq(&txn, mailbox_id)?;
+
+            // For the near flags, we can fuse the unchanged_since check,
+            // modification check, all addition/removal, and updating
+            // `flags_modseq` into one operation per message.
+            let mut update_near_flags = if 0 == flags.near_bits() {
+                if remove_unlisted {
+                    Some(txn.prepare(
+                        "UPDATE `mailbox_message` \
+                         SET `near_flags` = 0, `flags_modseq` = ?4 \
+                         WHERE `mailbox_id` = ?1 AND `uid` = ?2 \
+                         AND `flags_modseq` <= ?3 \
+                         AND `near_flags` != 0",
+                    )?)
+                } else {
+                    None
+                }
+            } else {
+                let mut or_flags = 0i64;
+                let mut nand_flags = 0i64;
+
+                if remove_listed {
+                    nand_flags |= flags.near_bits() as i64;
+                } else {
+                    or_flags |= flags.near_bits() as i64;
+                }
+                if remove_unlisted {
+                    nand_flags |= !flags.near_bits() as i64;
+                }
+
+                let flags_expr =
+                    format!("((`near_flags` | {or_flags}) & ~ {nand_flags})");
+                Some(txn.prepare(&format!(
+                    "UPDATE `mailbox_message` \
+                     SET `near_flags` = {flags_expr}, `flags_modseq` = ?4 \
+                     WHERE `mailbox_id` = ?1 AND `uid` = ?2 \
+                     AND `flags_modseq` <= ?3 \
+                     AND `near_flags` != {flags_expr}",
+                ))?)
+            };
+
+            // For the far flags, we need separate steps for add/remove, and
+            // also need to do the modseq check and update manually.
+            let mut add_far_flags = if !flags.has_far() || remove_listed {
+                None
+            } else {
+                let mut query =
+                    "INSERT OR IGNORE INTO `mailbox_message_far_flag` \
+                     (`mailbox_id`, `uid`, `flag_id`) VALUES"
+                        .to_owned();
+                for (i, far_flag) in flags.iter_far().enumerate() {
+                    if 0 != i {
+                        query.push(',');
+                    }
+                    let _ = write!(query, " (?1, ?2, {far_flag})");
+                }
+
+                Some(txn.prepare(&query)?)
+            };
+
+            let mut rm_far_flags = if remove_unlisted {
+                if flags.has_far() {
+                    let mut query = "DELETE FROM `mailbox_message_far_flag` \
+                         WHERE `mailbox_id` = ? AND `uid` = ? \
+                         AND `flag_id` NOT IN ("
+                        .to_owned();
+                    for (i, far_flag) in flags.iter_far().enumerate() {
+                        if 0 != i {
+                            query.push(',');
+                        }
+                        let _ = write!(query, "{far_flag}");
+                    }
+                    query.push(')');
+
+                    Some(txn.prepare(&query)?)
+                } else {
+                    Some(txn.prepare(
+                        "DELETE FROM `mailbox_message_far_flag` \
+                         WHERE `mailbox_id` = ? AND `uid` = ?",
+                    )?)
+                }
+            } else if remove_listed {
+                let mut query = "DELETE FROM `mailbox_message_far_flag` \
+                                 WHERE `mailbox_id` = ? AND `uid` = ? \
+                                 AND `flag_id` IN ("
+                    .to_owned();
+                for (i, far_flag) in flags.iter_far().enumerate() {
+                    if 0 != i {
+                        query.push(',');
+                    }
+                    let _ = write!(query, "{far_flag}");
+                }
+                query.push(')');
+
+                Some(txn.prepare(&query)?)
+            } else {
+                None
+            };
+
+            let mut is_updatable =
+                if add_far_flags.is_some() || rm_far_flags.is_some() {
+                    Some(txn.prepare(
+                        "SELECT 1 FROM `mailbox_message` \
+                         WHERE `mailbox_id` = ? AND `uid` = ? \
+                         AND `flags_modseq` <= ?",
+                    )?)
+                } else {
+                    None
+                };
+
+            let mut update_flags_modseq =
+                if add_far_flags.is_some() || rm_far_flags.is_some() {
+                    Some(txn.prepare(
+                        "UPDATE `mailbox_message` \
+                         SET `flags_modseq` = ?3 \
+                         WHERE `mailbox_id` = ?1 AND `uid` = ?2",
+                    )?)
+                } else {
+                    None
+                };
+
+            for uid in messages {
+                let mut modified_with_modseq_update = false;
+                let mut modified_without_modseq_update = false;
+
+                if let Some(ref mut is_updatable) = is_updatable {
+                    if !is_updatable.exists((
+                        mailbox_id,
+                        uid,
+                        unchanged_since,
+                    ))? {
+                        continue;
+                    }
+                }
+
+                if let Some(ref mut update_near_flags) = update_near_flags {
+                    modified_with_modseq_update |= 0
+                        != update_near_flags.execute((
+                            mailbox_id,
+                            uid,
+                            unchanged_since,
+                            modseq,
+                        ))?;
+                }
+
+                if let Some(ref mut rm_far_flags) = rm_far_flags {
+                    modified_without_modseq_update |=
+                        0 != rm_far_flags.execute((mailbox_id, uid))?;
+                }
+
+                if let Some(ref mut add_far_flags) = add_far_flags {
+                    modified_without_modseq_update |=
+                        0 != add_far_flags.execute((mailbox_id, uid))?;
+                }
+
+                if let Some(ref mut update_flags_modseq) = update_flags_modseq {
+                    if modified_without_modseq_update
+                        && !modified_with_modseq_update
+                    {
+                        update_flags_modseq
+                            .execute((mailbox_id, uid, modseq))?;
+                    }
+                }
+
+                if modified_with_modseq_update || modified_without_modseq_update
+                {
+                    modified.push(uid);
+                }
+            }
+        }
+
+        txn.commit()?;
+        Ok(modified)
+    }
+
+    /// Directly fetches the raw data for the given message.
+    fn fetch_raw_message(
+        &mut self,
+        message_id: MessageId,
+    ) -> Result<RawMessage, Error> {
+        self.cxn.enable_write(false)?;
+        self.cxn
+            .query_row(
+                "SELECT * FROM `message` WHERE `id` = ?",
+                (message_id,),
+                from_row,
+            )
+            .optional()?
+            .ok_or(Error::NxMessage)
+    }
+
+    /// Directly fetches the raw data for the given mailbox message.
+    fn fetch_raw_mailbox_message(
+        &mut self,
+        mailbox_id: MailboxId,
+        uid: Uid,
+    ) -> Result<RawMailboxMessage, Error> {
+        self.cxn.enable_write(false)?;
+        self.cxn
+            .query_row(
+                "SELECT * FROM `mailbox_message` \
+                 WHERE `mailbox_id` = ? AND `uid` = ?",
+                (mailbox_id, uid),
+                from_row,
+            )
+            .optional()?
+            .ok_or(Error::NxMessage)
+    }
+
+    /// Fetches the flags bitset for the given mailbox message.
+    ///
+    /// This is only useful for tests, as the real IMAP code needs to manage
+    /// flags at a snapshot level.
+    #[cfg(test)]
+    fn fetch_mailbox_message_flags(
+        &mut self,
+        mailbox_id: MailboxId,
+        uid: Uid,
+    ) -> Result<SmallBitset, Error> {
+        let txn = self.cxn.read_tx()?;
+        let near = txn
+            .query_row(
+                "SELECT `near_flags` FROM `mailbox_message` \
+                 WHERE `mailbox_id` = ? AND `uid` = ?",
+                (mailbox_id, uid),
+                from_single::<i64>,
+            )
+            .optional()?
+            .ok_or(Error::NxMessage)?;
+
+        let mut bitset = SmallBitset::new_with_near(near as u64);
+        for flag in txn
+            .prepare(
+                "SELECT `flag_id` FROM `mailbox_message_far_flag` \
+                 WHERE `mailbox_id` = ? AND `uid` = ?",
+            )?
+            .query_map((mailbox_id, uid), from_single::<usize>)?
+        {
+            bitset.insert(flag?);
+        }
+
+        Ok(bitset)
+    }
+
+    /// Fetches the `Modseq` at which a mailbox message was expunged (if there
+    /// is such a record).
+    ///
+    /// This is only useful for tests. Real code needs to query the table for a
+    /// range; additionally, this lookup is inefficient as there is no index on
+    /// the key it uses.
+    #[cfg(test)]
+    fn fetch_mailbox_message_expunge_modseq(
+        &mut self,
+        mailbox_id: MailboxId,
+        uid: Uid,
+    ) -> Result<Option<Modseq>, Error> {
+        self.cxn.enable_write(false)?;
+        self.cxn
+            .query_row(
+                "SELECT `expunged_modseq` FROM `mailbox_message_expungement` \
+                 WHERE `mailbox_id` = ? AND `uid` = ?",
+                (mailbox_id, uid),
+                from_single,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Zero the `last_activity` field of the given message.
+    #[cfg(test)]
+    fn zero_message_last_activity(
+        &mut self,
+        message_id: MessageId,
+    ) -> Result<(), Error> {
+        self.cxn.enable_write(true)?;
+        self.cxn.execute(
+            "UPDATE `message` SET `last_activity` = 0 WHERE `id` = ?",
+            (message_id,),
+        )?;
+        Ok(())
+    }
 }
 
 /// All data pertaining to a particular mailbox.
@@ -484,6 +924,54 @@ impl FromRow for Mailbox {
             next_modseq: row.get("next_modseq")?,
             append_modseq: row.get("append_modseq")?,
             expunge_modseq: row.get("expunge_modseq")?,
+        })
+    }
+}
+
+/// All data pertaining to a single message.
+#[derive(Debug, Clone)]
+struct RawMessage {
+    pub id: MessageId,
+    pub path: String,
+    pub session_key: Option<SessionKey>,
+    pub rfc822_size: Option<u64>,
+    pub last_activity: UnixTimestamp,
+}
+
+impl FromRow for RawMessage {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            path: row.get("path")?,
+            session_key: row.get("session_key")?,
+            rfc822_size: row.get("rfc822_size")?,
+            last_activity: row.get("last_activity")?,
+        })
+    }
+}
+
+/// The first-level data pertaining to a message instance in a mailbox.
+#[derive(Debug, Clone)]
+struct RawMailboxMessage {
+    pub mailbox_id: MailboxId,
+    pub uid: Uid,
+    pub message_id: MessageId,
+    pub near_flags: i64,
+    pub savedate: UnixTimestamp,
+    pub append_modseq: Modseq,
+    pub flags_modseq: Modseq,
+}
+
+impl FromRow for RawMailboxMessage {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            mailbox_id: row.get("mailbox_id")?,
+            uid: row.get("uid")?,
+            message_id: row.get("message_id")?,
+            near_flags: row.get("near_flags")?,
+            savedate: row.get("savedate")?,
+            append_modseq: row.get("append_modseq")?,
+            flags_modseq: row.get("flags_modseq")?,
         })
     }
 }
@@ -524,6 +1012,142 @@ impl ConnectionExt for rusqlite::Connection {
     fn enable_write(&mut self, _: bool) -> rusqlite::Result<()> {
         Ok(())
     }
+}
+
+fn intern_message_as_orphan(
+    cxn: &rusqlite::Connection,
+    path: &str,
+) -> Result<MessageId, Error> {
+    let existing = cxn
+        .prepare_cached("SELECT `id` FROM `message` WHERE `path` = ?")?
+        .query_row((path,), from_single)
+        .optional()?;
+    if let Some(existing) = existing {
+        return Ok(existing);
+    }
+
+    cxn.prepare_cached(
+        "INSERT INTO `message` (`path`, `last_activity`) VALUES (?, ?)",
+    )?
+    .execute((path, UnixTimestamp::now()))?;
+
+    Ok(MessageId(cxn.last_insert_rowid()))
+}
+
+fn append_mailbox_messages(
+    cxn: &rusqlite::Connection,
+    mailbox_id: MailboxId,
+    messages: &mut dyn Iterator<
+        Item = Result<(MessageId, Option<&SmallBitset>), Error>,
+    >,
+) -> Result<Uid, Error> {
+    let modseq = new_modseq(cxn, mailbox_id)?;
+
+    // Read the UID for the first new message out of the database. While here,
+    // also re-assert that the mailbox exists and is selectable, though
+    // `require_selectable_mailbox` ought to have been called first to
+    // distinguish the two cases.
+    let first_uid = cxn
+        .query_row(
+            "SELECT `next_uid` FROM `mailbox` WHERE `id` = ? AND `selectable`",
+            (mailbox_id,),
+            from_single::<Uid>,
+        )
+        .optional()?
+        .ok_or(Error::NxMailbox)?;
+
+    let mut next_uid = first_uid;
+
+    let now = UnixTimestamp::now();
+    let mut mailbox_message_insert = cxn.prepare(
+        "INSERT INTO `mailbox_message` ( \
+           `mailbox_id`, `uid`, `message_id`, `near_flags`, \
+           `savedate`, `append_modseq`, `flags_modseq` \
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )?;
+    let mut mailbox_message_far_flag_insert = cxn.prepare(
+        "INSERT INTO `mailbox_message_far_flag` (\
+           `mailbox_id`, `uid`, `flag_id` \
+         ) VALUES (?, ?, ?)",
+    )?;
+
+    for message in messages {
+        let (message_id, flags) = message?;
+
+        let uid = next_uid;
+        next_uid = next_uid.next().ok_or(Error::MailboxFull)?;
+
+        mailbox_message_insert.execute((
+            mailbox_id,
+            uid,
+            message_id,
+            flags.map_or(0, |f| f.near_bits() as i64),
+            now,
+            modseq,
+            modseq,
+        ))?;
+
+        if let Some(flags) = flags {
+            if flags.has_far() {
+                for far_flag in flags.iter_far() {
+                    mailbox_message_far_flag_insert.execute((
+                        mailbox_id,
+                        uid,
+                        FlagId(far_flag),
+                    ))?;
+                }
+            }
+        }
+    }
+
+    if next_uid > first_uid {
+        cxn.execute(
+            "UPDATE `mailbox` \
+             SET `next_uid` = ?, `append_modseq` = ? \
+             WHERE `id` = ?",
+            (next_uid, modseq, mailbox_id),
+        )?;
+    }
+
+    Ok(first_uid)
+}
+
+/// Ensures that `id` represents an extant and selectable mailbox.
+fn require_selectable_mailbox(
+    cxn: &rusqlite::Connection,
+    id: MailboxId,
+) -> Result<(), Error> {
+    match cxn
+        .prepare_cached("SELECT `selectable` FROM `mailbox` WHERE `id` = ?")?
+        .query_row((id,), from_single)
+        .optional()?
+    {
+        None => Err(Error::NxMailbox),
+        Some(false) => Err(Error::MailboxUnselectable),
+        Some(true) => Ok(()),
+    }
+}
+
+/// Allocates a new `Modseq` for a change within the given mailbox.
+fn new_modseq(
+    cxn: &rusqlite::Connection,
+    id: MailboxId,
+) -> Result<Modseq, Error> {
+    let this_modseq = cxn.prepare_cached(
+        "SELECT `next_modseq` FROM `mailbox` WHERE `id` = ? AND `selectable`",
+    )?
+        .query_row((id,), from_single::<Modseq>)
+        .optional()?
+        .ok_or(Error::NxMailbox)?;
+
+    let next_modseq = this_modseq.next().ok_or(Error::MailboxFull)?;
+
+    cxn.prepare_cached(
+        "UPDATE `mailbox` SET `next_modseq` = ? WHERE `id` = ?",
+    )?
+    .execute((next_modseq, id))?;
+
+    Ok(this_modseq)
 }
 
 #[cfg(test)]
@@ -799,5 +1423,583 @@ mod test {
             .fetch_all_flags()
             .unwrap()
             .contains(&(FlagId(5), keyword.clone())));
+    }
+
+    #[test]
+    fn test_message_crud() {
+        let mut fixture = Fixture::new();
+
+        // Create a bunch of flags. Some will be near flags, others far flags.
+        let flags = (0..100)
+            .map(|f| {
+                fixture
+                    .cxn
+                    .intern_flag(&Flag::Keyword(format!("flag{f}")))
+                    .unwrap()
+            })
+            .collect::<Vec<FlagId>>();
+
+        let unselectable_id = fixture
+            .cxn
+            .create_mailbox(MailboxId::ROOT, "unselectable", None)
+            .unwrap();
+        let child_id = fixture
+            .cxn
+            .create_mailbox(unselectable_id, "child", None)
+            .unwrap();
+
+        // Insert a couple messages into `unselectable`, give one of them a far
+        // flag, and expunge the other. This will add entries to all the
+        // mailbox-specific sub-tables, which we can then validate were removed
+        // when we delete `unselectable` (making it \Noselect rather than
+        // actually removing it).
+        let us_uid_flag = fixture
+            .cxn
+            .intern_and_append_mailbox_messages(
+                unselectable_id,
+                &mut [("foo", None), ("bar", None)].iter().copied(),
+            )
+            .unwrap();
+        assert_eq!(Uid::u(1), us_uid_flag);
+
+        let us_flag_flags = SmallBitset::from(vec![flags[99].0]);
+        fixture
+            .cxn
+            .modify_mailbox_message_flags(
+                unselectable_id,
+                &us_flag_flags,
+                false,
+                false,
+                Modseq::MAX,
+                &mut [us_uid_flag].iter().copied(),
+            )
+            .unwrap();
+
+        let us_flag_mboxmsg = fixture
+            .cxn
+            .fetch_raw_mailbox_message(unselectable_id, us_uid_flag)
+            .unwrap();
+        // The flag we set should be a far flag.
+        assert_eq!(0, us_flag_mboxmsg.near_flags);
+
+        assert_eq!(Modseq::of(2), us_flag_mboxmsg.append_modseq);
+        assert_eq!(Modseq::of(3), us_flag_mboxmsg.flags_modseq);
+
+        // Ensure the flags are what we think. Since we eliminated the
+        // possibility of the flag being a near flag above, success implies a
+        // far flag entry.
+        assert_eq!(
+            us_flag_flags,
+            fixture
+                .cxn
+                .fetch_mailbox_message_flags(unselectable_id, us_uid_flag)
+                .unwrap(),
+        );
+
+        let us_uid_expunge = us_uid_flag.next().unwrap();
+        fixture
+            .cxn
+            .expunge_mailbox_messages(
+                unselectable_id,
+                &mut [us_uid_expunge].iter().copied(),
+            )
+            .unwrap();
+
+        // Validate that it has in fact been expunged.
+        assert_matches!(
+            Err(Error::NxMessage),
+            fixture
+                .cxn
+                .fetch_raw_mailbox_message(unselectable_id, us_uid_expunge),
+        );
+        assert_eq!(
+            Some(Modseq::of(4)),
+            fixture
+                .cxn
+                .fetch_mailbox_message_expunge_modseq(
+                    unselectable_id,
+                    us_uid_expunge
+                )
+                .unwrap(),
+        );
+
+        let mut unselectable =
+            fixture.cxn.fetch_mailbox(unselectable_id).unwrap();
+        assert_eq!(Modseq::of(4), unselectable.expunge_modseq);
+        assert_eq!(Modseq::of(2), unselectable.append_modseq);
+        assert_eq!(Uid::u(3), unselectable.next_uid);
+
+        // Delete `unselectable`, making it `\Noselect`.
+        fixture.cxn.delete_mailbox(unselectable_id).unwrap();
+        unselectable = fixture.cxn.fetch_mailbox(unselectable_id).unwrap();
+        assert!(!unselectable.selectable);
+
+        assert_matches!(
+            Err(Error::NxMessage),
+            fixture
+                .cxn
+                .fetch_raw_mailbox_message(unselectable_id, us_uid_flag),
+        );
+        assert_eq!(
+            None,
+            fixture
+                .cxn
+                .fetch_mailbox_message_expunge_modseq(
+                    unselectable_id,
+                    us_uid_expunge
+                )
+                .unwrap()
+        );
+
+        // Now we can test all the expected failure modes of the message CRUD
+        // operations.
+
+        assert_matches!(
+            Err(Error::MailboxUnselectable),
+            fixture.cxn.append_mailbox_messages(
+                unselectable_id,
+                &mut [(us_flag_mboxmsg.message_id, None)].iter().copied(),
+            ),
+        );
+        assert_matches!(
+            Err(Error::NxMailbox),
+            fixture.cxn.append_mailbox_messages(
+                MailboxId(-1),
+                &mut [(us_flag_mboxmsg.message_id, None)].iter().copied(),
+            ),
+        );
+        assert_matches!(
+            Err(Error::MailboxUnselectable),
+            fixture.cxn.intern_and_append_mailbox_messages(
+                unselectable_id,
+                &mut [("foo", None)].iter().copied(),
+            ),
+        );
+        assert_matches!(
+            Err(Error::NxMailbox),
+            fixture.cxn.intern_and_append_mailbox_messages(
+                MailboxId(-1),
+                &mut [("foo", None)].iter().copied(),
+            ),
+        );
+        assert_matches!(
+            Err(Error::MailboxUnselectable),
+            fixture.cxn.expunge_mailbox_messages(
+                unselectable_id,
+                &mut [us_uid_flag].iter().copied(),
+            ),
+        );
+        assert_matches!(
+            Err(Error::NxMailbox),
+            fixture.cxn.expunge_mailbox_messages(
+                MailboxId(-1),
+                &mut [us_uid_flag].iter().copied(),
+            ),
+        );
+        assert_matches!(
+            Err(Error::MailboxUnselectable),
+            fixture.cxn.modify_mailbox_message_flags(
+                unselectable_id,
+                &SmallBitset::new(),
+                false,
+                false,
+                Modseq::MAX,
+                &mut [us_uid_flag].iter().copied(),
+            ),
+        );
+        assert_matches!(
+            Err(Error::NxMailbox),
+            fixture.cxn.modify_mailbox_message_flags(
+                MailboxId(-1),
+                &SmallBitset::new(),
+                false,
+                false,
+                Modseq::MAX,
+                &mut [us_uid_flag].iter().copied(),
+            ),
+        );
+
+        // Add a message to child by the two-step process, inserting them with
+        // initial flags (both near and far).
+        let child_init_flags = SmallBitset::from(vec![flags[0].0, flags[99].0]);
+        let child_msg_ids = fixture
+            .cxn
+            .intern_messages_as_orphans(
+                &mut ["foo", "bar", "baz"].iter().copied(),
+            )
+            .unwrap();
+        let child_msg_uid123 = fixture
+            .cxn
+            .append_mailbox_messages(
+                child_id,
+                &mut child_msg_ids
+                    .iter()
+                    .map(|&id| (id, Some(&child_init_flags))),
+            )
+            .unwrap();
+        let child_msg_uid4 = fixture
+            .cxn
+            .intern_and_append_mailbox_messages(
+                child_id,
+                &mut [("foo", Some(&child_init_flags))].iter().copied(),
+            )
+            .unwrap();
+
+        assert_eq!(Uid::u(1), child_msg_uid123);
+        assert_eq!(Uid::u(4), child_msg_uid4);
+
+        let child_mboxmsg1 = fixture
+            .cxn
+            .fetch_raw_mailbox_message(child_id, child_msg_uid123)
+            .unwrap();
+        let child_mboxmsg4 = fixture
+            .cxn
+            .fetch_raw_mailbox_message(child_id, child_msg_uid4)
+            .unwrap();
+        // Because messages 1 and 4 both have path "foo", they both have the
+        // same underlying message ID.
+        assert_eq!(child_mboxmsg1.message_id, child_mboxmsg4.message_id);
+
+        // Ensure all the flags were set properly.
+        assert_eq!(
+            child_init_flags,
+            fixture
+                .cxn
+                .fetch_mailbox_message_flags(child_id, child_msg_uid123)
+                .unwrap(),
+        );
+        assert_eq!(
+            child_init_flags,
+            fixture
+                .cxn
+                .fetch_mailbox_message_flags(
+                    child_id,
+                    child_msg_uid123.next().unwrap()
+                )
+                .unwrap(),
+        );
+        assert_eq!(
+            child_init_flags,
+            fixture
+                .cxn
+                .fetch_mailbox_message_flags(child_id, child_msg_uid4)
+                .unwrap(),
+        );
+
+        // Brute-force various operations with every flag we've defined
+        // combining with known near- and far-flags to exercise every path in
+        // modify_mailbox_message_flags and check the boundary conditions.
+        for &FlagId(flag) in &flags[1..99] {
+            let uid = child_msg_uid123;
+
+            // Clear the flags left over from prior code.
+            fixture
+                .cxn
+                .modify_mailbox_message_flags(
+                    child_id,
+                    &SmallBitset::new(),
+                    false,
+                    true,
+                    Modseq::MAX,
+                    &mut [uid].iter().copied(),
+                )
+                .unwrap();
+
+            macro_rules! read_modseq {
+                () => {
+                    fixture
+                        .cxn
+                        .fetch_raw_mailbox_message(child_id, uid)
+                        .unwrap()
+                        .flags_modseq
+                };
+            }
+
+            macro_rules! read_flags {
+                () => {
+                    fixture
+                        .cxn
+                        .fetch_mailbox_message_flags(child_id, uid)
+                        .unwrap()
+                };
+            }
+
+            let start_modseq = read_modseq!();
+
+            // Set *just* the flag in question. This covers the fused update
+            // case where all conditions pass for near flags and the insertion
+            // case for far flags.
+            assert_eq!(
+                vec![uid],
+                fixture
+                    .cxn
+                    .modify_mailbox_message_flags(
+                        child_id,
+                        &SmallBitset::from(vec![flag]),
+                        false,
+                        true,
+                        start_modseq,
+                        &mut [uid].iter().copied(),
+                    )
+                    .unwrap(),
+            );
+            let mut modseq = read_modseq!();
+            assert!(modseq > start_modseq);
+            assert_eq!(SmallBitset::from(vec![flag]), read_flags!());
+
+            // Try clearing the flag, setting a near flag, setting a far flag,
+            // and clearing all flags with the old modseq. Nothing should
+            // happen. This covers the inline modseq case for near flags and
+            // the manual check for far flags.
+            for (flags, remove_listed, remove_unlisted) in vec![
+                (vec![flag], true, false),
+                (vec![flags[0].0], true, false),
+                (vec![flags[99].0], true, false),
+                (vec![], false, true),
+            ] {
+                assert!(fixture
+                    .cxn
+                    .modify_mailbox_message_flags(
+                        child_id,
+                        &SmallBitset::from(flags),
+                        remove_listed,
+                        remove_unlisted,
+                        start_modseq,
+                        &mut [uid].iter().copied(),
+                    )
+                    .unwrap()
+                    .is_empty());
+                assert_eq!(modseq, read_modseq!());
+                assert_eq!(SmallBitset::from(vec![flag]), read_flags!());
+            }
+
+            // Setting the flag when it's already set does nothing, and the
+            // value of remove_unlisted changes nothing since there are no
+            // other flags. This partially covers the no-op check for near
+            // flags and fully covers the no-op checks for far flag insertion
+            // and bulk far flag removal.
+            for &remove_unlisted in &[false, true] {
+                assert!(fixture
+                    .cxn
+                    .modify_mailbox_message_flags(
+                        child_id,
+                        &SmallBitset::from(vec![flag]),
+                        false,
+                        remove_unlisted,
+                        modseq,
+                        &mut [uid].iter().copied(),
+                    )
+                    .unwrap()
+                    .is_empty());
+                assert_eq!(modseq, read_modseq!());
+                assert_eq!(SmallBitset::from(vec![flag]), read_flags!());
+            }
+
+            // Toggling other flags leaves this one alone.
+            for &other_flag in &[flags[0].0, flags[99].0] {
+                assert_eq!(
+                    vec![uid],
+                    fixture
+                        .cxn
+                        .modify_mailbox_message_flags(
+                            child_id,
+                            &SmallBitset::from(vec![other_flag]),
+                            false,
+                            false,
+                            modseq,
+                            &mut [uid].iter().copied(),
+                        )
+                        .unwrap(),
+                    "flag={flag}, other_flag={other_flag}",
+                );
+                let mut new_modseq = read_modseq!();
+                assert!(new_modseq > modseq);
+                modseq = new_modseq;
+                assert_eq!(
+                    SmallBitset::from(vec![other_flag, flag]),
+                    read_flags!(),
+                );
+
+                assert_eq!(
+                    vec![uid],
+                    fixture
+                        .cxn
+                        .modify_mailbox_message_flags(
+                            child_id,
+                            &SmallBitset::from(vec![other_flag]),
+                            true,
+                            false,
+                            modseq,
+                            &mut [uid].iter().copied(),
+                        )
+                        .unwrap(),
+                );
+                new_modseq = read_modseq!();
+                assert!(new_modseq > modseq);
+                modseq = new_modseq;
+                assert_eq!(SmallBitset::from(vec![flag]), read_flags!(),);
+            }
+
+            // Clearing another flag by remove_unlisted while re-setting the
+            // flag in question is detected as a change. This covers no-op
+            // detection for specific far flag removal and further tests the
+            // no-op detection for near flags.
+            for &other_flag in &[flags[0].0, flags[99].0] {
+                assert_eq!(
+                    vec![uid],
+                    fixture
+                        .cxn
+                        .modify_mailbox_message_flags(
+                            child_id,
+                            &SmallBitset::from(vec![other_flag]),
+                            false,
+                            false,
+                            modseq,
+                            &mut [uid].iter().copied(),
+                        )
+                        .unwrap(),
+                );
+                let mut new_modseq = read_modseq!();
+                assert!(new_modseq > modseq);
+                modseq = new_modseq;
+                assert_eq!(
+                    SmallBitset::from(vec![other_flag, flag]),
+                    read_flags!(),
+                );
+
+                assert_eq!(
+                    vec![uid],
+                    fixture
+                        .cxn
+                        .modify_mailbox_message_flags(
+                            child_id,
+                            &SmallBitset::from(vec![flag]),
+                            false,
+                            true,
+                            modseq,
+                            &mut [uid].iter().copied(),
+                        )
+                        .unwrap(),
+                );
+                new_modseq = read_modseq!();
+                assert!(new_modseq > modseq);
+                modseq = new_modseq;
+                assert_eq!(SmallBitset::from(vec![flag]), read_flags!(),);
+            }
+
+            // Clearing this flag when it's already clear is a no-op, even when
+            // other flags are present.
+            assert_eq!(
+                vec![uid],
+                fixture
+                    .cxn
+                    .modify_mailbox_message_flags(
+                        child_id,
+                        &SmallBitset::from(vec![flags[0].0, flags[99].0]),
+                        false,
+                        true,
+                        modseq,
+                        &mut [uid].iter().copied(),
+                    )
+                    .unwrap(),
+            );
+            let new_modseq = read_modseq!();
+            assert!(new_modseq > modseq);
+            modseq = new_modseq;
+            assert_eq!(
+                SmallBitset::from(vec![flags[0].0, flags[99].0]),
+                read_flags!(),
+            );
+
+            assert!(fixture
+                .cxn
+                .modify_mailbox_message_flags(
+                    child_id,
+                    &SmallBitset::from(vec![flag]),
+                    true,
+                    false,
+                    modseq,
+                    &mut [uid].iter().copied(),
+                )
+                .unwrap()
+                .is_empty());
+            assert_eq!(modseq, read_modseq!());
+            assert_eq!(
+                SmallBitset::from(vec![flags[0].0, flags[99].0]),
+                read_flags!(),
+            );
+        }
+
+        // Set all the flags on a couple messages to ensure that mailbox
+        // deletion and message expungement handle the far flags.
+        let all_flags =
+            SmallBitset::from(flags.iter().map(|f| f.0).collect::<Vec<_>>());
+        assert_eq!(
+            vec![
+                child_msg_uid123,
+                child_msg_uid123.next().unwrap(),
+                child_msg_uid4
+            ],
+            fixture
+                .cxn
+                .modify_mailbox_message_flags(
+                    child_id,
+                    &all_flags,
+                    false,
+                    false,
+                    Modseq::MAX,
+                    &mut [
+                        child_msg_uid123,
+                        child_msg_uid123.next().unwrap(),
+                        child_msg_uid4
+                    ]
+                    .iter()
+                    .copied(),
+                )
+                .unwrap(),
+        );
+        // Verify bulk-deletion of many flags. This is mainly a concern
+        // regarding syntax of dynamically-generated SQL.
+        assert_eq!(
+            vec![child_msg_uid4],
+            fixture
+                .cxn
+                .modify_mailbox_message_flags(
+                    child_id,
+                    &all_flags,
+                    true,
+                    false,
+                    Modseq::MAX,
+                    &mut [child_msg_uid4].iter().copied(),
+                )
+                .unwrap(),
+        );
+
+        // Expunge a message with many flags. Also ensure that last_activity
+        // gets updated when expunged.
+        fixture
+            .cxn
+            .zero_message_last_activity(child_msg_ids[0])
+            .unwrap();
+        fixture
+            .cxn
+            .expunge_mailbox_messages(
+                child_id,
+                &mut [child_msg_uid123].iter().copied(),
+            )
+            .unwrap();
+        assert_ne!(
+            UnixTimestamp::zero(),
+            fixture
+                .cxn
+                .fetch_raw_message(child_msg_ids[0])
+                .unwrap()
+                .last_activity,
+        );
+
+        // Now we can verify that deleting everything works.
+        fixture.cxn.delete_mailbox(child_id).unwrap();
+        fixture.cxn.delete_mailbox(unselectable_id).unwrap();
+        assert!(fixture.cxn.fetch_all_mailboxes().unwrap().is_empty());
     }
 }

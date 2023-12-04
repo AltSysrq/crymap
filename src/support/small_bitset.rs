@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -54,6 +54,11 @@ impl SmallBitset {
         Self::default()
     }
 
+    /// Initialise a new bitset with the given near bits and no far bits.
+    pub fn new_with_near(near: u64) -> Self {
+        Self { near, far: None }
+    }
+
     /// Insert `val` into the bitset.
     ///
     /// Returns true if the element was not already present.
@@ -91,6 +96,21 @@ impl SmallBitset {
                     .filter(move |&bit| 0 != (word & (1 << bit)))
                     .map(move |bit| bit + ix * 64)
             })
+    }
+
+    /// Iterates over the far values in the bitset.
+    pub fn iter_far(&self) -> impl Iterator<Item = usize> + '_ {
+        self.iter().filter(|&i| i >= 64)
+    }
+
+    /// Returns the bitset of the "near" 64 values.
+    pub fn near_bits(&self) -> u64 {
+        self.near
+    }
+
+    /// Returns whether the bitset has any "far" (>=64) values.
+    pub fn has_far(&self) -> bool {
+        self.far.is_some()
     }
 
     fn addr_mut(&mut self, val: usize) -> (&mut u64, u64) {
@@ -159,6 +179,43 @@ impl<'de> Deserialize<'de> for SmallBitset {
         })
     }
 }
+
+#[cfg(test)]
+impl From<Vec<usize>> for SmallBitset {
+    fn from(v: Vec<usize>) -> Self {
+        let mut this = Self::new();
+        for bit in v {
+            this.insert(bit);
+        }
+        this
+    }
+}
+
+impl std::cmp::PartialEq for SmallBitset {
+    fn eq(&self, rhs: &Self) -> bool {
+        if self.near != rhs.near {
+            return false;
+        }
+
+        match (&self.far, &rhs.far) {
+            (&None, &None) => true,
+            (&Some(ref v), &None) | (&None, &Some(ref v)) => {
+                v.iter().all(|&w| 0 == w)
+            },
+            (&Some(ref lhs), &Some(ref rhs)) => {
+                let len = lhs.len().max(rhs.len());
+                lhs.iter()
+                    .copied()
+                    .chain(std::iter::repeat(0))
+                    .zip(rhs.iter().copied().chain(std::iter::repeat(0)))
+                    .take(len)
+                    .all(|(lhs, rhs)| lhs == rhs)
+            },
+        }
+    }
+}
+
+impl std::cmp::Eq for SmallBitset {}
 
 #[cfg(test)]
 mod test {

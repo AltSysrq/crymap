@@ -79,6 +79,10 @@ impl UnixTimestamp {
     pub fn now() -> Self {
         Self(Utc::now())
     }
+
+    pub fn zero() -> Self {
+        Self(DateTime::<Utc>::from_timestamp(0, 0).unwrap())
+    }
 }
 
 impl ToSql for UnixTimestamp {
