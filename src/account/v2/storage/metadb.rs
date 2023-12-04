@@ -50,7 +50,9 @@ impl Connection {
             xex.name(),
         )?;
 
-        cxn.execute("PRAGMA foreign_keys = ON", ())?;
+        cxn.pragma_update(None, "foreign_keys", true)?;
+        cxn.pragma_update(None, "journal_mode", "PERSIST")?;
+        cxn.pragma_update(None, "journal_size_limit", 1024 * 1024)?;
         cxn.busy_timeout(Duration::from_secs(10))?;
 
         {
