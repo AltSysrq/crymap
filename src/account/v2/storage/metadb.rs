@@ -595,7 +595,14 @@ impl Connection {
     ///
     /// Messages where `flags_modseq > unchanged_since` are skipped.
     ///
-    /// Returns the messages that were actually modified.
+    /// Returns the messages that were actually modified and the modseq that
+    /// was generated to represent to represent the change. The modseq is
+    /// allocated even if no changes are made, so that it can still stand in
+    /// for any messages that exist only in the in-memory session state. (I.e.,
+    /// if a non-UID `STORE` is made against an expunged message that the
+    /// current session hasn't yet seen, the flags must still be updated in the
+    /// session copy of the message, using this modseq to represent the change
+    /// number.)
     ///
     /// UIDs corresponding to no existing message are silently ignored.
     pub fn modify_mailbox_message_flags(
@@ -606,7 +613,7 @@ impl Connection {
         remove_unlisted: bool,
         unchanged_since: Modseq,
         messages: &mut dyn Iterator<Item = Uid>,
-    ) -> Result<Vec<Uid>, Error> {
+    ) -> Result<(Vec<Uid>, Modseq), Error> {
         debug_assert!(!remove_listed || !remove_unlisted);
 
         let mut modified = Vec::<Uid>::new();
@@ -614,9 +621,8 @@ impl Connection {
         let txn = self.cxn.write_tx()?;
         require_selectable_mailbox(&txn, mailbox_id)?;
 
+        let modseq = new_modseq(&txn, mailbox_id)?;
         {
-            let modseq = new_modseq(&txn, mailbox_id)?;
-
             // For the near flags, we can fuse the unchanged_since check,
             // modification check, all addition/removal, and updating
             // `flags_modseq` into one operation per message.
@@ -787,7 +793,7 @@ impl Connection {
         }
 
         txn.commit()?;
-        Ok(modified)
+        Ok((modified, modseq))
     }
 
     /// Directly fetches the raw data for the given message.
@@ -1835,7 +1841,8 @@ mod test {
                         start_modseq,
                         &mut [uid].iter().copied(),
                     )
-                    .unwrap(),
+                    .unwrap()
+                    .0,
             );
             let mut modseq = read_modseq!();
             assert!(modseq > start_modseq);
@@ -1862,6 +1869,7 @@ mod test {
                         &mut [uid].iter().copied(),
                     )
                     .unwrap()
+                    .0
                     .is_empty());
                 assert_eq!(modseq, read_modseq!());
                 assert_eq!(SmallBitset::from(vec![flag]), read_flags!());
@@ -1884,6 +1892,7 @@ mod test {
                         &mut [uid].iter().copied(),
                     )
                     .unwrap()
+                    .0
                     .is_empty());
                 assert_eq!(modseq, read_modseq!());
                 assert_eq!(SmallBitset::from(vec![flag]), read_flags!());
@@ -1903,7 +1912,8 @@ mod test {
                             modseq,
                             &mut [uid].iter().copied(),
                         )
-                        .unwrap(),
+                        .unwrap()
+                        .0,
                     "flag={flag}, other_flag={other_flag}",
                 );
                 let mut new_modseq = read_modseq!();
@@ -1926,7 +1936,8 @@ mod test {
                             modseq,
                             &mut [uid].iter().copied(),
                         )
-                        .unwrap(),
+                        .unwrap()
+                        .0,
                 );
                 new_modseq = read_modseq!();
                 assert!(new_modseq > modseq);
@@ -1951,7 +1962,8 @@ mod test {
                             modseq,
                             &mut [uid].iter().copied(),
                         )
-                        .unwrap(),
+                        .unwrap()
+                        .0,
                 );
                 let mut new_modseq = read_modseq!();
                 assert!(new_modseq > modseq);
@@ -1973,7 +1985,8 @@ mod test {
                             modseq,
                             &mut [uid].iter().copied(),
                         )
-                        .unwrap(),
+                        .unwrap()
+                        .0,
                 );
                 new_modseq = read_modseq!();
                 assert!(new_modseq > modseq);
@@ -1995,7 +2008,8 @@ mod test {
                         modseq,
                         &mut [uid].iter().copied(),
                     )
-                    .unwrap(),
+                    .unwrap()
+                    .0,
             );
             let new_modseq = read_modseq!();
             assert!(new_modseq > modseq);
@@ -2016,6 +2030,7 @@ mod test {
                     &mut [uid].iter().copied(),
                 )
                 .unwrap()
+                .0
                 .is_empty());
             assert_eq!(modseq, read_modseq!());
             assert_eq!(
@@ -2050,7 +2065,8 @@ mod test {
                     .iter()
                     .copied(),
                 )
-                .unwrap(),
+                .unwrap()
+                .0,
         );
         // Verify bulk-deletion of many flags. This is mainly a concern
         // regarding syntax of dynamically-generated SQL.
@@ -2066,7 +2082,8 @@ mod test {
                     Modseq::MAX,
                     &mut [child_msg_uid4].iter().copied(),
                 )
-                .unwrap(),
+                .unwrap()
+                .0,
         );
 
         // Expunge a message with many flags. Also ensure that last_activity
