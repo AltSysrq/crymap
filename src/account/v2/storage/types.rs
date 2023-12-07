@@ -26,7 +26,9 @@ use rusqlite::types::{
     FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef,
 };
 
-use crate::{account::model::*, crypt::AES_BLOCK};
+use crate::{
+    account::model::*, crypt::AES_BLOCK, support::small_bitset::SmallBitset,
+};
 
 macro_rules! transparent_to_sql {
     ($t:ident) => {
@@ -214,7 +216,7 @@ pub struct Mailbox {
     pub special_use: Option<MailboxAttribute>,
     pub next_uid: Uid,
     pub recent_uid: Uid,
-    pub next_modseq: Modseq,
+    pub max_modseq: Modseq,
     pub append_modseq: Modseq,
     pub expunge_modseq: Modseq,
 }
@@ -229,7 +231,7 @@ impl FromRow for Mailbox {
             special_use: row.get("special_use")?,
             next_uid: row.get("next_uid")?,
             recent_uid: row.get("recent_uid")?,
-            next_modseq: row.get("next_modseq")?,
+            max_modseq: row.get("max_modseq")?,
             append_modseq: row.get("append_modseq")?,
             expunge_modseq: row.get("expunge_modseq")?,
         })
@@ -282,6 +284,39 @@ impl FromRow for RawMailboxMessage {
             flags_modseq: row.get("flags_modseq")?,
         })
     }
+}
+
+/// The initial snapshot loaded from the database.
+///
+/// This is essentially `SELECT` + `QRESYNC`.
+#[derive(Debug, Clone)]
+pub struct InitialSnapshot {
+    /// The full set of defined flags, sorted ascending by ID.
+    pub flags: Vec<(FlagId, Flag)>,
+    /// All messages currently present in the mailbox, sorted ascending by UID.
+    pub messages: Vec<InitialMessageStatus>,
+    /// The `next_uid` field of the mailbox.
+    pub next_uid: Uid,
+    /// The greatest modseq of the mailbox.
+    pub max_modseq: Modseq,
+    /// Any `QRESYNC` response to send.
+    pub qresync: Option<QresyncResponse>,
+}
+
+/// Information about a message in the mailbox which is being newly introduced
+/// to the snapshot.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InitialMessageStatus {
+    /// The mailbox-specific UID of the message.
+    pub uid: Uid,
+    /// The global ID of the message.
+    pub id: MessageId,
+    /// The flags on the message.
+    pub flags: SmallBitset,
+    /// The greatest modseq of the message.
+    pub last_modified: Modseq,
+    /// Whether this message should be marked `\Recent`.
+    pub recent: bool,
 }
 
 pub fn from_row<T: FromRow>(row: &rusqlite::Row<'_>) -> rusqlite::Result<T> {

@@ -461,6 +461,20 @@ impl<T> Default for SeqRange<T> {
     }
 }
 
+/// For test convenience. Panics if the `Vec` isn't sorted.
+#[cfg(test)]
+impl<T: TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync> From<Vec<T>>
+    for SeqRange<T>
+{
+    fn from(v: Vec<T>) -> Self {
+        let mut this = Self::new();
+        for item in v {
+            this.append(item);
+        }
+        this
+    }
+}
+
 /// A message flag.
 ///
 /// System flags are represented as top-level enum values. Keywords are in the
@@ -940,7 +954,7 @@ pub struct QresyncRequest {
 }
 
 /// The result from a `QRESYNC` operation.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct QresyncResponse {
     /// Messages that have been expunged since the reference point or best
     /// guess thereof.

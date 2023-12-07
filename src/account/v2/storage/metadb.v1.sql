@@ -22,7 +22,9 @@
 -- paths.
 CREATE TABLE `mailbox` (
   -- The surrogate ID for this mailbox. This is also used for the MAILBOXID
-  -- reported to the client.
+  -- reported to the client and is also the `UIDVALIDITY` value.
+  -- (`AUTOINCREMENT` starts at 1, so we don't end up with a `UIDVALIDITY` of
+  -- 0.)
   `id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
   -- The parent of this mailbox, or NULL if this is under the root.
   `parent_id` INTEGER NOT NULL,
@@ -38,10 +40,9 @@ CREATE TABLE `mailbox` (
   `next_uid` INTEGER NOT NULL DEFAULT 1,
   -- The UID of the first message to mark as "recent".
   `recent_uid` INTEGER NOT NULL DEFAULT 1,
-  -- The first modification sequence number that has not been used in this
-  -- mailbox. Modseq 1 is the initial state of the mailbox, so `next_modseq`
-  -- starts at 2.
-  `next_modseq` INTEGER NOT NULL DEFAULT 2,
+  -- The latest modification sequence number that has been used in this
+  -- mailbox. Modseq 1 is the initial state of the mailbox.
+  `max_modseq` INTEGER NOT NULL DEFAULT 1,
   -- The modseq at which a new message was last appended.
   `append_modseq` INTEGER NOT NULL DEFAULT 1,
   -- The modseq at which a message was last expunged.

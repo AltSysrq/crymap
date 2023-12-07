@@ -896,6 +896,122 @@ impl Connection {
         )?;
         Ok(())
     }
+
+    /// Fetches the initial snapshot state for a mailbox (as in `SELECT` or
+    /// `EXAMINE`).
+    ///
+    /// `writable` controls whether the `recent_uid` field gets updated.
+    pub fn select(
+        &mut self,
+        mailbox_id: MailboxId,
+        writable: bool,
+        qresync: Option<&QresyncRequest>,
+    ) -> Result<InitialSnapshot, Error> {
+        let txn = if writable {
+            self.cxn.write_tx()?
+        } else {
+            self.cxn.read_tx()?
+        };
+
+        let (selectable, next_uid, recent_uid, max_modseq) = txn
+            .query_row(
+                "SELECT `selectable`, `next_uid`, `recent_uid`, `max_modseq` \
+                 FROM `mailbox` WHERE `id` = ?",
+                (mailbox_id,),
+                from_row::<(bool, Uid, Uid, Modseq)>,
+            )
+            .optional()?
+            .ok_or(Error::NxMailbox)?;
+
+        if !selectable {
+            return Err(Error::MailboxUnselectable);
+        }
+
+        let flags = txn
+            .prepare("SELECT `id`, `flag` FROM `flag` ORDER BY `id`")?
+            .query_map((), from_row::<(FlagId, Flag)>)?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let messages =
+            fetch_initial_messages(&txn, mailbox_id, Uid::MIN, recent_uid)?;
+
+        if writable && recent_uid != next_uid {
+            txn.execute(
+                "UPDATE `mailbox` SET `recent_uid` = `next_uid` \
+                 WHERE `id` = ?",
+                (mailbox_id,),
+            )?;
+        }
+
+        let qresync_response = if let Some(qresync) =
+            qresync.filter(|q| i64::from(q.uid_validity) == mailbox_id.0)
+        {
+            // Note that this code deliberately never looks at
+            // `mapping_reference`: because we remember all expungements, the
+            // case where we would use it never occurs.
+            //
+            // Comparisons against `resync_from` are `>` and not `>=` since the
+            // client implies that it knows the state at `modseq ==
+            // resync_from`.
+
+            let accept_uid = |uid: Uid| -> bool {
+                qresync
+                    .known_uids
+                    .as_ref()
+                    .map_or(true, |k| k.contains(uid))
+            };
+
+            let mut expunged = SeqRange::<Uid>::new();
+            for uid in txn
+                .prepare(
+                    "SELECT `uid` FROM `mailbox_message_expungement` \
+                     WHERE `mailbox_id` = ? AND `expunged_modseq` > ? \
+                     ORDER BY `uid`",
+                )?
+                .query_map(
+                    (mailbox_id, qresync.resync_from),
+                    from_single::<Uid>,
+                )?
+            {
+                let uid = uid?;
+                if accept_uid(uid) {
+                    expunged.append(uid);
+                }
+            }
+
+            let changed = txn
+                .prepare(
+                    // `flags_modseq` is always >= `append_modseq`, so we only
+                    // need to query one of them.
+                    "SELECT `uid` FROM `mailbox_message` \
+                     WHERE `mailbox_id` = ? AND `flags_modseq` > ? \
+                     ORDER BY `uid`",
+                )?
+                .query_map(
+                    (mailbox_id, qresync.resync_from),
+                    from_single::<Uid>,
+                )?
+                .filter_map(|res| match res {
+                    Ok(uid) if !accept_uid(uid) => None,
+                    res => Some(res),
+                })
+                .collect::<Result<Vec<Uid>, _>>()?;
+
+            Some(QresyncResponse { expunged, changed })
+        } else {
+            None
+        };
+
+        txn.commit()?;
+
+        Ok(InitialSnapshot {
+            flags,
+            messages,
+            next_uid,
+            max_modseq,
+            qresync: qresync_response,
+        })
+    }
 }
 
 trait ConnectionExt {
@@ -1034,6 +1150,64 @@ fn append_mailbox_messages(
     Ok(first_uid)
 }
 
+/// Fetches the `InitialMessageStatus` for every message in `mailbox_id` whose
+/// UID is at least `min_uid`.
+///
+/// `recent_uid` is used to determine the value of the `recent` field.
+fn fetch_initial_messages(
+    txn: &rusqlite::Connection,
+    mailbox_id: MailboxId,
+    min_uid: Uid,
+    recent_uid: Uid,
+) -> Result<Vec<InitialMessageStatus>, Error> {
+    let mut messages = txn
+        .prepare(
+            "SELECT `uid`, `message_id`, `near_flags`,
+                    MAX(`flags_modseq`, `append_modseq`) \
+             FROM `mailbox_message` \
+             WHERE `mailbox_id` = ? AND `uid` >= ? \
+             ORDER BY `uid`",
+        )?
+        .query_map(
+            (mailbox_id, min_uid),
+            from_row::<(Uid, MessageId, i64, Modseq)>,
+        )?
+        .map(|res| {
+            res.map(|(uid, id, near_flags, modseq)| InitialMessageStatus {
+                uid,
+                id,
+                flags: SmallBitset::new_with_near(near_flags as u64),
+                last_modified: modseq,
+                recent: uid >= recent_uid,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    {
+        let mut msg_it = messages.iter_mut().peekable();
+
+        for far_flag in txn
+            .prepare(
+                "SELECT `uid`, `flag_id` \
+                 FROM `mailbox_message_far_flag` \
+                 WHERE `mailbox_id` = ? \
+                 ORDER BY `uid`",
+            )?
+            .query_map((mailbox_id,), from_row::<(Uid, FlagId)>)?
+        {
+            let (uid, FlagId(flag_id)) = far_flag?;
+            while msg_it.peek().unwrap().uid < uid {
+                msg_it.next();
+            }
+
+            let msg = msg_it.peek_mut().unwrap();
+            debug_assert_eq!(uid, msg.uid);
+            msg.flags.insert(flag_id);
+        }
+    }
+
+    Ok(messages)
+}
+
 /// Ensures that `id` represents an extant and selectable mailbox.
 fn require_selectable_mailbox(
     cxn: &rusqlite::Connection,
@@ -1055,19 +1229,17 @@ fn new_modseq(
     cxn: &rusqlite::Connection,
     id: MailboxId,
 ) -> Result<Modseq, Error> {
-    let this_modseq = cxn.prepare_cached(
-        "SELECT `next_modseq` FROM `mailbox` WHERE `id` = ? AND `selectable`",
+    let max_modseq = cxn.prepare_cached(
+        "SELECT `max_modseq` FROM `mailbox` WHERE `id` = ? AND `selectable`",
     )?
         .query_row((id,), from_single::<Modseq>)
         .optional()?
         .ok_or(Error::NxMailbox)?;
 
-    let next_modseq = this_modseq.next().ok_or(Error::MailboxFull)?;
+    let this_modseq = max_modseq.next().ok_or(Error::MailboxFull)?;
 
-    cxn.prepare_cached(
-        "UPDATE `mailbox` SET `next_modseq` = ? WHERE `id` = ?",
-    )?
-    .execute((next_modseq, id))?;
+    cxn.prepare_cached("UPDATE `mailbox` SET `max_modseq` = ? WHERE `id` = ?")?
+        .execute((this_modseq, id))?;
 
     Ok(this_modseq)
 }
@@ -1923,5 +2095,307 @@ mod test {
         fixture.cxn.delete_mailbox(child_id).unwrap();
         fixture.cxn.delete_mailbox(unselectable_id).unwrap();
         assert!(fixture.cxn.fetch_all_mailboxes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_select() {
+        let mut fixture = Fixture::new();
+
+        let inbox = fixture
+            .cxn
+            .create_mailbox(MailboxId::ROOT, "INBOX", None)
+            .unwrap();
+        let message_id = fixture
+            .cxn
+            .intern_messages_as_orphans(&mut ["foo"].iter().copied())
+            .unwrap()[0];
+
+        let mut init_state = fixture.cxn.select(inbox, true, None).unwrap();
+        assert!(init_state.messages.is_empty());
+        assert_eq!(Uid::MIN, init_state.next_uid);
+        assert_eq!(Modseq::MIN, init_state.max_modseq);
+        assert!(init_state.qresync.is_none());
+
+        let msg1_uid = fixture
+            .cxn
+            .append_mailbox_messages(
+                inbox,
+                &mut [(message_id, None)].iter().copied(),
+            )
+            .unwrap();
+        let msg2_uid = fixture
+            .cxn
+            .append_mailbox_messages(
+                inbox,
+                &mut [(message_id, None)].iter().copied(),
+            )
+            .unwrap();
+
+        // Read-only select: We'll get \Recent flags, but the next session will
+        // also see them.
+        init_state = fixture.cxn.select(inbox, false, None).unwrap();
+        assert_eq!(
+            vec![
+                InitialMessageStatus {
+                    uid: msg1_uid,
+                    id: message_id,
+                    flags: SmallBitset::new(),
+                    last_modified: Modseq::of(2),
+                    recent: true,
+                },
+                InitialMessageStatus {
+                    uid: msg2_uid,
+                    id: message_id,
+                    flags: SmallBitset::new(),
+                    last_modified: Modseq::of(3),
+                    recent: true,
+                },
+            ],
+            init_state.messages,
+        );
+        assert_eq!(Uid::u(3), init_state.next_uid);
+        assert_eq!(Modseq::of(3), init_state.max_modseq);
+
+        init_state = fixture.cxn.select(inbox, true, None).unwrap();
+        assert!(init_state.messages.iter().all(|m| m.recent));
+
+        // Since we did a RW select, the next will not see anything as recent.
+        init_state = fixture.cxn.select(inbox, true, None).unwrap();
+        assert!(init_state.messages.iter().all(|m| !m.recent));
+
+        // Add a third message. Another select will then see that message alone
+        // as recent.
+        let msg3_uid = fixture
+            .cxn
+            .append_mailbox_messages(
+                inbox,
+                &mut [(message_id, None)].iter().copied(),
+            )
+            .unwrap();
+        init_state = fixture.cxn.select(inbox, true, None).unwrap();
+        assert!(!init_state.messages[0].recent);
+        assert!(!init_state.messages[1].recent);
+        assert!(init_state.messages[2].recent);
+
+        let before_msg_flags = init_state.max_modseq;
+
+        // Add a bunch of flags to messages 1 and 3, then verify we get all of
+        // them when selecting.
+        let flags = (0..100)
+            .map(|id| {
+                fixture
+                    .cxn
+                    .intern_flag(&Flag::Keyword(format!("f{id}")))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let all_flags_bitset = SmallBitset::from(
+            flags.iter().map(|&FlagId(ix)| ix).collect::<Vec<_>>(),
+        );
+        fixture
+            .cxn
+            .modify_mailbox_message_flags(
+                inbox,
+                &all_flags_bitset,
+                false,
+                false,
+                Modseq::MAX,
+                &mut [msg1_uid, msg3_uid].iter().copied(),
+            )
+            .unwrap();
+
+        init_state = fixture.cxn.select(inbox, false, None).unwrap();
+        assert_eq!(all_flags_bitset, init_state.messages[0].flags);
+        assert_eq!(SmallBitset::new(), init_state.messages[1].flags);
+        assert_eq!(all_flags_bitset, init_state.messages[2].flags);
+
+        let after_msg_flags = init_state.max_modseq;
+
+        let msg4_uid = fixture
+            .cxn
+            .append_mailbox_messages(
+                inbox,
+                &mut [(message_id, None)].iter().copied(),
+            )
+            .unwrap();
+        let msg5_uid = fixture
+            .cxn
+            .append_mailbox_messages(
+                inbox,
+                &mut [(message_id, None)].iter().copied(),
+            )
+            .unwrap();
+
+        // Expunge a couple messages separately for the qresync tests.
+        fixture
+            .cxn
+            .expunge_mailbox_messages(inbox, &mut [msg4_uid].iter().copied())
+            .unwrap();
+        let before_expunge_2 =
+            fixture.cxn.fetch_mailbox(inbox).unwrap().max_modseq;
+        fixture
+            .cxn
+            .expunge_mailbox_messages(inbox, &mut [msg2_uid].iter().copied())
+            .unwrap();
+
+        let latest_modseq =
+            fixture.cxn.fetch_mailbox(inbox).unwrap().max_modseq;
+
+        // Qresync against the latest modseq returns nothing.
+        init_state = fixture
+            .cxn
+            .select(
+                inbox,
+                false,
+                Some(&QresyncRequest {
+                    uid_validity: inbox.0 as u32,
+                    resync_from: latest_modseq,
+                    known_uids: None,
+                    mapping_reference: None,
+                }),
+            )
+            .unwrap();
+        assert_eq!(
+            Some(QresyncResponse {
+                expunged: vec![].into(),
+                changed: vec![],
+            }),
+            init_state.qresync,
+        );
+        assert!(init_state.qresync.as_ref().unwrap().expunged.is_empty());
+        assert!(init_state.qresync.as_ref().unwrap().changed.is_empty());
+
+        // Qresync with the wrong UID validity returns no response at all.
+        init_state = fixture
+            .cxn
+            .select(
+                inbox,
+                false,
+                Some(&QresyncRequest {
+                    uid_validity: inbox.0 as u32 + 1,
+                    resync_from: Modseq::MIN,
+                    known_uids: None,
+                    mapping_reference: None,
+                }),
+            )
+            .unwrap();
+        assert!(init_state.qresync.is_none());
+
+        // Qresync from the init modseq returns all extant UIDs and both
+        // expunges (even though the UIDs for those expunges weren't known at
+        // that time).
+        init_state = fixture
+            .cxn
+            .select(
+                inbox,
+                false,
+                Some(&QresyncRequest {
+                    uid_validity: inbox.0 as u32,
+                    resync_from: Modseq::MIN,
+                    known_uids: None,
+                    mapping_reference: None,
+                }),
+            )
+            .unwrap();
+        assert_eq!(
+            Some(QresyncResponse {
+                expunged: vec![msg2_uid, msg4_uid].into(),
+                changed: vec![msg1_uid, msg3_uid, msg5_uid],
+            }),
+            init_state.qresync,
+        );
+
+        // If we specify a known UID range, we only get updates for things in
+        // that range.
+        init_state = fixture
+            .cxn
+            .select(
+                inbox,
+                false,
+                Some(&QresyncRequest {
+                    uid_validity: inbox.0 as u32,
+                    resync_from: Modseq::MIN,
+                    known_uids: Some(SeqRange::range(msg1_uid, msg3_uid)),
+                    mapping_reference: None,
+                }),
+            )
+            .unwrap();
+        assert_eq!(
+            Some(QresyncResponse {
+                expunged: vec![msg2_uid].into(),
+                changed: vec![msg1_uid, msg3_uid],
+            }),
+            init_state.qresync,
+        );
+
+        // Fetching with resync_from = before_msg_flags, we'll get told about
+        // msg1 and msg3 because of the flags change, even though they already
+        // existed.
+        init_state = fixture
+            .cxn
+            .select(
+                inbox,
+                false,
+                Some(&QresyncRequest {
+                    uid_validity: inbox.0 as u32,
+                    resync_from: before_msg_flags,
+                    known_uids: None,
+                    mapping_reference: None,
+                }),
+            )
+            .unwrap();
+        assert_eq!(
+            Some(QresyncResponse {
+                expunged: vec![msg2_uid, msg4_uid].into(),
+                changed: vec![msg1_uid, msg3_uid, msg5_uid],
+            }),
+            init_state.qresync,
+        );
+
+        // But with resync_from = after_msg_flags, there were no further
+        // updates to 1 and 3, so we don't see those.
+        init_state = fixture
+            .cxn
+            .select(
+                inbox,
+                false,
+                Some(&QresyncRequest {
+                    uid_validity: inbox.0 as u32,
+                    resync_from: after_msg_flags,
+                    known_uids: None,
+                    mapping_reference: None,
+                }),
+            )
+            .unwrap();
+        assert_eq!(
+            Some(QresyncResponse {
+                expunged: vec![msg2_uid, msg4_uid].into(),
+                changed: vec![msg5_uid],
+            }),
+            init_state.qresync,
+        );
+
+        // With resync_from = before_expunge_2, the only change is the
+        // expungement of message 2.
+        init_state = fixture
+            .cxn
+            .select(
+                inbox,
+                false,
+                Some(&QresyncRequest {
+                    uid_validity: inbox.0 as u32,
+                    resync_from: before_expunge_2,
+                    known_uids: None,
+                    mapping_reference: None,
+                }),
+            )
+            .unwrap();
+        assert_eq!(
+            Some(QresyncResponse {
+                expunged: vec![msg2_uid].into(),
+                changed: vec![],
+            }),
+            init_state.qresync,
+        );
     }
 }
