@@ -217,8 +217,6 @@ pub struct Mailbox {
     pub next_uid: Uid,
     pub recent_uid: Uid,
     pub max_modseq: Modseq,
-    pub append_modseq: Modseq,
-    pub expunge_modseq: Modseq,
 }
 
 impl FromRow for Mailbox {
@@ -232,8 +230,26 @@ impl FromRow for Mailbox {
             next_uid: row.get("next_uid")?,
             recent_uid: row.get("recent_uid")?,
             max_modseq: row.get("max_modseq")?,
-            append_modseq: row.get("append_modseq")?,
-            expunge_modseq: row.get("expunge_modseq")?,
+        })
+    }
+}
+
+/// Core status information about a mailbox.
+#[derive(Debug, Clone, Copy)]
+pub struct MailboxStatus {
+    pub selectable: bool,
+    pub next_uid: Uid,
+    pub recent_uid: Uid,
+    pub max_modseq: Modseq,
+}
+
+impl FromRow for MailboxStatus {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            selectable: row.get("selectable")?,
+            next_uid: row.get("next_uid")?,
+            recent_uid: row.get("recent_uid")?,
+            max_modseq: row.get("max_modseq")?,
         })
     }
 }
@@ -317,6 +333,50 @@ pub struct InitialMessageStatus {
     pub last_modified: Modseq,
     /// Whether this message should be marked `\Recent`.
     pub recent: bool,
+}
+
+/// Information to update a snapshot between the cursed non-UID read-only
+/// commands.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MiniPoll {
+    /// New flags that were created, sorted ascending by ID.
+    pub new_flags: Vec<(FlagId, Flag)>,
+    /// Updates to already-known messages, sorted ascending by UID.
+    pub updated_messages: Vec<UpdatedMessageStatus>,
+    /// The `HIGHESTMODSEQ` to report. This may be less than the maximum
+    /// `Modseq` of any message (including those in `updated_messages`) if
+    /// there have been append or expunge operations that are being delayed.
+    pub snapshot_modseq: Modseq,
+    /// Whether `snapshot_modseq` is less than `max_modseq` on the mailbox.
+    pub diverged: bool,
+}
+
+/// Full information to update a snapshot to the latest state.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FullPoll {
+    /// New flags that were created.
+    pub new_flags: Vec<(FlagId, Flag)>,
+    /// Updates to already-known messages, sorted ascending by UID.
+    pub updated_messages: Vec<UpdatedMessageStatus>,
+    /// Status on newly appended messages, sorted ascending by UID.
+    pub new_messages: Vec<InitialMessageStatus>,
+    /// UIDs which have been expunged, sorted ascending.
+    ///
+    /// This may include UIDs which were not in the current snapshot.
+    pub expunged: Vec<Uid>,
+    /// The current modification sequence number.
+    pub snapshot_modseq: Modseq,
+}
+
+/// Information about an already-known message which can be updated by polling.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdatedMessageStatus {
+    /// The mailbox-specific UID of the message.
+    pub uid: Uid,
+    /// The flags on the message.
+    pub flags: SmallBitset,
+    /// The greatest modseq of the message.
+    pub last_modified: Modseq,
 }
 
 pub fn from_row<T: FromRow>(row: &rusqlite::Row<'_>) -> rusqlite::Result<T> {

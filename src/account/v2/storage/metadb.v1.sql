@@ -43,10 +43,6 @@ CREATE TABLE `mailbox` (
   -- The latest modification sequence number that has been used in this
   -- mailbox. Modseq 1 is the initial state of the mailbox.
   `max_modseq` INTEGER NOT NULL DEFAULT 1,
-  -- The modseq at which a new message was last appended.
-  `append_modseq` INTEGER NOT NULL DEFAULT 1,
-  -- The modseq at which a message was last expunged.
-  `expunge_modseq` INTEGER NOT NULL DEFAULT 1,
   UNIQUE (`parent_id`, `name`),
   FOREIGN KEY (`parent_id`) REFERENCES `mailbox` (`id`)
 ) STRICT;
@@ -76,11 +72,14 @@ CREATE TABLE `flag` (
 -- IDs and also addresses the fact that AUTOINCREMENT starts at 1; this way, we
 -- can ensure bit 0 is used too without needing to do offsetting in code.
 INSERT INTO `flag` (`id`, `flag`) VALUES
-  (0, '\Answered'),
-  (1, '\Deleted'),
-  (2, '\Draft'),
-  (3, '\Flagged'),
-  (4, '\Seen');
+  -- We specifically make \Seen be bit 0 since the most common flag combination
+  -- is simply \Seen (i.e. just \Seen is 1) and SQLite has a compact
+  -- representation for integers 0 and 1.
+  (0, '\Seen'),
+  (1, '\Answered'),
+  (2, '\Deleted'),
+  (3, '\Draft'),
+  (4, '\Flagged');
 
 -- Tracks all messages which exist in the user's account.
 --

@@ -574,11 +574,6 @@ impl Connection {
                 insert_mailbox_message_expungement
                     .execute((mailbox_id, uid, modseq))?;
             }
-
-            txn.execute(
-                "UPDATE `mailbox` SET `expunge_modseq` = ? WHERE `id` = ?",
-                (modseq, mailbox_id),
-            )?;
         }
 
         txn.commit()?;
@@ -919,29 +914,21 @@ impl Connection {
             self.cxn.read_tx()?
         };
 
-        let (selectable, next_uid, recent_uid, max_modseq) = txn
-            .query_row(
-                "SELECT `selectable`, `next_uid`, `recent_uid`, `max_modseq` \
-                 FROM `mailbox` WHERE `id` = ?",
-                (mailbox_id,),
-                from_row::<(bool, Uid, Uid, Modseq)>,
-            )
-            .optional()?
-            .ok_or(Error::NxMailbox)?;
-
-        if !selectable {
-            return Err(Error::MailboxUnselectable);
-        }
+        let status = selectable_mailbox_status(&txn, mailbox_id)?;
 
         let flags = txn
             .prepare("SELECT `id`, `flag` FROM `flag` ORDER BY `id`")?
             .query_map((), from_row::<(FlagId, Flag)>)?
             .collect::<Result<Vec<_>, _>>()?;
 
-        let messages =
-            fetch_initial_messages(&txn, mailbox_id, Uid::MIN, recent_uid)?;
+        let messages = fetch_initial_messages(
+            &txn,
+            mailbox_id,
+            Uid::MIN,
+            status.recent_uid,
+        )?;
 
-        if writable && recent_uid != next_uid {
+        if writable && status.recent_uid != status.next_uid {
             txn.execute(
                 "UPDATE `mailbox` SET `recent_uid` = `next_uid` \
                  WHERE `id` = ?",
@@ -1013,9 +1000,201 @@ impl Connection {
         Ok(InitialSnapshot {
             flags,
             messages,
-            next_uid,
-            max_modseq,
+            next_uid: status.next_uid,
+            max_modseq: status.max_modseq,
             qresync: qresync_response,
+        })
+    }
+
+    /// Performs a "mini poll", discovering a subset of updated data which is
+    /// safe to report after the cursed non-UID `FETCH`, `STORE`, and `SEARCH`
+    /// commands.
+    ///
+    /// `max_known_flag` is the maximum flag ID currently in the snapshot. Any
+    /// new flags beyond this ID will be discovered and returned.
+    ///
+    /// `max_known_uid` is the maximum UID of any message in the snapshot. No
+    /// information on newer messages will be returned.
+    ///
+    /// `snapshot_modseq` is the current nominal modseq of the snapshot. It is
+    /// used to determine whether any expunges have happened after the
+    /// snapshot. `mini_poll` will compute an updated value for the snapshot
+    /// modseq.
+    ///
+    /// `max_message_modseq` is the maximum modseq of any message currently in
+    /// the snapshot. It may be greater than or less than `snapshot_modseq`.
+    /// It is used to discover changes to flags on known messages.
+    pub fn mini_poll(
+        &mut self,
+        mailbox_id: MailboxId,
+        max_known_flag: FlagId,
+        max_known_uid: Option<Uid>,
+        snapshot_modseq: Modseq,
+        max_message_modseq: Modseq,
+    ) -> Result<MiniPoll, Error> {
+        let txn = self.cxn.read_tx()?;
+
+        let status = selectable_mailbox_status(&txn, mailbox_id)?;
+        if snapshot_modseq == status.max_modseq {
+            // Short-circuit since we know nothing has changed. (There could
+            // potentially be new flags, but we don't need to discover them
+            // until any message is modified to reference them.)
+            return Ok(MiniPoll {
+                new_flags: Vec::new(),
+                updated_messages: Vec::new(),
+                snapshot_modseq,
+                diverged: false,
+            });
+        }
+
+        let new_flags = poll_new_flags(&txn, max_known_flag)?;
+        let updated_messages = poll_updated_messages(
+            &txn,
+            mailbox_id,
+            max_known_uid,
+            max_message_modseq,
+        )?;
+
+        // If there are expunge or append events which occurred after the
+        // snapshot, we need to ensure we do not report a modseq >= those
+        // events.
+        let delayed_expunge_modseq = txn
+            .prepare_cached(
+                "SELECT MIN(`expunged_modseq`) - 1 \
+                 FROM `mailbox_message_expungement` \
+                 WHERE `mailbox_id` = ? AND `expunged_modseq` > ?",
+            )?
+            .query_row(
+                (mailbox_id, snapshot_modseq),
+                from_single::<Option<Modseq>>,
+            )?;
+        let delayed_append_modseq = txn
+            .prepare_cached(
+                "SELECT MIN(`append_modseq`) - 1 \
+                 FROM `mailbox_message` \
+                 WHERE `mailbox_id` = ? AND `uid` > ?",
+            )?
+            .query_row(
+                (
+                    mailbox_id,
+                    max_known_uid.map(|uid| uid.0.get()).unwrap_or(0),
+                ),
+                from_single::<Option<Modseq>>,
+            )?;
+        let new_snapshot_modseq = delayed_expunge_modseq
+            .unwrap_or(status.max_modseq)
+            .min(delayed_append_modseq.unwrap_or(status.max_modseq));
+
+        let diverged = txn
+            .prepare_cached(
+                "SELECT `max_modseq` != ?2 FROM `mailbox` WHERE `id` = ?1",
+            )?
+            .query_row(
+                (mailbox_id, new_snapshot_modseq),
+                from_single::<bool>,
+            )?;
+
+        Ok(MiniPoll {
+            new_flags,
+            updated_messages,
+            snapshot_modseq: new_snapshot_modseq,
+            diverged,
+        })
+    }
+
+    /// Performs a full poll, fetching all data needed to bring a snapshot up
+    /// to date with the database.
+    ///
+    /// `writable` indicates whether the mailbox is opened in a writable mode.
+    /// If `false`, `recent_uid` will not be updated.
+    ///
+    /// `max_known_flag` is the maximum flag ID currently in the snapshot. Any
+    /// new flags beyond this ID will be discovered and returned.
+    ///
+    /// `max_known_uid` is the maximum UID of any message in the snapshot, used
+    /// to differentiate between already-known and new messages.
+    ///
+    /// `snapshot_modseq` is the current nominal modseq of the snapshot. It is
+    /// used to discover new expunge events.
+    ///
+    /// `max_message_modseq` is the maximum modseq of any message currently in
+    /// the snapshot. It may be greater than or less than `snapshot_modseq`.
+    /// (The "greater" case only occurs after `mini_poll` allowed the true
+    /// state to diverge from reality.) It is used to discover changes to flags
+    /// on known messages. This is only really here so that a `mini_poll`
+    /// followed by `full_poll` does not repeat flags changes.
+    pub fn full_poll(
+        &mut self,
+        mailbox_id: MailboxId,
+        writable: bool,
+        max_known_flag: FlagId,
+        max_known_uid: Option<Uid>,
+        snapshot_modseq: Modseq,
+        max_message_modseq: Modseq,
+    ) -> Result<FullPoll, Error> {
+        let txn = if writable {
+            self.cxn.write_tx()?
+        } else {
+            self.cxn.read_tx()?
+        };
+
+        let status = selectable_mailbox_status(&txn, mailbox_id)?;
+        if snapshot_modseq == status.max_modseq {
+            // Short-circuit since we know nothing has changed. (There could
+            // potentially be new flags, but we don't need to discover them
+            // until any message is modified to reference them.)
+            return Ok(FullPoll {
+                new_flags: Vec::new(),
+                updated_messages: Vec::new(),
+                new_messages: Vec::new(),
+                expunged: Vec::new(),
+                snapshot_modseq,
+            });
+        }
+
+        let new_flags = poll_new_flags(&txn, max_known_flag)?;
+        let updated_messages = poll_updated_messages(
+            &txn,
+            mailbox_id,
+            max_known_uid,
+            max_message_modseq,
+        )?;
+        let new_messages = if let Some(min_uid) =
+            max_known_uid.map_or(Some(Uid::MIN), Uid::next)
+        {
+            fetch_initial_messages(
+                &txn,
+                mailbox_id,
+                min_uid,
+                status.recent_uid,
+            )?
+        } else {
+            Vec::new()
+        };
+        let expunged = txn
+            .prepare_cached(
+                "SELECT `uid` FROM `mailbox_message_expungement` \
+                 WHERE `mailbox_id` = ? AND `expunged_modseq` > ? \
+                 ORDER BY `uid` ",
+            )?
+            .query_map((mailbox_id, snapshot_modseq), from_single::<Uid>)?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if writable && status.next_uid != status.recent_uid {
+            txn.execute(
+                "UPDATE `mailbox` SET `recent_uid` = `next_uid` WHERE `id` = ?",
+                (mailbox_id,),
+            )?;
+        }
+
+        txn.commit()?;
+
+        Ok(FullPoll {
+            new_flags,
+            updated_messages,
+            new_messages,
+            expunged,
+            snapshot_modseq: status.max_modseq,
         })
     }
 }
@@ -1146,10 +1325,8 @@ fn append_mailbox_messages(
 
     if next_uid > first_uid {
         cxn.execute(
-            "UPDATE `mailbox` \
-             SET `next_uid` = ?, `append_modseq` = ? \
-             WHERE `id` = ?",
-            (next_uid, modseq, mailbox_id),
+            "UPDATE `mailbox` SET `next_uid` = ? WHERE `id` = ?",
+            (next_uid, mailbox_id),
         )?;
     }
 
@@ -1167,7 +1344,7 @@ fn fetch_initial_messages(
     recent_uid: Uid,
 ) -> Result<Vec<InitialMessageStatus>, Error> {
     let mut messages = txn
-        .prepare(
+        .prepare_cached(
             "SELECT `uid`, `message_id`, `near_flags`,
                     MAX(`flags_modseq`, `append_modseq`) \
              FROM `mailbox_message` \
@@ -1188,17 +1365,98 @@ fn fetch_initial_messages(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    {
+
+    if !messages.is_empty() {
         let mut msg_it = messages.iter_mut().peekable();
 
         for far_flag in txn
-            .prepare(
+            .prepare_cached(
                 "SELECT `uid`, `flag_id` \
                  FROM `mailbox_message_far_flag` \
-                 WHERE `mailbox_id` = ? \
+                 WHERE `mailbox_id` = ? AND `uid` >= ? \
                  ORDER BY `uid`",
             )?
-            .query_map((mailbox_id,), from_row::<(Uid, FlagId)>)?
+            .query_map((mailbox_id, min_uid), from_row::<(Uid, FlagId)>)?
+        {
+            let (uid, FlagId(flag_id)) = far_flag?;
+            while msg_it.peek().unwrap().uid < uid {
+                msg_it.next();
+            }
+
+            let msg = msg_it.peek_mut().unwrap();
+            debug_assert_eq!(uid, msg.uid);
+            msg.flags.insert(flag_id);
+        }
+    }
+
+    Ok(messages)
+}
+
+/// Poll for flags added with an ID greater than `max_known_flag`.
+fn poll_new_flags(
+    txn: &rusqlite::Connection,
+    max_known_flag: FlagId,
+) -> Result<Vec<(FlagId, Flag)>, Error> {
+    txn.prepare_cached(
+        "SELECT `id`, `flag` FROM `flag` WHERE `id` > ? ORDER BY `id`",
+    )?
+    .query_map((max_known_flag,), from_row::<(FlagId, Flag)>)?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(Into::into)
+}
+
+/// Poll for updates to messages with a UID less than or equal to
+/// `max_known_uid` and which have been modified after `max_message_modseq`.
+fn poll_updated_messages(
+    txn: &rusqlite::Connection,
+    mailbox_id: MailboxId,
+    max_known_uid: Option<Uid>,
+    max_message_modseq: Modseq,
+) -> Result<Vec<UpdatedMessageStatus>, Error> {
+    let Some(max_known_uid) = max_known_uid else {
+        return Ok(Vec::new());
+    };
+
+    let mut messages = txn
+        .prepare_cached(
+            "SELECT `uid`, `near_flags`, `flags_modseq` \
+             FROM `mailbox_message` \
+             WHERE `mailbox_id` = ? AND `uid` <= ? \
+             AND `flags_modseq` > ? \
+             ORDER BY `uid`",
+        )?
+        .query_map(
+            (mailbox_id, max_known_uid, max_message_modseq),
+            from_row::<(Uid, i64, Modseq)>,
+        )?
+        .map(|res| {
+            res.map(|(uid, near_flags, modseq)| UpdatedMessageStatus {
+                uid,
+                flags: SmallBitset::new_with_near(near_flags as u64),
+                last_modified: modseq,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if !messages.is_empty() {
+        let mut msg_it = messages.iter_mut().peekable();
+
+        for far_flag in txn
+            .prepare_cached(
+                "SELECT `mm`.`uid`, `mmff`.`flag_id` \
+                 FROM `mailbox_message` `mm` \
+                 JOIN `mailbox_message_far_flag` `mmff` \
+                 ON `mm`.`mailbox_id` = `mmff`.`mailbox_id` \
+                 AND `mm`.`uid` = `mmff`.`uid` \
+                 WHERE `mm`.`mailbox_id` = ? \
+                 AND `mm`.`uid` <= ? \
+                 AND `mm`.`flags_modseq` > ? \
+                 ORDER BY `mm`.`uid`",
+            )?
+            .query_map(
+                (mailbox_id, max_known_uid, max_message_modseq),
+                from_row::<(Uid, FlagId)>,
+            )?
         {
             let (uid, FlagId(flag_id)) = far_flag?;
             while msg_it.peek().unwrap().uid < uid {
@@ -1228,6 +1486,26 @@ fn require_selectable_mailbox(
         Some(false) => Err(Error::MailboxUnselectable),
         Some(true) => Ok(()),
     }
+}
+
+fn selectable_mailbox_status(
+    cxn: &rusqlite::Connection,
+    mailbox_id: MailboxId,
+) -> Result<MailboxStatus, Error> {
+    let status = cxn
+        .prepare_cached(
+            "SELECT `selectable`, `next_uid`, `recent_uid`, `max_modseq` \
+             FROM `mailbox` WHERE `id` = ?",
+        )?
+        .query_row((mailbox_id,), from_row::<MailboxStatus>)
+        .optional()?
+        .ok_or(Error::NxMailbox)?;
+
+    if !status.selectable {
+        return Err(Error::MailboxUnselectable);
+    }
+
+    Ok(status)
 }
 
 /// Allocates a new `Modseq` for a change within the given mailbox.
@@ -1625,8 +1903,6 @@ mod test {
 
         let mut unselectable =
             fixture.cxn.fetch_mailbox(unselectable_id).unwrap();
-        assert_eq!(Modseq::of(4), unselectable.expunge_modseq);
-        assert_eq!(Modseq::of(2), unselectable.append_modseq);
         assert_eq!(Uid::u(3), unselectable.next_uid);
 
         // Delete `unselectable`, making it `\Noselect`.
@@ -2413,6 +2689,428 @@ mod test {
                 changed: vec![],
             }),
             init_state.qresync,
+        );
+
+        assert_matches!(
+            Err(Error::NxMailbox),
+            fixture.cxn.select(MailboxId(-1), false, None),
+        );
+
+        let unselectable = fixture
+            .cxn
+            .create_mailbox(MailboxId::ROOT, "unselectable", None)
+            .unwrap();
+        fixture
+            .cxn
+            .create_mailbox(unselectable, "child", None)
+            .unwrap();
+        fixture.cxn.delete_mailbox(unselectable).unwrap();
+
+        assert_matches!(
+            Err(Error::MailboxUnselectable),
+            fixture.cxn.select(unselectable, false, None),
+        );
+    }
+
+    #[test]
+    fn test_poll() {
+        let mut fixture = Fixture::new();
+
+        let inbox = fixture
+            .cxn
+            .create_mailbox(MailboxId::ROOT, "INBOX", None)
+            .unwrap();
+        macro_rules! read_modseq {
+            () => {
+                fixture.cxn.fetch_mailbox(inbox).unwrap().max_modseq
+            };
+        }
+
+        let message_id = fixture
+            .cxn
+            .intern_messages_as_orphans(&mut ["foo"].iter().copied())
+            .unwrap()[0];
+
+        let msg1_uid = fixture
+            .cxn
+            .append_mailbox_messages(
+                inbox,
+                &mut [(message_id, None)].iter().copied(),
+            )
+            .unwrap();
+        let after_insert_msg1 = read_modseq!();
+        let msg2_uid = fixture
+            .cxn
+            .append_mailbox_messages(
+                inbox,
+                &mut [(message_id, None)].iter().copied(),
+            )
+            .unwrap();
+        let msg3_uid = fixture
+            .cxn
+            .append_mailbox_messages(
+                inbox,
+                &mut [(message_id, None)].iter().copied(),
+            )
+            .unwrap();
+        let baseline_modseq = read_modseq!();
+
+        let msg4_uid = fixture
+            .cxn
+            .append_mailbox_messages(
+                inbox,
+                &mut [(message_id, None)].iter().copied(),
+            )
+            .unwrap();
+        let after_insert_msg4 = read_modseq!();
+
+        fixture
+            .cxn
+            .expunge_mailbox_messages(inbox, &mut [msg2_uid].iter().copied())
+            .unwrap();
+        let after_expunge_msg2 = read_modseq!();
+
+        let flags = (0..100)
+            .map(|id| {
+                fixture
+                    .cxn
+                    .intern_flag(&Flag::Keyword(format!("f{id}")))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let all_flags_bitset = SmallBitset::from(
+            flags.iter().map(|&FlagId(ix)| ix).collect::<Vec<_>>(),
+        );
+        fixture
+            .cxn
+            .modify_mailbox_message_flags(
+                inbox,
+                &all_flags_bitset,
+                false,
+                false,
+                Modseq::MAX,
+                &mut [msg3_uid].iter().copied(),
+            )
+            .unwrap();
+        let after_msg3_flags = read_modseq!();
+
+        // Mini poll from baseline_modseq --- we learn about message 3's new
+        // flags but nothing else. The snapshot is marked as divergent and the
+        // snapshot modseq remains at baseline_modseq.
+        let mut mini_poll = fixture
+            .cxn
+            .mini_poll(
+                inbox,
+                *flags.last().unwrap(),
+                Some(msg3_uid),
+                baseline_modseq,
+                baseline_modseq,
+            )
+            .unwrap();
+        assert_eq!(
+            MiniPoll {
+                new_flags: vec![],
+                updated_messages: vec![UpdatedMessageStatus {
+                    uid: msg3_uid,
+                    last_modified: after_msg3_flags,
+                    flags: all_flags_bitset.clone(),
+                },],
+                snapshot_modseq: baseline_modseq,
+                diverged: true,
+            },
+            mini_poll,
+        );
+
+        // With the same parameters, a full poll discovers the new message and
+        // the expungement.
+        let mut full_poll = fixture
+            .cxn
+            .full_poll(
+                inbox,
+                false,
+                *flags.last().unwrap(),
+                Some(msg3_uid),
+                baseline_modseq,
+                baseline_modseq,
+            )
+            .unwrap();
+        assert_eq!(
+            FullPoll {
+                new_flags: vec![],
+                updated_messages: vec![UpdatedMessageStatus {
+                    uid: msg3_uid,
+                    last_modified: after_msg3_flags,
+                    flags: all_flags_bitset.clone(),
+                },],
+                new_messages: vec![InitialMessageStatus {
+                    uid: msg4_uid,
+                    id: message_id,
+                    flags: SmallBitset::new(),
+                    last_modified: after_insert_msg4,
+                    recent: true,
+                },],
+                expunged: vec![msg2_uid],
+                snapshot_modseq: after_msg3_flags,
+            },
+            full_poll,
+        );
+
+        // Repeating the poll gives msg4 as recent again since the previous was
+        // read-only.
+        full_poll = fixture
+            .cxn
+            .full_poll(
+                inbox,
+                true,
+                *flags.last().unwrap(),
+                Some(msg3_uid),
+                baseline_modseq,
+                baseline_modseq,
+            )
+            .unwrap();
+        assert!(full_poll.new_messages[0].recent);
+
+        // But since that last one was RW, another discovery will not see it as
+        // recent.
+        full_poll = fixture
+            .cxn
+            .full_poll(
+                inbox,
+                true,
+                *flags.last().unwrap(),
+                Some(msg3_uid),
+                baseline_modseq,
+                baseline_modseq,
+            )
+            .unwrap();
+        assert!(!full_poll.new_messages[0].recent);
+
+        // Continuing the same sequence: max_message_modseq is now
+        // after_msg3_flags, but the snapshot is otherwise the same. We get no
+        // new information for mini_poll.
+        mini_poll = fixture
+            .cxn
+            .mini_poll(
+                inbox,
+                *flags.last().unwrap(),
+                Some(msg3_uid),
+                baseline_modseq,
+                after_msg3_flags,
+            )
+            .unwrap();
+        assert_eq!(
+            MiniPoll {
+                new_flags: vec![],
+                updated_messages: vec![],
+                snapshot_modseq: baseline_modseq,
+                diverged: true,
+            },
+            mini_poll,
+        );
+
+        // For full_poll, this is essentially continuing from the first
+        // mini_poll. We discover the new message and the expungement.
+        full_poll = fixture
+            .cxn
+            .full_poll(
+                inbox,
+                true,
+                *flags.last().unwrap(),
+                Some(msg3_uid),
+                baseline_modseq,
+                after_msg3_flags,
+            )
+            .unwrap();
+        assert_eq!(
+            FullPoll {
+                new_flags: vec![],
+                updated_messages: vec![],
+                new_messages: vec![InitialMessageStatus {
+                    uid: msg4_uid,
+                    id: message_id,
+                    flags: SmallBitset::new(),
+                    last_modified: after_insert_msg4,
+                    recent: false,
+                },],
+                expunged: vec![msg2_uid],
+                snapshot_modseq: after_msg3_flags,
+            },
+            full_poll,
+        );
+
+        // Mini poll from after_insert_msg4: this is the same as the baseline
+        // case, except that it's now an expunge blocking advancement of the
+        // snapshot modseq.
+        mini_poll = fixture
+            .cxn
+            .mini_poll(
+                inbox,
+                *flags.last().unwrap(),
+                Some(msg4_uid),
+                after_insert_msg4,
+                after_insert_msg4,
+            )
+            .unwrap();
+        assert_eq!(
+            MiniPoll {
+                new_flags: vec![],
+                updated_messages: vec![UpdatedMessageStatus {
+                    uid: msg3_uid,
+                    last_modified: after_msg3_flags,
+                    flags: all_flags_bitset.clone(),
+                },],
+                snapshot_modseq: after_insert_msg4,
+                diverged: true,
+            },
+            mini_poll,
+        );
+
+        // Mini poll from after_expunge_msg2: since there's only flag changes
+        // beyond, the whole snapshot advances and is not divergent.
+        mini_poll = fixture
+            .cxn
+            .mini_poll(
+                inbox,
+                *flags.last().unwrap(),
+                Some(msg4_uid),
+                after_expunge_msg2,
+                after_expunge_msg2,
+            )
+            .unwrap();
+        assert_eq!(
+            MiniPoll {
+                new_flags: vec![],
+                updated_messages: vec![UpdatedMessageStatus {
+                    uid: msg3_uid,
+                    last_modified: after_msg3_flags,
+                    flags: all_flags_bitset.clone(),
+                },],
+                snapshot_modseq: after_msg3_flags,
+                diverged: false,
+            },
+            mini_poll,
+        );
+
+        // Mini-polling from the primordial state returns no data.
+        mini_poll = fixture
+            .cxn
+            .mini_poll(
+                inbox,
+                *flags.last().unwrap(),
+                None,
+                Modseq::MIN,
+                Modseq::MIN,
+            )
+            .unwrap();
+        assert_eq!(
+            MiniPoll {
+                new_flags: vec![],
+                updated_messages: vec![],
+                snapshot_modseq: Modseq::MIN,
+                diverged: true,
+            },
+            mini_poll,
+        );
+
+        // Full-polling from the primordial state returns all data.
+        full_poll = fixture
+            .cxn
+            .full_poll(
+                inbox,
+                true,
+                *flags.last().unwrap(),
+                None,
+                Modseq::MIN,
+                Modseq::MIN,
+            )
+            .unwrap();
+        assert_eq!(
+            FullPoll {
+                new_flags: vec![],
+                updated_messages: vec![],
+                new_messages: vec![
+                    InitialMessageStatus {
+                        uid: msg1_uid,
+                        id: message_id,
+                        flags: SmallBitset::new(),
+                        last_modified: after_insert_msg1,
+                        recent: false,
+                    },
+                    InitialMessageStatus {
+                        uid: msg3_uid,
+                        id: message_id,
+                        flags: all_flags_bitset.clone(),
+                        last_modified: after_msg3_flags,
+                        recent: false,
+                    },
+                    InitialMessageStatus {
+                        uid: msg4_uid,
+                        id: message_id,
+                        flags: SmallBitset::new(),
+                        last_modified: after_insert_msg4,
+                        recent: false,
+                    },
+                ],
+                expunged: vec![msg2_uid],
+                snapshot_modseq: after_msg3_flags,
+            },
+            full_poll,
+        );
+
+        assert_matches!(
+            Err(Error::NxMailbox),
+            fixture.cxn.mini_poll(
+                MailboxId(-1),
+                FlagId(0),
+                None,
+                Modseq::MIN,
+                Modseq::MIN,
+            ),
+        );
+
+        assert_matches!(
+            Err(Error::NxMailbox),
+            fixture.cxn.full_poll(
+                MailboxId(-1),
+                true,
+                FlagId(0),
+                None,
+                Modseq::MIN,
+                Modseq::MIN,
+            ),
+        );
+
+        let unselectable = fixture
+            .cxn
+            .create_mailbox(MailboxId::ROOT, "unselectable", None)
+            .unwrap();
+        fixture
+            .cxn
+            .create_mailbox(unselectable, "child", None)
+            .unwrap();
+        fixture.cxn.delete_mailbox(unselectable).unwrap();
+
+        assert_matches!(
+            Err(Error::MailboxUnselectable),
+            fixture.cxn.mini_poll(
+                unselectable,
+                FlagId(0),
+                None,
+                Modseq::MIN,
+                Modseq::MIN,
+            ),
+        );
+
+        assert_matches!(
+            Err(Error::MailboxUnselectable),
+            fixture.cxn.full_poll(
+                unselectable,
+                true,
+                FlagId(0),
+                None,
+                Modseq::MIN,
+                Modseq::MIN,
+            ),
         );
     }
 }
