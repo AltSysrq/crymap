@@ -379,6 +379,27 @@ pub struct UpdatedMessageStatus {
     pub last_modified: Modseq,
 }
 
+/// Data retrieved when a message is accessed for reading.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MessageAccessData {
+    /// The path to the message relative to the message store.
+    pub path: String,
+    /// The cached session key (still encrypted), if available.
+    pub session_key: Option<SessionKey>,
+    /// The value of RFC822.SIZE, if available.
+    pub rfc822_size: Option<u64>,
+}
+
+impl FromRow for MessageAccessData {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            path: row.get("path")?,
+            session_key: row.get("session_key")?,
+            rfc822_size: row.get("rfc822_size")?,
+        })
+    }
+}
+
 pub fn from_row<T: FromRow>(row: &rusqlite::Row<'_>) -> rusqlite::Result<T> {
     T::from_row(row)
 }

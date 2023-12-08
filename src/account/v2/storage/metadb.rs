@@ -479,6 +479,41 @@ impl Connection {
         Ok(ret)
     }
 
+    /// Fetches the on-access data for the given message.
+    pub fn access_message(
+        &mut self,
+        message_id: MessageId,
+    ) -> Result<MessageAccessData, Error> {
+        self.cxn.enable_write(false)?;
+        self.cxn
+            .prepare_cached(
+                "SELECT `path`, `session_key`, `rfc822_size` \
+                 FROM `message` WHERE `id` = ?",
+            )?
+            .query_row((message_id,), from_row)
+            .optional()?
+            .ok_or(Error::NxMessage)
+    }
+
+    /// Updates the cached data for the given message.
+    ///
+    /// If the message no longer exists, the call silently does nothing.
+    pub fn cache_message_data(
+        &mut self,
+        message_id: MessageId,
+        session_key: SessionKey,
+        rfc822_size: u64,
+    ) -> Result<(), Error> {
+        self.cxn.enable_write(true)?;
+        self.cxn
+            .prepare_cached(
+                "UPDATE `message` SET `session_key` = ?2, `rfc822_size` = ?3 \
+                 WHERE `id` = ?1",
+            )?
+            .execute((message_id, session_key, rfc822_size))?;
+        Ok(())
+    }
+
     /// Append already-interned messages into the given mailbox, with the given
     /// initial flags if requested.
     ///
@@ -2388,6 +2423,56 @@ mod test {
         fixture.cxn.delete_mailbox(child_id).unwrap();
         fixture.cxn.delete_mailbox(unselectable_id).unwrap();
         assert!(fixture.cxn.fetch_all_mailboxes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_message_cache_data() {
+        let mut fixture = Fixture::new();
+        let message_id = fixture
+            .cxn
+            .intern_messages_as_orphans(&mut ["foo"].iter().copied())
+            .unwrap()[0];
+
+        assert_eq!(
+            MessageAccessData {
+                path: "foo".to_owned(),
+                session_key: None,
+                rfc822_size: None,
+            },
+            fixture.cxn.access_message(message_id).unwrap(),
+        );
+
+        fixture
+            .cxn
+            .cache_message_data(
+                message_id,
+                SessionKey([3; crate::crypt::AES_BLOCK]),
+                1234,
+            )
+            .unwrap();
+
+        assert_eq!(
+            MessageAccessData {
+                path: "foo".to_owned(),
+                session_key: Some(SessionKey([3; crate::crypt::AES_BLOCK])),
+                rfc822_size: Some(1234),
+            },
+            fixture.cxn.access_message(message_id).unwrap(),
+        );
+
+        assert_matches!(
+            Err(Error::NxMessage),
+            fixture.cxn.access_message(MessageId(-1)),
+        );
+
+        fixture
+            .cxn
+            .cache_message_data(
+                MessageId(-1),
+                SessionKey([3; crate::crypt::AES_BLOCK]),
+                1234,
+            )
+            .unwrap();
     }
 
     #[test]
