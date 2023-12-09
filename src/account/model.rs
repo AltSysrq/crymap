@@ -536,6 +536,8 @@ impl FromStr for Flag {
             Ok(Flag::Seen)
         } else if s.starts_with('\\') {
             Err(Error::NxFlag)
+        } else if s.is_empty() {
+            Err(Error::UnsafeName)
         } else if s.as_bytes().iter().copied().all(is_atom_char) {
             Ok(Flag::Keyword(s.to_owned()))
         } else {

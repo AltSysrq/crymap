@@ -22,7 +22,6 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
 
-use log::info;
 use rusqlite::OptionalExtension as _;
 
 use super::{sqlite_xex_vfs::XexVfs, types::*};
@@ -39,7 +38,7 @@ pub struct Connection {
     cxn: rusqlite::Connection,
 }
 
-static MIGRATION_V1: &str = include_str!("metadb.v1.sql");
+static MIGRATIONS: &[&str] = &[include_str!("metadb.v1.sql")];
 
 impl Connection {
     pub fn new(path: &Path, xex: &XexVfs) -> Result<Self, Error> {
@@ -55,38 +54,7 @@ impl Connection {
         cxn.pragma_update(None, "journal_size_limit", 1024 * 1024)?;
         cxn.busy_timeout(Duration::from_secs(10))?;
 
-        {
-            let txn = cxn.transaction_with_behavior(
-                rusqlite::TransactionBehavior::Exclusive,
-            )?;
-            txn.execute(
-                "CREATE TABLE IF NOT EXISTS `migration` (\
-                   `version` INTEGER NOT NULL PRIMARY KEY, \
-                   `applied_at` INTEGER NOT NULL\
-                 ) STRICT",
-                (),
-            )?;
-
-            let current_version = txn
-                .query_row(
-                    "SELECT MAX(`version`) FROM `migration`",
-                    (),
-                    from_single::<Option<u32>>,
-                )?
-                .unwrap_or(0);
-
-            if current_version < 1 {
-                info!("Applying V1 migration to meta DB");
-                txn.execute_batch(MIGRATION_V1)?;
-                txn.execute(
-                    "INSERT INTO `migration` (`version`, `applied_at`) \
-                     VALUES (1, ?)",
-                    (UnixTimestamp::now(),),
-                )?;
-            }
-
-            txn.commit()?;
-        }
+        super::db_migrations::apply_migrations(&mut cxn, "meta", MIGRATIONS)?;
 
         Ok(Self { cxn })
     }

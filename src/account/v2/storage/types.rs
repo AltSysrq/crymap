@@ -410,6 +410,35 @@ impl FromRow for MessageAccessData {
     }
 }
 
+/// An entry in the delivery database describing a message to be delivered.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Delivery {
+    /// The path to the message, relative to the message store.
+    pub path: String,
+    /// The path to the mailbox that will receive the message.
+    pub mailbox: String,
+    /// The flags to set on the message.
+    pub flags: Vec<Flag>,
+    /// The SAVEDATE for the message.
+    pub savedate: UnixTimestamp,
+}
+
+impl FromRow for Delivery {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            path: row.get("path")?,
+            mailbox: row.get("mailbox")?,
+            flags: row.get::<_, String>("flags").map(|flags| {
+                flags
+                    .split(' ')
+                    .filter_map(|flag| Flag::from_str(flag).ok())
+                    .collect::<Vec<_>>()
+            })?,
+            savedate: row.get("savedate")?,
+        })
+    }
+}
+
 pub fn from_row<T: FromRow>(row: &rusqlite::Row<'_>) -> rusqlite::Result<T> {
     T::from_row(row)
 }
