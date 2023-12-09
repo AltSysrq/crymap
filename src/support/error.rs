@@ -44,6 +44,8 @@ pub enum Error {
     BadOperationOnInbox,
     #[error("No such mailbox")]
     NxMailbox,
+    #[error("Internal error: Mailbox ID out of range")]
+    MailboxIdOutOfRange,
     #[error("Message expunged")]
     ExpungedMessage,
     #[error("Message not addressable by sequence number")]
@@ -64,6 +66,8 @@ pub enum Error {
     RenameToSelf,
     #[error("Rename destination is child of self")]
     RenameIntoSelf,
+    #[error("Move source and destination are the same")]
+    MoveIntoSelf,
     #[error("Too many items in batch operation")]
     BatchTooBig,
     #[error("Unknown Content-Transfer-Encoding")]

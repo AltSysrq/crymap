@@ -102,30 +102,7 @@ impl Connection {
     ) -> Result<MailboxId, Error> {
         let txn = self.cxn.write_tx()?;
 
-        if 0 == txn.query_row(
-            "SELECT COUNT(*) FROM `mailbox` WHERE `id` = ?",
-            (parent,),
-            from_single::<i64>,
-        )? {
-            return Err(Error::NxMailbox);
-        }
-
-        if 0 != txn.query_row(
-            "SELECT COUNT(*) FROM `mailbox` \
-             WHERE `parent_id` = ? AND `name` = ?",
-            (parent, name),
-            from_single::<i64>,
-        )? {
-            return Err(Error::MailboxExists);
-        }
-
-        txn.execute(
-            "INSERT INTO `mailbox` (`parent_id`, `name`, `special_use`)\
-             VALUES (?, ?, ?)",
-            (parent, name, special_use),
-        )?;
-
-        let id = MailboxId(txn.last_insert_rowid());
+        let id = create_mailbox(&txn, parent, name, special_use)?;
         txn.commit()?;
 
         Ok(id)
@@ -556,6 +533,102 @@ impl Connection {
         Ok(uid)
     }
 
+    /// Copy the messages represented by `src_uids` (which must be sorted
+    /// ascending) from `src_mailbox_id` into `dst_mailbox_id`.
+    ///
+    /// Returns the parallel ranges of messages that were actually copied.
+    pub fn copy_mailbox_messages(
+        &mut self,
+        src_mailbox_id: MailboxId,
+        src_uids: &mut dyn Iterator<Item = Uid>,
+        dst_mailbox_id: MailboxId,
+    ) -> Result<CopyResponse, Error> {
+        let txn = self.cxn.write_tx()?;
+
+        require_selectable_mailbox(&txn, src_mailbox_id)?;
+        require_selectable_mailbox(&txn, dst_mailbox_id)?;
+        let response = copy_mailbox_messages(
+            &txn,
+            src_mailbox_id,
+            src_uids,
+            dst_mailbox_id,
+        )?;
+        txn.commit()?;
+
+        Ok(response)
+    }
+
+    /// Move the messages represented by `src_uids` (which must be sorted
+    /// ascending) from `src_mailbox_id` into `dst_mailbox_id`.
+    ///
+    /// Returns the parallel ranges of messages that were actually copied.
+    pub fn move_mailbox_messages(
+        &mut self,
+        src_mailbox_id: MailboxId,
+        mut src_uids: impl Iterator<Item = Uid> + Clone,
+        dst_mailbox_id: MailboxId,
+    ) -> Result<CopyResponse, Error> {
+        if src_mailbox_id == dst_mailbox_id {
+            return Err(Error::MoveIntoSelf);
+        }
+
+        let txn = self.cxn.write_tx()?;
+
+        require_selectable_mailbox(&txn, src_mailbox_id)?;
+        require_selectable_mailbox(&txn, dst_mailbox_id)?;
+        let response = copy_mailbox_messages(
+            &txn,
+            src_mailbox_id,
+            &mut src_uids.clone(),
+            dst_mailbox_id,
+        )?;
+        expunge_mailbox_messages(&txn, src_mailbox_id, &mut src_uids)?;
+        txn.commit()?;
+
+        Ok(response)
+    }
+
+    /// Atomically create a mailbox at `(dst_parent_id, dst_name)` with no
+    /// special use, then move the entire contents of `src_mailbox_id` into it.
+    ///
+    /// This implements the special `RENAME INBOX` case.
+    pub fn move_all_mailbox_messages_into_create(
+        &mut self,
+        src_mailbox_id: MailboxId,
+        dst_parent_id: MailboxId,
+        dst_name: &str,
+    ) -> Result<MailboxId, Error> {
+        let txn = self.cxn.write_tx()?;
+
+        require_selectable_mailbox(&txn, src_mailbox_id)?;
+        let dst_mailbox_id =
+            create_mailbox(&txn, dst_parent_id, dst_name, None)?;
+
+        let src_uids = txn
+            .prepare(
+                "SELECT `uid` FROM `mailbox_message` \
+                 WHERE `mailbox_id` = ? ORDER BY `uid`",
+            )?
+            .query_map((src_mailbox_id,), from_single::<Uid>)?
+            .collect::<Result<Vec<Uid>, _>>()?;
+
+        copy_mailbox_messages(
+            &txn,
+            src_mailbox_id,
+            &mut src_uids.iter().copied(),
+            dst_mailbox_id,
+        )?;
+        expunge_mailbox_messages(
+            &txn,
+            src_mailbox_id,
+            &mut src_uids.into_iter(),
+        )?;
+
+        txn.commit()?;
+
+        Ok(dst_mailbox_id)
+    }
+
     /// Expunges the given messages by UID from the mailbox.
     ///
     /// This does not consider whether or not the messages have the `\Deleted`
@@ -568,49 +641,7 @@ impl Connection {
         let txn = self.cxn.write_tx()?;
 
         require_selectable_mailbox(&txn, mailbox_id)?;
-
-        {
-            let modseq = new_modseq(&txn, mailbox_id)?;
-            let now = UnixTimestamp::now();
-
-            let mut select_message_id = txn.prepare(
-                "SELECT `message_id` FROM `mailbox_message` \
-                 WHERE `mailbox_id` = ? AND `uid` = ?",
-            )?;
-            let mut delete_from_mailbox_message_far_flag = txn.prepare(
-                "DELETE FROM `mailbox_message_far_flag` \
-                 WHERE `mailbox_id` = ? AND `uid` = ?",
-            )?;
-            let mut delete_from_mailbox_message = txn.prepare(
-                "DELETE FROM `mailbox_message` \
-                 WHERE `mailbox_id` = ? AND `uid` = ?",
-            )?;
-            let mut update_last_activity = txn.prepare(
-                "UPDATE `message` SET `last_activity` = ?2 WHERE `id` = ?1",
-            )?;
-            let mut insert_mailbox_message_expungement = txn.prepare(
-                "INSERT INTO `mailbox_message_expungement` \
-                 (`mailbox_id`, `uid`, `expunged_modseq`) \
-                 VALUES (?, ?, ?)",
-            )?;
-
-            for uid in messages {
-                let Some(message_id) = select_message_id
-                    .query_row((mailbox_id, uid), from_single::<MessageId>)
-                    .optional()?
-                else {
-                    continue;
-                };
-
-                delete_from_mailbox_message_far_flag
-                    .execute((mailbox_id, uid))?;
-                delete_from_mailbox_message.execute((mailbox_id, uid))?;
-                update_last_activity.execute((message_id, now))?;
-                insert_mailbox_message_expungement
-                    .execute((mailbox_id, uid, modseq))?;
-            }
-        }
-
+        expunge_mailbox_messages(&txn, mailbox_id, messages)?;
         txn.commit()?;
 
         Ok(())
@@ -971,8 +1002,9 @@ impl Connection {
             )?;
         }
 
+        let uid_validity = mailbox_id.as_uid_validity()?;
         let qresync_response = if let Some(qresync) =
-            qresync.filter(|q| i64::from(q.uid_validity) == mailbox_id.0)
+            qresync.filter(|q| q.uid_validity == uid_validity)
         {
             // Note that this code deliberately never looks at
             // `mapping_reference`: because we remember all expungements, the
@@ -1272,6 +1304,38 @@ impl ConnectionExt for rusqlite::Connection {
     }
 }
 
+fn create_mailbox(
+    txn: &rusqlite::Connection,
+    parent: MailboxId,
+    name: &str,
+    special_use: Option<MailboxAttribute>,
+) -> Result<MailboxId, Error> {
+    if 0 == txn.query_row(
+        "SELECT COUNT(*) FROM `mailbox` WHERE `id` = ?",
+        (parent,),
+        from_single::<i64>,
+    )? {
+        return Err(Error::NxMailbox);
+    }
+
+    if 0 != txn.query_row(
+        "SELECT COUNT(*) FROM `mailbox` \
+         WHERE `parent_id` = ? AND `name` = ?",
+        (parent, name),
+        from_single::<i64>,
+    )? {
+        return Err(Error::MailboxExists);
+    }
+
+    txn.execute(
+        "INSERT INTO `mailbox` (`parent_id`, `name`, `special_use`)\
+         VALUES (?, ?, ?)",
+        (parent, name, special_use),
+    )?;
+
+    Ok(MailboxId(txn.last_insert_rowid()))
+}
+
 fn intern_message_as_orphan(
     cxn: &rusqlite::Connection,
     path: &str,
@@ -1301,19 +1365,8 @@ fn append_mailbox_messages(
 ) -> Result<Uid, Error> {
     let modseq = new_modseq(cxn, mailbox_id)?;
 
-    // Read the UID for the first new message out of the database. While here,
-    // also re-assert that the mailbox exists and is selectable, though
-    // `require_selectable_mailbox` ought to have been called first to
-    // distinguish the two cases.
-    let first_uid = cxn
-        .query_row(
-            "SELECT `next_uid` FROM `mailbox` WHERE `id` = ? AND `selectable`",
-            (mailbox_id,),
-            from_single::<Uid>,
-        )
-        .optional()?
-        .ok_or(Error::NxMailbox)?;
-
+    // Read the UID for the first new message out of the database.
+    let first_uid = selectable_mailbox_status(cxn, mailbox_id)?.next_uid;
     let mut next_uid = first_uid;
 
     let now = UnixTimestamp::now();
@@ -1366,6 +1419,128 @@ fn append_mailbox_messages(
     }
 
     Ok(first_uid)
+}
+
+/// Copy the messages represented by `src_uids` (which must be sorted
+/// ascending) from `src_mailbox_id` into `dst_mailbox_id`.
+///
+/// Returns the parallel ranges of messages that were actually copied.
+fn copy_mailbox_messages(
+    txn: &rusqlite::Connection,
+    src_mailbox_id: MailboxId,
+    src_uids: &mut dyn Iterator<Item = Uid>,
+    dst_mailbox_id: MailboxId,
+) -> Result<CopyResponse, Error> {
+    let mut response = CopyResponse {
+        uid_validity: dst_mailbox_id.as_uid_validity()?,
+        from_uids: SeqRange::new(),
+        to_uids: SeqRange::new(),
+    };
+
+    let dst_modseq = new_modseq(txn, dst_mailbox_id)?;
+    let now = UnixTimestamp::now();
+    let mut next_uid = selectable_mailbox_status(txn, dst_mailbox_id)?.next_uid;
+
+    let mut copy_message = txn.prepare(
+        "INSERT INTO `mailbox_message` ( \
+           `mailbox_id`, `uid`, `message_id`, `near_flags`, \
+           `savedate`, `append_modseq`, `flags_modseq` \
+         ) \
+         SELECT ?3, ?4, `message_id`, `near_flags`, ?5, ?6, ?6 \
+         FROM `mailbox_message` \
+         WHERE `mailbox_id` = ?1 AND `uid` = ?2",
+    )?;
+    let mut copy_far_flags = txn.prepare(
+        "INSERT INTO `mailbox_message_far_flag` ( \
+           `mailbox_id`, `uid`, `flag_id` \
+         ) \
+         SELECT ?3, ?4, `flag_id` \
+         FROM `mailbox_message_far_flag` \
+         WHERE `mailbox_id` = ?1 AND `uid` = ?2",
+    )?;
+
+    for src_uid in src_uids {
+        let dst_uid = next_uid;
+        if 0 == copy_message.execute((
+            src_mailbox_id,
+            src_uid,
+            dst_mailbox_id,
+            dst_uid,
+            now,
+            dst_modseq,
+        ))? {
+            continue;
+        }
+
+        copy_far_flags.execute((
+            src_mailbox_id,
+            src_uid,
+            dst_mailbox_id,
+            dst_uid,
+        ))?;
+        response.from_uids.append(src_uid);
+        response.to_uids.append(dst_uid);
+
+        next_uid = next_uid.next().ok_or(Error::MailboxFull)?;
+    }
+
+    if !response.from_uids.is_empty() {
+        txn.execute(
+            "UPDATE `mailbox` SET `next_uid` = ? WHERE `id` = ?",
+            (next_uid, dst_mailbox_id),
+        )?;
+    }
+
+    Ok(response)
+}
+
+/// Expunges the given messages from the given mailbox.
+///
+/// Non-existent messages are silently skipped.
+fn expunge_mailbox_messages(
+    txn: &rusqlite::Connection,
+    mailbox_id: MailboxId,
+    messages: &mut dyn Iterator<Item = Uid>,
+) -> Result<(), Error> {
+    let modseq = new_modseq(&txn, mailbox_id)?;
+    let now = UnixTimestamp::now();
+
+    let mut select_message_id = txn.prepare(
+        "SELECT `message_id` FROM `mailbox_message` \
+         WHERE `mailbox_id` = ? AND `uid` = ?",
+    )?;
+    let mut delete_from_mailbox_message_far_flag = txn.prepare(
+        "DELETE FROM `mailbox_message_far_flag` \
+         WHERE `mailbox_id` = ? AND `uid` = ?",
+    )?;
+    let mut delete_from_mailbox_message = txn.prepare(
+        "DELETE FROM `mailbox_message` \
+         WHERE `mailbox_id` = ? AND `uid` = ?",
+    )?;
+    let mut update_last_activity = txn
+        .prepare("UPDATE `message` SET `last_activity` = ?2 WHERE `id` = ?1")?;
+    let mut insert_mailbox_message_expungement = txn.prepare(
+        "INSERT INTO `mailbox_message_expungement` \
+         (`mailbox_id`, `uid`, `expunged_modseq`) \
+         VALUES (?, ?, ?)",
+    )?;
+
+    for uid in messages {
+        let Some(message_id) = select_message_id
+            .query_row((mailbox_id, uid), from_single::<MessageId>)
+            .optional()?
+        else {
+            continue;
+        };
+
+        delete_from_mailbox_message_far_flag.execute((mailbox_id, uid))?;
+        delete_from_mailbox_message.execute((mailbox_id, uid))?;
+        update_last_activity.execute((message_id, now))?;
+        insert_mailbox_message_expungement
+            .execute((mailbox_id, uid, modseq))?;
+    }
+
+    Ok(())
 }
 
 /// Fetches the `InitialMessageStatus` for every message in `mailbox_id` whose
@@ -2423,6 +2598,393 @@ mod test {
         fixture.cxn.delete_mailbox(child_id).unwrap();
         fixture.cxn.delete_mailbox(unselectable_id).unwrap();
         assert!(fixture.cxn.fetch_all_mailboxes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_message_copy_move() {
+        let mut fixture = Fixture::new();
+        let messages = fixture
+            .cxn
+            .intern_messages_as_orphans(
+                &mut ["a", "b", "c", "d", "e", "f"].iter().copied(),
+            )
+            .unwrap();
+
+        let copy_src = fixture
+            .cxn
+            .create_mailbox(MailboxId::ROOT, "copy-src", None)
+            .unwrap();
+        let copy_dst = fixture
+            .cxn
+            .create_mailbox(MailboxId::ROOT, "copy-dst", None)
+            .unwrap();
+        let move_dst = fixture
+            .cxn
+            .create_mailbox(MailboxId::ROOT, "move-dst", None)
+            .unwrap();
+
+        let flags = (0..100)
+            .map(|id| {
+                fixture
+                    .cxn
+                    .intern_flag(&Flag::Keyword(format!("f{id}")))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let all_flags_bitset = SmallBitset::from(
+            flags.iter().map(|&FlagId(ix)| ix).collect::<Vec<_>>(),
+        );
+
+        let msg1_uid = fixture
+            .cxn
+            .append_mailbox_messages(
+                copy_src,
+                &mut [
+                    (messages[0], None),
+                    (messages[1], None),
+                    (messages[2], Some(&all_flags_bitset)),
+                    (messages[3], None),
+                    (messages[4], None),
+                ]
+                .iter()
+                .copied(),
+            )
+            .unwrap();
+        assert_eq!(Uid::u(1), msg1_uid);
+
+        fixture
+            .cxn
+            .expunge_mailbox_messages(
+                copy_src,
+                &mut [Uid::u(4)].iter().copied(),
+            )
+            .unwrap();
+
+        // Also add an initial message to move_dst so that the copy part of the
+        // move produces slightly different results.
+        fixture
+            .cxn
+            .append_mailbox_messages(
+                move_dst,
+                &mut [(messages[5], None)].iter().copied(),
+            )
+            .unwrap();
+
+        let mut resp = fixture
+            .cxn
+            .copy_mailbox_messages(
+                copy_src,
+                &mut [Uid::u(1), Uid::u(3), Uid::u(4), Uid::u(5)]
+                    .iter()
+                    .copied(),
+                copy_dst,
+            )
+            .unwrap();
+        assert_eq!(
+            CopyResponse {
+                uid_validity: copy_dst.as_uid_validity().unwrap(),
+                from_uids: vec![Uid::u(1), Uid::u(3), Uid::u(5)].into(),
+                to_uids: vec![Uid::u(1), Uid::u(2), Uid::u(3)].into(),
+            },
+            resp,
+        );
+
+        resp = fixture
+            .cxn
+            .move_mailbox_messages(
+                copy_src,
+                [Uid::u(1), Uid::u(3), Uid::u(4), Uid::u(5)].iter().copied(),
+                move_dst,
+            )
+            .unwrap();
+        assert_eq!(
+            CopyResponse {
+                uid_validity: move_dst.as_uid_validity().unwrap(),
+                from_uids: vec![Uid::u(1), Uid::u(3), Uid::u(5)].into(),
+                to_uids: vec![Uid::u(2), Uid::u(3), Uid::u(4)].into(),
+            },
+            resp,
+        );
+
+        let mut selected = fixture.cxn.select(copy_src, false, None).unwrap();
+        // Only the one message we didn't move remains.
+        assert_eq!(
+            vec![InitialMessageStatus {
+                uid: Uid::u(2),
+                id: messages[1],
+                flags: SmallBitset::new(),
+                last_modified: Modseq::of(2),
+                recent: true,
+            },],
+            selected.messages,
+        );
+        // 1 = init, 2 = append, 3 = expunge, 4 = move
+        assert_eq!(Modseq::of(4), selected.max_modseq);
+
+        selected = fixture.cxn.select(copy_dst, false, None).unwrap();
+        assert_eq!(
+            vec![
+                InitialMessageStatus {
+                    uid: Uid::u(1),
+                    id: messages[0],
+                    flags: SmallBitset::new(),
+                    last_modified: Modseq::of(2),
+                    recent: true,
+                },
+                InitialMessageStatus {
+                    uid: Uid::u(2),
+                    id: messages[2],
+                    flags: all_flags_bitset.clone(),
+                    last_modified: Modseq::of(2),
+                    recent: true,
+                },
+                InitialMessageStatus {
+                    uid: Uid::u(3),
+                    id: messages[4],
+                    flags: SmallBitset::new(),
+                    last_modified: Modseq::of(2),
+                    recent: true,
+                },
+            ],
+            selected.messages,
+        );
+
+        selected = fixture.cxn.select(move_dst, false, None).unwrap();
+        assert_eq!(
+            vec![
+                InitialMessageStatus {
+                    uid: Uid::u(1),
+                    id: messages[5],
+                    flags: SmallBitset::new(),
+                    last_modified: Modseq::of(2),
+                    recent: true,
+                },
+                InitialMessageStatus {
+                    uid: Uid::u(2),
+                    id: messages[0],
+                    flags: SmallBitset::new(),
+                    last_modified: Modseq::of(3),
+                    recent: true,
+                },
+                InitialMessageStatus {
+                    uid: Uid::u(3),
+                    id: messages[2],
+                    flags: all_flags_bitset.clone(),
+                    last_modified: Modseq::of(3),
+                    recent: true,
+                },
+                InitialMessageStatus {
+                    uid: Uid::u(4),
+                    id: messages[4],
+                    flags: SmallBitset::new(),
+                    last_modified: Modseq::of(3),
+                    recent: true,
+                },
+            ],
+            selected.messages,
+        );
+
+        // Expunge a message from move_dst to create a UID hole.
+        fixture
+            .cxn
+            .expunge_mailbox_messages(
+                move_dst,
+                &mut [Uid::u(2)].iter().copied(),
+            )
+            .unwrap();
+
+        let rename_move_dst = fixture
+            .cxn
+            .move_all_mailbox_messages_into_create(
+                move_dst,
+                MailboxId::ROOT,
+                "rename-dst",
+            )
+            .unwrap();
+
+        selected = fixture.cxn.select(move_dst, false, None).unwrap();
+        assert!(selected.messages.is_empty());
+
+        selected = fixture.cxn.select(rename_move_dst, false, None).unwrap();
+        assert_eq!(
+            vec![
+                InitialMessageStatus {
+                    uid: Uid::u(1),
+                    id: messages[5],
+                    flags: SmallBitset::new(),
+                    last_modified: Modseq::of(2),
+                    recent: true,
+                },
+                InitialMessageStatus {
+                    uid: Uid::u(2),
+                    id: messages[2],
+                    flags: all_flags_bitset.clone(),
+                    last_modified: Modseq::of(2),
+                    recent: true,
+                },
+                InitialMessageStatus {
+                    uid: Uid::u(3),
+                    id: messages[4],
+                    flags: SmallBitset::new(),
+                    last_modified: Modseq::of(2),
+                    recent: true,
+                },
+            ],
+            selected.messages,
+        );
+
+        // Copying with dst == src is allowed.
+        resp = fixture
+            .cxn
+            .copy_mailbox_messages(
+                rename_move_dst,
+                &mut [Uid::u(2)].iter().copied(),
+                rename_move_dst,
+            )
+            .unwrap();
+        assert_eq!(
+            CopyResponse {
+                uid_validity: rename_move_dst.as_uid_validity().unwrap(),
+                from_uids: vec![Uid::u(2)].into(),
+                to_uids: vec![Uid::u(4)].into(),
+            },
+            resp,
+        );
+        selected = fixture.cxn.select(rename_move_dst, false, None).unwrap();
+        assert_eq!(
+            vec![
+                InitialMessageStatus {
+                    uid: Uid::u(1),
+                    id: messages[5],
+                    flags: SmallBitset::new(),
+                    last_modified: Modseq::of(2),
+                    recent: true,
+                },
+                InitialMessageStatus {
+                    uid: Uid::u(2),
+                    id: messages[2],
+                    flags: all_flags_bitset.clone(),
+                    last_modified: Modseq::of(2),
+                    recent: true,
+                },
+                InitialMessageStatus {
+                    uid: Uid::u(3),
+                    id: messages[4],
+                    flags: SmallBitset::new(),
+                    last_modified: Modseq::of(2),
+                    recent: true,
+                },
+                InitialMessageStatus {
+                    uid: Uid::u(4),
+                    id: messages[2],
+                    flags: all_flags_bitset.clone(),
+                    last_modified: Modseq::of(3),
+                    recent: true,
+                },
+            ],
+            selected.messages,
+        );
+
+        let unselectable = fixture
+            .cxn
+            .create_mailbox(MailboxId::ROOT, "unselectable", None)
+            .unwrap();
+        fixture
+            .cxn
+            .create_mailbox(unselectable, "plugh", None)
+            .unwrap();
+        fixture.cxn.delete_mailbox(unselectable).unwrap();
+
+        assert_matches!(
+            Err(Error::NxMailbox),
+            fixture.cxn.copy_mailbox_messages(
+                MailboxId(-1),
+                &mut std::iter::empty(),
+                copy_dst,
+            ),
+        );
+        assert_matches!(
+            Err(Error::NxMailbox),
+            fixture.cxn.copy_mailbox_messages(
+                copy_src,
+                &mut std::iter::empty(),
+                MailboxId(-1),
+            ),
+        );
+        assert_matches!(
+            Err(Error::NxMailbox),
+            fixture.cxn.move_mailbox_messages(
+                MailboxId(-1),
+                std::iter::empty(),
+                move_dst,
+            ),
+        );
+        assert_matches!(
+            Err(Error::NxMailbox),
+            fixture.cxn.move_mailbox_messages(
+                copy_src,
+                std::iter::empty(),
+                MailboxId(-1),
+            ),
+        );
+        assert_matches!(
+            Err(Error::NxMailbox),
+            fixture.cxn.move_all_mailbox_messages_into_create(
+                MailboxId(-1),
+                MailboxId::ROOT,
+                "other",
+            ),
+        );
+
+        assert_matches!(
+            Err(Error::MailboxUnselectable),
+            fixture.cxn.copy_mailbox_messages(
+                unselectable,
+                &mut std::iter::empty(),
+                copy_dst,
+            ),
+        );
+        assert_matches!(
+            Err(Error::MailboxUnselectable),
+            fixture.cxn.copy_mailbox_messages(
+                copy_src,
+                &mut std::iter::empty(),
+                unselectable,
+            ),
+        );
+        assert_matches!(
+            Err(Error::MailboxUnselectable),
+            fixture.cxn.move_mailbox_messages(
+                unselectable,
+                std::iter::empty(),
+                move_dst,
+            ),
+        );
+        assert_matches!(
+            Err(Error::MailboxUnselectable),
+            fixture.cxn.move_mailbox_messages(
+                copy_src,
+                std::iter::empty(),
+                unselectable,
+            ),
+        );
+        assert_matches!(
+            Err(Error::MailboxUnselectable),
+            fixture.cxn.move_all_mailbox_messages_into_create(
+                unselectable,
+                MailboxId::ROOT,
+                "other",
+            ),
+        );
+
+        assert_matches!(
+            Err(Error::MoveIntoSelf),
+            fixture.cxn.move_mailbox_messages(
+                move_dst,
+                std::iter::empty(),
+                move_dst,
+            ),
+        );
     }
 
     #[test]

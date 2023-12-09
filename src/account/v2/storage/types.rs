@@ -19,6 +19,7 @@
 //! Bindings for our model types to `rusqlite`, plus model types specific to
 //! the database itself.
 
+use std::convert::TryFrom;
 use std::str::FromStr;
 
 use chrono::prelude::*;
@@ -27,7 +28,9 @@ use rusqlite::types::{
 };
 
 use crate::{
-    account::model::*, crypt::AES_BLOCK, support::small_bitset::SmallBitset,
+    account::model::*,
+    crypt::AES_BLOCK,
+    support::{error::Error, small_bitset::SmallBitset},
 };
 
 macro_rules! transparent_to_sql {
@@ -62,6 +65,13 @@ impl MailboxId {
     /// that `(parent_id, name)` still works as a uniqueness constraint for
     /// top-level mailboxes.
     pub const ROOT: Self = Self(0);
+
+    pub fn as_uid_validity(self) -> Result<u32, Error> {
+        u32::try_from(self.0)
+            .ok()
+            .filter(|&u| u != 0)
+            .ok_or(Error::MailboxIdOutOfRange)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

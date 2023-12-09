@@ -1459,7 +1459,7 @@ where
 }
 
 /// The response from the `COPY` and `UID COPY` commands.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct CopyResponse {
     /// The UID validity value of the destination mailbox.
     pub uid_validity: u32,
