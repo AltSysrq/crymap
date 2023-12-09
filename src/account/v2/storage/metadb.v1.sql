@@ -44,7 +44,7 @@ CREATE TABLE `mailbox` (
   -- mailbox. Modseq 1 is the initial state of the mailbox.
   `max_modseq` INTEGER NOT NULL DEFAULT 1,
   UNIQUE (`parent_id`, `name`),
-  FOREIGN KEY (`parent_id`) REFERENCES `mailbox` (`id`)
+  FOREIGN KEY (`parent_id`) REFERENCES `mailbox` (`id`) ON DELETE RESTRICT
 ) STRICT;
 
 -- Pre-seed the special root pseudo-mailbox.
@@ -130,8 +130,8 @@ CREATE TABLE `mailbox_message` (
   -- The modseq at which the flags were changed.
   `flags_modseq` INTEGER NOT NULL,
   PRIMARY KEY (`mailbox_id`, `uid`),
-  FOREIGN KEY (`mailbox_id`) REFERENCES `mailbox` (`id`),
-  FOREIGN KEY (`message_id`) REFERENCES `message` (`id`)
+  FOREIGN KEY (`mailbox_id`) REFERENCES `mailbox` (`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`message_id`) REFERENCES `message` (`id`) ON DELETE RESTRICT
 ) WITHOUT ROWID, STRICT;
 
 -- Associates flags with indices >63 with messages.
@@ -141,8 +141,8 @@ CREATE TABLE `mailbox_message_far_flag` (
   `flag_id` INTEGER NOT NULL,
   PRIMARY KEY (`mailbox_id`, `uid`, `flag_id`),
   FOREIGN KEY (`mailbox_id`, `uid`)
-    REFERENCES `mailbox_message` (`mailbox_id`, `uid`),
-  FOREIGN KEY (`flag_id`) REFERENCES `flag` (`id`)
+    REFERENCES `mailbox_message` (`mailbox_id`, `uid`) ON DELETE RESTRICT,
+  FOREIGN KEY (`flag_id`) REFERENCES `flag` (`id`) ON DELETE RESTRICT
 ) WITHOUT ROWID, STRICT;
 
 CREATE TABLE `mailbox_message_expungement` (
@@ -154,7 +154,7 @@ CREATE TABLE `mailbox_message_expungement` (
   -- as such a query will be a binary search then a linear table scan to gather
   -- all the UIDs.
   PRIMARY KEY (`mailbox_id`, `expunged_modseq`, `uid`),
-  FOREIGN KEY (`mailbox_id`) REFERENCES `mailbox` (`id`)
+  FOREIGN KEY (`mailbox_id`) REFERENCES `mailbox` (`id`) ON DELETE RESTRICT
 ) WITHOUT ROWID, STRICT;
 
 -- Tracks the set of subscribed mailbox paths.

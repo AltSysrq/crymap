@@ -456,6 +456,47 @@ impl Connection {
         Ok(ret)
     }
 
+    /// Fetches the ID and path of every message which is currently orphaned
+    /// (i.e. not referenced by any mailbox) and which has a `last_activity`
+    /// time less than `last_activity_before`.
+    pub fn fetch_orphaned_messages(
+        &mut self,
+        last_activity_before: UnixTimestamp,
+    ) -> Result<Vec<(MessageId, String)>, Error> {
+        self.cxn.enable_write(false)?;
+        self.cxn
+            .prepare(
+                "SELECT `message`.`id`, `message`.`path` \
+                 FROM `message` \
+                 LEFT JOIN `mailbox_message` \
+                 ON `message`.`id` = `mailbox_message`.`message_id` \
+                 WHERE `mailbox_message`.`uid` IS NULL \
+                 AND `message`.`last_activity` < ?",
+            )?
+            .query_map((last_activity_before,), from_row)?
+            .collect::<Result<_, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Removes the message with the given ID from the database.
+    ///
+    /// If there is no such message, or it is not orphaned, this silently does
+    /// nothing.
+    pub fn forget_message(
+        &mut self,
+        message_id: MessageId,
+    ) -> Result<(), Error> {
+        self.cxn.enable_write(true)?;
+        self.cxn
+            .prepare_cached(
+                "DELETE FROM `message` WHERE `id` = ?1 \
+                 AND NOT EXISTS \
+                 (SELECT 1 FROM `mailbox_message` WHERE `message_id` = ?1)",
+            )?
+            .execute((message_id,))?;
+        Ok(())
+    }
+
     /// Fetches the on-access data for the given message.
     pub fn access_message(
         &mut self,
@@ -1742,6 +1783,7 @@ fn new_modseq(
 mod test {
     use std::sync::Arc;
 
+    use chrono::prelude::*;
     use tempfile::TempDir;
 
     use super::*;
@@ -3035,6 +3077,58 @@ mod test {
                 1234,
             )
             .unwrap();
+    }
+
+    #[test]
+    fn test_orphaned_messages() {
+        let mut fixture = Fixture::new();
+
+        let inbox = fixture
+            .cxn
+            .create_mailbox(MailboxId::ROOT, "INBOX", None)
+            .unwrap();
+
+        let messages = fixture
+            .cxn
+            .intern_messages_as_orphans(
+                &mut ["a", "b", "c", "d", "e", "f"].iter().copied(),
+            )
+            .unwrap();
+
+        for &message in &messages[3..] {
+            fixture.cxn.zero_message_last_activity(message).unwrap();
+        }
+
+        fixture
+            .cxn
+            .append_mailbox_messages(
+                inbox,
+                &mut [(messages[0], None), (messages[3], None)].iter().copied(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            vec![(messages[4], "e".to_owned()), (messages[5], "f".to_owned()),],
+            fixture
+                .cxn
+                .fetch_orphaned_messages(UnixTimestamp(
+                    DateTime::from_timestamp(42, 0).unwrap()
+                ))
+                .unwrap(),
+        );
+
+        for &message in &messages {
+            fixture.cxn.forget_message(message).unwrap();
+        }
+        fixture.cxn.forget_message(MessageId(999)).unwrap();
+
+        for (ix, &message) in messages.iter().enumerate() {
+            assert_eq!(
+                0 == ix || 3 == ix,
+                fixture.cxn.fetch_raw_message(message).is_ok(),
+                "for index {ix}",
+            );
+        }
     }
 
     #[test]
