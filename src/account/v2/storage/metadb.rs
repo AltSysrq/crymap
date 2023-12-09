@@ -2041,6 +2041,7 @@ mod test {
         let mut fixture = Fixture::new();
 
         let keyword = Flag::Keyword("Keyword".to_owned());
+        let keyword_lower = Flag::Keyword("keyword".to_owned());
         assert_eq!(None, fixture.cxn.look_up_flag_id(&keyword).unwrap());
         assert_eq!(FlagId(5), fixture.cxn.intern_flag(&keyword).unwrap());
         assert_eq!(
@@ -2048,6 +2049,11 @@ mod test {
             fixture.cxn.look_up_flag_id(&keyword).unwrap(),
         );
         assert_eq!(FlagId(5), fixture.cxn.intern_flag(&keyword).unwrap());
+        assert_eq!(FlagId(5), fixture.cxn.intern_flag(&keyword_lower).unwrap());
+        assert_eq!(
+            Some(FlagId(5)),
+            fixture.cxn.look_up_flag_id(&keyword_lower).unwrap(),
+        );
         assert!(fixture
             .cxn
             .fetch_all_flags()

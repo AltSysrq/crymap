@@ -64,7 +64,9 @@ CREATE TABLE `flag` (
   -- (because AUTOINCREMENT starts at 1).
   `id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
   -- The flag itself. E.g. "\Deleted", "\Sent", "Keyword".
-  `flag` TEXT NOT NULL,
+  --
+  -- Flags are ASCII-only so the built-in NOCASE collation is sufficient.
+  `flag` TEXT COLLATE NOCASE NOT NULL,
   UNIQUE (`flag`)
 ) STRICT;
 
