@@ -27,6 +27,7 @@
 
 mod db_migrations;
 mod deliverydb;
+mod messages;
 mod metadb;
 mod sqlite_xex_vfs;
 mod types;
