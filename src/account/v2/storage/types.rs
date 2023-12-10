@@ -343,6 +343,8 @@ pub struct InitialMessageStatus {
     pub last_modified: Modseq,
     /// Whether this message should be marked `\Recent`.
     pub recent: bool,
+    /// The `SAVEDATE` attribute of the message.
+    pub savedate: UnixTimestamp,
 }
 
 /// Information to update a snapshot between the cursed non-UID read-only

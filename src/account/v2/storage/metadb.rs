@@ -36,6 +36,9 @@ use crate::{
 /// A connection to the encrypted `meta.sqlite.xex` database.
 pub struct Connection {
     cxn: rusqlite::Connection,
+
+    #[cfg(test)]
+    override_savedate: Option<UnixTimestamp>,
 }
 
 static MIGRATIONS: &[&str] = &[include_str!("metadb.v1.sql")];
@@ -56,7 +59,11 @@ impl Connection {
 
         super::db_migrations::apply_migrations(&mut cxn, "meta", MIGRATIONS)?;
 
-        Ok(Self { cxn })
+        Ok(Self {
+            cxn,
+            #[cfg(test)]
+            override_savedate: None,
+        })
     }
 
     /// Creates a mailbox with the given name, parent, and special use.
@@ -511,11 +518,16 @@ impl Connection {
         mailbox_id: MailboxId,
         messages: &mut dyn Iterator<Item = (MessageId, Option<&SmallBitset>)>,
     ) -> Result<Uid, Error> {
+        let savedate = self.savedate();
         let txn = self.cxn.write_tx()?;
 
         require_selectable_mailbox(&txn, mailbox_id)?;
-        let uid =
-            append_mailbox_messages(&txn, mailbox_id, &mut messages.map(Ok))?;
+        let uid = append_mailbox_messages(
+            &txn,
+            mailbox_id,
+            savedate,
+            &mut messages.map(Ok),
+        )?;
         txn.commit()?;
 
         Ok(uid)
@@ -528,6 +540,7 @@ impl Connection {
         mailbox_id: MailboxId,
         messages: &mut dyn Iterator<Item = (&str, Option<&SmallBitset>)>,
     ) -> Result<Uid, Error> {
+        let savedate = self.savedate();
         let txn = self.cxn.write_tx()?;
 
         require_selectable_mailbox(&txn, mailbox_id)?;
@@ -536,7 +549,8 @@ impl Connection {
             intern_message_as_orphan(&txn, path).map(|id| (id, flags))
         });
 
-        let uid = append_mailbox_messages(&txn, mailbox_id, &mut messages)?;
+        let uid =
+            append_mailbox_messages(&txn, mailbox_id, savedate, &mut messages)?;
         txn.commit()?;
 
         Ok(uid)
@@ -552,6 +566,7 @@ impl Connection {
         src_uids: &mut dyn Iterator<Item = Uid>,
         dst_mailbox_id: MailboxId,
     ) -> Result<CopyResponse, Error> {
+        let savedate = self.savedate();
         let txn = self.cxn.write_tx()?;
 
         require_selectable_mailbox(&txn, src_mailbox_id)?;
@@ -561,6 +576,7 @@ impl Connection {
             src_mailbox_id,
             src_uids,
             dst_mailbox_id,
+            savedate,
         )?;
         txn.commit()?;
 
@@ -581,6 +597,7 @@ impl Connection {
             return Err(Error::MoveIntoSelf);
         }
 
+        let savedate = self.savedate();
         let txn = self.cxn.write_tx()?;
 
         require_selectable_mailbox(&txn, src_mailbox_id)?;
@@ -590,6 +607,7 @@ impl Connection {
             src_mailbox_id,
             &mut src_uids.clone(),
             dst_mailbox_id,
+            savedate,
         )?;
         expunge_mailbox_messages(&txn, src_mailbox_id, &mut src_uids)?;
         txn.commit()?;
@@ -607,6 +625,7 @@ impl Connection {
         dst_parent_id: MailboxId,
         dst_name: &str,
     ) -> Result<MailboxId, Error> {
+        let savedate = self.savedate();
         let txn = self.cxn.write_tx()?;
 
         require_selectable_mailbox(&txn, src_mailbox_id)?;
@@ -626,6 +645,7 @@ impl Connection {
             src_mailbox_id,
             &mut src_uids.iter().copied(),
             dst_mailbox_id,
+            savedate,
         )?;
         expunge_mailbox_messages(
             &txn,
@@ -1273,6 +1293,16 @@ impl Connection {
             snapshot_modseq: status.max_modseq,
         })
     }
+
+    #[cfg(not(test))]
+    fn savedate(&self) -> UnixTimestamp {
+        UnixTimestamp::now()
+    }
+
+    #[cfg(test)]
+    fn savedate(&self) -> UnixTimestamp {
+        self.override_savedate.unwrap_or_else(UnixTimestamp::now)
+    }
 }
 
 trait ConnectionExt {
@@ -1368,6 +1398,7 @@ fn intern_message_as_orphan(
 fn append_mailbox_messages(
     cxn: &rusqlite::Connection,
     mailbox_id: MailboxId,
+    savedate: UnixTimestamp,
     messages: &mut dyn Iterator<
         Item = Result<(MessageId, Option<&SmallBitset>), Error>,
     >,
@@ -1378,7 +1409,6 @@ fn append_mailbox_messages(
     let first_uid = selectable_mailbox_status(cxn, mailbox_id)?.next_uid;
     let mut next_uid = first_uid;
 
-    let now = UnixTimestamp::now();
     let mut mailbox_message_insert = cxn.prepare(
         "INSERT INTO `mailbox_message` ( \
            `mailbox_id`, `uid`, `message_id`, `near_flags`, \
@@ -1402,7 +1432,7 @@ fn append_mailbox_messages(
             uid,
             message_id,
             flags.map_or(0, |f| f.near_bits() as i64),
-            now,
+            savedate,
             modseq,
             modseq,
         ))?;
@@ -1439,6 +1469,7 @@ fn copy_mailbox_messages(
     src_mailbox_id: MailboxId,
     src_uids: &mut dyn Iterator<Item = Uid>,
     dst_mailbox_id: MailboxId,
+    savedate: UnixTimestamp,
 ) -> Result<CopyResponse, Error> {
     let mut response = CopyResponse {
         uid_validity: dst_mailbox_id.as_uid_validity()?,
@@ -1447,7 +1478,6 @@ fn copy_mailbox_messages(
     };
 
     let dst_modseq = new_modseq(txn, dst_mailbox_id)?;
-    let now = UnixTimestamp::now();
     let mut next_uid = selectable_mailbox_status(txn, dst_mailbox_id)?.next_uid;
 
     let mut copy_message = txn.prepare(
@@ -1475,7 +1505,7 @@ fn copy_mailbox_messages(
             src_uid,
             dst_mailbox_id,
             dst_uid,
-            now,
+            savedate,
             dst_modseq,
         ))? {
             continue;
@@ -1565,22 +1595,25 @@ fn fetch_initial_messages(
     let mut messages = txn
         .prepare_cached(
             "SELECT `uid`, `message_id`, `near_flags`,
-                    MAX(`flags_modseq`, `append_modseq`) \
+                    MAX(`flags_modseq`, `append_modseq`), `savedate` \
              FROM `mailbox_message` \
              WHERE `mailbox_id` = ? AND `uid` >= ? \
              ORDER BY `uid`",
         )?
         .query_map(
             (mailbox_id, min_uid),
-            from_row::<(Uid, MessageId, i64, Modseq)>,
+            from_row::<(Uid, MessageId, i64, Modseq, UnixTimestamp)>,
         )?
         .map(|res| {
-            res.map(|(uid, id, near_flags, modseq)| InitialMessageStatus {
-                uid,
-                id,
-                flags: SmallBitset::new_with_near(near_flags as u64),
-                last_modified: modseq,
-                recent: uid >= recent_uid,
+            res.map(|(uid, id, near_flags, modseq, savedate)| {
+                InitialMessageStatus {
+                    uid,
+                    id,
+                    savedate,
+                    flags: SmallBitset::new_with_near(near_flags as u64),
+                    last_modified: modseq,
+                    recent: uid >= recent_uid,
+                }
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -1760,20 +1793,25 @@ mod test {
     struct Fixture {
         _tmpdir: TempDir,
         cxn: Connection,
+        savedate: UnixTimestamp,
     }
 
     impl Fixture {
         fn new() -> Self {
+            let savedate =
+                UnixTimestamp(DateTime::from_timestamp(12345, 0).unwrap());
             let tmpdir = TempDir::new().unwrap();
             let master_key = Arc::new(MasterKey::new());
             let xex = XexVfs::new(master_key).unwrap();
-            let cxn =
+            let mut cxn =
                 Connection::new(&tmpdir.path().join("meta.sqlite.xex"), &xex)
                     .unwrap();
+            cxn.override_savedate = Some(savedate);
 
             Self {
                 _tmpdir: tmpdir,
                 cxn,
+                savedate,
             }
         }
     }
@@ -2731,6 +2769,7 @@ mod test {
                 flags: SmallBitset::new(),
                 last_modified: Modseq::of(2),
                 recent: true,
+                savedate: fixture.savedate,
             },],
             selected.messages,
         );
@@ -2746,6 +2785,7 @@ mod test {
                     flags: SmallBitset::new(),
                     last_modified: Modseq::of(2),
                     recent: true,
+                    savedate: fixture.savedate,
                 },
                 InitialMessageStatus {
                     uid: Uid::u(2),
@@ -2753,6 +2793,7 @@ mod test {
                     flags: all_flags_bitset.clone(),
                     last_modified: Modseq::of(2),
                     recent: true,
+                    savedate: fixture.savedate,
                 },
                 InitialMessageStatus {
                     uid: Uid::u(3),
@@ -2760,6 +2801,7 @@ mod test {
                     flags: SmallBitset::new(),
                     last_modified: Modseq::of(2),
                     recent: true,
+                    savedate: fixture.savedate,
                 },
             ],
             selected.messages,
@@ -2774,6 +2816,7 @@ mod test {
                     flags: SmallBitset::new(),
                     last_modified: Modseq::of(2),
                     recent: true,
+                    savedate: fixture.savedate,
                 },
                 InitialMessageStatus {
                     uid: Uid::u(2),
@@ -2781,6 +2824,7 @@ mod test {
                     flags: SmallBitset::new(),
                     last_modified: Modseq::of(3),
                     recent: true,
+                    savedate: fixture.savedate,
                 },
                 InitialMessageStatus {
                     uid: Uid::u(3),
@@ -2788,6 +2832,7 @@ mod test {
                     flags: all_flags_bitset.clone(),
                     last_modified: Modseq::of(3),
                     recent: true,
+                    savedate: fixture.savedate,
                 },
                 InitialMessageStatus {
                     uid: Uid::u(4),
@@ -2795,6 +2840,7 @@ mod test {
                     flags: SmallBitset::new(),
                     last_modified: Modseq::of(3),
                     recent: true,
+                    savedate: fixture.savedate,
                 },
             ],
             selected.messages,
@@ -2830,6 +2876,7 @@ mod test {
                     flags: SmallBitset::new(),
                     last_modified: Modseq::of(2),
                     recent: true,
+                    savedate: fixture.savedate,
                 },
                 InitialMessageStatus {
                     uid: Uid::u(2),
@@ -2837,6 +2884,7 @@ mod test {
                     flags: all_flags_bitset.clone(),
                     last_modified: Modseq::of(2),
                     recent: true,
+                    savedate: fixture.savedate,
                 },
                 InitialMessageStatus {
                     uid: Uid::u(3),
@@ -2844,6 +2892,7 @@ mod test {
                     flags: SmallBitset::new(),
                     last_modified: Modseq::of(2),
                     recent: true,
+                    savedate: fixture.savedate,
                 },
             ],
             selected.messages,
@@ -2875,6 +2924,7 @@ mod test {
                     flags: SmallBitset::new(),
                     last_modified: Modseq::of(2),
                     recent: true,
+                    savedate: fixture.savedate,
                 },
                 InitialMessageStatus {
                     uid: Uid::u(2),
@@ -2882,6 +2932,7 @@ mod test {
                     flags: all_flags_bitset.clone(),
                     last_modified: Modseq::of(2),
                     recent: true,
+                    savedate: fixture.savedate,
                 },
                 InitialMessageStatus {
                     uid: Uid::u(3),
@@ -2889,6 +2940,7 @@ mod test {
                     flags: SmallBitset::new(),
                     last_modified: Modseq::of(2),
                     recent: true,
+                    savedate: fixture.savedate,
                 },
                 InitialMessageStatus {
                     uid: Uid::u(4),
@@ -2896,6 +2948,7 @@ mod test {
                     flags: all_flags_bitset.clone(),
                     last_modified: Modseq::of(3),
                     recent: true,
+                    savedate: fixture.savedate,
                 },
             ],
             selected.messages,
@@ -3150,6 +3203,7 @@ mod test {
                     flags: SmallBitset::new(),
                     last_modified: Modseq::of(2),
                     recent: true,
+                    savedate: fixture.savedate,
                 },
                 InitialMessageStatus {
                     uid: msg2_uid,
@@ -3157,6 +3211,7 @@ mod test {
                     flags: SmallBitset::new(),
                     last_modified: Modseq::of(3),
                     recent: true,
+                    savedate: fixture.savedate,
                 },
             ],
             init_state.messages,
@@ -3563,6 +3618,7 @@ mod test {
                     flags: SmallBitset::new(),
                     last_modified: after_insert_msg4,
                     recent: true,
+                    savedate: fixture.savedate,
                 },],
                 expunged: vec![msg2_uid],
                 snapshot_modseq: after_msg3_flags,
@@ -3646,6 +3702,7 @@ mod test {
                     flags: SmallBitset::new(),
                     last_modified: after_insert_msg4,
                     recent: false,
+                    savedate: fixture.savedate,
                 },],
                 expunged: vec![msg2_uid],
                 snapshot_modseq: after_msg3_flags,
@@ -3750,6 +3807,7 @@ mod test {
                         flags: SmallBitset::new(),
                         last_modified: after_insert_msg1,
                         recent: false,
+                        savedate: fixture.savedate,
                     },
                     InitialMessageStatus {
                         uid: msg3_uid,
@@ -3757,6 +3815,7 @@ mod test {
                         flags: all_flags_bitset.clone(),
                         last_modified: after_msg3_flags,
                         recent: false,
+                        savedate: fixture.savedate,
                     },
                     InitialMessageStatus {
                         uid: msg4_uid,
@@ -3764,6 +3823,7 @@ mod test {
                         flags: SmallBitset::new(),
                         last_modified: after_insert_msg4,
                         recent: false,
+                        savedate: fixture.savedate,
                     },
                 ],
                 expunged: vec![msg2_uid],
