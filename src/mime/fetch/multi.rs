@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -230,8 +230,19 @@ impl Visitor for MultiFetcher {
         self.on_fetchers(|fetcher| fetcher.uid(uid))
     }
 
+    fn email_id(&mut self, id: &str) -> Result<(), Self::Output> {
+        self.on_fetchers(|fetcher| fetcher.email_id(id))
+    }
+
     fn last_modified(&mut self, modseq: Modseq) -> Result<(), Self::Output> {
         self.on_fetchers(|fetcher| fetcher.last_modified(modseq))
+    }
+
+    fn savedate(
+        &mut self,
+        savedate: DateTime<Utc>,
+    ) -> Result<(), Self::Output> {
+        self.on_fetchers(|fetcher| fetcher.savedate(savedate))
     }
 
     fn want_flags(&self) -> bool {
@@ -251,6 +262,10 @@ impl Visitor for MultiFetcher {
 
     fn end_flags(&mut self) -> Result<(), Self::Output> {
         self.on_fetchers(|fetcher| fetcher.end_flags())
+    }
+
+    fn rfc822_size(&mut self, size: u32) -> Result<(), Self::Output> {
+        self.on_fetchers(|fetcher| fetcher.rfc822_size(size))
     }
 
     fn metadata(

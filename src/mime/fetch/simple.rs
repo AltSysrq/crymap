@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -105,6 +105,10 @@ pub struct Rfc822SizeFetcher;
 impl Visitor for Rfc822SizeFetcher {
     type Output = u32;
 
+    fn rfc822_size(&mut self, size: u32) -> Result<(), u32> {
+        Err(size as u32)
+    }
+
     fn metadata(&mut self, md: &MessageMetadata) -> Result<(), u32> {
         Err(md.size)
     }
@@ -137,6 +141,10 @@ pub struct EmailIdFetcher;
 
 impl Visitor for EmailIdFetcher {
     type Output = String;
+
+    fn email_id(&mut self, id: &str) -> Result<(), String> {
+        Err(id.to_owned())
+    }
 
     fn metadata(&mut self, md: &MessageMetadata) -> Result<(), String> {
         Err(md.format_email_id())

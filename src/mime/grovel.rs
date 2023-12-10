@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -24,6 +24,8 @@ use std::mem;
 use std::rc::Rc;
 use std::str;
 
+use chrono::prelude::*;
+
 use super::header::{self, ContentType};
 use crate::account::model::*;
 use crate::support::error::Error;
@@ -46,8 +48,24 @@ pub trait Visitor: fmt::Debug {
         Ok(())
     }
 
+    /// Receives the `EMAILID` for the message when using the V2 storage
+    /// system. Not called for V1.
+    fn email_id(&mut self, id: &str) -> Result<(), Self::Output> {
+        Ok(())
+    }
+
     /// Receives the last modified `Modseq` of the message.
     fn last_modified(&mut self, modseq: Modseq) -> Result<(), Self::Output> {
+        Ok(())
+    }
+
+    /// Receives the `SAVEDATE` of the message.
+    ///
+    /// Not called for V1.
+    fn savedate(
+        &mut self,
+        savedate: DateTime<Utc>,
+    ) -> Result<(), Self::Output> {
         Ok(())
     }
 
@@ -69,6 +87,15 @@ pub trait Visitor: fmt::Debug {
     /// Indicates that there are no more flags on the current message,
     /// including not \Recent.
     fn end_flags(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
+
+    /// Receives the size of the message if it becomes available before the
+    /// metadata has been decoded.
+    ///
+    /// This will not be called if the size cannot be computed without decoding
+    /// the metadata. In that case, the size must be obtained via `metadata()`.
+    fn rfc822_size(&mut self, size: u32) -> Result<(), Self::Output> {
         Ok(())
     }
 
@@ -184,12 +211,16 @@ pub trait MessageAccessor {
     type Reader: BufRead;
 
     fn uid(&self) -> Uid;
+    fn email_id(&self) -> Option<String>;
     fn last_modified(&self) -> Modseq;
+    fn savedate(&self) -> Option<DateTime<Utc>>;
     fn is_recent(&self) -> bool;
     fn flags(&self) -> Vec<Flag>;
+    fn rfc822_size(&self) -> Option<u32>;
     fn open(&self) -> Result<(MessageMetadata, Self::Reader), Error>;
 }
 
+// TODO Upgrade this to work like the V2 data store.
 #[cfg(test)]
 pub struct SimpleAccessor {
     pub uid: Uid,
@@ -224,8 +255,16 @@ impl MessageAccessor for SimpleAccessor {
         self.uid
     }
 
+    fn email_id(&self) -> Option<String> {
+        None
+    }
+
     fn last_modified(&self) -> Modseq {
         self.last_modified
+    }
+
+    fn savedate(&self) -> Option<DateTime<Utc>> {
+        None
     }
 
     fn is_recent(&self) -> bool {
@@ -234,6 +273,10 @@ impl MessageAccessor for SimpleAccessor {
 
     fn flags(&self) -> Vec<Flag> {
         self.flags.clone()
+    }
+
+    fn rfc822_size(&self) -> Option<u32> {
+        None
     }
 
     fn open(&self) -> Result<(MessageMetadata, Self::Reader), Error> {
@@ -408,7 +451,13 @@ impl<V> Groveller<V> {
 
     fn check_info(&mut self, accessor: &impl MessageAccessor) -> Result<(), V> {
         self.visitor.uid(accessor.uid())?;
+        if let Some(email_id) = accessor.email_id() {
+            self.visitor.email_id(&email_id)?;
+        }
         self.visitor.last_modified(accessor.last_modified())?;
+        if let Some(savedate) = accessor.savedate() {
+            self.visitor.savedate(savedate)?;
+        }
 
         if self.visitor.want_flags() {
             if accessor.is_recent() {
@@ -418,6 +467,10 @@ impl<V> Groveller<V> {
             let flags = accessor.flags();
             self.visitor.flags(&flags)?;
             self.visitor.end_flags()?;
+        }
+
+        if let Some(rfc822_size) = accessor.rfc822_size() {
+            self.visitor.rfc822_size(rfc822_size)?;
         }
 
         Ok(())

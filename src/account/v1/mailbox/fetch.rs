@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -21,6 +21,8 @@ use std::fmt;
 use std::io::BufRead;
 use std::mem;
 use std::sync::Arc;
+
+use chrono::prelude::*;
 
 use super::super::{mailbox_state::*, model::*};
 use super::defs::*;
@@ -46,8 +48,16 @@ impl<'a> MessageAccessor for MailboxMessageAccessor<'a> {
         self.uid
     }
 
+    fn email_id(&self) -> Option<String> {
+        None
+    }
+
     fn last_modified(&self) -> Modseq {
         self.message_status.last_modified().into()
+    }
+
+    fn savedate(&self) -> Option<DateTime<Utc>> {
+        None
     }
 
     fn is_recent(&self) -> bool {
@@ -60,6 +70,10 @@ impl<'a> MessageAccessor for MailboxMessageAccessor<'a> {
             .filter_map(|fid| self.mailbox.state.flag(fid))
             .cloned()
             .collect()
+    }
+
+    fn rfc822_size(&self) -> Option<u32> {
+        None
     }
 
     fn open(&self) -> Result<(MessageMetadata, Self::Reader), Error> {

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -281,6 +281,8 @@ fn extend_parms(
 mod test {
     use std::fs;
     use std::path::{Path, PathBuf};
+
+    use chrono::prelude::*;
 
     use super::*;
     use crate::account::model::*;
@@ -1239,8 +1241,16 @@ hello world
                         Uid::MIN
                     }
 
+                    fn email_id(&self) -> Option<String> {
+                        None
+                    }
+
                     fn last_modified(&self) -> Modseq {
                         Modseq::MIN
+                    }
+
+                    fn savedate(&self) -> Option<DateTime<Utc>> {
+                        None
                     }
 
                     fn is_recent(&self) -> bool {
@@ -1249,6 +1259,10 @@ hello world
 
                     fn flags(&self) -> Vec<Flag> {
                         vec![]
+                    }
+
+                    fn rfc822_size(&self) -> Option<u32> {
+                        None
                     }
 
                     fn open(
