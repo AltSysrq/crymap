@@ -423,7 +423,7 @@ mod test {
         let internal_date =
             FixedOffset::zero().timestamp_millis_opt(1000).unwrap();
         let mut result = grovel::grovel(
-            &grovel::SimpleAccessor {
+            &mut grovel::SimpleAccessor {
                 data: crate::test_data::RFC3501_P56.to_owned().into(),
                 uid,
                 last_modified: modseq,

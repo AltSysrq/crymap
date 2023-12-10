@@ -279,7 +279,7 @@ mod test {
     fn parse(message: &str) -> Envelope {
         let message = message.replace('\n', "\r\n");
         grovel::grovel(
-            &grovel::SimpleAccessor {
+            &mut grovel::SimpleAccessor {
                 data: message.into(),
                 ..grovel::SimpleAccessor::default()
             },

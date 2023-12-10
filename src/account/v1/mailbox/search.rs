@@ -119,9 +119,9 @@ impl StatefulMailbox {
     ) -> bool {
         let ops = Arc::clone(ops);
 
-        let result = self.access_message(uid).and_then(|accessor| {
+        let result = self.access_message(uid).and_then(|mut accessor| {
             grovel::grovel(
-                &accessor,
+                &mut accessor,
                 SearchFetcher::new(want, move |sd| {
                     search_backend::eval(&ops, sd)
                 }),

@@ -207,17 +207,21 @@ pub trait Visitor: fmt::Debug {
 }
 
 /// Used by `Groveller` to access information about a message.
+///
+/// Methods on `MessageAccessor` are `&mut` to allow the accessor to cache data
+/// or invoke mutable methods on references it contains. The accessor is
+/// expected to be idempotent.
 pub trait MessageAccessor {
     type Reader: BufRead;
 
-    fn uid(&self) -> Uid;
-    fn email_id(&self) -> Option<String>;
-    fn last_modified(&self) -> Modseq;
-    fn savedate(&self) -> Option<DateTime<Utc>>;
-    fn is_recent(&self) -> bool;
-    fn flags(&self) -> Vec<Flag>;
-    fn rfc822_size(&self) -> Option<u32>;
-    fn open(&self) -> Result<(MessageMetadata, Self::Reader), Error>;
+    fn uid(&mut self) -> Uid;
+    fn email_id(&mut self) -> Option<String>;
+    fn last_modified(&mut self) -> Modseq;
+    fn savedate(&mut self) -> Option<DateTime<Utc>>;
+    fn is_recent(&mut self) -> bool;
+    fn flags(&mut self) -> Vec<Flag>;
+    fn rfc822_size(&mut self) -> Option<u32>;
+    fn open(&mut self) -> Result<(MessageMetadata, Self::Reader), Error>;
 }
 
 // TODO Upgrade this to work like the V2 data store.
@@ -251,35 +255,35 @@ impl MessageAccessor for SimpleAccessor {
     // can actually test buffering paths
     type Reader = std::io::BufReader<std::io::Cursor<Vec<u8>>>;
 
-    fn uid(&self) -> Uid {
+    fn uid(&mut self) -> Uid {
         self.uid
     }
 
-    fn email_id(&self) -> Option<String> {
+    fn email_id(&mut self) -> Option<String> {
         None
     }
 
-    fn last_modified(&self) -> Modseq {
+    fn last_modified(&mut self) -> Modseq {
         self.last_modified
     }
 
-    fn savedate(&self) -> Option<DateTime<Utc>> {
+    fn savedate(&mut self) -> Option<DateTime<Utc>> {
         None
     }
 
-    fn is_recent(&self) -> bool {
+    fn is_recent(&mut self) -> bool {
         self.recent
     }
 
-    fn flags(&self) -> Vec<Flag> {
+    fn flags(&mut self) -> Vec<Flag> {
         self.flags.clone()
     }
 
-    fn rfc822_size(&self) -> Option<u32> {
+    fn rfc822_size(&mut self) -> Option<u32> {
         None
     }
 
-    fn open(&self) -> Result<(MessageMetadata, Self::Reader), Error> {
+    fn open(&mut self) -> Result<(MessageMetadata, Self::Reader), Error> {
         Ok((
             self.metadata.clone(),
             std::io::BufReader::with_capacity(
@@ -291,7 +295,7 @@ impl MessageAccessor for SimpleAccessor {
 }
 
 pub fn grovel<V>(
-    accessor: &impl MessageAccessor,
+    accessor: &mut impl MessageAccessor,
     visitor: impl IntoBoxedVisitor<V>,
 ) -> Result<V, Error> {
     Groveller::new(visitor.into_boxed_visitor()).grovel(accessor)
@@ -436,7 +440,10 @@ impl<V> Groveller<V> {
     }
 
     /// Process the message produced by the given accessor.
-    fn grovel(mut self, accessor: &impl MessageAccessor) -> Result<V, Error> {
+    fn grovel(
+        mut self,
+        accessor: &mut impl MessageAccessor,
+    ) -> Result<V, Error> {
         if let Err(result) = self.check_info(accessor) {
             return Ok(result);
         }
@@ -449,7 +456,10 @@ impl<V> Groveller<V> {
         self.read_through(reader)
     }
 
-    fn check_info(&mut self, accessor: &impl MessageAccessor) -> Result<(), V> {
+    fn check_info(
+        &mut self,
+        accessor: &mut impl MessageAccessor,
+    ) -> Result<(), V> {
         self.visitor.uid(accessor.uid())?;
         if let Some(email_id) = accessor.email_id() {
             self.visitor.email_id(&email_id)?;

@@ -384,7 +384,7 @@ mod test {
         subscripts: Vec<u32>,
     ) -> Vec<u8> {
         let (_, result) = grovel::grovel(
-            &grovel::SimpleAccessor {
+            &mut grovel::SimpleAccessor {
                 data: message.into(),
                 ..grovel::SimpleAccessor::default()
             },

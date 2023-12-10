@@ -44,27 +44,27 @@ pub type FetchReceiver<'a> =
 impl<'a> MessageAccessor for MailboxMessageAccessor<'a> {
     type Reader = Box<dyn BufRead + 'a>;
 
-    fn uid(&self) -> Uid {
+    fn uid(&mut self) -> Uid {
         self.uid
     }
 
-    fn email_id(&self) -> Option<String> {
+    fn email_id(&mut self) -> Option<String> {
         None
     }
 
-    fn last_modified(&self) -> Modseq {
+    fn last_modified(&mut self) -> Modseq {
         self.message_status.last_modified().into()
     }
 
-    fn savedate(&self) -> Option<DateTime<Utc>> {
+    fn savedate(&mut self) -> Option<DateTime<Utc>> {
         None
     }
 
-    fn is_recent(&self) -> bool {
+    fn is_recent(&mut self) -> bool {
         self.message_status.is_recent()
     }
 
-    fn flags(&self) -> Vec<Flag> {
+    fn flags(&mut self) -> Vec<Flag> {
         self.message_status
             .flags()
             .filter_map(|fid| self.mailbox.state.flag(fid))
@@ -72,11 +72,11 @@ impl<'a> MessageAccessor for MailboxMessageAccessor<'a> {
             .collect()
     }
 
-    fn rfc822_size(&self) -> Option<u32> {
+    fn rfc822_size(&mut self) -> Option<u32> {
         None
     }
 
-    fn open(&self) -> Result<(MessageMetadata, Self::Reader), Error> {
+    fn open(&mut self) -> Result<(MessageMetadata, Self::Reader), Error> {
         self.mailbox.s.open_message(self.uid)
     }
 }
@@ -279,7 +279,7 @@ impl StatefulMailbox {
             Err(e) => return Err(e),
         };
 
-        let result = self.access_message(uid).and_then(|accessor| {
+        let result = self.access_message(uid).and_then(|mut accessor| {
             if request
                 .changed_since
                 .map(|since| {
@@ -326,7 +326,7 @@ impl StatefulMailbox {
                     );
                 }
 
-                let mut fetched = grovel(&accessor, fetcher)?;
+                let mut fetched = grovel(&mut accessor, fetcher)?;
 
                 // Ensure any section parts are OK
                 for part in &mut fetched {

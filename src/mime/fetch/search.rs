@@ -453,7 +453,7 @@ mod test {
 
     fn parse(message: &str) -> SearchData {
         let message = message.replace('\n', "\r\n");
-        let accessor = grovel::SimpleAccessor {
+        let mut accessor = grovel::SimpleAccessor {
             uid: Uid::u(42),
             last_modified: Modseq::of(56100),
             recent: true,
@@ -472,7 +472,7 @@ mod test {
         let capture2 = Rc::clone(&capture);
 
         grovel::grovel(
-            &accessor,
+            &mut accessor,
             SearchFetcher::new(OptionalSearchParts::all(), move |sd| {
                 if sd.content.is_some() {
                     *capture2.borrow_mut() = sd.clone();

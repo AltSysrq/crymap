@@ -671,7 +671,7 @@ mod test {
 
     fn do_fetch_bytes(message: Vec<u8>, section: BodySection) -> String {
         let (_, result) = grovel::grovel(
-            &grovel::SimpleAccessor {
+            &mut grovel::SimpleAccessor {
                 data: message.into(),
                 ..grovel::SimpleAccessor::default()
             },
@@ -1178,7 +1178,7 @@ Zm9v
     #[test]
     fn decode_unknown_cte_of_multipart() {
         let (_, result) = grovel::grovel(
-            &grovel::SimpleAccessor {
+            &mut grovel::SimpleAccessor {
                 data: b"\
 Content-Type: multipart/mixed; boundary=bound
 
@@ -1212,7 +1212,7 @@ hello
     #[test]
     fn decode_unknown_cte_of_single_part_with_subscript() {
         let (_, result) = grovel::grovel(
-            &grovel::SimpleAccessor {
+            &mut grovel::SimpleAccessor {
                 data: b"\
 Content-Transfer-Encoding: chunked
 
