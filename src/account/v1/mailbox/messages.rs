@@ -61,7 +61,7 @@ impl StatelessMailbox {
         };
 
         let size_xor = file.read_u32::<LittleEndian>()?;
-        let stream = data_stream::Reader::new(file, |k| {
+        let stream = data_stream::Reader::new(file, None, |k| {
             let mut ks = self.key_store.lock().unwrap();
             ks.get_private_key(k)
         })?;

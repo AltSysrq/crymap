@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -148,6 +148,28 @@ impl MasterKey {
         let mut hash = [0u8; AES_BLOCK];
         k.finalize(&mut hash);
         hash
+    }
+
+    /// Encrypts or decrypts a cached session key.
+    ///
+    /// The session key is encrypted by XORing it with a one-time-pad generated
+    /// by KMAC-128. This is an extra layer of protection over the XEX-mode
+    /// encryption used on the database that contains the cached session keys
+    /// since XEX-mode is less secure than non-random-write modes.
+    pub(super) fn crypt_cached_session_key(
+        &self,
+        session_key: &mut [u8; AES_BLOCK],
+        message_id: i64,
+    ) {
+        let mut k = Kmac::v128(self.master_key.unsecure(), b"session-key-otp");
+        k.update(&message_id.to_le_bytes());
+
+        let mut hash = [0u8; AES_BLOCK];
+        k.finalize(&mut hash);
+
+        for (sk, h) in session_key.iter_mut().zip(&hash) {
+            *sk ^= h;
+        }
     }
 
     /// Given this key and a password, generate a `MasterKeyConfig` which can

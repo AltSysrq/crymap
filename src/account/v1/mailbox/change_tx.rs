@@ -36,7 +36,7 @@ impl StatelessMailbox {
         src: &Path,
     ) -> Result<T, Error> {
         let file = fs::File::open(src)?;
-        let stream = data_stream::Reader::new(file, |k| {
+        let stream = data_stream::Reader::new(file, None, |k| {
             let mut ks = self.key_store.lock().unwrap();
             ks.get_private_key(k)
         })?;
