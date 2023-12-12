@@ -72,12 +72,24 @@ impl MailboxId {
             .filter(|&u| u != 0)
             .ok_or(Error::MailboxIdOutOfRange)
     }
+
+    /// Returns the RFC 8474 `MAILBOXID` string derived from this ID.
+    pub fn format_rfc8474(self) -> String {
+        format!("M{}", self.0)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MessageId(pub i64);
 transparent_to_sql!(MessageId);
 transparent_from_sql!(MessageId);
+
+impl MessageId {
+    /// Returns the RFC 8474 `EMAILID` string derived from this ID.
+    pub fn format_rfc8474(self) -> String {
+        format!("M{}", self.0)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FlagId(pub usize);

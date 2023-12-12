@@ -106,7 +106,7 @@ impl Visitor for Rfc822SizeFetcher {
     type Output = u32;
 
     fn rfc822_size(&mut self, size: u32) -> Result<(), u32> {
-        Err(size as u32)
+        Err(size)
     }
 
     fn metadata(&mut self, md: &MessageMetadata) -> Result<(), u32> {

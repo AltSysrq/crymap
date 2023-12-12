@@ -16,7 +16,6 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -29,7 +28,7 @@ use crate::{
     account::model::*,
     support::{
         error::Error, mailbox_paths::parse_mailbox_path,
-        small_bitset::SmallBitset,
+        safe_name::is_safe_name, small_bitset::SmallBitset,
     },
 };
 
@@ -83,6 +82,32 @@ impl Connection {
         Ok(id)
     }
 
+    /// Atomically creates all the mailboxes necessary to make `path` exist.
+    ///
+    /// `special_use` applies only to the final child. Returns the ID of the
+    /// final child.
+    ///
+    /// Unlike other parts of the database layer, this implementation *does*
+    /// validate name safety of the path, since it is the only thing that
+    /// actually parses it. However, it does not validate that the call is not
+    /// creating a child of INBOX.
+    ///
+    /// This still returns `MailboxExists` if `path` already refers to an
+    /// existing mailbox.
+    pub fn create_mailbox_hierarchy(
+        &mut self,
+        path: &str,
+        special_use: Option<MailboxAttribute>,
+    ) -> Result<MailboxId, Error> {
+        let txn = self.cxn.write_tx()?;
+
+        let (parent, child_name) = create_parent_hierarchy(&txn, path)?;
+        let id = create_mailbox(&txn, parent, child_name, special_use)?;
+        txn.commit()?;
+
+        Ok(id)
+    }
+
     /// Finds the ID of the mailbox with the given path, or returns
     /// `Error::NxMailbox` if it does not exist.
     ///
@@ -93,15 +118,7 @@ impl Connection {
 
         let mut id = MailboxId::ROOT;
         for part in parse_mailbox_path(path) {
-            id = self
-                .cxn
-                .query_row(
-                    "SELECT `id` FROM `mailbox` \
-                     WHERE `parent_id` = ? AND `name` = ?",
-                    (id, part),
-                    from_single,
-                )
-                .optional()?
+            id = look_up_mailbox(&self.cxn, id, part)?
                 .ok_or(Error::NxMailbox)?;
         }
 
@@ -132,15 +149,7 @@ impl Connection {
                 return Ok((parent, part));
             }
 
-            parent = self
-                .cxn
-                .query_row(
-                    "SELECT `id` FROM `mailbox` \
-                     WHERE `parent_id` = ? AND `name` = ?",
-                    (parent, part),
-                    from_single,
-                )
-                .optional()?
+            parent = look_up_mailbox(&self.cxn, parent, part)?
                 .ok_or(Error::NxMailbox)?;
         }
 
@@ -181,60 +190,25 @@ impl Connection {
         new_name: &str,
     ) -> Result<(), Error> {
         let txn = self.cxn.write_tx()?;
+        move_mailbox(&txn, mailbox_id, new_parent, new_name)?;
+        txn.commit()?;
+        Ok(())
+    }
 
-        // Fetch the current information about the mailbox to ensure it still
-        // exists and to check whether the rename is a noop.
-        let (current_parent, current_name) = txn
-            .query_row(
-                "SELECT `parent_id`, `name` FROM `mailbox` \
-                 WHERE `id` = ?",
-                (mailbox_id,),
-                from_row::<(MailboxId, String)>,
-            )
-            .optional()?
-            .ok_or(Error::NxMailbox)?;
-
-        if new_parent == current_parent && new_name == current_name {
-            return Err(Error::RenameToSelf);
-        }
-
-        // Walk up the tree and ensure `new_parent` is not a descendent of
-        // `mailbox`. This also handles verifying that the new parent actually
-        // exists.
-        let mut ancestor = new_parent;
-        while MailboxId::ROOT != ancestor {
-            if ancestor == mailbox_id {
-                return Err(Error::RenameIntoSelf);
-            }
-
-            ancestor = txn
-                .query_row(
-                    "SELECT `parent_id` FROM `mailbox` WHERE `id` = ?",
-                    (ancestor,),
-                    from_single,
-                )
-                .optional()?
-                .ok_or(Error::NxMailbox)?;
-        }
-
-        // Ensure the new name is not already in use.
-        if 0 != txn.query_row(
-            "SELECT COUNT(*) FROM `mailbox` \
-             WHERE `parent_id` = ? AND `name` = ?",
-            (new_parent, new_name),
-            from_single::<i64>,
-        )? {
-            return Err(Error::MailboxExists);
-        }
-
-        // Everything looks sensible; go ahead with the rename.
-
-        txn.execute(
-            "UPDATE `mailbox` SET `parent_id` = ?, `name` = ? \
-             WHERE `id` = ?",
-            (new_parent, new_name, mailbox_id),
-        )?;
-
+    /// Moves and renames `mailbox_id` to be at `new_path`, implicitly creating
+    /// any new mailboxes required.
+    ///
+    /// Like `create_mailbox_hierarchy`, this does validate that all names are
+    /// safe, but does not validate that the destination is not inside the
+    /// INBOX.
+    pub fn move_mailbox_into_hierarchy(
+        &mut self,
+        mailbox_id: MailboxId,
+        new_path: &str,
+    ) -> Result<(), Error> {
+        let txn = self.cxn.write_tx()?;
+        let (new_parent, new_name) = create_parent_hierarchy(&txn, new_path)?;
+        move_mailbox(&txn, mailbox_id, new_parent, new_name)?;
         txn.commit()?;
         Ok(())
     }
@@ -347,14 +321,12 @@ impl Connection {
     ///
     /// Unsubscribed parents of subscribed mailboxes are not represented here.
     /// Their existence must be inferred from the results.
-    pub fn fetch_all_subscriptions(
-        &mut self,
-    ) -> Result<BTreeSet<String>, Error> {
+    pub fn fetch_all_subscriptions(&mut self) -> Result<Vec<String>, Error> {
         self.cxn.enable_write(false)?;
         self.cxn
             .prepare("SELECT `path` FROM `subscription`")?
             .query_map((), from_single)?
-            .collect::<Result<BTreeSet<_>, _>>()
+            .collect::<Result<Vec<_>, _>>()
             .map_err(Into::into)
     }
 
@@ -366,11 +338,8 @@ impl Connection {
     ) -> Result<Option<FlagId>, Error> {
         self.cxn.enable_write(false)?;
         self.cxn
-            .query_row(
-                "SELECT `id` FROM `flag` WHERE `flag` = ?",
-                (flag,),
-                from_single,
-            )
+            .prepare_cached("SELECT `id` FROM `flag` WHERE `flag` = ?")?
+            .query_row((flag,), from_single)
             .optional()
             .map_err(Into::into)
     }
@@ -383,11 +352,8 @@ impl Connection {
     pub fn intern_flag(&mut self, flag: &Flag) -> Result<FlagId, Error> {
         let txn = self.cxn.write_tx()?;
         if let Some(existing) = txn
-            .query_row(
-                "SELECT `id` FROM `flag` WHERE `flag` = ?",
-                (flag,),
-                from_single,
-            )
+            .prepare_cached("SELECT `id` FROM `flag` WHERE `flag` = ?")?
+            .query_row((flag,), from_single)
             .optional()?
         {
             return Ok(existing);
@@ -615,20 +581,26 @@ impl Connection {
         Ok(response)
     }
 
-    /// Atomically create a mailbox at `(dst_parent_id, dst_name)` with no
-    /// special use, then move the entire contents of `src_mailbox_id` into it.
+    /// Atomically create a mailbox at `dst_path` with no special use, then
+    /// move the entire contents of `src_mailbox_id` into it.
+    ///
+    /// `dst_path` is validated for special names but not for whether it
+    /// implies a descendent of the INBOX`. There is only an implicit-hierarchy
+    /// version of this function since it is only used for the lunatic special
+    /// case that invokes it.
     ///
     /// This implements the special `RENAME INBOX` case.
-    pub fn move_all_mailbox_messages_into_create(
+    pub fn move_all_mailbox_messages_into_create_hierarchy(
         &mut self,
         src_mailbox_id: MailboxId,
-        dst_parent_id: MailboxId,
-        dst_name: &str,
+        dst_path: &str,
     ) -> Result<MailboxId, Error> {
         let savedate = self.savedate();
         let txn = self.cxn.write_tx()?;
 
         require_selectable_mailbox(&txn, src_mailbox_id)?;
+        let (dst_parent_id, dst_name) =
+            create_parent_hierarchy(&txn, dst_path)?;
         let dst_mailbox_id =
             create_mailbox(&txn, dst_parent_id, dst_name, None)?;
 
@@ -1375,6 +1347,112 @@ fn create_mailbox(
     Ok(MailboxId(txn.last_insert_rowid()))
 }
 
+/// Creates any mailboxes needed so that `path` can be represented as a
+/// `parent_id` and `child_name` pair.
+///
+/// This validates that all elements of the path are safe names, including the
+/// final one.
+fn create_parent_hierarchy<'a>(
+    txn: &rusqlite::Connection,
+    path: &'a str,
+) -> Result<(MailboxId, &'a str), Error> {
+    let mut parent = MailboxId::ROOT;
+    let mut parts = parse_mailbox_path(path).peekable();
+    while let Some(part) = parts.next() {
+        if !is_safe_name(part) {
+            return Err(Error::UnsafeName);
+        }
+
+        if parts.peek().is_none() {
+            return Ok((parent, part));
+        }
+
+        if let Some(id) = look_up_mailbox(txn, parent, part)? {
+            parent = id;
+        } else {
+            parent = create_mailbox(txn, parent, part, None)?;
+        }
+    }
+
+    // We only get here if path is empty.
+    Err(Error::UnsafeName)
+}
+
+fn look_up_mailbox(
+    txn: &rusqlite::Connection,
+    parent_id: MailboxId,
+    name: &str,
+) -> Result<Option<MailboxId>, Error> {
+    txn.prepare_cached(
+        "SELECT `id` FROM `mailbox` WHERE `parent_id` = ? AND `name` = ?",
+    )?
+    .query_row((parent_id, name), from_single)
+    .optional()
+    .map_err(Into::into)
+}
+
+fn move_mailbox(
+    txn: &rusqlite::Connection,
+    mailbox_id: MailboxId,
+    new_parent: MailboxId,
+    new_name: &str,
+) -> Result<(), Error> {
+    // Fetch the current information about the mailbox to ensure it still
+    // exists and to check whether the rename is a noop.
+    let (current_parent, current_name) = txn
+        .query_row(
+            "SELECT `parent_id`, `name` FROM `mailbox` \
+             WHERE `id` = ?",
+            (mailbox_id,),
+            from_row::<(MailboxId, String)>,
+        )
+        .optional()?
+        .ok_or(Error::NxMailbox)?;
+
+    if new_parent == current_parent && new_name == current_name {
+        return Err(Error::RenameToSelf);
+    }
+
+    // Walk up the tree and ensure `new_parent` is not a descendent of
+    // `mailbox`. This also handles verifying that the new parent actually
+    // exists.
+    let mut ancestor = new_parent;
+    while MailboxId::ROOT != ancestor {
+        if ancestor == mailbox_id {
+            return Err(Error::RenameIntoSelf);
+        }
+
+        ancestor = txn
+            .query_row(
+                "SELECT `parent_id` FROM `mailbox` WHERE `id` = ?",
+                (ancestor,),
+                from_single,
+            )
+            .optional()?
+            .ok_or(Error::NxMailbox)?;
+    }
+
+    // Ensure the new name is not already in use.
+    if 0 != txn.query_row(
+        "SELECT COUNT(*) FROM `mailbox` \
+         WHERE `parent_id` = ? AND `name` = ?",
+        (new_parent, new_name),
+        from_single::<i64>,
+    )? {
+        return Err(Error::MailboxExists);
+    }
+
+    // Everything looks sensible; go ahead with the rename.
+
+    txn.execute(
+        "UPDATE `mailbox` SET `parent_id` = ?, `name` = ? \
+         WHERE `id` = ?",
+        (new_parent, new_name, mailbox_id),
+    )?;
+
+    Ok(())
+}
+
 fn intern_message_as_orphan(
     cxn: &rusqlite::Connection,
     path: &str,
@@ -1541,7 +1619,7 @@ fn expunge_mailbox_messages(
     mailbox_id: MailboxId,
     messages: &mut dyn Iterator<Item = Uid>,
 ) -> Result<(), Error> {
-    let modseq = new_modseq(&txn, mailbox_id)?;
+    let modseq = new_modseq(txn, mailbox_id)?;
     let now = UnixTimestamp::now();
 
     let mut select_message_id = txn.prepare(
@@ -2011,6 +2089,58 @@ mod test {
     }
 
     #[test]
+    fn test_create_mailbox_hierarchy() {
+        let mut fixture = Fixture::new();
+
+        let baz_id = fixture
+            .cxn
+            .create_mailbox_hierarchy(
+                "foo/bar/baz",
+                Some(MailboxAttribute::Important),
+            )
+            .unwrap();
+        let qux_id = fixture
+            .cxn
+            .create_mailbox_hierarchy("foo/bar/qux", None)
+            .unwrap();
+        let fum_id = fixture.cxn.create_mailbox_hierarchy("fum", None).unwrap();
+
+        let mailboxes = fixture.cxn.fetch_all_mailboxes().unwrap();
+        assert_eq!(5, mailboxes.len());
+        for mailbox in &mailboxes {
+            if baz_id == mailbox.id {
+                assert_eq!(
+                    Some(MailboxAttribute::Important),
+                    mailbox.special_use
+                );
+            } else {
+                assert_eq!(None, mailbox.special_use);
+            }
+        }
+
+        assert_eq!(baz_id, fixture.cxn.find_mailbox("foo/bar/baz").unwrap());
+        assert_eq!(qux_id, fixture.cxn.find_mailbox("foo/bar/qux").unwrap());
+        assert_eq!(fum_id, fixture.cxn.find_mailbox("fum").unwrap());
+
+        assert_matches!(
+            Err(Error::UnsafeName),
+            fixture.cxn.create_mailbox_hierarchy("", None),
+        );
+        assert_matches!(
+            Err(Error::UnsafeName),
+            fixture.cxn.create_mailbox_hierarchy("f%o", None),
+        );
+        assert_matches!(
+            Err(Error::UnsafeName),
+            fixture.cxn.create_mailbox_hierarchy("foo/b%r", None),
+        );
+        assert_matches!(
+            Err(Error::MailboxExists),
+            fixture.cxn.create_mailbox_hierarchy("foo/bar", None),
+        );
+    }
+
+    #[test]
     fn test_subscription_crud() {
         let mut fixture = Fixture::new();
 
@@ -2018,14 +2148,14 @@ mod test {
         fixture.cxn.add_subscription("bar").unwrap();
         fixture.cxn.add_subscription("foo").unwrap();
 
+        fn sorted(mut v: Vec<String>) -> Vec<String> {
+            v.sort();
+            v
+        }
+
         assert_eq!(
             vec!["bar".to_owned(), "foo".to_owned()],
-            fixture
-                .cxn
-                .fetch_all_subscriptions()
-                .unwrap()
-                .into_iter()
-                .collect::<Vec<String>>(),
+            sorted(fixture.cxn.fetch_all_subscriptions().unwrap(),),
         );
 
         fixture.cxn.rm_subscription("foo").unwrap();
@@ -2033,12 +2163,7 @@ mod test {
 
         assert_eq!(
             vec!["bar".to_owned()],
-            fixture
-                .cxn
-                .fetch_all_subscriptions()
-                .unwrap()
-                .into_iter()
-                .collect::<Vec<String>>(),
+            fixture.cxn.fetch_all_subscriptions().unwrap(),
         );
     }
 
@@ -2857,9 +2982,8 @@ mod test {
 
         let rename_move_dst = fixture
             .cxn
-            .move_all_mailbox_messages_into_create(
+            .move_all_mailbox_messages_into_create_hierarchy(
                 move_dst,
-                MailboxId::ROOT,
                 "rename-dst",
             )
             .unwrap();
@@ -2998,9 +3122,8 @@ mod test {
         );
         assert_matches!(
             Err(Error::NxMailbox),
-            fixture.cxn.move_all_mailbox_messages_into_create(
+            fixture.cxn.move_all_mailbox_messages_into_create_hierarchy(
                 MailboxId(-1),
-                MailboxId::ROOT,
                 "other",
             ),
         );
@@ -3039,9 +3162,8 @@ mod test {
         );
         assert_matches!(
             Err(Error::MailboxUnselectable),
-            fixture.cxn.move_all_mailbox_messages_into_create(
+            fixture.cxn.move_all_mailbox_messages_into_create_hierarchy(
                 unselectable,
-                MailboxId::ROOT,
                 "other",
             ),
         );

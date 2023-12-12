@@ -16,10 +16,16 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-//! The V2 storage and state system was introduced with Crymap 2.0.0.
+//! The in-memory state for the V2 state and storage system. This is the API
+//! used by the IMAP protocol layer and the delivery systems.
+//!
+//! This module tree should be thought of as one large module, as it is very
+//! tightly cross-coupled; the main types are `Account` and `ExternAccount`,
+//! whose very large implementation is split across multiple files for
+//! manageability.
 
-// TODO REMOVE
-#![allow(dead_code)]
+mod defs;
+mod init;
+mod mailboxes;
 
-mod state;
-mod storage;
+pub use defs::{Account, Mailbox};
