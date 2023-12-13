@@ -1374,8 +1374,8 @@ mod test {
         assert_matches!(Err(Error::NxMailbox), fixture.account.delete(""));
     }
 
-    // TODO This test depends on appending messages, which is not yet
-    // implemented.
+    // TODO This test depends on appending messages and selecting mailboxes,
+    // which is not yet implemented.
     // #[test]
     // fn test_rename() {
     //     let mut fixture = TestFixture::new();

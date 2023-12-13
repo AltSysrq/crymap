@@ -180,14 +180,20 @@ impl<'de> Deserialize<'de> for SmallBitset {
     }
 }
 
-#[cfg(test)]
-impl From<Vec<usize>> for SmallBitset {
-    fn from(v: Vec<usize>) -> Self {
+impl std::iter::FromIterator<usize> for SmallBitset {
+    fn from_iter<T: IntoIterator<Item = usize>>(iter: T) -> Self {
         let mut this = Self::new();
-        for bit in v {
+        for bit in iter {
             this.insert(bit);
         }
         this
+    }
+}
+
+#[cfg(test)]
+impl From<Vec<usize>> for SmallBitset {
+    fn from(v: Vec<usize>) -> Self {
+        v.into_iter().collect()
     }
 }
 

@@ -53,6 +53,8 @@ macro_rules! transparent_from_sql {
     };
 }
 
+// TODO This should just contain a `u32` since it needs to be one to be a
+// UIDVALIDITY anyway, and this way it just wastes memory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MailboxId(pub i64);
 transparent_to_sql!(MailboxId);

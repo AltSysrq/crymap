@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -16,21 +16,18 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-use std::convert::TryInto;
 use std::fs;
-use std::io::{self, BufRead, Read, Seek, Write};
+use std::io::{self, BufRead, Read};
 use std::path::Path;
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt};
 use chrono::prelude::*;
 use log::info;
-use rand::{rngs::OsRng, Rng};
 use tempfile::NamedTempFile;
 
 use super::defs::*;
-use crate::account::model::*;
+use crate::account::{message_format, model::*};
 use crate::crypt::data_stream;
-use crate::support::compression::{Compression, FinishWrite};
 use crate::support::error::Error;
 use crate::support::file_ops;
 
@@ -161,51 +158,18 @@ impl StatelessMailbox {
     pub fn buffer_message(
         &self,
         internal_date: DateTime<FixedOffset>,
-        mut data: impl Read,
+        data: impl Read,
     ) -> Result<BufferedMessage, Error> {
         self.not_read_only()?;
 
         let mut buffer_file = NamedTempFile::new_in(&self.common_paths.tmp)?;
-
-        let size_xor: u32;
-        let metadata = MessageMetadata {
-            size: OsRng.gen(),
+        message_format::write_message(
+            &mut buffer_file,
+            &mut self.key_store.lock().unwrap(),
             internal_date,
-            email_id: OsRng.gen(),
-        };
-        let compression = Compression::DEFAULT_FOR_MESSAGE;
+            data,
+        )?;
 
-        buffer_file.write_u32::<LittleEndian>(0)?;
-        {
-            let mut crypt_writer = {
-                let mut ks = self.key_store.lock().unwrap();
-                let (key_name, pub_key) = ks.get_default_public_key()?;
-
-                data_stream::Writer::new(
-                    &mut buffer_file,
-                    pub_key,
-                    key_name.to_owned(),
-                    compression,
-                )?
-            };
-            {
-                let mut compressor =
-                    compression.compressor(&mut crypt_writer)?;
-                let metadata_bytes = serde_cbor::to_vec(&metadata)?;
-                compressor.write_u16::<LittleEndian>(
-                    metadata_bytes.len().try_into().unwrap(),
-                )?;
-                compressor.write_all(&metadata_bytes)?;
-
-                let size = io::copy(&mut data, &mut compressor)?;
-                size_xor = metadata.size ^ size.try_into().unwrap_or(u32::MAX);
-                compressor.finish()?;
-            }
-            crypt_writer.flush()?;
-        }
-
-        buffer_file.seek(io::SeekFrom::Start(0))?;
-        buffer_file.write_u32::<LittleEndian>(size_xor)?;
         file_ops::chmod(buffer_file.path(), 0o440)?;
         buffer_file.as_file_mut().sync_all()?;
         Ok(BufferedMessage(buffer_file.into_temp_path()))
