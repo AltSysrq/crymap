@@ -53,6 +53,8 @@ pub struct Mailbox {
     pub(super) flags: Vec<(storage::FlagId, Flag)>,
     /// The `HIGHESTMODSEQ` currently reported.
     pub(super) snapshot_modseq: Modseq,
+    /// The `next_uid` when the mailbox was initially selected.
+    pub(super) initial_next_uid: Uid,
     /// UIDs of messages whose flags have changed but have not yet been sent to
     /// the client.
     pub(super) changed_flags_uids: Vec<Uid>,
@@ -73,6 +75,19 @@ pub(super) struct MessageStatus {
     pub(super) recent: bool,
     /// The `SAVEDATE` of the message.
     pub(super) savedate: DateTime<Utc>,
+}
+
+impl From<storage::InitialMessageStatus> for MessageStatus {
+    fn from(m: storage::InitialMessageStatus) -> Self {
+        Self {
+            uid: m.uid,
+            id: m.id,
+            flags: m.flags,
+            last_modified: m.last_modified,
+            recent: m.recent,
+            savedate: m.savedate.0,
+        }
+    }
 }
 
 impl Account {

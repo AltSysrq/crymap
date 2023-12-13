@@ -28,5 +28,6 @@ mod defs;
 mod init;
 mod mailboxes;
 mod messages;
+mod select;
 
 pub use defs::{Account, Mailbox};

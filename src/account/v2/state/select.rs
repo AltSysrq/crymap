@@ -1,0 +1,84 @@
+//-
+// Copyright (c) 2023, Jason Lingle
+//
+// This file is part of Crymap.
+//
+// Crymap is free software: you can  redistribute it and/or modify it under the
+// terms of  the GNU General Public  License as published by  the Free Software
+// Foundation, either version  3 of the License, or (at  your option) any later
+// version.
+//
+// Crymap is distributed  in the hope that  it will be useful,  but WITHOUT ANY
+// WARRANTY; without  even the implied  warranty of MERCHANTABILITY  or FITNESS
+// FOR  A PARTICULAR  PURPOSE.  See the  GNU General  Public  License for  more
+// details.
+//
+// You should have received a copy of the GNU General Public License along with
+// Crymap. If not, see <http://www.gnu.org/licenses/>.
+
+use super::defs::*;
+use crate::{account::model::*, support::error::Error};
+
+impl Account {
+    /// Perform a `SELECT` or `EXAMINE` of the given mailbox, with an optional
+    /// fused `QRESYNC` operation.
+    ///
+    /// Use `Mailbox::select_response()` on the returned `Mailbox` to get the
+    /// actual `SelectResponse`.
+    pub fn select(
+        &mut self,
+        mailbox: &str,
+        writable: bool,
+        qresync: Option<&QresyncRequest>,
+    ) -> Result<(Mailbox, Option<QresyncResponse>), Error> {
+        let mailbox_id = self.metadb.find_mailbox(mailbox)?;
+        let snapshot = self.metadb.select(mailbox_id, writable, qresync)?;
+        let mailbox = Mailbox {
+            id: mailbox_id,
+            writable,
+            messages: snapshot
+                .messages
+                .into_iter()
+                .map(MessageStatus::from)
+                .collect(),
+            flags: snapshot.flags,
+            snapshot_modseq: snapshot.max_modseq,
+            initial_next_uid: snapshot.next_uid,
+            changed_flags_uids: Vec::new(),
+        };
+
+        Ok((mailbox, snapshot.qresync))
+    }
+}
+
+impl Mailbox {
+    /// Generates the `SelectResponse` to be produced in response to selecting
+    /// the mailbox in this state.
+    pub fn select_response(&self) -> Result<SelectResponse, Error> {
+        let seen_flag = self
+            .flags
+            .iter()
+            .find(|&&(_, ref f)| &Flag::Seen == f)
+            .map(|&(id, _)| id.0);
+
+        Ok(SelectResponse {
+            flags: self
+                .flags
+                .iter()
+                .map(|&(_, ref flag)| flag.clone())
+                .collect(),
+            exists: self.messages.len(),
+            recent: self.messages.iter().filter(|m| m.recent).count(),
+            unseen: seen_flag.and_then(|seen_flag| {
+                self.messages
+                    .iter()
+                    .position(|m| m.flags.contains(seen_flag))
+                    .map(Seqnum::from_index)
+            }),
+            uidnext: self.initial_next_uid,
+            uidvalidity: self.id.as_uid_validity()?,
+            read_only: !self.writable,
+            max_modseq: self.snapshot_modseq,
+        })
+    }
+}

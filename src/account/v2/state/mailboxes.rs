@@ -510,7 +510,10 @@ fn walk_hierarchy(
 
 #[cfg(test)]
 mod test {
+    use chrono::prelude::*;
+
     use super::*;
+    use crate::support::chronox::*;
 
     fn list_formatted(account: &mut Account, request: ListRequest) -> String {
         let responses = account.list(&request).unwrap();
@@ -1374,150 +1377,149 @@ mod test {
         assert_matches!(Err(Error::NxMailbox), fixture.account.delete(""));
     }
 
-    // TODO This test depends on appending messages and selecting mailboxes,
-    // which is not yet implemented.
-    // #[test]
-    // fn test_rename() {
-    //     let mut fixture = TestFixture::new();
+    #[test]
+    fn test_rename() {
+        let mut fixture = TestFixture::new();
 
-    //     fixture
-    //         .account
-    //         .rename(RenameRequest {
-    //             existing_name: "Archive".to_owned(),
-    //             new_name: "Stuff/2020".to_owned(),
-    //         })
-    //         .unwrap();
+        fixture
+            .account
+            .rename(RenameRequest {
+                existing_name: "Archive".to_owned(),
+                new_name: "Stuff/2020".to_owned(),
+            })
+            .unwrap();
 
-    //     assert_eq!(
-    //         "'Stuff' [] []\n\
-    //          'Stuff/2020' [\\Archive] []\n",
-    //         list_formatted(
-    //             &mut fixture.account,
-    //             ListRequest {
-    //                 patterns: vec!["Stuff*".to_owned()],
-    //                 return_special_use: true,
-    //                 ..ListRequest::default()
-    //             }
-    //         )
-    //     );
+        assert_eq!(
+            "'Stuff' [] []\n\
+             'Stuff/2020' [\\Archive] []\n",
+            list_formatted(
+                &mut fixture.account,
+                ListRequest {
+                    patterns: vec!["Stuff*".to_owned()],
+                    return_special_use: true,
+                    ..ListRequest::default()
+                }
+            )
+        );
 
-    //     fixture
-    //         .account
-    //         .mailbox("INBOX", false)
-    //         .unwrap()
-    //         .append(
-    //             FixedOffset::zero().timestamp0(),
-    //             vec![],
-    //             &b"this is a test message"[..],
-    //         )
-    //         .unwrap();
-    //     fixture
-    //         .account
-    //         .rename(RenameRequest {
-    //             existing_name: "INBOX".to_owned(),
-    //             new_name: "INBOX Special Case".to_owned(),
-    //         })
-    //         .unwrap();
+        fixture
+            .account
+            .append(
+                "INBOX",
+                FixedOffset::zero().timestamp0(),
+                vec![],
+                &b"this is a test message"[..],
+            )
+            .unwrap();
+        fixture
+            .account
+            .rename(RenameRequest {
+                existing_name: "INBOX".to_owned(),
+                new_name: "INBOX Special Case".to_owned(),
+            })
+            .unwrap();
 
-    //     assert_eq!(
-    //         "'INBOX' [\\Noinferiors] []\n\
-    //          'INBOX Special Case' [] []\n",
-    //         list_formatted(
-    //             &mut fixture.account,
-    //             ListRequest {
-    //                 patterns: vec!["IN*".to_owned()],
-    //                 ..ListRequest::default()
-    //             }
-    //         )
-    //     );
+        assert_eq!(
+            "'INBOX' [\\Noinferiors] []\n\
+             'INBOX Special Case' [] []\n",
+            list_formatted(
+                &mut fixture.account,
+                ListRequest {
+                    patterns: vec!["IN*".to_owned()],
+                    ..ListRequest::default()
+                }
+            )
+        );
 
-    //     {
-    //         let (_, select) = fixture
-    //             .account
-    //             .mailbox("INBOX", true)
-    //             .unwrap()
-    //             .select()
-    //             .unwrap();
-    //         assert_eq!(0, select.exists);
+        {
+            let select = fixture
+                .account
+                .select("INBOX", false, None)
+                .unwrap()
+                .0
+                .select_response()
+                .unwrap();
+            assert_eq!(0, select.exists);
 
-    //         let (_, select) = fixture
-    //             .account
-    //             .mailbox("INBOX Special Case", true)
-    //             .unwrap()
-    //             .select()
-    //             .unwrap();
-    //         assert_eq!(1, select.exists);
-    //     }
+            let select = fixture
+                .account
+                .select("INBOX Special Case", false, None)
+                .unwrap()
+                .0
+                .select_response()
+                .unwrap();
+            assert_eq!(1, select.exists);
+        }
 
-    //     assert_matches!(
-    //         Err(Error::RenameToSelf),
-    //         fixture.account.rename(RenameRequest {
-    //             existing_name: "Sent".to_owned(),
-    //             new_name: "Sent".to_owned(),
-    //         })
-    //     );
-    //     assert_matches!(
-    //         Err(Error::RenameIntoSelf),
-    //         fixture.account.rename(RenameRequest {
-    //             existing_name: "Sent".to_owned(),
-    //             new_name: "Sent/Child".to_owned(),
-    //         })
-    //     );
-    //     assert_matches!(
-    //         Err(Error::BadOperationOnInbox),
-    //         fixture.account.rename(RenameRequest {
-    //             existing_name: "Sent".to_owned(),
-    //             new_name: "INBOX/Sent".to_owned(),
-    //         })
-    //     );
-    //     assert_matches!(
-    //         Err(Error::MailboxExists),
-    //         fixture.account.rename(RenameRequest {
-    //             existing_name: "Sent".to_owned(),
-    //             new_name: "Spam".to_owned(),
-    //         })
-    //     );
-    //     assert_matches!(
-    //         Err(Error::NxMailbox),
-    //         fixture.account.rename(RenameRequest {
-    //             existing_name: "Xyzzy".to_owned(),
-    //             new_name: "Plugh".to_owned(),
-    //         })
-    //     );
-    //     assert_matches!(
-    //         Err(Error::NxMailbox),
-    //         fixture.account.rename(RenameRequest {
-    //             existing_name: "".to_owned(),
-    //             new_name: "Plugh".to_owned(),
-    //         })
-    //     );
-    //     assert_matches!(
-    //         Err(Error::NxMailbox),
-    //         fixture.account.rename(RenameRequest {
-    //             existing_name: "/".to_owned(),
-    //             new_name: "Plugh".to_owned(),
-    //         })
-    //     );
-    //     assert_matches!(
-    //         Err(Error::UnsafeName),
-    //         fixture.account.rename(RenameRequest {
-    //             existing_name: "../Foo".to_owned(),
-    //             new_name: "Plugh".to_owned(),
-    //         })
-    //     );
-    //     assert_matches!(
-    //         Err(Error::UnsafeName),
-    //         fixture.account.rename(RenameRequest {
-    //             existing_name: "Sent".to_owned(),
-    //             new_name: "../Plugh".to_owned(),
-    //         })
-    //     );
-    //     assert_matches!(
-    //         Err(Error::UnsafeName),
-    //         fixture.account.rename(RenameRequest {
-    //             existing_name: "Sent".to_owned(),
-    //             new_name: "".to_owned(),
-    //         })
-    //     );
-    // }
+        assert_matches!(
+            Err(Error::RenameToSelf),
+            fixture.account.rename(RenameRequest {
+                existing_name: "Sent".to_owned(),
+                new_name: "Sent".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::RenameIntoSelf),
+            fixture.account.rename(RenameRequest {
+                existing_name: "Sent".to_owned(),
+                new_name: "Sent/Child".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::BadOperationOnInbox),
+            fixture.account.rename(RenameRequest {
+                existing_name: "Sent".to_owned(),
+                new_name: "INBOX/Sent".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::MailboxExists),
+            fixture.account.rename(RenameRequest {
+                existing_name: "Sent".to_owned(),
+                new_name: "Spam".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::NxMailbox),
+            fixture.account.rename(RenameRequest {
+                existing_name: "Xyzzy".to_owned(),
+                new_name: "Plugh".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::NxMailbox),
+            fixture.account.rename(RenameRequest {
+                existing_name: "".to_owned(),
+                new_name: "Plugh".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::NxMailbox),
+            fixture.account.rename(RenameRequest {
+                existing_name: "/".to_owned(),
+                new_name: "Plugh".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::NxMailbox),
+            fixture.account.rename(RenameRequest {
+                existing_name: "../Foo".to_owned(),
+                new_name: "Plugh".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::UnsafeName),
+            fixture.account.rename(RenameRequest {
+                existing_name: "Sent".to_owned(),
+                new_name: "../Plugh".to_owned(),
+            })
+        );
+        assert_matches!(
+            Err(Error::UnsafeName),
+            fixture.account.rename(RenameRequest {
+                existing_name: "Sent".to_owned(),
+                new_name: "".to_owned(),
+            })
+        );
+    }
 }

@@ -194,7 +194,7 @@ impl StatefulMailbox {
         Ok((this, select_response))
     }
 
-    /// The QRESYNC operation that can be part of `SELECT` and `EXPUNGE`.
+    /// The QRESYNC operation that can be part of `SELECT` and `EXAMINE`.
     ///
     /// The `changed` UIDs on the response are automatically added to the list
     /// of UIDs to fetch on the next poll.
