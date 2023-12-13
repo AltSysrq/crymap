@@ -41,6 +41,11 @@ impl Account {
                 .into_iter()
                 .map(MessageStatus::from)
                 .collect(),
+            max_client_known_flag_id: snapshot
+                .flags
+                .last()
+                .expect("there is always at least one flag")
+                .0,
             flags: snapshot.flags,
             snapshot_modseq: snapshot.max_modseq,
             initial_next_uid: snapshot.next_uid,

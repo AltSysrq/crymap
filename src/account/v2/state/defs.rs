@@ -51,6 +51,8 @@ pub struct Mailbox {
     pub(super) messages: Vec<MessageStatus>,
     /// The flags currently known to this session, sorted ascending by ID.
     pub(super) flags: Vec<(storage::FlagId, Flag)>,
+    /// The maximum flag ID currently known by the client.
+    pub(super) max_client_known_flag_id: storage::FlagId,
     /// The `HIGHESTMODSEQ` currently reported.
     pub(super) snapshot_modseq: Modseq,
     /// The `next_uid` when the mailbox was initially selected.
@@ -93,6 +95,12 @@ impl From<storage::InitialMessageStatus> for MessageStatus {
 impl Account {
     pub fn config_file(&self) -> PathBuf {
         self.root.join("user.toml")
+    }
+}
+
+impl Mailbox {
+    pub(super) fn uid_index(&self, uid: Uid) -> Option<usize> {
+        self.messages.binary_search_by_key(&uid, |m| m.uid).ok()
     }
 }
 

@@ -904,6 +904,25 @@ pub struct SelectResponse {
     pub max_modseq: Modseq,
 }
 
+/// Unsolicited responses that can be sent after the cursed seqnum-based
+/// `FETCH`, `STORE`, and `SEARCH` command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MiniPollResponse {
+    /// UIDs of messages that should be sent in unsolicited `FETCH` responses
+    /// because their metadata changed.
+    pub fetch: Vec<Uid>,
+    /// If `Some`, the snapshot has diverged from reality and a `HIGHESTMODSEQ`
+    /// must be sent after the `FETCH` responses to correct the client's
+    /// modseq.
+    ///
+    /// This only includes UIDs currently mapped to sequence numbers, but may
+    /// include UIDs that have since been expunged. Flag updates on UIDs not
+    /// yet mapped to sequence numbers are lost, since those `FETCH` responses
+    /// are expected to happen when the full poll announces the new messages to
+    /// the client.
+    pub divergent_modseq: Option<Modseq>,
+}
+
 /// Unsolicited responses that can be sent after commands (other than `FETCH`,
 /// `STORE`, `SEARCH`).
 #[derive(Debug, Clone, PartialEq, Eq)]

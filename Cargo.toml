@@ -28,6 +28,7 @@ encoding_rs = "0.8.33"
 # TODO Investigate more so we can file a bug report with whichever repo is
 # causing the problem here.
 flate2 = { version = "1.0", default-features = false, features = ["zlib"] }
+itertools = "0.12.0"
 lazy_static = "1.4"
 log = "0.4.8"
 memchr = "2.6.4"
