@@ -242,4 +242,10 @@ process-per-connection design.
 
 The SAVEDATE extension becomes supportable with the new message storage system.
 
+* Sieve support?
+
+RFC 5804. There's a Thunderbird extension that uses it. This is an entirely
+separate IMAP-like protocol instead of being an IMAP extension, for some
+reason. (The `IMAPSIEVE` extension is different and weird.)
+
 * end of file (org-mode workaround)
