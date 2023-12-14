@@ -25,6 +25,7 @@
 //! manageability.
 
 mod defs;
+mod expunge;
 mod flags;
 mod init;
 mod mailboxes;

@@ -16,6 +16,7 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+use std::borrow::Cow;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -124,7 +125,11 @@ impl Mailbox {
         silent: bool,
     ) -> Result<SeqRange<u32>, Error> {
         let mut ret = SeqRange::new();
-        for seqnum in seqnums.items(u32::MAX) {
+        for seqnum in seqnums.items(if silent {
+            self.messages.len().saturating_sub(1) as u32
+        } else {
+            u32::MAX
+        }) {
             let index = seqnum.to_index();
             if index < self.messages.len() {
                 ret.append(index as u32);
@@ -134,6 +139,39 @@ impl Mailbox {
         }
 
         Ok(ret)
+    }
+
+    /// Ensure a `SeqRange<Uid>` only references UIDs in this snapshot.
+    pub(super) fn filter_uid_range<'a>(
+        &self,
+        uids: &'a SeqRange<Uid>,
+    ) -> Cow<'a, SeqRange<Uid>> {
+        if uids.len() > self.messages.len() {
+            let mut ret = SeqRange::new();
+            for m in self.messages.iter() {
+                if uids.contains(m.uid) {
+                    ret.append(m.uid);
+                }
+            }
+
+            Cow::Owned(ret)
+        } else {
+            if uids
+                .items(u32::MAX)
+                .all(|uid| self.uid_index(uid).is_some())
+            {
+                Cow::Borrowed(uids)
+            } else {
+                let mut ret = SeqRange::new();
+                for uid in uids.items(u32::MAX) {
+                    if self.uid_index(uid).is_some() {
+                        ret.append(uid);
+                    }
+                }
+
+                Cow::Owned(ret)
+            }
+        }
     }
 
     /// Translate a `SeqRange<Uid>` to `SeqRange<Seqnum>`.
@@ -204,11 +242,17 @@ impl Mailbox {
         Ok(ret)
     }
 
+    /// Returns the in-memory `FlagId` for the given flag.
+    pub fn flag_id(&self, flag: &Flag) -> Option<storage::FlagId> {
+        self.flags
+            .iter()
+            .find(|&(_, ref f)| flag == f)
+            .map(|&(id, _)| id)
+    }
+
     #[cfg(test)]
     pub fn test_flag_o(&self, flag: &Flag, message: Uid) -> bool {
-        let Some((flag_id, _)) =
-            self.flags.iter().find(|&(_, ref f)| flag == f)
-        else {
+        let Some(flag_id) = self.flag_id(flag) else {
             return false;
         };
 
