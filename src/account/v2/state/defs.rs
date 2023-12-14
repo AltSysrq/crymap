@@ -24,7 +24,7 @@ use chrono::prelude::*;
 use super::super::storage;
 use crate::account::{key_store::KeyStore, model::*};
 use crate::crypt::master_key::MasterKey;
-use crate::support::small_bitset::SmallBitset;
+use crate::support::{error::Error, small_bitset::SmallBitset};
 
 /// A logged-in user account.
 pub struct Account {
@@ -99,8 +99,107 @@ impl Account {
 }
 
 impl Mailbox {
+    pub(super) fn require_writable(&self) -> Result<(), Error> {
+        if self.writable {
+            Ok(())
+        } else {
+            Err(Error::MailboxReadOnly)
+        }
+    }
+
     pub(super) fn uid_index(&self, uid: Uid) -> Option<usize> {
         self.messages.binary_search_by_key(&uid, |m| m.uid).ok()
+    }
+
+    /// Translate a `SeqRange<Seqnum>` to `SeqRange<usize>`.
+    ///
+    /// If `silent` is true, errors will be silently swallowed and the call
+    /// never fails. Otherwise, an out-of-range `Seqnum` results in
+    /// `NxMessage`.
+    pub(super) fn seqnum_range_to_indices(
+        &self,
+        seqnums: &SeqRange<Seqnum>,
+        silent: bool,
+    ) -> Result<SeqRange<u32>, Error> {
+        let mut ret = SeqRange::new();
+        for seqnum in seqnums.items(u32::MAX) {
+            let index = seqnum.to_index();
+            if index < self.messages.len() {
+                ret.append(index as u32);
+            } else if !silent {
+                return Err(Error::NxMessage);
+            }
+        }
+
+        Ok(ret)
+    }
+
+    /// Translate a `SeqRange<Uid>` to `SeqRange<Seqnum>`.
+    ///
+    /// If `silent` is true, errors will be silently swallowed and the call
+    /// never fails. Otherwise, a non-existent `Uid` results in `NxMessage`.
+    pub(super) fn uid_range_to_seqnum(
+        &self,
+        uids: &SeqRange<Uid>,
+        silent: bool,
+    ) -> Result<SeqRange<Seqnum>, Error> {
+        let mut ret = SeqRange::new();
+
+        if uids.len() >= self.messages.len() && silent {
+            // The client can request something like 1:1000000000, so if we're
+            // going to be ignoring all the non-existing UIDs anyway, just see
+            // which messages we know about are in the set if the set is bigger
+            // than the message count.
+            for (ix, m) in self.messages.iter().enumerate() {
+                if uids.contains(m.uid) {
+                    ret.append(Seqnum::from_index(ix));
+                }
+            }
+        } else {
+            for uid in uids.items(u32::MAX) {
+                if let Some(index) = self.uid_index(uid) {
+                    ret.append(Seqnum::from_index(index));
+                } else if !silent {
+                    return Err(Error::NxMessage);
+                }
+            }
+        }
+
+        Ok(ret)
+    }
+
+    /// Translate a `SeqRange<Uid>` to `SeqRange<usize>`.
+    ///
+    /// If `silent` is true, errors will be silently swallowed and the call
+    /// never fails. Otherwise, a non-existent `Uid` results in `NxMessage`.
+    pub(super) fn uid_range_to_indices(
+        &self,
+        uids: &SeqRange<Uid>,
+        silent: bool,
+    ) -> Result<SeqRange<u32>, Error> {
+        let mut ret = SeqRange::new();
+
+        if uids.len() >= self.messages.len() && silent {
+            // The client can request something like 1:1000000000, so if we're
+            // going to be ignoring all the non-existing UIDs anyway, just see
+            // which messages we know about are in the set if the set is bigger
+            // than the message count.
+            for (ix, m) in self.messages.iter().enumerate() {
+                if uids.contains(m.uid) {
+                    ret.append(ix as u32);
+                }
+            }
+        } else {
+            for uid in uids.items(u32::MAX) {
+                if let Some(index) = self.uid_index(uid) {
+                    ret.append(index as u32);
+                } else if !silent {
+                    return Err(Error::NxMessage);
+                }
+            }
+        }
+
+        Ok(ret)
     }
 }
 

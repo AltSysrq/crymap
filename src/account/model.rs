@@ -352,10 +352,13 @@ impl<T: TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync> SeqRange<T> {
 
     /// Return an iterator to the items in this set.
     ///
-    /// Invalid items and items greater than `max`. are silently excluded.
+    /// Invalid items and items greater than `max` are silently excluded.
     ///
     /// Items are delivered in strictly ascending order.
-    pub fn items(&self, max: impl Into<u32>) -> impl Iterator<Item = T> + '_ {
+    pub fn items(
+        &self,
+        max: impl Into<u32>,
+    ) -> impl Iterator<Item = T> + Clone + '_ {
         let max: u32 = max.into();
         self.parts
             .iter()
@@ -452,6 +455,12 @@ impl fmt::Debug for SeqRange<Seqnum> {
 impl fmt::Debug for SeqRange<Uid> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "[Uid {}]", self)
+    }
+}
+
+impl fmt::Debug for SeqRange<u32> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[index {}]", self)
     }
 }
 

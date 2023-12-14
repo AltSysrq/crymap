@@ -326,6 +326,18 @@ impl FromRow for RawMailboxMessage {
     }
 }
 
+/// The result of a `STORE` against a single message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoreResult {
+    /// The message was modified.
+    Modified,
+    /// Preconditions passed, but the modification would have left the message
+    /// in the same state.
+    Nop,
+    /// The message was modified after `unchanged_since` or has been expunged.
+    PreconditionsFailed,
+}
+
 /// The initial snapshot loaded from the database.
 ///
 /// This is essentially `SELECT` + `QRESYNC`.

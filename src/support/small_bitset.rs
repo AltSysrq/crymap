@@ -103,6 +103,34 @@ impl SmallBitset {
         self.iter().filter(|&i| i >= 64)
     }
 
+    // TODO Add tests around these set functions
+
+    /// Add all flags from `rhs` to `self`.
+    pub fn add_all(&mut self, rhs: &Self) {
+        self.near |= rhs.near;
+        for i in rhs.iter_far() {
+            self.insert(i);
+        }
+    }
+
+    /// Remove all flags from `rhs` in `self`.
+    pub fn remove_all(&mut self, rhs: &Self) {
+        self.near &= !rhs.near;
+        for i in rhs.iter_far() {
+            self.remove(i);
+        }
+    }
+
+    /// Remove all flags from `self` not set in `rhs`.
+    pub fn remove_complement(&mut self, rhs: &Self) {
+        self.near &= rhs.near;
+        for i in self.clone().iter_far() {
+            if !rhs.contains(i) {
+                self.remove(i);
+            }
+        }
+    }
+
     /// Returns the bitset of the "near" 64 values.
     pub fn near_bits(&self) -> u64 {
         self.near
@@ -197,6 +225,7 @@ impl From<Vec<usize>> for SmallBitset {
     }
 }
 
+// TODO Add unit test
 impl std::cmp::PartialEq for SmallBitset {
     fn eq(&self, rhs: &Self) -> bool {
         if self.near != rhs.near {

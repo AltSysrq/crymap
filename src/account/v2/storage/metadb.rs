@@ -657,16 +657,10 @@ impl Connection {
     ///
     /// Messages where `flags_modseq > unchanged_since` are skipped.
     ///
-    /// Returns the messages that were actually modified and the modseq that
-    /// was generated to represent to represent the change. The modseq is
-    /// allocated even if no changes are made, so that it can still stand in
-    /// for any messages that exist only in the in-memory session state. (I.e.,
-    /// if a non-UID `STORE` is made against an expunged message that the
-    /// current session hasn't yet seen, the flags must still be updated in the
-    /// session copy of the message, using this modseq to represent the change
-    /// number.)
+    /// Returns a `Vec` of results parallel to `messages` which indicates what
+    /// happened to each message.
     ///
-    /// UIDs corresponding to no existing message are silently ignored.
+    /// If no messages were changed, no modseq is allocated for the operation.
     pub fn modify_mailbox_message_flags(
         &mut self,
         mailbox_id: MailboxId,
@@ -675,10 +669,10 @@ impl Connection {
         remove_unlisted: bool,
         unchanged_since: Modseq,
         messages: &mut dyn Iterator<Item = Uid>,
-    ) -> Result<(Vec<Uid>, Modseq), Error> {
+    ) -> Result<Vec<StoreResult>, Error> {
         debug_assert!(!remove_listed || !remove_unlisted);
 
-        let mut modified = Vec::<Uid>::new();
+        let mut results = Vec::<StoreResult>::new();
 
         let txn = self.cxn.write_tx()?;
         require_selectable_mailbox(&txn, mailbox_id)?;
@@ -688,14 +682,25 @@ impl Connection {
             // For the near flags, we can fuse the unchanged_since check,
             // modification check, all addition/removal, and updating
             // `flags_modseq` into one operation per message.
+            //
+            // The near flags statement will:
+            // - Return no rows if the message is expunged or the
+            //   unchanged_since condition fails.
+            // - Return a value other than `modseq` if the condition passes but
+            //   the change is a no-op.
+            // - Return `modseq` if the condition passes and the change makes a
+            //   difference.
             let mut update_near_flags = if 0 == flags.near_bits() {
                 if remove_unlisted {
                     Some(txn.prepare(
                         "UPDATE `mailbox_message` \
-                         SET `near_flags` = 0, `flags_modseq` = ?4 \
+                         SET `near_flags` = 0, `flags_modseq` = \
+                           CASE `near_flags` \
+                           WHEN 0 THEN `flags_modseq` \
+                           ELSE ?4 END \
                          WHERE `mailbox_id` = ?1 AND `uid` = ?2 \
                          AND `flags_modseq` <= ?3 \
-                         AND `near_flags` != 0",
+                         RETURNING `flags_modseq`",
                     )?)
                 } else {
                     None
@@ -717,10 +722,13 @@ impl Connection {
                     format!("((`near_flags` | {or_flags}) & ~ {nand_flags})");
                 Some(txn.prepare(&format!(
                     "UPDATE `mailbox_message` \
-                     SET `near_flags` = {flags_expr}, `flags_modseq` = ?4 \
+                     SET `near_flags` = {flags_expr}, `flags_modseq` = \
+                       CASE `near_flags` \
+                       WHEN {flags_expr} THEN `flags_modseq` \
+                       ELSE ?4 END \
                      WHERE `mailbox_id` = ?1 AND `uid` = ?2 \
                      AND `flags_modseq` <= ?3 \
-                     AND `near_flags` != {flags_expr}",
+                     RETURNING `flags_modseq`",
                 ))?)
             };
 
@@ -814,18 +822,26 @@ impl Connection {
                         uid,
                         unchanged_since,
                     ))? {
+                        results.push(StoreResult::PreconditionsFailed);
                         continue;
                     }
                 }
 
                 if let Some(ref mut update_near_flags) = update_near_flags {
-                    modified_with_modseq_update |= 0
-                        != update_near_flags.execute((
-                            mailbox_id,
-                            uid,
-                            unchanged_since,
-                            modseq,
-                        ))?;
+                    match update_near_flags
+                        .query_row(
+                            (mailbox_id, uid, unchanged_since, modseq),
+                            from_single::<Modseq>,
+                        )
+                        .optional()?
+                    {
+                        None => {
+                            results.push(StoreResult::PreconditionsFailed);
+                            continue;
+                        },
+
+                        Some(m) => modified_with_modseq_update |= m == modseq,
+                    }
                 }
 
                 if let Some(ref mut rm_far_flags) = rm_far_flags {
@@ -849,13 +865,18 @@ impl Connection {
 
                 if modified_with_modseq_update || modified_without_modseq_update
                 {
-                    modified.push(uid);
+                    results.push(StoreResult::Modified);
+                } else {
+                    results.push(StoreResult::Nop);
                 }
             }
         }
 
-        txn.commit()?;
-        Ok((modified, modseq))
+        if results.iter().any(|&r| StoreResult::Modified == r) {
+            txn.commit()?;
+        }
+
+        Ok(results)
     }
 
     /// Directly fetches the raw data for the given message.
@@ -2230,17 +2251,20 @@ mod test {
         assert_eq!(Uid::u(1), us_uid_flag);
 
         let us_flag_flags = SmallBitset::from(vec![flags[99].0]);
-        fixture
-            .cxn
-            .modify_mailbox_message_flags(
-                unselectable_id,
-                &us_flag_flags,
-                false,
-                false,
-                Modseq::MAX,
-                &mut [us_uid_flag].iter().copied(),
-            )
-            .unwrap();
+        assert_eq!(
+            vec![StoreResult::Modified],
+            fixture
+                .cxn
+                .modify_mailbox_message_flags(
+                    unselectable_id,
+                    &us_flag_flags,
+                    false,
+                    false,
+                    Modseq::MAX,
+                    &mut [us_uid_flag].iter().copied(),
+                )
+                .unwrap(),
+        );
 
         let us_flag_mboxmsg = fixture
             .cxn
@@ -2495,7 +2519,7 @@ mod test {
             // case where all conditions pass for near flags and the insertion
             // case for far flags.
             assert_eq!(
-                vec![uid],
+                vec![StoreResult::Modified],
                 fixture
                     .cxn
                     .modify_mailbox_message_flags(
@@ -2506,8 +2530,7 @@ mod test {
                         start_modseq,
                         &mut [uid].iter().copied(),
                     )
-                    .unwrap()
-                    .0,
+                    .unwrap(),
             );
             let mut modseq = read_modseq!();
             assert!(modseq > start_modseq);
@@ -2523,19 +2546,20 @@ mod test {
                 (vec![flags[99].0], true, false),
                 (vec![], false, true),
             ] {
-                assert!(fixture
-                    .cxn
-                    .modify_mailbox_message_flags(
-                        child_id,
-                        &SmallBitset::from(flags),
-                        remove_listed,
-                        remove_unlisted,
-                        start_modseq,
-                        &mut [uid].iter().copied(),
-                    )
-                    .unwrap()
-                    .0
-                    .is_empty());
+                assert_eq!(
+                    vec![StoreResult::PreconditionsFailed],
+                    fixture
+                        .cxn
+                        .modify_mailbox_message_flags(
+                            child_id,
+                            &SmallBitset::from(flags),
+                            remove_listed,
+                            remove_unlisted,
+                            start_modseq,
+                            &mut [uid].iter().copied(),
+                        )
+                        .unwrap(),
+                );
                 assert_eq!(modseq, read_modseq!());
                 assert_eq!(SmallBitset::from(vec![flag]), read_flags!());
             }
@@ -2546,19 +2570,20 @@ mod test {
             // flags and fully covers the no-op checks for far flag insertion
             // and bulk far flag removal.
             for &remove_unlisted in &[false, true] {
-                assert!(fixture
-                    .cxn
-                    .modify_mailbox_message_flags(
-                        child_id,
-                        &SmallBitset::from(vec![flag]),
-                        false,
-                        remove_unlisted,
-                        modseq,
-                        &mut [uid].iter().copied(),
-                    )
-                    .unwrap()
-                    .0
-                    .is_empty());
+                assert_eq!(
+                    vec![StoreResult::Nop],
+                    fixture
+                        .cxn
+                        .modify_mailbox_message_flags(
+                            child_id,
+                            &SmallBitset::from(vec![flag]),
+                            false,
+                            remove_unlisted,
+                            modseq,
+                            &mut [uid].iter().copied(),
+                        )
+                        .unwrap(),
+                );
                 assert_eq!(modseq, read_modseq!());
                 assert_eq!(SmallBitset::from(vec![flag]), read_flags!());
             }
@@ -2566,7 +2591,7 @@ mod test {
             // Toggling other flags leaves this one alone.
             for &other_flag in &[flags[0].0, flags[99].0] {
                 assert_eq!(
-                    vec![uid],
+                    vec![StoreResult::Modified],
                     fixture
                         .cxn
                         .modify_mailbox_message_flags(
@@ -2577,8 +2602,7 @@ mod test {
                             modseq,
                             &mut [uid].iter().copied(),
                         )
-                        .unwrap()
-                        .0,
+                        .unwrap(),
                     "flag={flag}, other_flag={other_flag}",
                 );
                 let mut new_modseq = read_modseq!();
@@ -2590,7 +2614,7 @@ mod test {
                 );
 
                 assert_eq!(
-                    vec![uid],
+                    vec![StoreResult::Modified],
                     fixture
                         .cxn
                         .modify_mailbox_message_flags(
@@ -2601,8 +2625,7 @@ mod test {
                             modseq,
                             &mut [uid].iter().copied(),
                         )
-                        .unwrap()
-                        .0,
+                        .unwrap(),
                 );
                 new_modseq = read_modseq!();
                 assert!(new_modseq > modseq);
@@ -2616,7 +2639,7 @@ mod test {
             // no-op detection for near flags.
             for &other_flag in &[flags[0].0, flags[99].0] {
                 assert_eq!(
-                    vec![uid],
+                    vec![StoreResult::Modified],
                     fixture
                         .cxn
                         .modify_mailbox_message_flags(
@@ -2627,8 +2650,7 @@ mod test {
                             modseq,
                             &mut [uid].iter().copied(),
                         )
-                        .unwrap()
-                        .0,
+                        .unwrap(),
                 );
                 let mut new_modseq = read_modseq!();
                 assert!(new_modseq > modseq);
@@ -2639,7 +2661,7 @@ mod test {
                 );
 
                 assert_eq!(
-                    vec![uid],
+                    vec![StoreResult::Modified],
                     fixture
                         .cxn
                         .modify_mailbox_message_flags(
@@ -2650,8 +2672,7 @@ mod test {
                             modseq,
                             &mut [uid].iter().copied(),
                         )
-                        .unwrap()
-                        .0,
+                        .unwrap(),
                 );
                 new_modseq = read_modseq!();
                 assert!(new_modseq > modseq);
@@ -2662,7 +2683,7 @@ mod test {
             // Clearing this flag when it's already clear is a no-op, even when
             // other flags are present.
             assert_eq!(
-                vec![uid],
+                vec![StoreResult::Modified],
                 fixture
                     .cxn
                     .modify_mailbox_message_flags(
@@ -2673,8 +2694,7 @@ mod test {
                         modseq,
                         &mut [uid].iter().copied(),
                     )
-                    .unwrap()
-                    .0,
+                    .unwrap(),
             );
             let new_modseq = read_modseq!();
             assert!(new_modseq > modseq);
@@ -2684,19 +2704,20 @@ mod test {
                 read_flags!(),
             );
 
-            assert!(fixture
-                .cxn
-                .modify_mailbox_message_flags(
-                    child_id,
-                    &SmallBitset::from(vec![flag]),
-                    true,
-                    false,
-                    modseq,
-                    &mut [uid].iter().copied(),
-                )
-                .unwrap()
-                .0
-                .is_empty());
+            assert_eq!(
+                vec![StoreResult::Nop],
+                fixture
+                    .cxn
+                    .modify_mailbox_message_flags(
+                        child_id,
+                        &SmallBitset::from(vec![flag]),
+                        true,
+                        false,
+                        modseq,
+                        &mut [uid].iter().copied(),
+                    )
+                    .unwrap(),
+            );
             assert_eq!(modseq, read_modseq!());
             assert_eq!(
                 SmallBitset::from(vec![flags[0].0, flags[99].0]),
@@ -2709,11 +2730,7 @@ mod test {
         let all_flags =
             SmallBitset::from(flags.iter().map(|f| f.0).collect::<Vec<_>>());
         assert_eq!(
-            vec![
-                child_msg_uid123,
-                child_msg_uid123.next().unwrap(),
-                child_msg_uid4
-            ],
+            vec![StoreResult::Modified; 3],
             fixture
                 .cxn
                 .modify_mailbox_message_flags(
@@ -2730,13 +2747,12 @@ mod test {
                     .iter()
                     .copied(),
                 )
-                .unwrap()
-                .0,
+                .unwrap(),
         );
         // Verify bulk-deletion of many flags. This is mainly a concern
         // regarding syntax of dynamically-generated SQL.
         assert_eq!(
-            vec![child_msg_uid4],
+            vec![StoreResult::Modified],
             fixture
                 .cxn
                 .modify_mailbox_message_flags(
@@ -2747,8 +2763,7 @@ mod test {
                     Modseq::MAX,
                     &mut [child_msg_uid4].iter().copied(),
                 )
-                .unwrap()
-                .0,
+                .unwrap(),
         );
 
         // Expunge a message with many flags. Also ensure that last_activity
