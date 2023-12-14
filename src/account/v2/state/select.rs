@@ -48,6 +48,7 @@ impl Account {
                 .0,
             flags: snapshot.flags,
             snapshot_modseq: snapshot.max_modseq,
+            polled_snapshot_modseq: snapshot.max_modseq,
             initial_next_uid: snapshot.next_uid,
             changed_flags_uids: Vec::new(),
         };

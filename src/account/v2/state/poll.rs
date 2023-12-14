@@ -102,9 +102,11 @@ impl Account {
 
         let new_messages = !poll.new_messages.is_empty();
         let messages_changed = !poll.expunged.is_empty() || new_messages;
-        let modseq_changed = mailbox.snapshot_modseq != poll.snapshot_modseq;
+        let modseq_changed =
+            mailbox.polled_snapshot_modseq != poll.snapshot_modseq;
         mailbox.flags.append(&mut poll.new_flags);
         mailbox.snapshot_modseq = poll.snapshot_modseq;
+        mailbox.polled_snapshot_modseq = poll.snapshot_modseq;
         mailbox.merge_message_updates(poll.updated_messages);
         let mut changed_uids = mailbox.take_changed_flags_uids();
         changed_uids.extend(poll.new_messages.iter().map(|m| m.uid));

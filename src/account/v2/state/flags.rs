@@ -30,7 +30,7 @@ impl Account {
         mailbox: &mut Mailbox,
         request: &StoreRequest<'_, Seqnum>,
     ) -> Result<StoreResponse<Seqnum>, Error> {
-        let ids = mailbox.seqnum_range_to_indices(request.ids, false)?;
+        let ids = mailbox.seqnum_range_to_indices(request.ids, true)?;
         let request = StoreRequest {
             ids: &ids,
             flags: request.flags,
@@ -62,7 +62,7 @@ impl Account {
         // > a UID FETCH command to return an OK without any data
         // > or a UID COPY or UID STORE to return an OK without
         // > performing any operations.
-        let ids = mailbox.uid_range_to_indices(request.ids, false)?;
+        let ids = mailbox.uid_range_to_indices(request.ids, true)?;
         let request = StoreRequest {
             ids: &ids,
             flags: request.flags,
@@ -105,7 +105,7 @@ impl Account {
 
         let target_ix_uids = request
             .ids
-            .items((mailbox.messages.len() - 1) as u32)
+            .items((mailbox.messages.len().saturating_sub(1)) as u32)
             .map(|ix| (ix as usize, mailbox.messages[ix as usize].uid))
             .collect::<Vec<_>>();
 
@@ -202,7 +202,7 @@ impl Account {
         }
 
         Ok(StoreResponse {
-            ok: request.loud && request.ids.is_empty(),
+            ok: !request.loud || !request.ids.is_empty(),
             modified: rejected_uids,
         })
     }
@@ -224,4 +224,196 @@ fn apply_flags(
     }
 }
 
-// TODO Adapt tests from v1/mailbox/flags.rs
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn store_empty_mailbox_loud() {
+        let mut fixture = TestFixture::new();
+        let (mut mb1, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let res = fixture
+            .account
+            .store(
+                &mut mb1,
+                &StoreRequest {
+                    ids: &SeqRange::just(Uid::MIN),
+                    flags: &[Flag::Flagged],
+                    remove_listed: false,
+                    remove_unlisted: false,
+                    loud: true,
+                    unchanged_since: None,
+                },
+            )
+            .unwrap();
+        assert!(!res.ok);
+
+        fixture.account.poll(&mut mb1).unwrap();
+    }
+
+    #[test]
+    fn store_empty_mailbox_silent() {
+        let mut fixture = TestFixture::new();
+        let (mut mb1, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let res = fixture
+            .account
+            .store(
+                &mut mb1,
+                &StoreRequest {
+                    ids: &SeqRange::just(Uid::MIN),
+                    flags: &[Flag::Flagged],
+                    remove_listed: false,
+                    remove_unlisted: false,
+                    loud: false,
+                    unchanged_since: None,
+                },
+            )
+            .unwrap();
+        assert!(res.ok);
+
+        fixture.account.poll(&mut mb1).unwrap();
+    }
+
+    #[test]
+    fn store_plus_flag_uncond_loud_success() {
+        let mut fixture = TestFixture::new();
+        let uid1 = fixture.simple_append("INBOX");
+        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let res = fixture
+            .account
+            .store(
+                &mut mb,
+                &StoreRequest {
+                    ids: &SeqRange::just(uid1),
+                    flags: &[Flag::Flagged],
+                    remove_listed: false,
+                    remove_unlisted: false,
+                    loud: true,
+                    unchanged_since: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            StoreResponse {
+                ok: true,
+                modified: SeqRange::new()
+            },
+            res
+        );
+
+        let mini_poll = fixture.account.mini_poll(&mut mb).unwrap();
+        assert_eq!(vec![uid1], mini_poll.fetch);
+        let poll = fixture.account.poll(&mut mb).unwrap();
+        assert_eq!(Some(Modseq::of(3)), poll.max_modseq,);
+        assert!(poll.fetch.is_empty());
+
+        assert!(mb.test_flag_o(&Flag::Flagged, uid1));
+    }
+
+    #[test]
+    fn store_plus_flag_uncond_loud_noop() {
+        let mut fixture = TestFixture::new();
+        let uid1 = fixture.simple_append("INBOX");
+        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        fixture
+            .account
+            .store(
+                &mut mb,
+                &StoreRequest {
+                    ids: &SeqRange::just(uid1),
+                    flags: &[Flag::Flagged],
+                    remove_listed: false,
+                    remove_unlisted: false,
+                    loud: true,
+                    unchanged_since: None,
+                },
+            )
+            .unwrap();
+        // Flush pending notifications
+        fixture.account.poll(&mut mb).unwrap();
+
+        // Second operation does the same thing, so has no effect
+        let res = fixture
+            .account
+            .store(
+                &mut mb,
+                &StoreRequest {
+                    ids: &SeqRange::just(uid1),
+                    flags: &[Flag::Flagged],
+                    remove_listed: false,
+                    remove_unlisted: false,
+                    loud: true,
+                    unchanged_since: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            StoreResponse {
+                ok: true,
+                modified: SeqRange::new()
+            },
+            res
+        );
+
+        // Due to it being loud, we get a fetch anyway
+        let mini_poll = fixture.account.mini_poll(&mut mb).unwrap();
+        assert_eq!(
+            MiniPollResponse {
+                fetch: vec![uid1],
+                divergent_modseq: None
+            },
+            mini_poll,
+        );
+        let poll = fixture.account.poll(&mut mb).unwrap();
+        // No spurious change inserted
+        assert_eq!(None, poll.max_modseq);
+        assert!(poll.fetch.is_empty());
+
+        assert!(mb.test_flag_o(&Flag::Flagged, uid1));
+    }
+
+    #[test]
+    fn store_plus_flag_uncond_loud_nx() {
+        let mut fixture = TestFixture::new();
+        let uid1 = fixture.simple_append("INBOX");
+        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let res = fixture
+            .account
+            .store(
+                &mut mb,
+                &StoreRequest {
+                    ids: &SeqRange::just(Uid::MAX),
+                    flags: &[Flag::Flagged],
+                    remove_listed: false,
+                    remove_unlisted: false,
+                    loud: true,
+                    unchanged_since: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            StoreResponse {
+                ok: false,
+                modified: SeqRange::new()
+            },
+            res
+        );
+
+        assert_eq!(
+            MiniPollResponse {
+                fetch: vec![],
+                divergent_modseq: None,
+            },
+            fixture.account.mini_poll(&mut mb).unwrap(),
+        );
+        let poll = fixture.account.poll(&mut mb).unwrap();
+        assert_eq!(None, poll.max_modseq);
+        assert!(poll.fetch.is_empty());
+
+        assert!(!mb.test_flag_o(&Flag::Flagged, uid1));
+    }
+
+    // TODO Adapt more unit tests.
+    // Next is `store_plus_flag_uncond_loud_expunged`, but we can't do that
+    // until we can expunge messages.
+}

@@ -55,6 +55,8 @@ pub struct Mailbox {
     pub(super) max_client_known_flag_id: storage::FlagId,
     /// The `HIGHESTMODSEQ` currently reported.
     pub(super) snapshot_modseq: Modseq,
+    /// The last `HIGHESTMODSEQ` reported by a full `poll` operation.
+    pub(super) polled_snapshot_modseq: Modseq,
     /// The `next_uid` when the mailbox was initially selected.
     pub(super) initial_next_uid: Uid,
     /// UIDs of messages whose flags have changed but have not yet been sent to
@@ -201,6 +203,21 @@ impl Mailbox {
 
         Ok(ret)
     }
+
+    #[cfg(test)]
+    pub fn test_flag_o(&self, flag: &Flag, message: Uid) -> bool {
+        let Some((flag_id, _)) =
+            self.flags.iter().find(|&(_, ref f)| flag == f)
+        else {
+            return false;
+        };
+
+        let Some(index) = self.uid_index(message) else {
+            return false;
+        };
+
+        self.messages[index].flags.contains(flag_id.0)
+    }
 }
 
 #[cfg(test)]
@@ -236,5 +253,23 @@ impl TestFixture {
                 special_use: vec![],
             })
             .unwrap();
+    }
+
+    pub(super) fn simple_append(&mut self, dst: &str) -> Uid {
+        self.simple_append_data(dst, "foobar".as_bytes())
+    }
+
+    pub(super) fn simple_append_data(&mut self, dst: &str, data: &[u8]) -> Uid {
+        use crate::support::chronox::*;
+
+        self.account
+            .append(
+                dst,
+                FixedOffset::zero()
+                    .from_utc_datetime(&Utc::now().naive_local()),
+                std::iter::empty(),
+                data,
+            )
+            .unwrap()
     }
 }
