@@ -126,7 +126,7 @@ impl Mailbox {
     ) -> Result<SeqRange<u32>, Error> {
         let mut ret = SeqRange::new();
         for seqnum in seqnums.items(if silent {
-            self.messages.len().saturating_sub(1) as u32
+            Seqnum::from_index(self.messages.len().saturating_sub(1)).into()
         } else {
             u32::MAX
         }) {
@@ -155,22 +155,20 @@ impl Mailbox {
             }
 
             Cow::Owned(ret)
+        } else if uids
+            .items(u32::MAX)
+            .all(|uid| self.uid_index(uid).is_some())
+        {
+            Cow::Borrowed(uids)
         } else {
-            if uids
-                .items(u32::MAX)
-                .all(|uid| self.uid_index(uid).is_some())
-            {
-                Cow::Borrowed(uids)
-            } else {
-                let mut ret = SeqRange::new();
-                for uid in uids.items(u32::MAX) {
-                    if self.uid_index(uid).is_some() {
-                        ret.append(uid);
-                    }
+            let mut ret = SeqRange::new();
+            for uid in uids.items(u32::MAX) {
+                if self.uid_index(uid).is_some() {
+                    ret.append(uid);
                 }
-
-                Cow::Owned(ret)
             }
+
+            Cow::Owned(ret)
         }
     }
 
@@ -246,7 +244,7 @@ impl Mailbox {
     pub fn flag_id(&self, flag: &Flag) -> Option<storage::FlagId> {
         self.flags
             .iter()
-            .find(|&(_, ref f)| flag == f)
+            .find(|&&(_, ref f)| flag == f)
             .map(|&(id, _)| id)
     }
 
