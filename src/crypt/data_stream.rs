@@ -122,6 +122,12 @@ pub struct Reader<R> {
     pub metadata: Metadata,
 }
 
+pub struct CachedSessionKey<'a> {
+    pub master_key: &'a MasterKey,
+    pub message_id: i64,
+    pub session_key: &'a [u8; AES_BLOCK],
+}
+
 impl<R: Read> Reader<R> {
     /// Create a new reader.
     ///
@@ -135,18 +141,17 @@ impl<R: Read> Reader<R> {
     /// The header block is fully read in by this call.
     pub fn new(
         mut reader: R,
-        cached_session_key: Option<(&MasterKey, i64, &[u8; AES_BLOCK])>,
+        cached_session_key: Option<CachedSessionKey<'_>>,
         priv_key_lookup: impl FnOnce(&str) -> Result<Arc<Rsa<Private>>, Error>,
     ) -> Result<Self, Error> {
         let meta_length = reader.read_u16::<LittleEndian>()?;
         let meta: Metadata =
             serde_cbor::from_reader(reader.by_ref().take(meta_length.into()))?;
 
-        let key = if let Some((master_key, message_id, cached_session_key)) =
-            cached_session_key
-        {
-            let mut key = *cached_session_key;
-            master_key.crypt_cached_session_key(&mut key, message_id);
+        let key = if let Some(csk) = cached_session_key {
+            let mut key = *csk.session_key;
+            csk.master_key
+                .crypt_cached_session_key(&mut key, csk.message_id);
             key
         } else {
             let priv_key = priv_key_lookup(&meta.meta_key_id)?;

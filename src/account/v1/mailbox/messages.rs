@@ -20,14 +20,12 @@ use std::fs;
 use std::io::{self, BufRead, Read};
 use std::path::Path;
 
-use byteorder::{LittleEndian, ReadBytesExt};
 use chrono::prelude::*;
 use log::info;
 use tempfile::NamedTempFile;
 
 use super::defs::*;
 use crate::account::{message_format, model::*};
-use crate::crypt::data_stream;
 use crate::support::error::Error;
 use crate::support::file_ops;
 
@@ -44,7 +42,7 @@ impl StatelessMailbox {
         uid: Uid,
     ) -> Result<(MessageMetadata, Box<dyn BufRead + 'a>), Error> {
         let scheme = self.message_scheme();
-        let mut file = match fs::File::open(
+        let file = match fs::File::open(
             scheme.access_path_for_id(uid.0.get()).assume_exists(),
         ) {
             Ok(f) => f,
@@ -57,20 +55,12 @@ impl StatelessMailbox {
             Err(e) => return Err(e.into()),
         };
 
-        let size_xor = file.read_u32::<LittleEndian>()?;
-        let stream = data_stream::Reader::new(file, None, |k| {
-            let mut ks = self.key_store.lock().unwrap();
-            ks.get_private_key(k)
-        })?;
-        let compression = stream.metadata.compression;
-        let mut stream = compression.decompressor(stream)?;
-        let metadata_length = stream.read_u16::<LittleEndian>()?;
-        let mut metadata: MessageMetadata = serde_cbor::from_reader(
-            stream.by_ref().take(metadata_length.into()),
-        )?;
-        metadata.size ^= size_xor;
-
-        Ok((metadata, stream))
+        message_format::read_message(
+            file,
+            None,
+            &mut self.key_store.lock().unwrap(),
+            |_| (),
+        )
     }
 
     /// Append the message(s) from the request to the mailbox.

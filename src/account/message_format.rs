@@ -30,9 +30,9 @@
 //! `size_xor ^ metadata.size`.
 
 use std::convert::TryInto;
-use std::io::{self, Read, Seek, Write};
+use std::io::{self, BufRead, Read, Seek, Write};
 
-use byteorder::{LittleEndian, WriteBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::prelude::*;
 use rand::{rngs::OsRng, Rng};
 
@@ -42,6 +42,33 @@ use crate::support::{
     compression::{Compression, FinishWrite},
     error::Error,
 };
+
+/// Begins reading a message from `src`.
+///
+/// The metadata is immediately decoded and is returned with the `size`
+/// corrected.
+///
+/// `on_data_stream` is invoked with the `data_stream::Reader` as soon as it
+/// has been created.
+pub fn read_message<'a, R: Read + 'a>(
+    mut src: R,
+    csk: Option<data_stream::CachedSessionKey<'_>>,
+    key_store: &mut KeyStore,
+    on_data_stream: impl FnOnce(&data_stream::Reader<R>),
+) -> Result<(MessageMetadata, Box<dyn BufRead + 'a>), Error> {
+    let size_xor = src.read_u32::<LittleEndian>()?;
+    let stream =
+        data_stream::Reader::new(src, csk, |k| key_store.get_private_key(k))?;
+    on_data_stream(&stream);
+    let compression = stream.metadata.compression;
+    let mut stream = compression.decompressor(stream)?;
+    let metadata_length = stream.read_u16::<LittleEndian>()?;
+    let mut metadata: MessageMetadata =
+        serde_cbor::from_reader(stream.by_ref().take(metadata_length.into()))?;
+    metadata.size ^= size_xor;
+
+    Ok((metadata, stream))
+}
 
 /// Writes a message to `out`, using `key_store` to obtain the public key and
 /// the full data from `message_contents` as the payload.
