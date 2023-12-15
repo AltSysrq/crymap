@@ -3,8 +3,7 @@ name = "crymap"
 version = "1.0.1"
 authors = ["Jason Lingle <jason@lin.gl>"]
 license = "GPL-3.0"
-# TODO Upgrade
-edition = "2018"
+edition = "2021"
 readme = "README.md"
 repository = "https://github.com/altsysrq/crymap"
 homepage = "https://altsysrq.github.io/crymap/index.html"
