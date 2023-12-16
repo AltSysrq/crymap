@@ -100,7 +100,7 @@ CREATE TABLE `message` (
   `path` TEXT NOT NULL,
   -- The 16-byte session key used to encrypt the message, if known. The session
   -- key is XOR'ed with a 16-bit KMAC derived from the master key unique to
-  -- `path` so that breaking the weaker XEX encryption of the database does not
+  -- `id` so that breaking the weaker XEX encryption of the database does not
   -- compromise the session keys.
   `session_key` BLOB,
   -- The value of `RFC822.SIZE`, if known.

@@ -38,9 +38,6 @@ pub struct MailboxMessageAccessor<'a> {
     message_status: &'a MessageStatus,
 }
 
-pub type FetchReceiver<'a> =
-    &'a (dyn Fn(Seqnum, Vec<FetchedItem>) + Send + Sync + 'a);
-
 impl<'a> MessageAccessor for MailboxMessageAccessor<'a> {
     type Reader = Box<dyn BufRead + 'a>;
 
@@ -80,6 +77,9 @@ impl<'a> MessageAccessor for MailboxMessageAccessor<'a> {
         self.mailbox.s.open_message(self.uid)
     }
 }
+
+pub type FetchReceiver<'a> =
+    &'a (dyn Fn(Seqnum, Vec<FetchedItem>) + Send + Sync + 'a);
 
 impl StatefulMailbox {
     /// Create an accessor that can be passed to `grovel` to access the message

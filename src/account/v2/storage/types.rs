@@ -404,6 +404,8 @@ pub struct FullPoll {
     pub expunged: Vec<Uid>,
     /// The current modification sequence number.
     pub snapshot_modseq: Modseq,
+    /// The `next_uid` field of the mailbox.
+    pub next_uid: Uid,
 }
 
 /// Information about an already-known message which can be updated by polling.
@@ -425,6 +427,7 @@ pub struct MessageAccessData {
     /// The cached session key (still encrypted), if available.
     pub session_key: Option<SessionKey>,
     /// The value of RFC822.SIZE, if available.
+    // TODO Switch everything to u64 or change this back to u32
     pub rfc822_size: Option<u64>,
 }
 

@@ -49,8 +49,9 @@ impl Account {
             flags: snapshot.flags,
             snapshot_modseq: snapshot.max_modseq,
             polled_snapshot_modseq: snapshot.max_modseq,
-            initial_next_uid: snapshot.next_uid,
+            next_uid: snapshot.next_uid,
             changed_flags_uids: Vec::new(),
+            fetch_loopbreaker: Default::default(),
         };
 
         Ok((mailbox, snapshot.qresync))
@@ -81,7 +82,7 @@ impl Mailbox {
                     .position(|m| m.flags.contains(seen_flag))
                     .map(Seqnum::from_index)
             }),
-            uidnext: self.initial_next_uid,
+            uidnext: self.next_uid,
             uidvalidity: self.id.as_uid_validity()?,
             read_only: !self.writable,
             max_modseq: self.snapshot_modseq,

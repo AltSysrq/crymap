@@ -234,7 +234,7 @@ mod test {
     #[test]
     fn store_empty_mailbox_loud() {
         let mut fixture = TestFixture::new();
-        let (mut mb1, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb1, _) = fixture.select("INBOX", true, None).unwrap();
         let res = fixture
             .account
             .store(
@@ -251,13 +251,13 @@ mod test {
             .unwrap();
         assert!(!res.ok);
 
-        fixture.account.poll(&mut mb1).unwrap();
+        fixture.poll(&mut mb1).unwrap();
     }
 
     #[test]
     fn store_empty_mailbox_silent() {
         let mut fixture = TestFixture::new();
-        let (mut mb1, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb1, _) = fixture.select("INBOX", true, None).unwrap();
         let res = fixture
             .account
             .store(
@@ -274,14 +274,14 @@ mod test {
             .unwrap();
         assert!(res.ok);
 
-        fixture.account.poll(&mut mb1).unwrap();
+        fixture.poll(&mut mb1).unwrap();
     }
 
     #[test]
     fn store_plus_flag_uncond_loud_success() {
         let mut fixture = TestFixture::new();
         let uid1 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
         let res = fixture
             .account
             .store(
@@ -304,9 +304,9 @@ mod test {
             res,
         );
 
-        let mini_poll = fixture.account.mini_poll(&mut mb).unwrap();
+        let mini_poll = fixture.mini_poll(&mut mb).unwrap();
         assert_eq!(vec![uid1], mini_poll.fetch);
-        let poll = fixture.account.poll(&mut mb).unwrap();
+        let poll = fixture.poll(&mut mb).unwrap();
         assert_eq!(Some(Modseq::of(3)), poll.max_modseq,);
         assert!(poll.fetch.is_empty());
 
@@ -317,7 +317,7 @@ mod test {
     fn store_plus_flag_uncond_loud_noop() {
         let mut fixture = TestFixture::new();
         let uid1 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
         fixture
             .account
             .store(
@@ -333,7 +333,7 @@ mod test {
             )
             .unwrap();
         // Flush pending notifications
-        fixture.account.poll(&mut mb).unwrap();
+        fixture.poll(&mut mb).unwrap();
 
         // Second operation does the same thing, so has no effect
         let res = fixture
@@ -359,7 +359,7 @@ mod test {
         );
 
         // Due to it being loud, we get a fetch anyway
-        let mini_poll = fixture.account.mini_poll(&mut mb).unwrap();
+        let mini_poll = fixture.mini_poll(&mut mb).unwrap();
         assert_eq!(
             MiniPollResponse {
                 fetch: vec![uid1],
@@ -367,7 +367,7 @@ mod test {
             },
             mini_poll,
         );
-        let poll = fixture.account.poll(&mut mb).unwrap();
+        let poll = fixture.poll(&mut mb).unwrap();
         // No spurious change inserted
         assert_eq!(None, poll.max_modseq);
         assert!(poll.fetch.is_empty());
@@ -379,7 +379,7 @@ mod test {
     fn store_plus_flag_uncond_loud_nx() {
         let mut fixture = TestFixture::new();
         let uid1 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
         let res = fixture
             .account
             .store(
@@ -407,9 +407,9 @@ mod test {
                 fetch: vec![],
                 divergent_modseq: None,
             },
-            fixture.account.mini_poll(&mut mb).unwrap(),
+            fixture.mini_poll(&mut mb).unwrap(),
         );
-        let poll = fixture.account.poll(&mut mb).unwrap();
+        let poll = fixture.poll(&mut mb).unwrap();
         assert_eq!(None, poll.max_modseq);
         assert!(poll.fetch.is_empty());
 
@@ -420,7 +420,7 @@ mod test {
     fn store_plus_flag_uncond_loud_expunged() {
         let mut fixture = TestFixture::new();
         let uid1 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
         fixture
             .account
             .vanquish(&mb, &SeqRange::just(uid1))
@@ -456,10 +456,10 @@ mod test {
                 fetch: vec![uid1],
                 divergent_modseq: Some(Modseq::of(2)),
             },
-            fixture.account.mini_poll(&mut mb).unwrap(),
+            fixture.mini_poll(&mut mb).unwrap(),
         );
         assert!(mb.test_flag_o(&Flag::Flagged, uid1));
-        let poll = fixture.account.poll(&mut mb).unwrap();
+        let poll = fixture.poll(&mut mb).unwrap();
         assert_eq!(Some(Modseq::of(3)), poll.max_modseq,);
         assert!(poll.fetch.is_empty());
     }
@@ -468,7 +468,7 @@ mod test {
     fn store_plus_flag_uncond_silent_success() {
         let mut fixture = TestFixture::new();
         let uid1 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
         let res = fixture
             .account
             .store(
@@ -491,11 +491,8 @@ mod test {
             res,
         );
 
-        assert_eq!(
-            vec![uid1],
-            fixture.account.mini_poll(&mut mb).unwrap().fetch,
-        );
-        let poll = fixture.account.poll(&mut mb).unwrap();
+        assert_eq!(vec![uid1], fixture.mini_poll(&mut mb).unwrap().fetch,);
+        let poll = fixture.poll(&mut mb).unwrap();
         assert_eq!(Some(Modseq::of(3)), poll.max_modseq);
         assert!(poll.fetch.is_empty());
 
@@ -506,7 +503,7 @@ mod test {
     fn store_plus_flag_uncond_silent_noop() {
         let mut fixture = TestFixture::new();
         let uid1 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
 
         fixture
             .account
@@ -523,7 +520,7 @@ mod test {
             )
             .unwrap();
         // Flush pending notifications
-        fixture.account.poll(&mut mb).unwrap();
+        fixture.poll(&mut mb).unwrap();
 
         // Second operation does the same thing, so has no effect
         let res = fixture
@@ -549,8 +546,8 @@ mod test {
         );
 
         // Due to it being silent, we get no change notification
-        assert!(fixture.account.mini_poll(&mut mb).unwrap().fetch.is_empty());
-        let poll = fixture.account.poll(&mut mb).unwrap();
+        assert!(fixture.mini_poll(&mut mb).unwrap().fetch.is_empty());
+        let poll = fixture.poll(&mut mb).unwrap();
         // No spurious change inserted
         assert_eq!(None, poll.max_modseq);
         assert!(poll.fetch.is_empty());
@@ -562,7 +559,7 @@ mod test {
     fn store_plus_flag_uncond_silent_nx() {
         let mut fixture = TestFixture::new();
         let uid1 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
 
         let res = fixture
             .account
@@ -586,8 +583,8 @@ mod test {
             res,
         );
 
-        assert!(fixture.account.mini_poll(&mut mb).unwrap().fetch.is_empty(),);
-        let poll = fixture.account.poll(&mut mb).unwrap();
+        assert!(fixture.mini_poll(&mut mb).unwrap().fetch.is_empty(),);
+        let poll = fixture.poll(&mut mb).unwrap();
         assert_eq!(None, poll.max_modseq);
         assert!(poll.fetch.is_empty());
 
@@ -598,7 +595,7 @@ mod test {
     fn store_plus_flag_uncond_silent_expunged() {
         let mut fixture = TestFixture::new();
         let uid1 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
 
         fixture
             .account
@@ -635,10 +632,10 @@ mod test {
                 fetch: vec![uid1],
                 divergent_modseq: Some(Modseq::of(2)),
             },
-            fixture.account.mini_poll(&mut mb).unwrap(),
+            fixture.mini_poll(&mut mb).unwrap(),
         );
         assert!(mb.test_flag_o(&Flag::Flagged, uid1));
-        let poll = fixture.account.poll(&mut mb).unwrap();
+        let poll = fixture.poll(&mut mb).unwrap();
         assert_eq!(Some(Modseq::of(3)), poll.max_modseq);
         assert!(poll.fetch.is_empty());
     }
@@ -652,7 +649,7 @@ mod test {
         let mut fixture = TestFixture::new();
         let uid1 = fixture.simple_append("INBOX");
         let uid2 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
 
         // UNCHANGEDSINCE == last_modified
         let res = fixture
@@ -682,9 +679,9 @@ mod test {
                 fetch: vec![uid1],
                 divergent_modseq: None,
             },
-            fixture.account.mini_poll(&mut mb).unwrap(),
+            fixture.mini_poll(&mut mb).unwrap(),
         );
-        let poll = fixture.account.poll(&mut mb).unwrap();
+        let poll = fixture.poll(&mut mb).unwrap();
         assert_eq!(Some(Modseq::of(4)), poll.max_modseq);
         assert!(mb.test_flag_o(&Flag::Flagged, uid1));
 
@@ -716,9 +713,9 @@ mod test {
                 fetch: vec![uid2],
                 divergent_modseq: None,
             },
-            fixture.account.mini_poll(&mut mb).unwrap(),
+            fixture.mini_poll(&mut mb).unwrap(),
         );
-        let poll = fixture.account.poll(&mut mb).unwrap();
+        let poll = fixture.poll(&mut mb).unwrap();
         assert_eq!(Some(Modseq::of(5)), poll.max_modseq);
         assert!(mb.test_flag_o(&Flag::Seen, uid2));
     }
@@ -727,7 +724,7 @@ mod test {
     fn store_plus_flag_cond_silent_modified() {
         let mut fixture = TestFixture::new();
         let uid1 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
 
         let res = fixture
             .account
@@ -751,7 +748,7 @@ mod test {
             res,
         );
         // Discard pending notifications
-        fixture.account.poll(&mut mb).unwrap();
+        fixture.poll(&mut mb).unwrap();
 
         let res = fixture
             .account
@@ -781,10 +778,10 @@ mod test {
                 fetch: vec![uid1],
                 divergent_modseq: None,
             },
-            fixture.account.mini_poll(&mut mb).unwrap(),
+            fixture.mini_poll(&mut mb).unwrap(),
         );
 
-        let poll = fixture.account.poll(&mut mb).unwrap();
+        let poll = fixture.poll(&mut mb).unwrap();
         // No transaction happened
         assert_eq!(None, poll.max_modseq);
 
@@ -798,7 +795,7 @@ mod test {
         let uid1 = fixture.simple_append("INBOX");
         let uid2 = fixture.simple_append("INBOX");
         let uid3 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
         assert_eq!(Modseq::of(4), mb.select_response().unwrap().max_modseq,);
 
         let res = fixture
@@ -825,7 +822,7 @@ mod test {
         // Discard pending notifications
         assert_eq!(
             Some(Modseq::of(5)),
-            fixture.account.poll(&mut mb).unwrap().max_modseq,
+            fixture.poll(&mut mb).unwrap().max_modseq,
         );
 
         let res = fixture
@@ -857,10 +854,10 @@ mod test {
                 fetch: vec![uid1, uid2, uid3],
                 divergent_modseq: None,
             },
-            fixture.account.mini_poll(&mut mb).unwrap(),
+            fixture.mini_poll(&mut mb).unwrap(),
         );
 
-        fixture.account.poll(&mut mb).unwrap();
+        fixture.poll(&mut mb).unwrap();
 
         // The flag got set only on the messages that passed the UNCHANGEDSINCE
         // clause
@@ -874,7 +871,7 @@ mod test {
         let mut fixture = TestFixture::new();
         let _uid1 = fixture.simple_append("INBOX");
         let uid2 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
 
         // Try to edit UID 2 with an UNCHANGEDSINCE before it was created.
         let res = fixture
@@ -905,10 +902,10 @@ mod test {
                 fetch: vec![uid2],
                 divergent_modseq: None,
             },
-            fixture.account.mini_poll(&mut mb).unwrap(),
+            fixture.mini_poll(&mut mb).unwrap(),
         );
 
-        fixture.account.poll(&mut mb).unwrap();
+        fixture.poll(&mut mb).unwrap();
 
         // No change was made
         assert!(!mb.test_flag_o(&Flag::Flagged, uid2));
@@ -918,7 +915,7 @@ mod test {
     fn store_plus_flag_cond_silent_doomed() {
         let mut fixture = TestFixture::new();
         let uid1 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
 
         // Try to edit UID 1 with an UNCHANGEDSINCE of 0, something that MUST
         // fail according to RFC 7162, Page 12, Example 6.
@@ -950,10 +947,10 @@ mod test {
                 fetch: vec![uid1],
                 divergent_modseq: None,
             },
-            fixture.account.mini_poll(&mut mb).unwrap(),
+            fixture.mini_poll(&mut mb).unwrap(),
         );
 
-        fixture.account.poll(&mut mb).unwrap();
+        fixture.poll(&mut mb).unwrap();
 
         // No change was made
         assert!(!mb.test_flag_o(&Flag::Flagged, uid1));
@@ -967,7 +964,7 @@ mod test {
     fn store_minus_flag_uncond_silent_success() {
         let mut fixture = TestFixture::new();
         let uid1 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
 
         fixture
             .account
@@ -983,7 +980,7 @@ mod test {
                 },
             )
             .unwrap();
-        fixture.account.poll(&mut mb).unwrap();
+        fixture.poll(&mut mb).unwrap();
 
         let res = fixture
             .account
@@ -1012,7 +1009,7 @@ mod test {
                 fetch: vec![uid1],
                 divergent_modseq: None,
             },
-            fixture.account.mini_poll(&mut mb).unwrap(),
+            fixture.mini_poll(&mut mb).unwrap(),
         );
 
         // Only the \Flagged flag was removed
@@ -1024,7 +1021,7 @@ mod test {
     fn store_eq_flag_uncond_silent_success() {
         let mut fixture = TestFixture::new();
         let uid1 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
 
         fixture
             .account
@@ -1040,7 +1037,7 @@ mod test {
                 },
             )
             .unwrap();
-        fixture.account.poll(&mut mb).unwrap();
+        fixture.poll(&mut mb).unwrap();
 
         let res = fixture
             .account
@@ -1069,7 +1066,7 @@ mod test {
                 fetch: vec![uid1],
                 divergent_modseq: None,
             },
-            fixture.account.mini_poll(&mut mb).unwrap(),
+            fixture.mini_poll(&mut mb).unwrap(),
         );
 
         // The \Flagged flag was added and the \Seen flag was removed
@@ -1083,14 +1080,14 @@ mod test {
         let uid1 = fixture.simple_append("INBOX");
         let uid2 = fixture.simple_append("INBOX");
         let uid3 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
         fixture
             .account
             .vanquish(&mb, &SeqRange::just(uid1))
             .unwrap();
         assert_eq!(
             Some(Modseq::of(5)),
-            fixture.account.poll(&mut mb).unwrap().max_modseq,
+            fixture.poll(&mut mb).unwrap().max_modseq,
         );
 
         let res = fixture
@@ -1117,7 +1114,7 @@ mod test {
         // Discard pending notifications
         assert_eq!(
             Some(Modseq::of(6)),
-            fixture.account.poll(&mut mb).unwrap().max_modseq,
+            fixture.poll(&mut mb).unwrap().max_modseq,
         );
 
         let res = fixture
@@ -1149,10 +1146,10 @@ mod test {
                 fetch: vec![uid2, uid3],
                 divergent_modseq: None,
             },
-            fixture.account.mini_poll(&mut mb).unwrap(),
+            fixture.mini_poll(&mut mb).unwrap(),
         );
 
-        fixture.account.poll(&mut mb).unwrap();
+        fixture.poll(&mut mb).unwrap();
 
         // The flag got set only on the message that passed the UNCHANGEDSINCE
         // clause
@@ -1164,11 +1161,11 @@ mod test {
     fn store_rejected_when_read_only() {
         let mut fixture = TestFixture::new();
         let uid1 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", false, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", false, None).unwrap();
 
         assert_matches!(
             Err(Error::MailboxReadOnly),
-            fixture.account.store(
+            fixture.store(
                 &mut mb,
                 &StoreRequest {
                     ids: &SeqRange::just(uid1),
@@ -1186,10 +1183,10 @@ mod test {
     fn seqnum_store_bad_seqnum() {
         let mut fixture = TestFixture::new();
         let _uid1 = fixture.simple_append("INBOX");
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
         assert_matches!(
             Err(Error::NxMessage),
-            fixture.account.seqnum_store(
+            fixture.seqnum_store(
                 &mut mb,
                 &StoreRequest {
                     ids: &SeqRange::range(Seqnum::u(1), Seqnum::u(2)),

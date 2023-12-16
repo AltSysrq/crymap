@@ -108,6 +108,7 @@ impl Account {
         mailbox.snapshot_modseq = poll.snapshot_modseq;
         mailbox.polled_snapshot_modseq = poll.snapshot_modseq;
         mailbox.merge_message_updates(poll.updated_messages);
+        mailbox.next_uid = poll.next_uid;
         let mut changed_uids = mailbox.take_changed_flags_uids();
         changed_uids.extend(poll.new_messages.iter().map(|m| m.uid));
         mailbox
@@ -141,6 +142,10 @@ impl Account {
 
             Some(cu) != expunged_it.peek().copied()
         });
+
+        // Now that the client knows about all the expunges, we can forget the
+        // loopbreaker state.
+        mailbox.fetch_loopbreaker.clear();
 
         Ok(PollResponse {
             expunge,

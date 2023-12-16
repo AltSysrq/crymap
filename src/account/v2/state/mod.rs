@@ -26,6 +26,7 @@
 
 mod defs;
 mod expunge;
+mod fetch;
 mod flags;
 mod init;
 mod mailboxes;

@@ -156,12 +156,12 @@ mod test {
     #[test]
     fn expunge_of_expunged_message_succeeds_quietly() {
         let mut fixture = TestFixture::new();
-        let (mut mb1, _) = fixture.account.select("INBOX", true, None).unwrap();
-        let (mut mb2, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb1, _) = fixture.select("INBOX", true, None).unwrap();
+        let (mut mb2, _) = fixture.select("INBOX", true, None).unwrap();
 
         // Create a message with the \Deleted flag set
         let uid = fixture.simple_append("INBOX");
-        fixture.account.poll(&mut mb1).unwrap();
+        fixture.poll(&mut mb1).unwrap();
         fixture
             .account
             .store(
@@ -176,33 +176,33 @@ mod test {
                 },
             )
             .unwrap();
-        fixture.account.poll(&mut mb1).unwrap();
+        fixture.poll(&mut mb1).unwrap();
 
         // Let mb2 see it too
-        fixture.account.poll(&mut mb2).unwrap();
+        fixture.poll(&mut mb2).unwrap();
 
         // Expunge it in mb1 and verify it's gone.
-        fixture.account.expunge_all_deleted(&mb1).unwrap();
-        let poll = fixture.account.poll(&mut mb1).unwrap();
+        fixture.expunge_all_deleted(&mb1).unwrap();
+        let poll = fixture.poll(&mut mb1).unwrap();
         assert_eq!(vec![(Seqnum::u(1), uid)], poll.expunge);
         assert_eq!(None, mb1.uid_index(uid));
 
         // Expunge via mb2, which thinks the message still exists.
-        fixture.account.expunge_all_deleted(&mb2).unwrap();
-        let poll = fixture.account.poll(&mut mb2).unwrap();
+        fixture.expunge_all_deleted(&mb2).unwrap();
+        let poll = fixture.poll(&mut mb2).unwrap();
         assert_eq!(vec![(Seqnum::u(1), uid)], poll.expunge);
         assert_eq!(None, mb2.uid_index(uid));
 
         // Also ensure that the second expunge doesn't break mb1
-        fixture.account.poll(&mut mb1).unwrap();
+        fixture.poll(&mut mb1).unwrap();
     }
 
     #[test]
     fn expunge_empty_mailbox() {
         let mut fixture = TestFixture::new();
-        let (mut mb1, _) = fixture.account.select("INBOX", true, None).unwrap();
-        fixture.account.expunge_all_deleted(&mb1).unwrap();
-        fixture.account.poll(&mut mb1).unwrap();
+        let (mut mb1, _) = fixture.select("INBOX", true, None).unwrap();
+        fixture.expunge_all_deleted(&mb1).unwrap();
+        fixture.poll(&mut mb1).unwrap();
     }
 
     // v1/mailbox/expunge.rs has a test
@@ -215,8 +215,8 @@ mod test {
     fn expunge_doesnt_see_delete_set_in_other_session() {
         let mut fixture = TestFixture::new();
         let uid = fixture.simple_append("INBOX");
-        let (mut mb1, _) = fixture.account.select("INBOX", true, None).unwrap();
-        let (mut mb2, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb1, _) = fixture.select("INBOX", true, None).unwrap();
+        let (mut mb2, _) = fixture.select("INBOX", true, None).unwrap();
 
         // Session 1 sets \Deleted
         fixture
@@ -236,9 +236,9 @@ mod test {
 
         // Session 2 runs EXPUNGE without having a chance to see the flag
         // change.
-        fixture.account.expunge_all_deleted(&mb2).unwrap();
+        fixture.expunge_all_deleted(&mb2).unwrap();
         // In the end, nothing is expunged.
-        let poll = fixture.account.poll(&mut mb2).unwrap();
+        let poll = fixture.poll(&mut mb2).unwrap();
         assert!(poll.expunge.is_empty());
     }
 
@@ -246,13 +246,13 @@ mod test {
     fn expunge_wont_delete_invisible_messages() {
         let mut fixture = TestFixture::new();
         let uid1 = fixture.simple_append("INBOX");
-        let (mut mb1, _) = fixture.account.select("INBOX", true, None).unwrap();
-        let (mut mb2, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb1, _) = fixture.select("INBOX", true, None).unwrap();
+        let (mut mb2, _) = fixture.select("INBOX", true, None).unwrap();
 
         // A second STORE comes in, and the first session sees that message and
         // sets \Deleted on both messages.
         let uid2 = fixture.simple_append("INBOX");
-        fixture.account.poll(&mut mb1).unwrap();
+        fixture.poll(&mut mb1).unwrap();
         fixture
             .account
             .store(
@@ -270,12 +270,12 @@ mod test {
 
         // The second session does a mini poll, which exposes it to the new
         // \Deleted state.
-        assert_eq!(1, fixture.account.mini_poll(&mut mb2).unwrap().fetch.len());
+        assert_eq!(1, fixture.mini_poll(&mut mb2).unwrap().fetch.len());
         // When the second session runs EXPUNGE, only the message actually in
         // its snapshot is removed.
-        fixture.account.expunge_all_deleted(&mb2).unwrap();
+        fixture.expunge_all_deleted(&mb2).unwrap();
 
-        let poll = fixture.account.poll(&mut mb1).unwrap();
+        let poll = fixture.poll(&mut mb1).unwrap();
         assert_eq!(vec![(Seqnum::u(1), uid1)], poll.expunge);
     }
 
@@ -283,13 +283,13 @@ mod test {
     fn uid_expunge_wont_delete_invisible_messages() {
         let mut fixture = TestFixture::new();
         let uid1 = fixture.simple_append("INBOX");
-        let (mut mb1, _) = fixture.account.select("INBOX", true, None).unwrap();
-        let (mut mb2, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb1, _) = fixture.select("INBOX", true, None).unwrap();
+        let (mut mb2, _) = fixture.select("INBOX", true, None).unwrap();
 
         // A second STORE comes in, and the first session sees that message and
         // sets \Deleted on both messages.
         let uid2 = fixture.simple_append("INBOX");
-        fixture.account.poll(&mut mb1).unwrap();
+        fixture.poll(&mut mb1).unwrap();
         fixture
             .account
             .store(
@@ -307,7 +307,7 @@ mod test {
 
         // The second session does a mini poll, which exposes it to the new
         // \Deleted state.
-        assert_eq!(1, fixture.account.mini_poll(&mut mb2).unwrap().fetch.len());
+        assert_eq!(1, fixture.mini_poll(&mut mb2).unwrap().fetch.len());
         // When the second session runs UID EXPUNGE, explicitly requesting both
         // UIDs, only the message actually in its snapshot is removed.
         fixture
@@ -315,14 +315,14 @@ mod test {
             .expunge_deleted(&mb2, &SeqRange::range(uid1, uid2))
             .unwrap();
 
-        let poll = fixture.account.poll(&mut mb1).unwrap();
+        let poll = fixture.poll(&mut mb1).unwrap();
         assert_eq!(vec![(Seqnum::u(1), uid1)], poll.expunge);
     }
 
     #[test]
     fn no_expunge_on_read_only() {
         let mut fixture = TestFixture::new();
-        let (mb, _) = fixture.account.select("INBOX", false, None).unwrap();
+        let (mb, _) = fixture.select("INBOX", false, None).unwrap();
 
         assert_matches!(
             Err(Error::MailboxReadOnly),
@@ -332,11 +332,11 @@ mod test {
         );
         assert_matches!(
             Err(Error::MailboxReadOnly),
-            fixture.account.expunge_all_deleted(&mb),
+            fixture.expunge_all_deleted(&mb),
         );
         assert_matches!(
             Err(Error::MailboxReadOnly),
-            fixture.account.vanquish(&mb, &SeqRange::just(Uid::MIN)),
+            fixture.vanquish(&mb, &SeqRange::just(Uid::MIN)),
         );
     }
 
@@ -346,7 +346,7 @@ mod test {
         for _ in 0..3 {
             fixture.simple_append("INBOX");
         }
-        let (mut mb, _) = fixture.account.select("INBOX", true, None).unwrap();
+        let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
 
         fixture
             .account
@@ -362,10 +362,10 @@ mod test {
                 },
             )
             .unwrap();
-        fixture.account.poll(&mut mb).unwrap();
+        fixture.poll(&mut mb).unwrap();
 
-        fixture.account.expunge_all_deleted(&mb).unwrap();
-        fixture.account.poll(&mut mb).unwrap();
+        fixture.expunge_all_deleted(&mb).unwrap();
+        fixture.poll(&mut mb).unwrap();
 
         fixture
             .account

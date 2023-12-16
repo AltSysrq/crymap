@@ -17,6 +17,7 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -58,11 +59,17 @@ pub struct Mailbox {
     pub(super) snapshot_modseq: Modseq,
     /// The last `HIGHESTMODSEQ` reported by a full `poll` operation.
     pub(super) polled_snapshot_modseq: Modseq,
-    /// The `next_uid` when the mailbox was initially selected.
-    pub(super) initial_next_uid: Uid,
+    /// The `UIDNEXT` value. This is an exclusive upper bound on the UIDs that
+    /// may be present in the mailbox snapshot.
+    pub(super) next_uid: Uid,
     /// UIDs of messages whose flags have changed but have not yet been sent to
     /// the client.
     pub(super) changed_flags_uids: Vec<Uid>,
+    /// When the client tries to fetch an addressable UID that's been expunged,
+    /// we add it to this set. If it is there already, we kill the client
+    /// connection. The set gets cleared on a full poll cycle. See
+    /// `FetchResponseKind` for more details.
+    pub(super) fetch_loopbreaker: HashSet<Uid>,
 }
 
 /// Information about a message retained in a selected mailbox.
@@ -133,6 +140,33 @@ impl Mailbox {
             let index = seqnum.to_index();
             if index < self.messages.len() {
                 ret.append(index as u32);
+            } else if !silent {
+                return Err(Error::NxMessage);
+            }
+        }
+
+        Ok(ret)
+    }
+
+    /// Translate a `SeqRange<Seqnum>` to `SeqRange<Uid>`.
+    ///
+    /// If `silent` is true, errors will be silently swallowed and the call
+    /// never fails. Otherwise, an out-of-range `Seqnum` results in
+    /// `NxMessage`.
+    pub(super) fn seqnum_range_to_uid(
+        &self,
+        seqnums: &SeqRange<Seqnum>,
+        silent: bool,
+    ) -> Result<SeqRange<Uid>, Error> {
+        let mut ret = SeqRange::new();
+        for seqnum in seqnums.items(if silent {
+            Seqnum::from_index(self.messages.len().saturating_sub(1)).into()
+        } else {
+            u32::MAX
+        }) {
+            let index = seqnum.to_index();
+            if let Some(message) = self.messages.get(index) {
+                ret.append(message.uid);
             } else if !silent {
                 return Err(Error::NxMessage);
             }
@@ -260,6 +294,22 @@ impl Mailbox {
 
         self.messages[index].flags.contains(flag_id.0)
     }
+
+    /// Returns a non-empty `Vec<Flag>` with all flags known to the mailbox if
+    /// there are currently any which the client doesn't know about.
+    pub(super) fn flags_response_if_changed(&mut self) -> Vec<Flag> {
+        let greatest_id = self
+            .flags
+            .last()
+            .expect("there is always at least one flag")
+            .0;
+        if greatest_id > self.max_client_known_flag_id {
+            self.max_client_known_flag_id = greatest_id;
+            self.flags.iter().map(|&(_, ref f)| f.clone()).collect()
+        } else {
+            vec![]
+        }
+    }
 }
 
 #[cfg(test)]
@@ -313,5 +363,21 @@ impl TestFixture {
                 data,
             )
             .unwrap()
+    }
+}
+
+#[cfg(test)]
+impl std::ops::Deref for TestFixture {
+    type Target = Account;
+
+    fn deref(&self) -> &Account {
+        &self.account
+    }
+}
+
+#[cfg(test)]
+impl std::ops::DerefMut for TestFixture {
+    fn deref_mut(&mut self) -> &mut Account {
+        &mut self.account
     }
 }

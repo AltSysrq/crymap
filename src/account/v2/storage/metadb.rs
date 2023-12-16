@@ -451,7 +451,7 @@ impl Connection {
             )?
             .query_row((message_id,), from_row)
             .optional()?
-            .ok_or(Error::NxMessage)
+            .ok_or(Error::ExpungedMessage)
     }
 
     /// Updates the cached data for the given message.
@@ -646,6 +646,36 @@ impl Connection {
         txn.commit()?;
 
         Ok(())
+    }
+
+    /// Fetch the messages in the given mailbox which were expunged after the
+    /// given modseq and pass the given filter.
+    ///
+    /// The UIDs are returned in ascending order.
+    ///
+    /// This corresponds to QRESYNC's `UID FETCH VANISHED CHANGEDSINCE modseq`.
+    pub fn fetch_vanished_mailbox_messages(
+        &mut self,
+        mailbox_id: MailboxId,
+        after_modseq: Modseq,
+        filter: &mut dyn FnMut(Uid) -> bool,
+    ) -> Result<Vec<Uid>, Error> {
+        let txn = self.cxn.read_tx()?;
+
+        let mut ret = txn
+            .prepare(
+                "SELECT `uid` FROM `mailbox_message_expungement` \
+                 WHERE `mailbox_id` = ? AND `expunged_modseq` > ?",
+            )?
+            .query_map((mailbox_id, after_modseq), from_single::<Uid>)?
+            .filter(|r| match *r {
+                Ok(uid) => filter(uid),
+                Err(_) => true,
+            })
+            .collect::<Result<Vec<Uid>, _>>()?;
+
+        ret.sort_unstable();
+        Ok(ret)
     }
 
     /// Modifies the flags of the given sequence of messages in a mailbox.
@@ -1238,6 +1268,7 @@ impl Connection {
                 new_messages: Vec::new(),
                 expunged: Vec::new(),
                 snapshot_modseq,
+                next_uid: status.next_uid,
             });
         }
 
@@ -1284,6 +1315,7 @@ impl Connection {
             new_messages,
             expunged,
             snapshot_modseq: status.max_modseq,
+            next_uid: status.next_uid,
         })
     }
 
@@ -2313,6 +2345,39 @@ mod test {
                 )
                 .unwrap(),
         );
+        assert_eq!(
+            vec![us_uid_expunge],
+            fixture
+                .cxn
+                .fetch_vanished_mailbox_messages(
+                    unselectable_id,
+                    Modseq::of(3),
+                    &mut |u| us_uid_expunge == u,
+                )
+                .unwrap(),
+        );
+        assert_eq!(
+            Vec::<Uid>::new(),
+            fixture
+                .cxn
+                .fetch_vanished_mailbox_messages(
+                    unselectable_id,
+                    Modseq::of(4),
+                    &mut |u| us_uid_expunge == u,
+                )
+                .unwrap(),
+        );
+        assert_eq!(
+            Vec::<Uid>::new(),
+            fixture
+                .cxn
+                .fetch_vanished_mailbox_messages(
+                    unselectable_id,
+                    Modseq::of(3),
+                    &mut |_| false,
+                )
+                .unwrap(),
+        );
 
         let mut unselectable =
             fixture.cxn.fetch_mailbox(unselectable_id).unwrap();
@@ -3229,7 +3294,7 @@ mod test {
         );
 
         assert_matches!(
-            Err(Error::NxMessage),
+            Err(Error::ExpungedMessage),
             fixture.cxn.access_message(MessageId(-1)),
         );
 
@@ -3759,6 +3824,7 @@ mod test {
                 },],
                 expunged: vec![msg2_uid],
                 snapshot_modseq: after_msg3_flags,
+                next_uid: Uid::u(5),
             },
             full_poll,
         );
@@ -3843,6 +3909,7 @@ mod test {
                 },],
                 expunged: vec![msg2_uid],
                 snapshot_modseq: after_msg3_flags,
+                next_uid: Uid::u(5),
             },
             full_poll,
         );
@@ -3965,6 +4032,7 @@ mod test {
                 ],
                 expunged: vec![msg2_uid],
                 snapshot_modseq: after_msg3_flags,
+                next_uid: Uid::u(5),
             },
             full_poll,
         );

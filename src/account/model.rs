@@ -1325,9 +1325,13 @@ pub struct PrefetchResponse {
     /// not affect the sequence number mapping, so a client could only become
     /// confused if it modified the sequence number mapping anyway, in which
     /// case it would be better to send the `VANISHED (EARLIER)` *after* the
-    /// `FETCH` responses. There's also the simple fact that 3501 permits the
-    /// server to send any `FETCH` response whenever it wants, so this
-    /// requirement overall seems like it should be moot.
+    /// `FETCH` responses, which would make it possible to inform clients of
+    /// messages that could not be fetched because the server has removed them
+    /// entirely (though this is rarely necessary in this implementation since
+    /// we keep orphaned messages around for quite a while). There's also the
+    /// simple fact that 3501 permits the server to send any `FETCH` response
+    /// whenever it wants, so this requirement overall seems like it should be
+    /// moot.
     ///
     /// Nonetheless, we order this first since it's a "MUST" requirement.
     pub vanished: SeqRange<Uid>,
