@@ -32,7 +32,9 @@ use crate::support::{error::Error, small_bitset::SmallBitset};
 pub struct Account {
     pub(super) master_key: Arc<MasterKey>,
     pub(super) metadb: storage::MetaDb,
+    pub(super) metadb_path: PathBuf,
     pub(super) deliverydb: storage::DeliveryDb,
+    pub(super) deliverydb_path: PathBuf,
     pub(super) message_store: storage::MessageStore,
     pub(super) key_store: KeyStore,
     pub(super) root: PathBuf,

@@ -54,18 +54,21 @@ impl Account {
             Some(Arc::clone(&master_key)),
         );
 
+        let metadb_path = root.join("meta.sqlite.xex");
+        let deliverydb_path = root.join("delivery.sqlite");
+
         let xex_vfs = storage::XexVfs::new(Arc::clone(&master_key))?;
         // TODO Database setup logs stuff but doesn't have the log prefix.
-        let metadb =
-            storage::MetaDb::new(&root.join("meta.sqlite.xex"), &xex_vfs)?;
-        let deliverydb =
-            storage::DeliveryDb::new(&root.join("delivery.sqlite"))?;
+        let metadb = storage::MetaDb::new(&metadb_path, &xex_vfs)?;
+        let deliverydb = storage::DeliveryDb::new(&deliverydb_path)?;
         let message_store = storage::MessageStore::new(root.join("messages"));
 
         Ok(Self {
             master_key,
             metadb,
+            metadb_path,
             deliverydb,
+            deliverydb_path,
             message_store,
             key_store,
             root,
