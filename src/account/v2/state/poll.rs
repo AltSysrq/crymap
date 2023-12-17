@@ -25,6 +25,11 @@ use super::defs::*;
 use crate::{account::model::*, support::error::Error};
 
 impl Account {
+    /// Clear cache(s) only used for the duration of individual commands.
+    pub fn clear_cache(&mut self) {
+        self.key_store.clear_cache();
+    }
+
     /// Do a "mini" poll on an open mailbox, appropriate for use after a
     /// `FETCH`, `STORE`, or `SEARCH` operation.
     ///

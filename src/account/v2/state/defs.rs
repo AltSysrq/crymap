@@ -284,6 +284,28 @@ impl Mailbox {
             .map(|&(id, _)| id)
     }
 
+    pub fn count_unseen(&self) -> usize {
+        let Some(unseen) = self.flag_id(&Flag::Seen) else {
+            return 0;
+        };
+
+        self.messages
+            .iter()
+            .filter(|m| !m.flags.contains(unseen.0))
+            .count()
+    }
+
+    pub fn count_deleted(&self) -> usize {
+        let Some(deleted) = self.flag_id(&Flag::Deleted) else {
+            return 0;
+        };
+
+        self.messages
+            .iter()
+            .filter(|m| m.flags.contains(deleted.0))
+            .count()
+    }
+
     #[cfg(test)]
     pub fn test_flag_o(&self, flag: &Flag, message: Uid) -> bool {
         let Some(flag_id) = self.flag_id(flag) else {

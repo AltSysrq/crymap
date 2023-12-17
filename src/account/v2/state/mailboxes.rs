@@ -126,6 +126,75 @@ impl Account {
         self.metadb.rm_subscription(&normalise_path(name)?)
     }
 
+    /// The RFC 3501 `STATUS` command.
+    pub fn status(
+        &mut self,
+        request: &StatusRequest,
+    ) -> Result<StatusResponse, Error> {
+        let (mb, _) = self.select(&request.name, false, None)?;
+        let select = mb.select_response()?;
+
+        let mut response = StatusResponse {
+            name: normalise_path(&request.name)?,
+            ..StatusResponse::default()
+        };
+
+        if request.messages {
+            response.messages = Some(select.exists);
+        }
+
+        if request.recent {
+            response.recent = Some(select.recent);
+        }
+
+        if request.uidnext {
+            response.uidnext = Some(select.uidnext);
+        }
+
+        if request.uidvalidity {
+            response.uidvalidity = Some(select.uidvalidity);
+        }
+
+        if request.unseen {
+            if select.unseen.is_some() {
+                response.unseen = Some(mb.count_unseen());
+            } else {
+                response.unseen = Some(0);
+            }
+        }
+
+        if request.max_modseq {
+            response.max_modseq = Some(select.max_modseq);
+        }
+
+        if request.mailbox_id {
+            response.mailbox_id = Some(mb.id.format_rfc8474());
+        }
+
+        if request.size {
+            let mut size = 0u64;
+            for message in &mb.messages {
+                if let Some(rfc822_size) = self
+                    .metadb
+                    .access_message(message.id)
+                    .ok()
+                    .and_then(|mad| mad.rfc822_size)
+                {
+                    size += rfc822_size;
+                } else if let Ok((md, _)) = self.open_message(message.id) {
+                    size += u64::from(md.size);
+                }
+            }
+            response.size = Some(size);
+        }
+
+        if request.deleted {
+            response.deleted = Some(mb.count_deleted());
+        }
+
+        Ok(response)
+    }
+
     /// The RFC 3501 `LIST` and `LSUB` commands and the non-standard `XLIST`
     /// command.
     ///
@@ -137,6 +206,9 @@ impl Account {
     ///
     /// The special case of `LIST "" ""` (a query for the path separator) is
     /// handled here.
+    ///
+    /// `LIST STATUS` is not handled here; the command processor just calls
+    /// `status` itself.
     pub fn list(
         &mut self,
         request: &ListRequest,
@@ -1520,6 +1592,141 @@ mod test {
                 existing_name: "Sent".to_owned(),
                 new_name: "".to_owned(),
             })
+        );
+    }
+
+    #[test]
+    fn test_status() {
+        let mut fixture = TestFixture::new();
+
+        let (uidvalidity, uidnext) = {
+            let (mut mb, _) = fixture.select("INBOX", true, None).unwrap();
+            let select = mb.select_response().unwrap();
+
+            // Adjust inbox to have 1 recent, 2 unseen, 3 messages.
+            fixture.simple_append("INBOX");
+            let uid2 = fixture.simple_append("INBOX");
+
+            // Remove \Recent from these two and make them accessible to our
+            // snapshot.
+            fixture.poll(&mut mb).unwrap();
+
+            fixture
+                .store(
+                    &mut mb,
+                    &StoreRequest {
+                        ids: &SeqRange::just(uid2),
+                        flags: &[Flag::Seen],
+                        remove_listed: false,
+                        remove_unlisted: false,
+                        loud: false,
+                        unchanged_since: None,
+                    },
+                )
+                .unwrap();
+            fixture.poll(&mut mb).unwrap();
+
+            let uid3 = fixture.simple_append("INBOX");
+            (select.uidvalidity, uid3.next().unwrap())
+        };
+
+        assert_eq!(
+            StatusResponse {
+                name: "INBOX".to_owned(),
+                messages: Some(3),
+                ..StatusResponse::default()
+            },
+            fixture
+                .account
+                .status(&StatusRequest {
+                    name: "inbox".to_owned(),
+                    messages: true,
+                    ..StatusRequest::default()
+                })
+                .unwrap()
+        );
+
+        assert_eq!(
+            StatusResponse {
+                name: "INBOX".to_owned(),
+                recent: Some(1),
+                ..StatusResponse::default()
+            },
+            fixture
+                .account
+                .status(&StatusRequest {
+                    name: "inbox".to_owned(),
+                    recent: true,
+                    ..StatusRequest::default()
+                })
+                .unwrap()
+        );
+
+        assert_eq!(
+            StatusResponse {
+                name: "INBOX".to_owned(),
+                uidnext: Some(uidnext),
+                ..StatusResponse::default()
+            },
+            fixture
+                .account
+                .status(&StatusRequest {
+                    name: "inbox".to_owned(),
+                    uidnext: true,
+                    ..StatusRequest::default()
+                })
+                .unwrap()
+        );
+
+        assert_eq!(
+            StatusResponse {
+                name: "INBOX".to_owned(),
+                uidvalidity: Some(uidvalidity),
+                ..StatusResponse::default()
+            },
+            fixture
+                .account
+                .status(&StatusRequest {
+                    name: "inbox".to_owned(),
+                    uidvalidity: true,
+                    ..StatusRequest::default()
+                })
+                .unwrap()
+        );
+
+        assert_eq!(
+            StatusResponse {
+                name: "INBOX".to_owned(),
+                unseen: Some(2),
+                ..StatusResponse::default()
+            },
+            fixture
+                .account
+                .status(&StatusRequest {
+                    name: "inbox".to_owned(),
+                    unseen: true,
+                    ..StatusRequest::default()
+                })
+                .unwrap()
+        );
+
+        // Adjust Archive to have 1 recent, 1 unseen, 1 message.
+        fixture.simple_append("Archive");
+
+        assert_eq!(
+            StatusResponse {
+                name: "Archive".to_owned(),
+                unseen: Some(1),
+                ..StatusResponse::default()
+            },
+            fixture
+                .account
+                .status(&StatusRequest {
+                    name: "Archive".to_owned(),
+                    unseen: true,
+                    ..StatusRequest::default()
+                })
+                .unwrap()
         );
     }
 }

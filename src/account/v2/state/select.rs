@@ -66,11 +66,8 @@ impl Mailbox {
     /// Generates the `SelectResponse` to be produced in response to selecting
     /// the mailbox in this state.
     pub fn select_response(&self) -> Result<SelectResponse, Error> {
-        let seen_flag = self
-            .flags
-            .iter()
-            .find(|&&(_, ref f)| &Flag::Seen == f)
-            .map(|&(id, _)| id.0);
+        let seen_flag =
+            self.flag_id(&Flag::Seen).expect("\\Seen is always defined");
 
         Ok(SelectResponse {
             flags: self
@@ -80,12 +77,11 @@ impl Mailbox {
                 .collect(),
             exists: self.messages.len(),
             recent: self.messages.iter().filter(|m| m.recent).count(),
-            unseen: seen_flag.and_then(|seen_flag| {
-                self.messages
-                    .iter()
-                    .position(|m| m.flags.contains(seen_flag))
-                    .map(Seqnum::from_index)
-            }),
+            unseen: self
+                .messages
+                .iter()
+                .position(|m| !m.flags.contains(seen_flag.0))
+                .map(Seqnum::from_index),
             uidnext: self.next_uid,
             uidvalidity: self.id.as_uid_validity()?,
             read_only: !self.writable,

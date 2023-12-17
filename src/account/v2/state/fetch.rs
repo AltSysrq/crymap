@@ -304,7 +304,7 @@ impl Account {
     ///
     /// If the message entry or its backing file is gone, returns
     /// `Error::ExpungedMessage`.
-    fn open_message(
+    pub(super) fn open_message(
         &mut self,
         message_id: storage::MessageId,
     ) -> Result<(MessageMetadata, Box<dyn BufRead>), Error> {
