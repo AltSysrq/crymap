@@ -407,12 +407,8 @@ impl Connection {
         self.cxn.enable_write(false)?;
         self.cxn
             .prepare(
-                "SELECT `message`.`id`, `message`.`path` \
-                 FROM `message` \
-                 LEFT JOIN `mailbox_message` \
-                 ON `message`.`id` = `mailbox_message`.`message_id` \
-                 WHERE `mailbox_message`.`uid` IS NULL \
-                 AND `message`.`last_activity` < ?",
+                "SELECT `id`, `path` FROM `message` \
+                 WHERE `refcount` = 0 AND `last_activity` < ?",
             )?
             .query_map((last_activity_before,), from_row)?
             .collect::<Result<_, _>>()
@@ -430,9 +426,7 @@ impl Connection {
         self.cxn.enable_write(true)?;
         self.cxn
             .prepare_cached(
-                "DELETE FROM `message` WHERE `id` = ?1 \
-                 AND NOT EXISTS \
-                 (SELECT 1 FROM `mailbox_message` WHERE `message_id` = ?1)",
+                "DELETE FROM `message` WHERE `id` = ? AND `refcount` = 0",
             )?
             .execute((message_id,))?;
         Ok(())

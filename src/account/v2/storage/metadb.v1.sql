@@ -111,8 +111,13 @@ CREATE TABLE `message` (
   --
   -- This is used to identify when it is safe to delete orphaned messages.
   `last_activity` INTEGER NOT NULL,
+  -- The number of references from `mailbox_message` to this message. This is
+  -- maintained automatically by triggers.
+  `refcount` INTEGER NOT NULL DEFAULT 0,
   UNIQUE (`path`)
 ) STRICT;
+
+CREATE INDEX `message_orphan_status` ON `message` (`refcount`, `last_activity`);
 
 -- An instance of a message within a mailbox.
 CREATE TABLE `mailbox_message` (
@@ -135,6 +140,28 @@ CREATE TABLE `mailbox_message` (
   FOREIGN KEY (`mailbox_id`) REFERENCES `mailbox` (`id`) ON DELETE RESTRICT,
   FOREIGN KEY (`message_id`) REFERENCES `message` (`id`) ON DELETE RESTRICT
 ) WITHOUT ROWID, STRICT;
+
+CREATE INDEX `mailbox_message_message_id` ON `mailbox_message` (`message_id`);
+
+CREATE TRIGGER `message_refcount_incr`
+AFTER INSERT ON `mailbox_message`
+FOR EACH ROW BEGIN
+  UPDATE `message` SET `refcount` = `refcount` + 1
+  WHERE `message`.`id` = NEW.`message_id`;
+END;
+
+CREATE TRIGGER `message_refcount_decr`
+AFTER DELETE ON `mailbox_message`
+FOR EACH ROW BEGIN
+  UPDATE `message` SET `refcount` = `refcount` - 1
+  WHERE `message`.`id` = OLD.`message_id`;
+END;
+
+CREATE TRIGGER `mailbox_message_no_message_id_update`
+BEFORE UPDATE ON `mailbox_message`
+FOR EACH ROW WHEN OLD.`message_id` != NEW.`message_id` BEGIN
+  SELECT RAISE (FAIL, 'updating message_id is not allowed');
+END;
 
 -- Associates flags with indices >63 with messages.
 CREATE TABLE `mailbox_message_far_flag` (
