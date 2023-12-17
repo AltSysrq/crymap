@@ -29,8 +29,8 @@ impl StatefulMailbox {
             .state
             .uids()
             .map(|uid| {
-                let accessor = self.access_message(uid)?;
-                grovel(&accessor, ZstdTrainFetcher::default())
+                let mut accessor = self.access_message(uid)?;
+                grovel(&mut accessor, ZstdTrainFetcher::default())
             })
             .collect::<Result<Vec<_>, Error>>()?;
 

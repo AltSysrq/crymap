@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -23,19 +23,19 @@
 //! couple exceptions, the header values are replaced with a few random
 //! characters, both to prevent personal data from ending up in the dictionary,
 //! and to ensure the dictionary is generally applicable. (This does cause zstd
-//! to "learn" some of the random values, bit this is OK since the dictionary
+//! to "learn" some of the random values, but this is OK since the dictionary
 //! also matches substrings. The random values are still needed to prevent it
 //! from "learning" things like both `From: \r\nTo: \r\n` and
 //! `To: \r\nFrom: \r\n`.
 
-use std::mem;
+use std::io::Write;
 
 use rand::{rngs::OsRng, Rng};
 
-use crate::mime::grovel;
+use crate::{mime::grovel, support::un64};
 
 #[derive(Debug, Clone, Default)]
-pub struct ZstdTrainFetcher(pub Vec<u8>);
+pub struct ZstdTrainFetcher(Vec<u8>);
 
 impl grovel::Visitor for ZstdTrainFetcher {
     type Output = Vec<u8>;
@@ -69,6 +69,18 @@ impl grovel::Visitor for ZstdTrainFetcher {
     }
 
     fn end(&mut self) -> Self::Output {
-        mem::take(&mut self.0)
+        // We need to feed what we've accumulated into un64 compression since
+        // that's what zstd will actually see, and some header names are longer
+        // to be recognised as "base64" and "decoded" by un64.
+        let mut compressed = Vec::<u8>::with_capacity(self.0.len());
+        {
+            let mut writer = un64::Writer::new(&mut compressed);
+            writer
+                .write_all(&self.0)
+                .expect("writing to vec never fails");
+            writer.flush().expect("writing to vec never fails");
+        }
+        self.0.clear();
+        compressed
     }
 }
