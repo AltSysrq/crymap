@@ -954,7 +954,8 @@ pub struct PollResponse {
     /// ...
     /// ```
     pub expunge: Vec<(Seqnum, Uid)>,
-    /// If the mailbox size has changed, the new size.
+    /// If any new messages were added, the new mailbox size after processing
+    /// expungements.
     /// `* exists EXISTS`
     pub exists: Option<usize>,
     /// If there are new messages, the new recent count.

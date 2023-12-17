@@ -502,7 +502,6 @@ mod test {
         assert!(!archive.test_flag_o(&Flag::Draft, uids3[0]));
 
         let poll = fixture.poll(&mut inbox).unwrap();
-        assert_eq!(Some(1), poll.exists);
         assert_eq!(1, poll.expunge.len());
 
         let uids4 = fixture
@@ -527,7 +526,6 @@ mod test {
         assert!(archive.test_flag_o(&Flag::Draft, uids4[0]));
 
         let poll = fixture.poll(&mut inbox).unwrap();
-        assert_eq!(Some(0), poll.exists);
         assert_eq!(1, poll.expunge.len());
     }
 
