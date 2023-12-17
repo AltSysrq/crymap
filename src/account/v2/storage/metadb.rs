@@ -626,8 +626,9 @@ impl Connection {
         let txn = self.cxn.write_tx()?;
 
         require_selectable_mailbox(&txn, mailbox_id)?;
-        expunge_mailbox_messages(&txn, mailbox_id, messages)?;
-        txn.commit()?;
+        if expunge_mailbox_messages(&txn, mailbox_id, messages)? > 0 {
+            txn.commit()?;
+        }
 
         Ok(())
     }
@@ -1653,7 +1654,7 @@ fn expunge_mailbox_messages(
     txn: &rusqlite::Connection,
     mailbox_id: MailboxId,
     messages: &mut dyn Iterator<Item = Uid>,
-) -> Result<(), Error> {
+) -> Result<u32, Error> {
     let modseq = new_modseq(txn, mailbox_id)?;
 
     let mut delete_from_mailbox_message_far_flag = txn.prepare(
@@ -1670,15 +1671,17 @@ fn expunge_mailbox_messages(
          VALUES (?, ?, ?)",
     )?;
 
+    let mut count = 0;
     for uid in messages {
         delete_from_mailbox_message_far_flag.execute((mailbox_id, uid))?;
         if delete_from_mailbox_message.execute((mailbox_id, uid))? > 0 {
             insert_mailbox_message_expungement
                 .execute((mailbox_id, uid, modseq))?;
+            count += 1;
         }
     }
 
-    Ok(())
+    Ok(count)
 }
 
 /// Fetches the `InitialMessageStatus` for every message in `mailbox_id` whose
