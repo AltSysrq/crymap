@@ -37,5 +37,8 @@ mod poll;
 mod search;
 mod select;
 
+#[cfg(feature = "dev-tools")]
+mod zstd_train;
+
 pub use defs::{Account, Mailbox};
 pub use delivery::DeliveryAccount;
