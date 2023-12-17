@@ -107,10 +107,11 @@ CREATE TABLE `message` (
   `rfc822_size` INTEGER,
   -- The last time (as a UNIX timestamp, seconds) at which the message was
   -- expunged from any mailbox or had other activity that could result in it
-  -- being orphaned.
+  -- being orphaned. This is automatically maintained by the default value and
+  -- triggers.
   --
   -- This is used to identify when it is safe to delete orphaned messages.
-  `last_activity` INTEGER NOT NULL,
+  `last_activity` INTEGER NOT NULL DEFAULT (unixepoch()),
   -- The number of references from `mailbox_message` to this message. This is
   -- maintained automatically by triggers.
   `refcount` INTEGER NOT NULL DEFAULT 0,
@@ -153,7 +154,8 @@ END;
 CREATE TRIGGER `message_refcount_decr`
 AFTER DELETE ON `mailbox_message`
 FOR EACH ROW BEGIN
-  UPDATE `message` SET `refcount` = `refcount` - 1
+  UPDATE `message`
+  SET `refcount` = `refcount` - 1, `last_activity` = unixepoch()
   WHERE `message`.`id` = OLD.`message_id`;
 END;
 

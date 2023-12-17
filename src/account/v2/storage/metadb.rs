@@ -248,16 +248,6 @@ impl Connection {
             return Err(Error::MailboxHasInferiors);
         }
 
-        // Bump the activity time for all messages in the mailbox so that they
-        // linger a while after being orphaned.
-        txn.execute(
-            "UPDATE `message` SET `last_activity` = ? \
-             FROM (SELECT DISTINCT `message_id` FROM `mailbox_message` \
-                   WHERE `mailbox_id` = ?) \
-             WHERE `message`.`id` = `message_id`",
-            (UnixTimestamp::now(), id),
-        )?;
-
         // Remove external references to the mailbox.
         txn.execute(
             "DELETE FROM `mailbox_message_far_flag` \
@@ -1512,10 +1502,8 @@ fn intern_message_as_orphan(
         return Ok(existing);
     }
 
-    cxn.prepare_cached(
-        "INSERT INTO `message` (`path`, `last_activity`) VALUES (?, ?)",
-    )?
-    .execute((path, UnixTimestamp::now()))?;
+    cxn.prepare_cached("INSERT INTO `message` (`path`) VALUES (?)")?
+        .execute((path,))?;
 
     Ok(MessageId(cxn.last_insert_rowid()))
 }
@@ -1667,12 +1655,7 @@ fn expunge_mailbox_messages(
     messages: &mut dyn Iterator<Item = Uid>,
 ) -> Result<(), Error> {
     let modseq = new_modseq(txn, mailbox_id)?;
-    let now = UnixTimestamp::now();
 
-    let mut select_message_id = txn.prepare(
-        "SELECT `message_id` FROM `mailbox_message` \
-         WHERE `mailbox_id` = ? AND `uid` = ?",
-    )?;
     let mut delete_from_mailbox_message_far_flag = txn.prepare(
         "DELETE FROM `mailbox_message_far_flag` \
          WHERE `mailbox_id` = ? AND `uid` = ?",
@@ -1681,8 +1664,6 @@ fn expunge_mailbox_messages(
         "DELETE FROM `mailbox_message` \
          WHERE `mailbox_id` = ? AND `uid` = ?",
     )?;
-    let mut update_last_activity = txn
-        .prepare("UPDATE `message` SET `last_activity` = ?2 WHERE `id` = ?1")?;
     let mut insert_mailbox_message_expungement = txn.prepare(
         "INSERT INTO `mailbox_message_expungement` \
          (`mailbox_id`, `uid`, `expunged_modseq`) \
@@ -1690,18 +1671,11 @@ fn expunge_mailbox_messages(
     )?;
 
     for uid in messages {
-        let Some(message_id) = select_message_id
-            .query_row((mailbox_id, uid), from_single::<MessageId>)
-            .optional()?
-        else {
-            continue;
-        };
-
         delete_from_mailbox_message_far_flag.execute((mailbox_id, uid))?;
-        delete_from_mailbox_message.execute((mailbox_id, uid))?;
-        update_last_activity.execute((message_id, now))?;
-        insert_mailbox_message_expungement
-            .execute((mailbox_id, uid, modseq))?;
+        if delete_from_mailbox_message.execute((mailbox_id, uid))? > 0 {
+            insert_mailbox_message_expungement
+                .execute((mailbox_id, uid, modseq))?;
+        }
     }
 
     Ok(())
