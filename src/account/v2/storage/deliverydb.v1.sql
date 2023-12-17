@@ -45,7 +45,8 @@ CREATE TABLE `delivery` (
   -- main database.
   --
   -- Delivery entries are dropped once this indicates they are too old, opening
-  -- messages that were orphaned by failed delivery to orphan recovery.
+  -- messages that were not delivered successfully to unaccounted message
+  -- recovery.
   `delivered` INTEGER
 ) STRICT;
 

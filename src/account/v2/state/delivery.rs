@@ -100,8 +100,9 @@ impl DeliveryAccount {
     ) -> Result<(), Error> {
         let canonical_path = fs::File::open(&message.0)
             .and_then(storage::MessageStore::canonical_path)?;
-        // Orphan recovery ignores very new files, so placing the file into the
-        // message store before adding it to the database is fine.
+        // Unaccounted message recovery ignores very new files, so placing the
+        // file into the message store before adding it to the database is
+        // fine.
         self.message_store.insert(&message.0, &canonical_path)?;
         self.deliverydb.queue_delivery(&storage::Delivery {
             path: canonical_path
@@ -136,8 +137,8 @@ impl Account {
         loop {
             // By successfully removing an entry, we're committing to
             // delivering it. If we can't for some reason and drop it on the
-            // floor, the message will be subject to orphan recovery after 1
-            // hour.
+            // floor, the message will be subject to unaccounted message
+            // recovery after 1 hour.
             let delivery = match self.deliverydb.pop_delivery() {
                 Ok(None) => return,
                 Ok(Some(d)) => d,
