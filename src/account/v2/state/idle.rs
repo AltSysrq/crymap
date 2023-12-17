@@ -28,6 +28,7 @@
 //! ```ignore
 //! while idling {
 //!   let mut idle = account.prepare_idle()?;
+//!   account.drain_deliveries();
 //!   let poll = account.poll(&mut mailbox)?;
 //!   send_poll_results(poll);
 //!   account.idle(idle)?;

@@ -26,9 +26,34 @@ use tempfile::NamedTempFile;
 use super::super::storage;
 use super::defs::*;
 use crate::{
-    account::{message_format, model::*},
+    account::{key_store::KeyStore, message_format, model::*},
     support::{error::Error, file_ops, small_bitset::SmallBitset},
 };
+
+/// Buffer the given data stream into a file that can later be moved into the
+/// message store.
+///
+/// The returned object is a reference to a file in the temporary directory
+/// which will be deleted when dropped, but does not contain an actual file
+/// handle.
+pub(super) fn buffer_message(
+    key_store: &mut KeyStore,
+    common_paths: &CommonPaths,
+    internal_date: DateTime<FixedOffset>,
+    data: impl Read,
+) -> Result<BufferedMessage, Error> {
+    let mut buffer_file = NamedTempFile::new_in(&common_paths.tmp)?;
+    message_format::write_message(
+        &mut buffer_file,
+        key_store,
+        internal_date,
+        data,
+    )?;
+
+    file_ops::chmod(buffer_file.path(), 0o440)?;
+    buffer_file.as_file_mut().sync_all()?;
+    Ok(BufferedMessage(buffer_file.into_temp_path()))
+}
 
 impl Account {
     /// Buffer the given data stream into a file that can later be appended
@@ -46,17 +71,12 @@ impl Account {
         internal_date: DateTime<FixedOffset>,
         data: impl Read,
     ) -> Result<BufferedMessage, Error> {
-        let mut buffer_file = NamedTempFile::new_in(&self.common_paths.tmp)?;
-        message_format::write_message(
-            &mut buffer_file,
+        buffer_message(
             &mut self.key_store,
+            &self.common_paths,
             internal_date,
             data,
-        )?;
-
-        file_ops::chmod(buffer_file.path(), 0o440)?;
-        buffer_file.as_file_mut().sync_all()?;
-        Ok(BufferedMessage(buffer_file.into_temp_path()))
+        )
     }
 
     /// Append the message(s) from the request to the given mailbox.

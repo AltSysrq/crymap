@@ -25,6 +25,7 @@
 //! manageability.
 
 mod defs;
+mod delivery;
 mod expunge;
 mod fetch;
 mod flags;
@@ -37,3 +38,4 @@ mod search;
 mod select;
 
 pub use defs::{Account, Mailbox};
+pub use delivery::DeliveryAccount;

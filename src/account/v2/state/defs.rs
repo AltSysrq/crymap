@@ -316,7 +316,7 @@ impl Mailbox {
 
 #[cfg(test)]
 pub(super) struct TestFixture {
-    _root: tempfile::TempDir,
+    pub(super) root: tempfile::TempDir,
     pub(super) account: Account,
 }
 
@@ -334,10 +334,7 @@ impl TestFixture {
         account.key_store.set_rsa_bits(1024);
         account.provision(b"hunter2").unwrap();
 
-        Self {
-            _root: root,
-            account,
-        }
+        Self { root, account }
     }
 
     pub(super) fn create(&mut self, name: &str) {

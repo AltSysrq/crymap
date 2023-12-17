@@ -20,6 +20,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
 
+use chrono::prelude::*;
 use rusqlite::OptionalExtension as _;
 
 use super::types::*;
@@ -69,17 +70,37 @@ impl Connection {
         Ok(())
     }
 
-    /// Remove and return 1 arbitrary entry from the delivery queue, if any.
+    /// Select, mark as in-flight, and return 1 arbitrary entry from the
+    /// delivery queue, if any.
     pub fn pop_delivery(&mut self) -> Result<Option<Delivery>, Error> {
         self.cxn
             .prepare_cached(
-                "DELETE FROM `delivery` \
-                 WHERE ROWID = (SELECT MIN(ROWID) FROM `delivery`) \
-                 RETURNING *",
+                "UPDATE `delivery` \
+                 SET `delivered` = ?
+                 WHERE ROWID = ( \
+                   SELECT MIN(ROWID) FROM `delivery` WHERE `delivered` IS NULL \
+                 ) RETURNING *",
             )?
-            .query_row((), from_row)
+            .query_row((UnixTimestamp::now(),), from_row)
             .optional()
             .map_err(Into::into)
+    }
+
+    /// Returns whether the given path is an outstanding or in-flight delivery.
+    pub fn is_delivery(&mut self, path: &str) -> Result<bool, Error> {
+        self.cxn
+            .prepare_cached("SELECT 1 FROM `delivery` WHERE `path` = ?")?
+            .exists((path,))
+            .map_err(Into::into)
+    }
+
+    /// Clear old entries from the delivery database.
+    pub fn clear_old_deliveries(&mut self) -> Result<(), Error> {
+        self.cxn.execute(
+            "DELETE FROM `delivery` WHERE `delivered` < ?",
+            (UnixTimestamp(Utc::now() - chrono::Duration::hours(1)),),
+        )?;
+        Ok(())
     }
 }
 
@@ -87,7 +108,6 @@ impl Connection {
 mod test {
     use super::*;
     use crate::account::model::Flag;
-    use chrono::prelude::*;
     use tempfile::TempDir;
 
     #[test]
@@ -111,6 +131,13 @@ mod test {
 
         cxn.queue_delivery(&delivery1).unwrap();
         cxn.queue_delivery(&delivery2).unwrap();
+        assert!(cxn.is_delivery("foo/bar").unwrap());
+        assert!(cxn.is_delivery("baz/quux").unwrap());
+        assert!(!cxn.is_delivery("nonexistent").unwrap());
+
+        cxn.clear_old_deliveries().unwrap();
+        assert!(cxn.is_delivery("foo/bar").unwrap());
+        assert!(cxn.is_delivery("baz/quux").unwrap());
 
         let mut popped = Vec::new();
         popped.push(cxn.pop_delivery().unwrap().unwrap());
@@ -119,5 +146,11 @@ mod test {
 
         assert!(popped.contains(&delivery1));
         assert!(popped.contains(&delivery2));
+
+        assert!(cxn.is_delivery("foo/bar").unwrap());
+        assert!(cxn.is_delivery("baz/quux").unwrap());
+        cxn.clear_old_deliveries().unwrap();
+        assert!(cxn.is_delivery("foo/bar").unwrap());
+        assert!(cxn.is_delivery("baz/quux").unwrap());
     }
 }

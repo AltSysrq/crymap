@@ -38,5 +38,16 @@ CREATE TABLE `delivery` (
   `flags` TEXT NOT NULL,
   -- The SAVEDATE value to set on the message when added to the destination
   -- mailbox.
-  `savedate` INTEGER NOT NULL
+  `savedate` INTEGER NOT NULL,
+  -- If not NULL, some logged in process has attempted delivery of this entry.
+  -- The entry is being kept around so that message recovery can see that the
+  -- delivery is in-flight even if the file is not currently represented in the
+  -- main database.
+  --
+  -- Delivery entries are dropped once this indicates they are too old, opening
+  -- messages that were orphaned by failed delivery to orphan recovery.
+  `delivered` INTEGER
 ) STRICT;
+
+CREATE INDEX `delivery_path` ON `delivery` (`path`);
+CREATE INDEX `delivery_delivered` ON `delivery` (`delivered`);

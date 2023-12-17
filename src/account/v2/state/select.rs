@@ -31,6 +31,10 @@ impl Account {
         writable: bool,
         qresync: Option<&QresyncRequest>,
     ) -> Result<(Mailbox, Option<QresyncResponse>), Error> {
+        // Implicitly drain deliveries before selecting to ensure new messages
+        // show up immediately.
+        self.drain_deliveries();
+
         let mailbox_id = self.metadb.find_mailbox(mailbox)?;
         let snapshot = self.metadb.select(mailbox_id, writable, qresync)?;
         let mailbox = Mailbox {
