@@ -543,10 +543,14 @@ impl<V> Groveller<V> {
             // the next buffer. This is necessary since the next input could be
             // a LF followed by a multipart boundary, in which case this CR
             // must not become part of the child content. We don't need to do
-            // this if the buffer is not full since that indicates we hit EOF.
+            // this if the buffer is not full since that indicates we hit EOL.
             // We also don't need to worry about additional CR bytes before the
             // one we chop off since at this point we know they are not
             // followed by a LF.
+            //
+            // In other words, we're ensuring that we don't split a CRLF pair.
+            // We save the CR so that on the next cycle we either just have
+            // CRLF as a buffer or determine this is an unpaired CR.
             if MAX_BUFFER == buf.len() && Some(&b'\r') == buf.last() {
                 wrapped_cr = true;
                 buf.pop();
