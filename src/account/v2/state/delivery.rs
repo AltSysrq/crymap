@@ -90,6 +90,18 @@ impl DeliveryAccount {
         )
     }
 
+    /// Deliver the given data as a message into the given mailbox with the
+    /// requested flags.
+    pub fn deliver(
+        &mut self,
+        mailbox: &str,
+        flags: &[Flag],
+        data: impl std::io::Read,
+    ) -> Result<(), Error> {
+        let buffered = self.buffer_message(data)?;
+        self.deliver_buffered(mailbox, flags, &buffered)
+    }
+
     /// Deliver the given message into the given mailbox with the requested
     /// flags.
     pub fn deliver_buffered(

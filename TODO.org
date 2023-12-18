@@ -1,4 +1,4 @@
-- LMTP to V2
+- CLI to V2
 - Remove remaining external dependencies on V1
 - V2 maintenance:
   - Orphan cleanup

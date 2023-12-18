@@ -300,6 +300,17 @@ impl Account {
         }
     }
 
+    /// Open the message with the given UID for reading.
+    #[cfg(test)]
+    pub fn open_message_by_uid(
+        &mut self,
+        mb: &Mailbox,
+        uid: Uid,
+    ) -> Result<(MessageMetadata, Box<dyn BufRead>), Error> {
+        let index = mb.uid_index(uid).ok_or(Error::NxMessage)?;
+        self.open_message(mb.messages[index].id)
+    }
+
     /// Open the given raw message ID for reading.
     ///
     /// If the message entry or its backing file is gone, returns

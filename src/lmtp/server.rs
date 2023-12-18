@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -31,11 +31,10 @@ use openssl::ssl::SslAcceptor;
 use super::codes::*;
 use super::syntax::*;
 use crate::account::model::CommonPaths;
-use crate::account::v1::account::Account;
+use crate::account::v2::DeliveryAccount;
 use crate::support::{
     append_limit::APPEND_SIZE_LIMIT,
     buffer::BufferWriter,
-    chronox::*,
     error::Error,
     rcio::RcIo,
     safe_name::is_safe_name,
@@ -668,8 +667,6 @@ impl Server {
 
         let now = Utc::now();
         let smtp_date = now.to_rfc2822();
-        let internal_date =
-            FixedOffset::zero().from_utc_datetime(&now.naive_local());
         let mut data_buffer = mem::replace(
             &mut self.data_buffer,
             BufferWriter::new(Arc::clone(&self.common_paths)),
@@ -750,16 +747,14 @@ impl Server {
                 smtp_date
             );
 
-            let account = Account::new(
+            let result = DeliveryAccount::new(
                 format!("{}:~{}", self.log_prefix, recipient.normalised),
                 user_dir,
-                None,
-            );
-
-            let result = account.mailbox("INBOX", false).and_then(|mb| {
-                mb.append(
-                    internal_date,
-                    vec![],
+            )
+            .and_then(|mut account| {
+                account.deliver(
+                    "INBOX",
+                    &[],
                     message_prefix.as_bytes().chain(&mut data_buffer),
                 )
             });
@@ -773,30 +768,6 @@ impl Server {
                         Cow::Borrowed("OK"),
                     )?;
                 },
-                Err(Error::NxMailbox) => {
-                    self.send_response(
-                        response_kind,
-                        pc::ActionNotTakenTemporary,
-                        Some((cc::TempFail, sc::MailboxDisabled)),
-                        Cow::Borrowed("INBOX seems to be missing"),
-                    )?;
-                },
-                Err(Error::MailboxFull) => {
-                    self.send_response(
-                        response_kind,
-                        pc::ActionNotTakenTemporary,
-                        Some((cc::TempFail, sc::MailboxFull)),
-                        Cow::Borrowed("INBOX is full"),
-                    )?;
-                },
-                Err(Error::GaveUpInsertion) => {
-                    self.send_response(
-                        response_kind,
-                        pc::ActionNotTakenTemporary,
-                        Some((cc::TempFail, sc::MailSystemCongestion)),
-                        Cow::Borrowed("INBOX is too busy"),
-                    )?;
-                },
                 Err(e) => {
                     error!(
                         "{} Unexpected error delivering to {}: {}",
@@ -808,7 +779,7 @@ impl Server {
                         Some((cc::TempFail, sc::OtherMailboxStatus)),
                         Cow::Borrowed(
                             "Unexpected problem accessing INBOX; \
-                                       see LMTP server logs for details",
+                             see LMTP server logs for details",
                         ),
                     )?;
                 },

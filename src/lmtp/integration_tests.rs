@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -33,7 +33,7 @@ use tempfile::TempDir;
 
 use super::server::*;
 use crate::account::model::Uid;
-use crate::account::v1::account::Account;
+use crate::account::v2::Account;
 use crate::crypt::master_key::MasterKey;
 use crate::support::{
     append_limit::APPEND_SIZE_LIMIT, error::Error, rcio::RcIo,
@@ -47,30 +47,31 @@ use crate::support::{
 // The test system has three user accounts: dib, gäz, and zim. One extra,
 // "gir", is created initially but is destroyed by one of the tests.
 lazy_static! {
-    static ref SYSTEM_DIR: Mutex<Weak<TempDir>> = Mutex::new(Weak::new());
+    static ref SYSTEM_DIR: Mutex<Weak<Setup>> = Mutex::new(Weak::new());
 }
 
-#[derive(Clone, Debug)]
 struct Setup {
-    system_dir: Arc<TempDir>,
+    system_dir: TempDir,
+    master_key: Arc<MasterKey>,
 }
 
-fn set_up() -> Setup {
+fn set_up() -> Arc<Setup> {
     crate::init_test_log();
 
     let mut lock = SYSTEM_DIR.lock().unwrap();
 
-    if let Some(system_dir) = lock.upgrade() {
-        return Setup { system_dir };
+    if let Some(setup) = lock.upgrade() {
+        return setup;
     }
 
-    let setup = set_up_new_root();
-    *lock = Arc::downgrade(&setup.system_dir);
+    let setup = Arc::new(set_up_new_root());
+    *lock = Arc::downgrade(&setup);
     setup
 }
 
 fn set_up_new_root() -> Setup {
-    let system_dir = Arc::new(TempDir::new().unwrap());
+    let system_dir = TempDir::new().unwrap();
+    let master_key = Arc::new(MasterKey::new());
 
     vec!["dib", "gäz", "zim", "gir"]
         .into_par_iter()
@@ -78,15 +79,19 @@ fn set_up_new_root() -> Setup {
             let user_dir = system_dir.path().join(user_name);
             fs::create_dir(&user_dir).unwrap();
 
-            let account = Account::new(
+            let mut account = Account::new(
                 "initial-setup".to_owned(),
                 user_dir,
-                Some(Arc::new(MasterKey::new())),
-            );
+                Arc::clone(&master_key),
+            )
+            .unwrap();
             account.provision(b"hunter2").unwrap();
         });
 
-    Setup { system_dir }
+    Setup {
+        system_dir,
+        master_key,
+    }
 }
 
 lazy_static! {
@@ -206,26 +211,21 @@ fn simple_command(cxn: &mut (impl Read + Write), command: &str, prefix: &str) {
 
 /// Return whether the given account received the specified email.
 fn received_email(setup: &Setup, account_name: &str, email: &str) -> bool {
-    let account = Account::new(
+    let mut account = Account::new(
         "verify".to_owned(),
         setup.system_dir.path().join(account_name),
-        None,
-    );
-    let config = account.load_config().unwrap();
-    let master_key =
-        MasterKey::from_config(&config.master_key, b"hunter2").unwrap();
+        Arc::clone(&setup.master_key),
+    )
+    .unwrap();
 
-    let account = Account::new(
-        "verify".to_owned(),
-        setup.system_dir.path().join(account_name),
-        Some(Arc::new(master_key)),
-    );
-
-    let mailbox = account.mailbox("INBOX", true).unwrap();
+    let (mailbox, _) = account.select("INBOX", false, None).unwrap();
+    // An unrelated thread may be processing the delivery we're looking for
+    // right now as part of its own `select()`, so give that time to happen.
+    std::thread::sleep(std::time::Duration::from_millis(250));
     // Messages are always delivered one at a time, so we can just do linear
     // probing until we hit a non-existent UID.
     for uid in 1.. {
-        let mut r = match mailbox.open_message(Uid::u(uid)) {
+        let mut r = match account.open_message_by_uid(&mailbox, Uid::u(uid)) {
             Ok((_, r)) => r,
             Err(Error::NxMessage)
             | Err(Error::UnaddressableMessage)
