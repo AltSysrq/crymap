@@ -768,7 +768,10 @@ impl Server {
                         Cow::Borrowed("OK"),
                     )?;
                 },
+
                 Err(e) => {
+                    // NB In the one test that (normally) gets to this path,
+                    // it's because the user was deliberately deleted.
                     error!(
                         "{} Unexpected error delivering to {}: {}",
                         self.log_prefix, recipient.normalised, e

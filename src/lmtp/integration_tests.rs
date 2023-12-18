@@ -218,27 +218,34 @@ fn received_email(setup: &Setup, account_name: &str, email: &str) -> bool {
     )
     .unwrap();
 
-    let (mailbox, _) = account.select("INBOX", false, None).unwrap();
-    // An unrelated thread may be processing the delivery we're looking for
-    // right now as part of its own `select()`, so give that time to happen.
-    std::thread::sleep(std::time::Duration::from_millis(250));
-    // Messages are always delivered one at a time, so we can just do linear
-    // probing until we hit a non-existent UID.
-    for uid in 1.. {
-        let mut r = match account.open_message_by_uid(&mailbox, Uid::u(uid)) {
-            Ok((_, r)) => r,
-            Err(Error::NxMessage)
-            | Err(Error::UnaddressableMessage)
-            | Err(Error::ExpungedMessage) => return false,
-            Err(e) => panic!("Unexpected error: {}", e),
-        };
+    let (mut mailbox, _) = account.select("INBOX", false, None).unwrap();
+    for _ in 0..5 {
+        // Messages are always delivered one at a time, so we can just do
+        // linear probing until we hit a non-existent UID.
+        for uid in 1.. {
+            let mut r = match account.open_message_by_uid(&mailbox, Uid::u(uid))
+            {
+                Ok((_, r)) => r,
+                Err(Error::NxMessage)
+                | Err(Error::UnaddressableMessage)
+                | Err(Error::ExpungedMessage) => break,
+                Err(e) => panic!("Unexpected error: {}", e),
+            };
 
-        let mut data = Vec::new();
-        r.read_to_end(&mut data).unwrap();
+            let mut data = Vec::new();
+            r.read_to_end(&mut data).unwrap();
 
-        if data.ends_with(email.as_bytes()) {
-            return true;
+            if data.ends_with(email.as_bytes()) {
+                return true;
+            }
         }
+
+        // An unrelated thread may be processing the delivery we're looking for
+        // right now as part of its own `select()`, so give that time to
+        // happen. We retry several times since it can actually take a while
+        // under very high load.
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        account.poll(&mut mailbox).unwrap();
     }
 
     false
