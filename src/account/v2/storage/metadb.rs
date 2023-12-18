@@ -1148,6 +1148,7 @@ impl Connection {
                 updated_messages: Vec::new(),
                 snapshot_modseq,
                 diverged: false,
+                has_pending_expunge: false,
             });
         }
 
@@ -1203,6 +1204,7 @@ impl Connection {
             updated_messages,
             snapshot_modseq: new_snapshot_modseq,
             diverged,
+            has_pending_expunge: delayed_expunge_modseq.is_some(),
         })
     }
 
@@ -3760,6 +3762,7 @@ mod test {
                 },],
                 snapshot_modseq: baseline_modseq,
                 diverged: true,
+                has_pending_expunge: true,
             },
             mini_poll,
         );
@@ -3849,6 +3852,7 @@ mod test {
                 updated_messages: vec![],
                 snapshot_modseq: baseline_modseq,
                 diverged: true,
+                has_pending_expunge: true,
             },
             mini_poll,
         );
@@ -3908,6 +3912,7 @@ mod test {
                 },],
                 snapshot_modseq: after_insert_msg4,
                 diverged: true,
+                has_pending_expunge: true,
             },
             mini_poll,
         );
@@ -3934,6 +3939,7 @@ mod test {
                 },],
                 snapshot_modseq: after_msg3_flags,
                 diverged: false,
+                has_pending_expunge: false,
             },
             mini_poll,
         );
@@ -3955,6 +3961,7 @@ mod test {
                 updated_messages: vec![],
                 snapshot_modseq: Modseq::MIN,
                 diverged: true,
+                has_pending_expunge: true,
             },
             mini_poll,
         );

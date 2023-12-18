@@ -61,6 +61,8 @@ pub struct Mailbox {
     pub(super) snapshot_modseq: Modseq,
     /// The last `HIGHESTMODSEQ` reported by a full `poll` operation.
     pub(super) polled_snapshot_modseq: Modseq,
+    /// Whether there is an unreported expunge in the backing store.
+    pub(super) has_pending_expunge: bool,
     /// The `UIDNEXT` value. This is an exclusive upper bound on the UIDs that
     /// may be present in the mailbox snapshot.
     pub(super) next_uid: Uid,
@@ -111,6 +113,35 @@ impl Account {
 }
 
 impl Mailbox {
+    pub fn snapshot_modseq(&self) -> Modseq {
+        self.snapshot_modseq
+    }
+
+    pub fn has_pending_expunge(&self) -> bool {
+        self.has_pending_expunge
+    }
+
+    pub fn max_seqnum(&self) -> Seqnum {
+        Seqnum::from_index(self.messages.len().saturating_sub(1))
+    }
+
+    pub fn next_uid(&self) -> Uid {
+        self.next_uid
+    }
+
+    pub fn read_only(&self) -> bool {
+        !self.writable
+    }
+
+    pub fn rfc8474_mailbox_id(&self) -> String {
+        self.id.format_rfc8474()
+    }
+
+    /// Add the given UIDs into the internal pool of UIDs to be fetched later.
+    pub fn add_changed_uids(&mut self, uids: impl Iterator<Item = Uid>) {
+        self.changed_flags_uids.extend(uids);
+    }
+
     pub(super) fn require_writable(&self) -> Result<(), Error> {
         if self.writable {
             Ok(())
@@ -212,7 +243,7 @@ impl Mailbox {
     ///
     /// If `silent` is true, errors will be silently swallowed and the call
     /// never fails. Otherwise, a non-existent `Uid` results in `NxMessage`.
-    pub(super) fn uid_range_to_seqnum(
+    pub fn uid_range_to_seqnum(
         &self,
         uids: &SeqRange<Uid>,
         silent: bool,

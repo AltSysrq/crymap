@@ -94,7 +94,7 @@ fn append_uid() {
          Some(s::RespTextCode::AppendUid(data)), _) =
             responses.into_iter().next().unwrap() => data
     };
-    assert_eq!("256:257", data.uids);
+    assert_eq!("1:2", data.uids);
 
     command!(responses = client, c("SELECT 4315appu"));
     has_untagged_response_matching! {
@@ -125,7 +125,7 @@ fn copy_uid() {
          Some(s::RespTextCode::CopyUid(data)), _) = response => data
     };
     assert_eq!("1,3", data.from_uids);
-    assert_eq!("256:257", data.to_uids);
+    assert_eq!("1:2", data.to_uids);
 
     command!(responses = client, c("SELECT 4315copu/dst"));
     has_untagged_response_matching! {

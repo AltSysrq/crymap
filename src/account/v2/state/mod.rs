@@ -36,9 +36,12 @@ mod messages;
 mod poll;
 mod search;
 mod select;
+mod user_config;
 
 #[cfg(feature = "dev-tools")]
 mod zstd_train;
 
 pub use defs::{Account, Mailbox};
 pub use delivery::DeliveryAccount;
+pub use fetch::FetchReceiver;
+pub use idle::{IdleListener, IdleNotifier};

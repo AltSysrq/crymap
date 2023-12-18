@@ -61,6 +61,7 @@ impl Account {
 
         mailbox.flags.append(&mut mini_poll.new_flags);
         mailbox.snapshot_modseq = mini_poll.snapshot_modseq;
+        mailbox.has_pending_expunge = mini_poll.has_pending_expunge;
         mailbox.merge_message_updates(mini_poll.updated_messages);
 
         Ok(MiniPollResponse {
@@ -111,6 +112,7 @@ impl Account {
         mailbox.flags.append(&mut poll.new_flags);
         mailbox.snapshot_modseq = poll.snapshot_modseq;
         mailbox.polled_snapshot_modseq = poll.snapshot_modseq;
+        mailbox.has_pending_expunge = false;
         mailbox.merge_message_updates(poll.updated_messages);
         mailbox.next_uid = poll.next_uid;
         let mut changed_uids = mailbox.take_changed_flags_uids();

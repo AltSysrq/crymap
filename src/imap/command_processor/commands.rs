@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020 Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -23,7 +23,7 @@ use log::{error, info};
 
 use super::defs::*;
 use crate::account::model::SeqRange;
-use crate::account::v1::mailbox::IdleListener;
+use crate::account::v2::IdleListener;
 use crate::support::error::Error;
 
 impl CommandProcessor {
@@ -108,6 +108,14 @@ impl CommandProcessor {
             s::Command::Simple(s::SimpleCommand::Unselect) => {
                 self.cmd_unselect(sender)
             },
+            s::Command::Simple(s::SimpleCommand::XCryFlagsOff) => {
+                self.flag_responses_enabled = false;
+                success()
+            },
+            s::Command::Simple(s::SimpleCommand::XCryFlagsOn) => {
+                self.flag_responses_enabled = true;
+                success()
+            },
             s::Command::Simple(s::SimpleCommand::XCryPurge) => {
                 self.cmd_xcry_purge()
             },
@@ -188,7 +196,11 @@ impl CommandProcessor {
             // If an error occurred and we have a selected mailbox, check that
             // the mailbox still exists. If not, disconnect the client instead
             // of letting them continue to flail in confusion.
-            if !selected.stateless().is_ok() {
+            if !self
+                .account
+                .as_mut()
+                .is_some_and(|a| a.is_usable_mailbox(selected))
+            {
                 return s::ResponseLine {
                     tag: None,
                     response: s::Response::Cond(s::CondResponse {
@@ -215,9 +227,7 @@ impl CommandProcessor {
             {
                 if s::RespCondType::Ok == cr.cond && cr.code.is_none() {
                     cr.code = Some(s::RespTextCode::HighestModseq(
-                        selected
-                            .report_max_modseq()
-                            .map_or(1, |m| m.raw().get()),
+                        selected.snapshot_modseq().raw(),
                     ));
                 }
             }
@@ -344,10 +354,8 @@ impl CommandProcessor {
 
         self.condstore_enabled = true;
 
-        let highest_modseq = self
-            .selected
-            .as_ref()
-            .map(|s| s.report_max_modseq().map_or(1, |m| m.raw().get()));
+        let highest_modseq =
+            self.selected.as_ref().map(|s| s.snapshot_modseq().raw());
 
         // Only send an untagged OK if there's something interesting to say
         if implicit || highest_modseq.is_some() {
@@ -492,10 +500,11 @@ impl CommandProcessor {
 
     #[cfg(feature = "dev-tools")]
     fn cmd_xcry_zstd_train(&mut self) -> CmdResult {
-        use crate::support::chronox::*;
         use chrono::prelude::*;
 
-        let data = selected!(self)?.zstd_train().map_err(map_error!(self))?;
+        let data = account!(self)?
+            .zstd_train(selected!(self)?)
+            .map_err(map_error!(self))?;
         let data = base64::encode(&data);
         let mut wrapped_data = String::new();
         for chunk in data.as_bytes().chunks(72) {
@@ -531,11 +540,9 @@ Content-Transfer-Encoding: base64
         );
 
         account!(self)?
-            .mailbox("INBOX", false)
-            .map_err(map_error!(self))?
             .append(
-                FixedOffset::zero()
-                    .from_utc_datetime(&Utc::now().naive_local()),
+                "INBOX",
+                Utc::now().into(),
                 vec![],
                 message.replace('\n', "\r\n").as_bytes(),
             )
@@ -545,12 +552,17 @@ Content-Transfer-Encoding: base64
     }
 
     fn full_poll(&mut self, sender: SendResponse<'_>) -> Result<(), Error> {
-        let selected = match self.selected.as_mut() {
-            Some(s) => s,
-            None => return Ok(()),
+        let Some(ref mut account) = self.account else {
+            return Ok(());
         };
 
-        let poll = selected.poll()?;
+        account.drain_deliveries();
+
+        let Some(ref mut selected) = self.selected.as_mut() else {
+            return Ok(());
+        };
+
+        let poll = account.poll(selected)?;
         if self.qresync_enabled {
             if !poll.expunge.is_empty() {
                 let mut sr = SeqRange::new();
@@ -594,15 +606,18 @@ Content-Transfer-Encoding: base64
     }
 
     fn mini_poll(&mut self, sender: SendResponse<'_>) -> Result<(), Error> {
-        let selected = match self.selected.as_mut() {
-            Some(s) => s,
-            None => return Ok(()),
+        let Some(ref mut account) = self.account else {
+            return Ok(());
         };
-        let uids = selected.mini_poll();
-        let uids_empty = uids.is_empty();
-        let divergent_modseq = selected.divergent_modseq();
 
-        self.fetch_for_background_update(sender, uids);
+        let Some(ref mut selected) = self.selected else {
+            return Ok(());
+        };
+
+        let poll = account.mini_poll(selected)?;
+        let uids_empty = poll.fetch.is_empty();
+
+        self.fetch_for_background_update(sender, poll.fetch);
 
         // If the true max modseq is not the same as the reported max modseq,
         // we need to also send a HIGHESTMODSEQ response (after the fetches
@@ -610,11 +625,11 @@ Content-Transfer-Encoding: base64
         // on looking at the FETCH responses, since the value from FETCH could
         // be greater than of an expungement the client hasn't seen.
         if !uids_empty && self.condstore_enabled {
-            if let Some(divergent_modseq) = divergent_modseq {
+            if let Some(divergent_modseq) = poll.divergent_modseq {
                 sender(s::Response::Cond(s::CondResponse {
                     cond: s::RespCondType::Ok,
                     code: Some(s::RespTextCode::HighestModseq(
-                        divergent_modseq.raw().get(),
+                        divergent_modseq.raw(),
                     )),
                     quip: Some(Cow::Borrowed("Snapshot diverged from reality")),
                 }));
@@ -650,19 +665,21 @@ Content-Transfer-Encoding: base64
         let mut before_first_idle = Some(before_first_idle);
 
         let result = loop {
-            let selected = match selected!(self) {
-                Ok(s) => s,
+            let account = match account!(self) {
+                Ok(a) => a,
                 Err(e) => break Err(e),
             };
 
-            let listener = match selected
-                .stateless()
-                .prepare_idle()
-                .map_err(map_error!(self))
-            {
-                Ok(l) => l,
-                Err(e) => break Err(e),
+            // Ensure a mailbox is actually selected before we even start.
+            if let Err(e) = selected!(self) {
+                break Err(e);
             };
+
+            let listener =
+                match account.prepare_idle().map_err(map_error!(self)) {
+                    Ok(l) => l,
+                    Err(e) => break Err(e),
+                };
 
             if let Err(e) = self.full_poll(sender).map_err(map_error!(self)) {
                 break Err(e);
@@ -682,11 +699,11 @@ Content-Transfer-Encoding: base64
                 break Ok(());
             }
 
-            if let Err(e) = listener
-                .idle()
-                .map_err(Error::from)
-                .map_err(map_error!(self))
-            {
+            let account = match account!(self) {
+                Ok(a) => a,
+                Err(e) => break Err(e),
+            };
+            if let Err(e) = account.idle(listener).map_err(map_error!(self)) {
                 break Err(e);
             }
         };
@@ -702,11 +719,11 @@ Content-Transfer-Encoding: base64
             } else {
                 // We sent a continuation line. We're not allowed to return any
                 // tagged response, so die instead.
-                let response = if self
-                    .selected
-                    .as_ref()
-                    .map_or(true, |s| s.stateless().is_ok())
-                {
+                let response = if self.account.as_mut().is_some_and(|a| {
+                    self.selected
+                        .as_ref()
+                        .is_some_and(|s| a.is_usable_mailbox(s))
+                }) {
                     s::Response::Cond(s::CondResponse {
                         cond: s::RespCondType::Bye,
                         code: Some(s::RespTextCode::ServerBug(())),

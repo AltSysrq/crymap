@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -23,9 +23,9 @@ use chrono::prelude::*;
 
 use super::defs::*;
 use crate::account::model::*;
-use crate::account::v1::mailbox::{StatefulMailbox, StatelessMailbox};
+use crate::account::v2::{Account, Mailbox};
 use crate::imap::mailbox_name::MailboxName;
-use crate::support::{chronox::*, error::Error};
+use crate::support::error::Error;
 
 impl CommandProcessor {
     /// Start an append command.
@@ -45,20 +45,19 @@ impl CommandProcessor {
         item_data: impl Read,
     ) -> PartialResult<()> {
         let mailbox = cmd.mailbox.get_utf8(self.unicode_aware);
-        let dst =
-            account!(self)?
-                .mailbox(&mailbox, false)
-                .map_err(map_error! {
-                    self,
-                    NxMailbox =>
-                        (No, Some(s::RespTextCode::TryCreate(()))),
-                    MailboxUnselectable =>
-                        (No, Some(s::RespTextCode::Nonexistent(()))),
-                    UnsafeName =>
-                        (No, Some(s::RespTextCode::Cannot(()))),
-                })?;
+        account!(self)?
+            .probe_mailbox(&mailbox)
+            .map_err(map_error! {
+                self,
+                NxMailbox =>
+                    (No, Some(s::RespTextCode::TryCreate(()))),
+                MailboxUnselectable =>
+                    (No, Some(s::RespTextCode::Nonexistent(()))),
+                UnsafeName =>
+                    (No, Some(s::RespTextCode::Cannot(()))),
+            })?;
         self.multiappend = Some(Multiappend {
-            dst,
+            dst: mailbox.into_owned(),
             request: AppendRequest { items: vec![] },
         });
         self.cmd_append_item(cmd.first_fragment, item_size, item_data)
@@ -106,13 +105,9 @@ impl CommandProcessor {
             }));
         }
 
-        let buffered = append
-            .dst
+        let buffered = account!(self)?
             .buffer_message(
-                cmd.internal_date.unwrap_or_else(|| {
-                    FixedOffset::zero()
-                        .from_utc_datetime(&Utc::now().naive_local())
-                }),
+                cmd.internal_date.unwrap_or_else(|| Utc::now().into()),
                 item_data,
             )
             .map_err(map_error!(self))?;
@@ -129,16 +124,21 @@ impl CommandProcessor {
         tag: Cow<'static, str>,
         sender: SendResponse<'_>,
     ) -> s::ResponseLine<'static> {
+        let account = account!(self)
+            .expect("APPEND couldn't have started if there were no account");
+
         let append = self
             .multiappend
             .take()
             .expect("cmd_append_commit with no append in progress");
         let response =
-            match append.dst.multiappend(append.request).map_err(map_error! {
+            match account.multiappend(&append.dst, append.request).map_err(map_error! {
                 self,
                 MailboxFull => (No, Some(s::RespTextCode::Limit(()))),
                 GaveUpInsertion => (No, Some(s::RespTextCode::Unavailable(()))),
                 BatchTooBig => (No, Some(s::RespTextCode::Limit(()))),
+                NxMailbox => (No, Some(s::RespTextCode::TryCreate(()))),
+                MailboxUnselectable => (No, Some(s::RespTextCode::Nonexistent(()))),
             }) {
                 Ok(appended) => appended,
                 Err(response) => {
@@ -182,10 +182,12 @@ impl CommandProcessor {
     ) -> CmdResult {
         // As with NOOP, the unsolicited responses that go with this are part
         // of the natural poll cycle.
-        selected!(self)?.expunge_all_deleted().map_err(map_error! {
-            self,
-            MailboxReadOnly => (No, Some(s::RespTextCode::Cannot(()))),
-        })?;
+        account!(self)?
+            .expunge_all_deleted(selected!(self)?)
+            .map_err(map_error! {
+                self,
+                MailboxReadOnly => (No, Some(s::RespTextCode::Cannot(()))),
+            })?;
         success()
     }
 
@@ -195,8 +197,8 @@ impl CommandProcessor {
         _sender: SendResponse<'_>,
     ) -> CmdResult {
         let uids = self.parse_uid_range(&uids)?;
-        selected!(self)?
-            .expunge_deleted(&uids)
+        account!(self)?
+            .expunge_deleted(selected!(self)?, &uids)
             .map_err(map_error! {
                 self,
                 MailboxReadOnly =>
@@ -220,7 +222,7 @@ impl CommandProcessor {
         _sender: SendResponse<'_>,
     ) -> CmdResult {
         let uids = self.parse_uid_range(&uids)?;
-        selected!(self)?.vanquish(&uids).map_err(map_error! {
+        account!(self)?.vanquish(selected!(self)?, &uids).map_err(map_error! {
             self,
             MailboxReadOnly => (No, Some(s::RespTextCode::Cannot(()))),
             NxMessage => (No, Some(s::RespTextCode::Nonexistent(()))),
@@ -230,7 +232,7 @@ impl CommandProcessor {
     }
 
     pub(super) fn cmd_xcry_purge(&mut self) -> CmdResult {
-        let n = selected!(self)?.purge_all();
+        let n = account!(self)?.purge_all().map_err(map_error!(self))?;
         Ok(s::Response::Cond(s::CondResponse {
             cond: s::RespCondType::Ok,
             code: None,
@@ -250,7 +252,7 @@ impl CommandProcessor {
             request,
             sender,
             false,
-            StatefulMailbox::seqnum_copy,
+            Account::seqnum_copy,
         )
     }
 
@@ -266,7 +268,7 @@ impl CommandProcessor {
             request,
             sender,
             true,
-            StatefulMailbox::seqnum_moove,
+            Account::seqnum_moove,
         )
     }
 
@@ -277,13 +279,7 @@ impl CommandProcessor {
     ) -> CmdResult {
         let messages = self.parse_uid_range(&cmd.messages)?;
         let request = CopyRequest { ids: messages };
-        self.copy_or_move(
-            &cmd.dst,
-            request,
-            sender,
-            false,
-            StatefulMailbox::copy,
-        )
+        self.copy_or_move(&cmd.dst, request, sender, false, Account::copy)
     }
 
     pub(super) fn cmd_uid_move(
@@ -293,13 +289,7 @@ impl CommandProcessor {
     ) -> CmdResult {
         let messages = self.parse_uid_range(&cmd.messages)?;
         let request = CopyRequest { ids: messages };
-        self.copy_or_move(
-            &cmd.dst,
-            request,
-            sender,
-            true,
-            StatefulMailbox::moove,
-        )
+        self.copy_or_move(&cmd.dst, request, sender, true, Account::moove)
     }
 
     fn copy_or_move<T>(
@@ -309,28 +299,17 @@ impl CommandProcessor {
         sender: SendResponse<'_>,
         copyuid_in_separate_response: bool,
         f: impl FnOnce(
-            &mut StatefulMailbox,
+            &mut Account,
+            &Mailbox,
             &T,
-            &StatelessMailbox,
+            &str,
         ) -> Result<CopyResponse, Error>,
     ) -> CmdResult {
         let account = account!(self)?;
-        // Fail fast if nothing is selected
-        let _ = selected!(self)?;
+        let selected = selected!(self)?;
 
         let dst = dst.get_utf8(self.unicode_aware);
-        let dst = account.mailbox(&dst, false).map_err(map_error! {
-            self,
-            NxMailbox =>
-                (No, Some(s::RespTextCode::TryCreate(()))),
-            UnsafeName =>
-                (No, Some(s::RespTextCode::Cannot(()))),
-            MailboxUnselectable =>
-                (No, Some(s::RespTextCode::Nonexistent(()))),
-        })?;
-
-        let selected = selected!(self)?;
-        let response = f(selected, &request, &dst).map_err(map_error! {
+        let response = f(account, selected, &request, &dst).map_err(map_error! {
             self,
             MailboxFull => (No, Some(s::RespTextCode::Limit(()))),
             NxMessage => (No, Some(s::RespTextCode::Nonexistent(()))),
@@ -338,7 +317,18 @@ impl CommandProcessor {
             GaveUpInsertion => (No, Some(s::RespTextCode::Unavailable(()))),
             UnaddressableMessage => (No, Some(s::RespTextCode::ClientBug(()))),
             BatchTooBig => (No, Some(s::RespTextCode::Limit(()))),
+            NxMailbox => (No, Some(s::RespTextCode::TryCreate(()))),
+            MailboxUnselectable => (No, Some(s::RespTextCode::Nonexistent(()))),
+            MoveIntoSelf => (No, Some(s::RespTextCode::Cannot(()))),
         })?;
+
+        if response.from_uids.is_empty() {
+            return Ok(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::No,
+                code: None,
+                quip: Some(Cow::Borrowed("No messages matched")),
+            }));
+        }
 
         let mut copyuid_code = Some(s::RespTextCode::CopyUid(s::CopyUidData {
             uid_validity: response.uid_validity,

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -35,7 +35,7 @@ fn basic_success() {
     };
     has_untagged_response_matching! {
         s::Response::Flags(ref flags) in responses => {
-            assert_eq!(5, flags.len());
+            assert!(flags.len() >= 5);
         }
     };
     has_untagged_response_matching! {
@@ -57,7 +57,7 @@ fn basic_success() {
             code: Some(s::RespTextCode::PermanentFlags(ref flags)),
             ..
         }) in responses => {
-            assert_eq!(5, flags.len());
+            assert!(flags.len() >= 5);
         }
     };
     has_untagged_response_matching! {
@@ -82,7 +82,7 @@ fn basic_success() {
     };
     has_untagged_response_matching! {
         s::Response::Flags(ref flags) in responses => {
-            assert_eq!(5, flags.len());
+            assert!(flags.len() >= 5);
         }
     };
     has_untagged_response_matching! {
@@ -105,7 +105,7 @@ fn basic_success() {
             code: Some(s::RespTextCode::PermanentFlags(ref flags)),
             ..
         }) in responses => {
-            assert_eq!(5, flags.len());
+            assert!(flags.len() >= 5);
         }
     };
     has_untagged_response_matching! {
@@ -237,8 +237,8 @@ fn error_conditions() {
     command!([response] = client, c("SELECT ../foo"));
     assert_error_response(
         response,
-        Some(s::RespTextCode::Cannot(())),
-        Error::UnsafeName,
+        Some(s::RespTextCode::Nonexistent(())),
+        Error::NxMailbox,
     );
 
     command!([response] = client, c("SELECT \"\""));

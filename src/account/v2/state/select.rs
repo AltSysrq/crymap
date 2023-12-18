@@ -20,6 +20,17 @@ use super::defs::*;
 use crate::{account::model::*, support::error::Error};
 
 impl Account {
+    /// Probe for the given mailbox, returning the error `select` would if
+    /// anything would obviously go wrong.
+    pub fn probe_mailbox(&mut self, mailbox: &str) -> Result<(), Error> {
+        let mailbox_id = self.metadb.find_mailbox(mailbox)?;
+        if !self.metadb.fetch_mailbox(mailbox_id)?.selectable {
+            return Err(Error::MailboxUnselectable);
+        }
+
+        Ok(())
+    }
+
     /// Perform a `SELECT` or `EXAMINE` of the given mailbox, with an optional
     /// fused `QRESYNC` operation.
     ///
@@ -53,6 +64,7 @@ impl Account {
             flags: snapshot.flags,
             snapshot_modseq: snapshot.max_modseq,
             polled_snapshot_modseq: snapshot.max_modseq,
+            has_pending_expunge: false,
             next_uid: snapshot.next_uid,
             changed_flags_uids: Vec::new(),
             fetch_loopbreaker: Default::default(),

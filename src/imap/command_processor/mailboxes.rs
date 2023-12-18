@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -29,14 +29,11 @@ use crate::support::error::Error;
 impl CommandProcessor {
     pub(super) fn cmd_close(&mut self, _sender: SendResponse<'_>) -> CmdResult {
         {
+            let account = account!(self)?;
             let selected = selected!(self)?;
-            if !selected.stateless().read_only() {
-                if let Err(e) = selected.expunge_all_deleted() {
-                    warn!(
-                        "{} Implicit EXPUNGE failed: {}",
-                        selected.stateless().log_prefix(),
-                        e
-                    );
+            if !selected.read_only() {
+                if let Err(e) = account.expunge_all_deleted(selected) {
+                    warn!("{} Implicit EXPUNGE failed: {}", self.log_prefix, e);
                 }
             }
         }
@@ -215,12 +212,12 @@ impl CommandProcessor {
                     // if anything goes wrong. However, we're still required to
                     // handle the case where the mailbox was deleted between
                     // getting the list response and STATUS.
-                    if !self
-                        .account
-                        .as_ref()
-                        .and_then(|a| a.mailbox_path(&response.name).ok())
-                        .map_or(true, |mbp| mbp.is_selectable())
-                    {
+                    if self.account.as_mut().is_some_and(|account| {
+                        matches!(
+                            account.probe_mailbox(&response.name),
+                            Err(Error::MailboxUnselectable | Error::NxMailbox),
+                        )
+                    }) {
                         response.attributes.push(MailboxAttribute::Noselect);
                     }
                     None
@@ -603,31 +600,18 @@ impl CommandProcessor {
         }
 
         let mailbox = mailbox.get_utf8(self.unicode_aware);
-        let stateless = account!(self)?.mailbox(&mailbox, read_only).map_err(
-            map_error! {
-                self,
-                NxMailbox | MailboxUnselectable =>
-                    (No, Some(s::RespTextCode::Nonexistent(()))),
-                UnsafeName =>
-                    (No, Some(s::RespTextCode::Cannot(()))),
-            },
-        )?;
-        let mailbox_id = stateless.path().mailbox_id().map_err(map_error! {
-            self,
-            NxMailbox | MailboxUnselectable =>
-                (No, Some(s::RespTextCode::Nonexistent(()))),
-            UnsafeName =>
-                (No, Some(s::RespTextCode::Cannot(()))),
-        })?;
-
-        let (mut stateful, select) =
-            stateless.select().map_err(map_error! {
+        let (mut stateful, qresync_response) = account!(self)?
+            .select(&mailbox, !read_only, qresync.as_ref())
+            .map_err(map_error! {
                 self,
                 NxMailbox | MailboxUnselectable =>
                     (No, Some(s::RespTextCode::Nonexistent(()))),
                 UnsafeName =>
                     (No, Some(s::RespTextCode::Cannot(()))),
             })?;
+        let select = stateful.select_response().map_err(map_error!(self))?;
+        let mailbox_id = stateful.rfc8474_mailbox_id();
+
         sender(s::Response::Flags(select.flags.clone()));
         sender(s::Response::Cond(s::CondResponse {
             cond: s::RespCondType::Ok,
@@ -672,9 +656,7 @@ impl CommandProcessor {
             }));
         }
 
-        if let Some(qresync) = qresync {
-            let response =
-                stateful.qresync(qresync).map_err(map_error!(self))?;
+        if let Some(response) = qresync_response {
             if !response.expunged.is_empty() {
                 sender(s::Response::Vanished(s::VanishedResponse {
                     earlier: true,
@@ -683,9 +665,10 @@ impl CommandProcessor {
             }
             // The FETCH responses, if any, are handled by the poll cycle at
             // the end of the SELECT.
+            stateful.add_changed_uids(response.changed.into_iter());
         }
 
-        let read_only = stateful.stateless().read_only();
+        let read_only = stateful.read_only();
         self.selected = Some(stateful);
 
         Ok(s::Response::Cond(s::CondResponse {

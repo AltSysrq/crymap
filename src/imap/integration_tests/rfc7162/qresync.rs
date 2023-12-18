@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -139,8 +139,12 @@ fn qresync_select() {
 
     // A request with modseq 1 would normally dump all expunges from all time,
     // since it predates the first expunge we remember. However, the optional
-    // fourth parameter lets us provide enough correlation to the server for it
-    // to figure out that we already know about 3's demise.
+    // fourth parameter could provide the server enough correlation to the
+    // server for it to figure out that we already know about 3's demise.
+    // However, since the server knows it remembers all expunges, it doesn't
+    // use that list, and instead tells us about all expunges. (Since the
+    // client is *supposed* to provide a matching modseq and correspondence
+    // table.)
     command!(mut responses = client, cb(&format!(
         "SELECT 7162qrqs (QRESYNC ({} 1 (1,3,9 1,4,10)))",
         uid_validity,
@@ -149,7 +153,7 @@ fn qresync_select() {
     has_untagged_response_matching! {
         s::Response::Vanished(ref vr) in responses => {
             assert!(vr.earlier);
-            assert_eq!("7", &vr.uids);
+            assert_eq!("3,7", &vr.uids);
         }
     };
     has_untagged_response_matching! {

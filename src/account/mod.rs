@@ -27,4 +27,4 @@ pub mod model;
 mod search_backend;
 
 pub mod v1;
-mod v2;
+pub mod v2;

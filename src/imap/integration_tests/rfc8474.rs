@@ -101,7 +101,7 @@ fn mailbox_ids() {
 }
 
 #[test]
-fn inbox_rename_doesnt_preserve_mailbox_id() {
+fn inbox_rename_vs_mailbox_id() {
     // Need to use a unique root since we'll be destroying INBOX
     let setup = set_up_new_root();
     let mut client = setup.connect("8474reni");
@@ -130,7 +130,7 @@ fn inbox_rename_doesnt_preserve_mailbox_id() {
             code: Some(s::RespTextCode::MailboxId(ref id)),
             quip: _,
         }) in responses => {
-            assert_ne!(inbox_id, *id);
+            assert_eq!(inbox_id, *id);
         }
     };
 

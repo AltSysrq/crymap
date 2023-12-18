@@ -28,6 +28,14 @@ use crate::{
 };
 
 impl Account {
+    /// Return whether the given `Mailbox` is still usable.
+    pub fn is_usable_mailbox(&mut self, mb: &Mailbox) -> bool {
+        self.metadb
+            .fetch_mailbox(mb.id)
+            .ok()
+            .is_some_and(|m| m.selectable)
+    }
+
     /// The RFC 3501 `CREATE` command.
     ///
     /// Returns the RFC 8474 `MAILBOXID` of the new mailbox.

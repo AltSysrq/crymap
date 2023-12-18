@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -20,7 +20,10 @@ use std::borrow::Cow;
 use std::fmt;
 
 use super::defs::*;
-use crate::account::{model::*, v1::mailbox::StatefulMailbox};
+use crate::account::{
+    model::*,
+    v2::{Account, Mailbox},
+};
 use crate::support::error::Error;
 
 impl CommandProcessor {
@@ -30,7 +33,7 @@ impl CommandProcessor {
         sender: SendResponse<'_>,
     ) -> CmdResult {
         let ids = self.parse_seqnum_range(&cmd.messages)?;
-        self.store(ids, cmd, sender, StatefulMailbox::seqnum_store)
+        self.store(ids, cmd, sender, Account::seqnum_store)
     }
 
     pub(crate) fn cmd_uid_store(
@@ -39,7 +42,7 @@ impl CommandProcessor {
         sender: SendResponse<'_>,
     ) -> CmdResult {
         let ids = self.parse_uid_range(&cmd.messages)?;
-        self.store(ids, cmd, sender, StatefulMailbox::store)
+        self.store(ids, cmd, sender, Account::store)
     }
 
     fn store<ID>(
@@ -48,7 +51,8 @@ impl CommandProcessor {
         cmd: s::StoreCommand<'_>,
         sender: SendResponse<'_>,
         f: impl FnOnce(
-            &mut StatefulMailbox,
+            &mut Account,
+            &mut Mailbox,
             &StoreRequest<ID>,
         ) -> Result<StoreResponse<ID>, Error>,
     ) -> CmdResult
@@ -68,7 +72,7 @@ impl CommandProcessor {
             unchanged_since: cmd.unchanged_since.map(Modseq::of),
         };
 
-        let resp = f(selected!(self)?, &request).map_err(map_error! {
+        let resp = f(account!(self)?, selected!(self)?, &request).map_err(map_error! {
             self,
             MailboxFull => (No, Some(s::RespTextCode::Limit(()))),
             NxMessage => (No, Some(s::RespTextCode::Nonexistent(()))),
@@ -78,19 +82,7 @@ impl CommandProcessor {
             GaveUpInsertion => (No, Some(s::RespTextCode::Unavailable(()))),
         })?;
 
-        fn expunged_response() -> s::Response<'static> {
-            s::Response::Cond(s::CondResponse {
-                cond: s::RespCondType::No,
-                code: Some(s::RespTextCode::ExpungeIssued(())),
-                quip: Some(Cow::Borrowed("Some messages have been expunged")),
-            })
-        }
-
         if !resp.modified.is_empty() {
-            if !resp.ok {
-                sender(expunged_response());
-            }
-
             Ok(s::Response::Cond(s::CondResponse {
                 cond: if resp.ok {
                     s::RespCondType::Ok
@@ -105,7 +97,11 @@ impl CommandProcessor {
         } else if resp.ok {
             success()
         } else {
-            Ok(expunged_response())
+            Ok(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::No,
+                code: None,
+                quip: Some(Cow::Borrowed("No messages matched")),
+            }))
         }
     }
 }

@@ -25,7 +25,7 @@ use std::sync::Arc;
 use log::{info, warn};
 
 use super::defs::*;
-use crate::account::v1::account::{account_config_file, Account};
+use crate::account::v2::{account_config_file, Account};
 use crate::crypt::master_key::MasterKey;
 use crate::support::{
     safe_name::is_safe_name, unix_privileges, user_config::UserConfig,
@@ -204,11 +204,12 @@ impl CommandProcessor {
 
         self.drop_privileges(&mut user_dir)?;
 
-        let account = Account::new(
+        let mut account = Account::new(
             self.log_prefix.clone(),
             user_dir,
-            Some(Arc::new(master_key)),
-        );
+            Arc::new(master_key),
+        )
+        .map_err(map_error!(self))?;
         account
             .init(&user_config.key_store)
             .map_err(map_error!(self))?;

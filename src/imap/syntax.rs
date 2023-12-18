@@ -1760,6 +1760,8 @@ simple_enum! {
         LogOut("LOGOUT"),
         Noop("NOOP"),
         StartTls("STARTTLS"),
+        XCryFlagsOff("XCRY FLAGS OFF"),
+        XCryFlagsOn("XCRY FLAGS ON"),
         XCryGetUserConfig("XCRY GET-USER-CONFIG"),
         XCryPurge("XCRY PURGE"),
         XCryZstdTrain("XCRY ZSTD TRAIN"),

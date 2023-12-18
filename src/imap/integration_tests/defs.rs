@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -29,7 +29,7 @@ use regex::bytes::Regex;
 use tempfile::TempDir;
 
 use crate::account::model::Flag;
-use crate::account::v1::account::Account;
+use crate::account::v2::Account;
 use crate::crypt::master_key::MasterKey;
 use crate::imap::client::Client;
 use crate::imap::command_processor::CommandProcessor;
@@ -69,11 +69,12 @@ pub fn set_up_new_root() -> Setup {
     let user_dir = system_dir.path().join("azure");
     fs::create_dir(&user_dir).unwrap();
 
-    let account = Account::new(
+    let mut account = Account::new(
         "initial-setup".to_owned(),
         user_dir,
-        Some(Arc::new(MasterKey::new())),
-    );
+        Arc::new(MasterKey::new()),
+    )
+    .unwrap();
     account.provision(b"hunter2").unwrap();
 
     Setup { system_dir }
@@ -154,6 +155,9 @@ pub fn quick_log_in(client: &mut PipeClient) {
         .unwrap();
 
     assert_eq!(1, responses.len());
+
+    // Disable flags responses by default to prevent test cross-talk.
+    ok_command!(client, s::Command::Simple(s::SimpleCommand::XCryFlagsOff));
 }
 
 pub fn quick_create(client: &mut PipeClient, mailbox: &str) {

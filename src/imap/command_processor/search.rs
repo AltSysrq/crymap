@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -21,7 +21,7 @@ use std::convert::TryFrom;
 
 use super::defs::*;
 use crate::account::model::*;
-use crate::account::v1::mailbox::StatefulMailbox;
+use crate::account::v2::{Account, Mailbox};
 use crate::support::error::Error;
 
 impl CommandProcessor {
@@ -31,7 +31,7 @@ impl CommandProcessor {
         tag: &str,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        self.search(cmd, tag, sender, false, StatefulMailbox::seqnum_search)
+        self.search(cmd, tag, sender, false, Account::seqnum_search)
     }
 
     pub(super) fn cmd_uid_search(
@@ -40,7 +40,7 @@ impl CommandProcessor {
         tag: &str,
         sender: SendResponse<'_>,
     ) -> CmdResult {
-        self.search(cmd, tag, sender, true, StatefulMailbox::search)
+        self.search(cmd, tag, sender, true, Account::search)
     }
 
     fn search<
@@ -52,7 +52,8 @@ impl CommandProcessor {
         sender: SendResponse<'_>,
         is_uid: bool,
         f: impl FnOnce(
-            &mut StatefulMailbox,
+            &mut Account,
+            &Mailbox,
             &SearchRequest,
         ) -> Result<SearchResponse<T>, Error>,
     ) -> CmdResult {
@@ -76,8 +77,8 @@ impl CommandProcessor {
             self.enable_condstore(sender, true);
         }
 
-        let response =
-            f(selected!(self)?, &request).map_err(map_error!(self))?;
+        let response = f(account!(self)?, selected!(self)?, &request)
+            .map_err(map_error!(self))?;
         // We normally return a response. If SAVE is specified, we won't unless
         // another return option requests it.
         let mut return_response =

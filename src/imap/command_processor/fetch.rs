@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -26,7 +26,7 @@ use log::{error, warn};
 use super::defs::*;
 use crate::account::{
     model::*,
-    v1::mailbox::{FetchReceiver, StatefulMailbox},
+    v2::{Account, FetchReceiver, Mailbox},
 };
 use crate::imap::literal_source::LiteralSource;
 use crate::mime::fetch::{self, section::*};
@@ -45,9 +45,9 @@ impl CommandProcessor {
             ids,
             false,
             false,
-            StatefulMailbox::seqnum_store,
-            |mb, r| mb.prefetch(r, &SeqRange::new()),
-            StatefulMailbox::seqnum_fetch,
+            Account::seqnum_store,
+            |a, mb, r| a.seqnum_prefetch(mb, r),
+            Account::seqnum_fetch,
         )
     }
 
@@ -63,9 +63,9 @@ impl CommandProcessor {
             ids,
             true,
             true,
-            StatefulMailbox::store,
-            |mb, r| mb.prefetch(r, &r.ids),
-            |mb, r, f| mb.fetch(&r, f),
+            Account::store,
+            |a, mb, r| a.prefetch(mb, r),
+            |a, mb, r, f| a.fetch(mb, &r, f),
         )
     }
 
@@ -96,9 +96,9 @@ impl CommandProcessor {
             ids,
             false,
             false,
-            |_, _| panic!("Shouldn't STORE in background update"),
-            |mb, r| mb.prefetch(r, &r.ids),
-            |mb, r, f| mb.fetch(&r, f),
+            |_, _, _| panic!("Shouldn't STORE in background update"),
+            |a, mb, r| a.prefetch(mb, r),
+            |a, mb, r, f| a.fetch(mb, &r, f),
         );
     }
 
@@ -110,15 +110,18 @@ impl CommandProcessor {
         force_fetch_uid: bool,
         allow_vanished: bool,
         f_store: impl FnOnce(
-            &mut StatefulMailbox,
+            &mut Account,
+            &mut Mailbox,
             &StoreRequest<ID>,
         ) -> Result<StoreResponse<ID>, Error>,
         f_prefetch: impl FnOnce(
-            &mut StatefulMailbox,
+            &mut Account,
+            &mut Mailbox,
             &FetchRequest<ID>,
-        ) -> PrefetchResponse,
+        ) -> Result<PrefetchResponse, Error>,
         f_fetch: impl FnOnce(
-            &mut StatefulMailbox,
+            &mut Account,
+            &mut Mailbox,
             FetchRequest<ID>,
             FetchReceiver<'_>,
         ) -> Result<FetchResponse, Error>,
@@ -206,8 +209,6 @@ impl CommandProcessor {
             self.enable_condstore(sender, true);
         }
 
-        let selected = selected!(self)?;
-
         // If there are non-.PEEK body sections in the request, implicitly set
         // \Seen on all the messages.
         //
@@ -218,8 +219,12 @@ impl CommandProcessor {
         // cache-fill protocol.
         //
         // This is only best-effort, and we only log if anything goes wrong.
-        if fetch_properties.set_seen && !selected.stateless().read_only() {
+        if fetch_properties.set_seen && !selected!(self)?.read_only() {
+            let account = account!(self)?;
+            let selected = selected!(self)?;
+
             let store_res = f_store(
+                account,
                 selected,
                 &StoreRequest {
                     ids: &request.ids,
@@ -236,16 +241,34 @@ impl CommandProcessor {
                     self.log_prefix, e
                 );
             }
+
+            // We need to do a mini-poll to bring the STORE into effect.
+            if let Ok(poll) = account.mini_poll(selected) {
+                // We're not in a position to process these just yet, so feed
+                // it back into the next poll.
+                selected.add_changed_uids(poll.fetch.into_iter());
+            }
         }
 
-        let prefetch = f_prefetch(selected, &request);
+        let mut prefetch =
+            f_prefetch(account!(self)?, selected!(self)?, &request)
+                .map_err(map_error!(self))?;
+        if !self.flag_responses_enabled {
+            prefetch.flags.clear();
+        }
         fetch_preresponse(sender, prefetch)?;
 
-        let receiver = |seqnum, items| {
+        let mut receiver = |seqnum, items| {
             fetch_response(sender, fetch_properties, seqnum, items);
         };
 
-        let response = f_fetch(selected, request, &receiver).map_err(map_error! {
+        let response = f_fetch(
+            account!(self)?,
+            selected!(self)?,
+            request,
+            &mut receiver,
+        )
+        .map_err(map_error! {
             self,
             MasterKeyUnavailable => (No, Some(s::RespTextCode::ServerBug(()))),
             BadEncryptedKey => (No, Some(s::RespTextCode::Corruption(()))),

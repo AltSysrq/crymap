@@ -387,6 +387,9 @@ pub struct MiniPoll {
     pub snapshot_modseq: Modseq,
     /// Whether `snapshot_modseq` is less than `max_modseq` on the mailbox.
     pub diverged: bool,
+    /// Whether there are expunge events with a modseq greater than
+    /// `snapshot_modseq` in the mailbox.
+    pub has_pending_expunge: bool,
 }
 
 /// Full information to update a snapshot to the latest state.

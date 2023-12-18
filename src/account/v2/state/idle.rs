@@ -48,8 +48,8 @@ impl Account {
     /// Because there may be as-yet undetected changes from before this call,
     /// it must be followed by a `poll` to check for those updates after
     /// `prepare_idle` succeeds.
-    pub fn prepare_idle(&self) -> Result<Idle, Error> {
-        Ok(Idle {
+    pub fn prepare_idle(&self) -> Result<IdleListener, Error> {
+        Ok(IdleListener {
             internal: Arc::new(Mutex::new(IdleInternal {
                 metadb_mtime: self.metadb_mtime()?,
                 deliverydb_mtime: self.deliverydb_mtime()?,
@@ -61,7 +61,7 @@ impl Account {
     ///
     /// This blocks until either a possible change has been detected, an error
     /// occurs, or something invokes `idle.notifier()`.
-    pub fn idle(&self, idle: Idle) -> Result<(), Error> {
+    pub fn idle(&self, idle: IdleListener) -> Result<(), Error> {
         // TODO Use something other than polling.
         //
         // This is pending a final decision on whether to make the entire
@@ -96,12 +96,11 @@ impl Account {
     }
 }
 
-/// Internal state used for idling.
-pub struct Idle {
+pub struct IdleListener {
     internal: Arc<Mutex<IdleInternal>>,
 }
 
-impl Idle {
+impl IdleListener {
     /// Creates an `IdleNotifier` which can be used to wake this `Idle` up.
     pub fn notifier(&self) -> IdleNotifier {
         IdleNotifier {

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -29,7 +29,7 @@ use regex::bytes::Regex;
 use super::command_processor::CommandProcessor;
 use super::lex::LexWriter;
 use super::syntax as s;
-use crate::account::v1::mailbox::IdleNotifier;
+use crate::account::v2::IdleNotifier;
 use crate::support::append_limit::APPEND_SIZE_LIMIT;
 use crate::support::error::Error;
 

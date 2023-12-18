@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2022, Jason Lingle
+// Copyright (c) 2020, 2022, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -26,10 +26,7 @@ use log::error;
 
 use crate::account::{
     model::*,
-    v1::{
-        account::Account,
-        mailbox::{StatefulMailbox, StatelessMailbox},
-    },
+    v2::{Account, Mailbox},
 };
 use crate::support::{error::Error, system_config::SystemConfig};
 
@@ -95,13 +92,19 @@ pub struct CommandProcessor {
     pub(super) data_root: PathBuf,
 
     pub(super) account: Option<Account>,
-    pub(super) selected: Option<StatefulMailbox>,
+    pub(super) selected: Option<Mailbox>,
     pub(super) searchres: SeqRange<Uid>,
     pub(super) unicode_aware: bool,
     pub(super) utf8_enabled: bool,
     pub(super) condstore_enabled: bool,
     pub(super) qresync_enabled: bool,
     pub(super) imap4rev2_enabled: bool,
+
+    /// Whether implicit `* FLAGS` responses are sent when new flags are
+    /// discovered. Controlled by `XCRY FLAGS (ON|OFF)`. This is used by the
+    /// integration tests to prevent cross-talk noise since flags are
+    /// account-wide.
+    pub(super) flag_responses_enabled: bool,
 
     pub(super) multiappend: Option<Multiappend>,
 
@@ -111,7 +114,7 @@ pub struct CommandProcessor {
 }
 
 pub(super) struct Multiappend {
-    pub(super) dst: StatelessMailbox,
+    pub(super) dst: String,
     pub(super) request: AppendRequest,
 }
 
@@ -146,6 +149,7 @@ impl CommandProcessor {
             condstore_enabled: false,
             qresync_enabled: false,
             imap4rev2_enabled: false,
+            flag_responses_enabled: true,
 
             multiappend: None,
 
@@ -172,10 +176,12 @@ impl CommandProcessor {
         raw: &str,
     ) -> PartialResult<SeqRange<Seqnum>> {
         if "$" == raw {
-            return Ok(selected!(self)?.uid_range_to_seqnum(&self.searchres));
+            return Ok(selected!(self)?
+                .uid_range_to_seqnum(&self.searchres, true)
+                .unwrap());
         }
 
-        let max_seqnum = selected!(self)?.max_seqnum().unwrap_or(Seqnum::MIN);
+        let max_seqnum = selected!(self)?.max_seqnum();
         let seqrange = SeqRange::parse(raw, max_seqnum).ok_or_else(|| {
             s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::Bad,
@@ -210,7 +216,7 @@ impl CommandProcessor {
             return Ok(self.searchres.clone());
         }
 
-        let max_uid = selected!(self)?.max_uid().unwrap_or(Uid::MIN);
+        let max_uid = selected!(self)?.next_uid();
         let seqrange = SeqRange::parse(raw, max_uid).ok_or_else(|| {
             s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::Bad,
@@ -269,15 +275,23 @@ pub(super) fn catch_all_error_handling(
     // that.
     if selected_ok {
         error!("{} Unhandled internal error: {}", log_prefix, e);
-    }
 
-    s::Response::Cond(s::CondResponse {
-        cond: s::RespCondType::No,
-        code: Some(s::RespTextCode::ServerBug(())),
-        quip: Some(Cow::Borrowed(
-            "Unexpected error; check server logs for details",
-        )),
-    })
+        s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::No,
+            code: Some(s::RespTextCode::ServerBug(())),
+            quip: Some(Cow::Borrowed(
+                "Unexpected error; check server logs for details",
+            )),
+        })
+    } else {
+        s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::No,
+            code: Some(s::RespTextCode::ServerBug(())),
+            quip: Some(Cow::Borrowed(
+                "Unexpected error; was the mailbox deleted?",
+            )),
+        })
+    }
 }
 
 #[cfg(test)]
