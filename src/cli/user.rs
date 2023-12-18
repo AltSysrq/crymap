@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -24,7 +24,7 @@ use std::sync::Arc;
 use rand::{rngs::OsRng, Rng};
 
 use super::main::ServerUserAddSubcommand;
-use crate::account::v1::account::Account;
+use crate::account::v2::Account;
 use crate::crypt::master_key::MasterKey;
 use crate::support::safe_name::is_safe_name;
 
@@ -162,13 +162,13 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
         }
     }
 
-    let account = Account::new(
+    if let Err(e) = Account::new(
         "account-setup".to_owned(),
         actual_path,
-        Some(Arc::new(MasterKey::new())),
-    );
-
-    if let Err(e) = account.provision(password.as_bytes()) {
+        Arc::new(MasterKey::new()),
+    )
+    .and_then(|mut account| account.provision(password.as_bytes()))
+    {
         die!(EX_SOFTWARE, "Error provisioning account: {}", e);
     }
 

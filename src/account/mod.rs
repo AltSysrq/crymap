@@ -26,5 +26,5 @@ mod message_format;
 pub mod model;
 mod search_backend;
 
-pub mod v1;
+mod v1;
 pub mod v2;

@@ -163,10 +163,6 @@ pub(super) struct ServerDeliverSubcommand {
     #[structopt(short, long, default_value = "INBOX")]
     pub(super) mailbox: String,
 
-    /// Create the destination mailbox if it does not already exist.
-    #[structopt(short, long)]
-    pub(super) create: bool,
-
     /// Add this IMAP flag (e.g., '\Flagged') or keyword to the delivered
     /// message(s). Can be passed multiple times.
     #[structopt(parse(try_from_str), short, long, number_of_values(1))]

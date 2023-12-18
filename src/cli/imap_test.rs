@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use log::{info, warn};
 
-use crate::account::v1::account::Account;
+use crate::account::v2::Account;
 use crate::crypt::master_key::MasterKey;
 use crate::imap::command_processor::CommandProcessor;
 use crate::imap::server::Server;
@@ -53,11 +53,12 @@ pub fn imap_test() {
         .expect(&format!("Failed to create {}", user_dir.display()));
 
     {
-        let account = Account::new(
+        let mut account = Account::new(
             "initial-setup".to_owned(),
             user_dir,
-            Some(Arc::new(MasterKey::new())),
-        );
+            Arc::new(MasterKey::new()),
+        )
+        .expect("failed to open account");
         account
             .provision(b"hunter2")
             .expect("Failed to set user account up");
