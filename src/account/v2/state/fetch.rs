@@ -48,7 +48,7 @@ impl Account {
         let index = mailbox.uid_index(uid).ok_or(Error::NxMessage)?;
         Ok(MailboxMessageAccessor {
             account: self,
-            mailbox: mailbox,
+            mailbox,
             message_status: &mailbox.messages[index],
             index,
             access: None,

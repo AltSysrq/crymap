@@ -44,7 +44,7 @@ impl Account {
     pub fn load_config(&self) -> Result<UserConfig, Error> {
         let config_file = account_config_file(&self.root);
         let mut data = Vec::new();
-        fs::File::open(&config_file)?.read_to_end(&mut data)?;
+        fs::File::open(config_file)?.read_to_end(&mut data)?;
 
         let config: UserConfig = toml::from_slice(&data)?;
         Ok(config)
