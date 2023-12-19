@@ -24,7 +24,7 @@ use super::super::{
     hier_id_scheme::HierIdScheme, mailbox_path::*, mailbox_state::*, model::*,
 };
 use crate::account::{key_store::KeyStore, model::*};
-use crate::support::error::Error;
+use crate::support::{error::Error, small_bitset::SmallBitset};
 
 /// A stateless view of a mailbox.
 ///
@@ -206,6 +206,17 @@ impl StatefulMailbox {
         self.state
             .uid_range_to_seqnum(range, true)
             .expect("silent uid_range_to_seqnum should never fail")
+    }
+
+    pub(in crate::account) fn uids(&self) -> impl Iterator<Item = Uid> + '_ {
+        self.state.uids()
+    }
+
+    pub(in crate::account) fn message_flags(
+        &self,
+        uid: Uid,
+    ) -> Option<&SmallBitset> {
+        self.state.message_status(uid).map(|m| m.raw_flags())
     }
 }
 

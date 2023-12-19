@@ -341,21 +341,10 @@ impl Connection {
     /// its new ID is returned.
     pub fn intern_flag(&mut self, flag: &Flag) -> Result<FlagId, Error> {
         let txn = self.cxn.write_tx()?;
-        if let Some(existing) = txn
-            .prepare_cached("SELECT `id` FROM `flag` WHERE `flag` = ?")?
-            .query_row((flag,), from_single)
-            .optional()?
-        {
-            return Ok(existing);
-        }
-
-        txn.execute("INSERT INTO `flag` (`flag`) VALUES (?)", (flag,))?;
-        let flag_id = usize::try_from(txn.last_insert_rowid())
-            .map_err(|_| Error::MailboxFull)?;
-
+        let flag_id = intern_flag(&txn, flag)?;
         txn.commit()?;
 
-        Ok(FlagId(flag_id))
+        Ok(flag_id)
     }
 
     /// Retrieves all flags that currently exist in the account.
@@ -1306,6 +1295,102 @@ impl Connection {
         })
     }
 
+    /// Runs the V1-to-V2 migration process.
+    ///
+    /// If the migration has already been performed according to the database,
+    /// this does nothing and simply returns. Otherwise, `callback` is invoked.
+    /// The callback is given its own callback to which it passes migration
+    /// information as it discovers it.
+    ///
+    /// An exclusive lock is held on the database for the duration of the
+    /// operation.
+    pub fn migrate_v1_to_v2(
+        &mut self,
+        callback: &mut dyn FnMut(
+            &mut dyn FnMut(V1MigrationEvent<'_>) -> Result<(), Error>,
+        ) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        self.cxn.enable_write(true)?;
+        let txn = self.cxn.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Exclusive,
+        )?;
+
+        if 0 == txn.execute(
+            "INSERT OR IGNORE INTO `maintenance` (`name`) \
+             VALUES ('v1-to-v2-migration')",
+            (),
+        )? {
+            return Ok(());
+        }
+
+        let mut current_flag_ids = Vec::<FlagId>::new();
+        let mut current_mailbox = None::<MailboxId>;
+        callback(&mut |evt| {
+            match evt {
+                V1MigrationEvent::Mailbox {
+                    path,
+                    special_use,
+                    flags,
+                } => {
+                    let (parent_id, child_name) =
+                        create_parent_hierarchy(&txn, path)?;
+                    current_mailbox =
+                        look_up_mailbox(&txn, parent_id, child_name)?;
+                    if current_mailbox.is_none() {
+                        current_mailbox = Some(create_mailbox(
+                            &txn,
+                            parent_id,
+                            child_name,
+                            special_use,
+                        )?);
+                    }
+
+                    current_flag_ids.clear();
+                    for flag in flags {
+                        current_flag_ids.push(intern_flag(&txn, flag)?);
+                    }
+                },
+
+                V1MigrationEvent::Message {
+                    path,
+                    flags,
+                    savedate,
+                } => {
+                    let mailbox_id =
+                        current_mailbox.expect("Message event before Mailbox");
+                    let message_id = intern_message_as_orphan(&txn, path)?;
+                    let translated_flags = flags
+                        .iter()
+                        .map(|ix| current_flag_ids[ix].0)
+                        .collect::<SmallBitset>();
+
+                    append_mailbox_messages(
+                        &txn,
+                        mailbox_id,
+                        savedate,
+                        &mut std::iter::once(Ok((
+                            message_id,
+                            Some(&translated_flags),
+                        ))),
+                    )?;
+                },
+
+                V1MigrationEvent::Subscription { path } => {
+                    txn.execute(
+                        "INSERT OR IGNORE INTO `subscription` (`path`) \
+                         VALUES (?)",
+                        (path,),
+                    )?;
+                },
+            }
+
+            Ok(())
+        })?;
+
+        txn.commit()?;
+        Ok(())
+    }
+
     #[cfg(not(test))]
     fn savedate(&self) -> UnixTimestamp {
         UnixTimestamp::now()
@@ -1353,6 +1438,25 @@ impl ConnectionExt for rusqlite::Connection {
     fn enable_write(&mut self, _: bool) -> rusqlite::Result<()> {
         Ok(())
     }
+}
+
+fn intern_flag(
+    txn: &rusqlite::Connection,
+    flag: &Flag,
+) -> Result<FlagId, Error> {
+    if let Some(existing) = txn
+        .prepare_cached("SELECT `id` FROM `flag` WHERE `flag` = ?")?
+        .query_row((flag,), from_single)
+        .optional()?
+    {
+        return Ok(existing);
+    }
+
+    txn.execute("INSERT INTO `flag` (`flag`) VALUES (?)", (flag,))?;
+    let flag_id = usize::try_from(txn.last_insert_rowid())
+        .map_err(|_| Error::MailboxFull)?;
+
+    Ok(FlagId(flag_id))
 }
 
 fn create_mailbox(
@@ -1525,13 +1629,13 @@ fn append_mailbox_messages(
     let first_uid = selectable_mailbox_status(cxn, mailbox_id)?.next_uid;
     let mut next_uid = first_uid;
 
-    let mut mailbox_message_insert = cxn.prepare(
+    let mut mailbox_message_insert = cxn.prepare_cached(
         "INSERT INTO `mailbox_message` ( \
            `mailbox_id`, `uid`, `message_id`, `near_flags`, \
            `savedate`, `append_modseq`, `flags_modseq` \
          ) VALUES (?, ?, ?, ?, ?, ?, ?)",
     )?;
-    let mut mailbox_message_far_flag_insert = cxn.prepare(
+    let mut mailbox_message_far_flag_insert = cxn.prepare_cached(
         "INSERT INTO `mailbox_message_far_flag` (\
            `mailbox_id`, `uid`, `flag_id` \
          ) VALUES (?, ?, ?)",

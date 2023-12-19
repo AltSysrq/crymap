@@ -33,6 +33,7 @@ mod idle;
 mod init;
 mod mailboxes;
 mod messages;
+mod migration;
 mod poll;
 mod search;
 mod select;

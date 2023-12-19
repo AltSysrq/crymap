@@ -3,5 +3,4 @@
   - Unaccounted recovery
   - Database backups
   - tmp/garbage cleanup
-- V1->V2 migration
 - Implement SAVEDATE

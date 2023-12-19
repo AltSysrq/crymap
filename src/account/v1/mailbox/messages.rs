@@ -18,7 +18,7 @@
 
 use std::fs;
 use std::io::{self, BufRead, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::prelude::*;
 use log::info;
@@ -30,6 +30,14 @@ use crate::support::error::Error;
 use crate::support::file_ops;
 
 impl StatelessMailbox {
+    /// Returns the raw path where the message with the given UID is stored.
+    ///
+    /// This is only used by the V1-to-V2 migration.
+    pub(in crate::account) fn message_path(&self, uid: Uid) -> PathBuf {
+        let scheme = self.message_scheme();
+        scheme.access_path_for_id(uid.0.get()).assume_exists()
+    }
+
     /// Open the identified message for reading.
     ///
     /// This doesn't correspond to any particular IMAP command (that would be

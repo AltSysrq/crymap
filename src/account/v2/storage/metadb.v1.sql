@@ -199,5 +199,5 @@ CREATE TABLE `maintenance` (
   `name` TEXT NOT NULL PRIMARY KEY,
   -- The datetime (UNIX, seconds) at which a process last started this kind of
   -- maintenance.
-  `last_started` INTEGER NOT NULL
+  `last_started` INTEGER NOT NULL DEFAULT (unixepoch())
 ) STRICT;

@@ -851,6 +851,11 @@ impl MessageStatus {
         self.flags.contains(flag.0)
     }
 
+    /// Returns the raw flags bitset.
+    pub fn raw_flags(&self) -> &SmallBitset {
+        &self.flags
+    }
+
     /// Returns the last `Modseq` of this message.
     pub fn last_modified(&self) -> V1Modseq {
         self.last_modified

@@ -473,6 +473,34 @@ impl FromRow for Delivery {
     }
 }
 
+/// An event used to stream state in the V1-to-V2 migration process.
+pub enum V1MigrationEvent<'a> {
+    /// Begins migration of a mailbox.
+    ///
+    /// Mailboxes must be migrated in pre-order; i.e., parents before children.
+    Mailbox {
+        /// The mailbox path; e.g. "INBOX", "Archive/2023".
+        path: &'a str,
+        /// The special-use attribute, if any.
+        special_use: Option<MailboxAttribute>,
+        /// The flags defined by this mailbox.
+        flags: &'a [Flag],
+    },
+    /// Migrates a message in the current mailbox.
+    Message {
+        /// The path of the message relative to the message store (i.e. its new
+        /// location).
+        path: &'a str,
+        /// The flags on the message. Indices are into `flags` on the most
+        /// recent `Mailbox` event.
+        flags: &'a SmallBitset,
+        /// The `SAVEDATE` to apply to the message.
+        savedate: UnixTimestamp,
+    },
+    /// Migrates a subscription.
+    Subscription { path: &'a str },
+}
+
 pub fn from_row<T: FromRow>(row: &rusqlite::Row<'_>) -> rusqlite::Result<T> {
     T::from_row(row)
 }

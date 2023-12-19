@@ -74,8 +74,9 @@ impl MessageStore {
         Ok(path.into())
     }
 
-    /// Inserts `src` into the message store at `dst`, where `dst` is the
-    /// relative path (and preferably the canonical path for the file).
+    /// Inserts `src`, an absolute path or relative to the CWD, into the
+    /// message store at `dst`, where `dst` is the relative path (and
+    /// preferably the canonical path for the file).
     ///
     /// If the destination already exists, this has no effect.
     pub fn insert(&self, src: &Path, dst: &Path) -> Result<(), Error> {

@@ -85,6 +85,8 @@ impl Account {
         &mut self,
         key_store_config: &KeyStoreConfig,
     ) -> Result<(), Error> {
+        self.migrate_v1_to_v2()?;
+
         fs::DirBuilder::new()
             .mode(0o770)
             .create(&self.common_paths.tmp)
