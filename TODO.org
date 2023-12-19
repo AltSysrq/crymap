@@ -4,3 +4,4 @@
   - Database backups
   - tmp/garbage cleanup
 - Implement SAVEDATE
+- Ensure delivery DB is group-writable
