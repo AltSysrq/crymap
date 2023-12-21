@@ -366,6 +366,10 @@ impl<F: FnMut(&SearchData) -> Option<bool>> Visitor for SearchFetcher<F> {
         self.eval()
             .expect_err("Failed to eval() to something after all fields set")
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
 }
 
 impl<F: FnMut(&SearchData) -> Option<bool>> SearchFetcher<F> {
@@ -481,6 +485,10 @@ impl Visitor for ContentAccumulator {
     fn end(&mut self) -> bool {
         let _ = self.content(&[0]);
         false
+    }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
     }
 }
 

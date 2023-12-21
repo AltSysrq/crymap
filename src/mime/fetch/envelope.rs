@@ -174,6 +174,10 @@ impl grovel::Visitor for EnvelopeFetcher {
     fn end(&mut self) -> Envelope {
         mem::take(&mut self.envelope)
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
 }
 
 impl EnvelopeFetcher {

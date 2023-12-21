@@ -39,6 +39,10 @@ impl Visitor for UidFetcher {
     fn end(&mut self) -> Uid {
         panic!("UidFetcher.end()")
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -53,6 +57,10 @@ impl Visitor for ModseqFetcher {
 
     fn end(&mut self) -> Modseq {
         panic!("ModseqFetcher.end()")
+    }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
     }
 }
 
@@ -97,6 +105,10 @@ impl Visitor for FlagsFetcher {
     fn end(&mut self) -> FlagsInfo {
         mem::take(&mut self.info)
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -116,6 +128,10 @@ impl Visitor for Rfc822SizeFetcher {
     fn end(&mut self) -> u32 {
         panic!("Rfc822SizeFetcher.end()")
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -133,6 +149,10 @@ impl Visitor for InternalDateFetcher {
 
     fn end(&mut self) -> DateTime<FixedOffset> {
         panic!("InternalDateFetcher.end()")
+    }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
     }
 }
 
@@ -153,6 +173,10 @@ impl Visitor for EmailIdFetcher {
     fn end(&mut self) -> String {
         panic!("EmailIdFetcher.end()")
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -172,13 +196,14 @@ impl Visitor for SaveDateFetcher {
         &mut self,
         _: &MessageMetadata,
     ) -> Result<(), Option<DateTime<FixedOffset>>> {
-        // If we haven't gotten the SAVEDATE by now, we never will.
-        //Err(None)
-        Ok(())
+        Err(None)
     }
 
     fn end(&mut self) -> Option<DateTime<FixedOffset>> {
-        //None
-        panic!("SaveDateFetcher.end()")
+        None
+    }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
     }
 }

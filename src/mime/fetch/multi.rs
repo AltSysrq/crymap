@@ -377,6 +377,10 @@ impl Visitor for MultiFetcher {
         self.on_fetchers(|fetcher| Err(fetcher.end()))
             .expect_err("Failed to complete MultiFetcher.end()")
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        panic!("missing method on MultiFetcher")
+    }
 }
 
 #[cfg(test)]

@@ -214,6 +214,10 @@ impl Visitor for BodyStructureFetcher {
 
         mem::take(&mut self.bs)
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
 }
 
 impl BodyStructureFetcher {

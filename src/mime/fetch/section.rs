@@ -446,6 +446,10 @@ impl Visitor for SectionLocator {
             }),
         )
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
 }
 
 impl SectionLocator {
@@ -647,6 +651,10 @@ impl Visitor for SectionFetcher {
         let target = self.target.take().unwrap();
         let fetched = self.end_buffer();
         (target, fetched)
+    }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
     }
 }
 

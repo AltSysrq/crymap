@@ -83,4 +83,8 @@ impl grovel::Visitor for ZstdTrainFetcher {
         self.0.clear();
         compressed
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
 }

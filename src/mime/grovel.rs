@@ -45,18 +45,18 @@ pub trait Visitor: fmt::Debug {
 
     /// Receives the UID of the message being processed.
     fn uid(&mut self, uid: Uid) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Receives the `EMAILID` for the message when using the V2 storage
     /// system. Not called for V1.
     fn email_id(&mut self, id: &str) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Receives the last modified `Modseq` of the message.
     fn last_modified(&mut self, modseq: Modseq) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Receives the `SAVEDATE` of the message.
@@ -66,7 +66,7 @@ pub trait Visitor: fmt::Debug {
         &mut self,
         savedate: DateTime<Utc>,
     ) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Indicates whether loading the flags for the message would be useful.
@@ -76,18 +76,18 @@ pub trait Visitor: fmt::Debug {
 
     /// Indicates the current message has the given flags.
     fn flags(&mut self, flags: &[Flag]) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Indicates that the current message is marked \Recent.
     fn recent(&mut self) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Indicates that there are no more flags on the current message,
     /// including not \Recent.
     fn end_flags(&mut self) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Receives the size of the message if it becomes available before the
@@ -96,7 +96,7 @@ pub trait Visitor: fmt::Debug {
     /// This will not be called if the size cannot be computed without decoding
     /// the metadata. In that case, the size must be obtained via `metadata()`.
     fn rfc822_size(&mut self, size: u32) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Receives the `MessageMetadata` of the message being processed.
@@ -104,7 +104,7 @@ pub trait Visitor: fmt::Debug {
         &mut self,
         metadata: &MessageMetadata,
     ) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Called once for every line which passes through the parser, in its raw
@@ -119,7 +119,7 @@ pub trait Visitor: fmt::Debug {
     ///
     /// This is called before more specific methods relating to the line.
     fn raw_line(&mut self, line: &[u8]) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Called for each header found.
@@ -134,7 +134,7 @@ pub trait Visitor: fmt::Debug {
         name: &str,
         value: &[u8],
     ) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Called for the content type once it has been parsed.
@@ -145,7 +145,7 @@ pub trait Visitor: fmt::Debug {
         &mut self,
         ct: &ContentType<'_>,
     ) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Indicates that `start_part` will not get called at this level.
@@ -166,7 +166,7 @@ pub trait Visitor: fmt::Debug {
     /// Multipart segments also have "content", which is simply their raw
     /// representation.
     fn start_content(&mut self) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Called as raw data which is strictly part of this part is encountered.
@@ -174,7 +174,7 @@ pub trait Visitor: fmt::Debug {
     /// `data` will usually either be a line ending itself or have no line
     /// ending.
     fn content(&mut self, data: &[u8]) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Indicates that the start of a multipart part has been encountered.
@@ -196,7 +196,7 @@ pub trait Visitor: fmt::Debug {
         &mut self,
         child_result: Self::Output,
     ) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Indicates that the end of the segment has been reached.
@@ -204,6 +204,10 @@ pub trait Visitor: fmt::Debug {
     /// This is always the last method to be called. It takes `&mut self` to
     /// keep the trait object-safe.
     fn end(&mut self) -> Self::Output;
+
+    /// The default implementation of all the methods but `end`,
+    /// `start_part`, and `leaf_section`.
+    fn visit_default(&mut self) -> Result<(), Self::Output>;
 }
 
 /// Used by `Groveller` to access information about a message.
@@ -1026,6 +1030,10 @@ impl<
 
     fn end(&mut self) -> Self::Output {
         (self.map_to)(self.delegate.end())
+    }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        panic!("missing method on VisitorMap")
     }
 }
 
