@@ -19,6 +19,7 @@
 use std::fmt::Write as _;
 use std::fs;
 use std::io::{self, Read};
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 
 use chrono::prelude::*;
@@ -82,7 +83,10 @@ impl MessageStore {
     pub fn insert(&self, src: &Path, dst: &Path) -> Result<(), Error> {
         let dst = self.root.join(dst);
         if let Some(parent) = dst.parent() {
-            fs::create_dir_all(parent)?;
+            fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o770)
+                .create(parent)?;
         }
 
         match nix::unistd::linkat(
