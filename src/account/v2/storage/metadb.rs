@@ -387,6 +387,30 @@ impl Connection {
         get_message_by_path(&self.cxn, path).map(|e| e.is_some())
     }
 
+    /// Returns a summary of the messages known to the database.
+    ///
+    /// The table returned holds the sum of the `summary_increment` values for
+    /// all known messages grouped by their `summary_bucket`, with
+    /// `summary_bucket` being the index.
+    pub fn summarise_messages(&self) -> Result<Box<[u64; 256]>, Error> {
+        let mut result = Box::new([0u64; 256]);
+        for entry in self
+            .cxn
+            .prepare(
+                "SELECT `summary_bucket`, SUM(`summary_increment`) \
+                 FROM `message` GROUP BY `summary_bucket`",
+            )?
+            .query_map((), from_row::<(usize, u64)>)?
+        {
+            let (group, sum) = entry?;
+            if let Some(dst) = result.get_mut(group) {
+                *dst = sum;
+            }
+        }
+
+        Ok(result)
+    }
+
     /// Fetches the ID and path of every message which is currently orphaned
     /// (i.e. not referenced by any mailbox) and which has a `last_activity`
     /// time less than `last_activity_before`.
@@ -1723,6 +1747,19 @@ fn get_message_by_path(
         .map_err(Into::into)
 }
 
+/// Computes the `summary_bucket` and `summary_increment` values for the given
+/// message path.
+pub fn message_summary_values(path: &str) -> (u8, u16) {
+    // FNV hash
+    let mut hash = 2166136261u32;
+    for &byte in path.as_bytes() {
+        hash = hash.wrapping_mul(16777619);
+        hash ^= u32::from(byte);
+    }
+
+    (hash as u8, ((hash >> 8) as u16).max(1))
+}
+
 fn intern_message_as_orphan(
     cxn: &rusqlite::Connection,
     path: &str,
@@ -1731,8 +1768,12 @@ fn intern_message_as_orphan(
         return Ok(existing);
     }
 
-    cxn.prepare_cached("INSERT INTO `message` (`path`) VALUES (?)")?
-        .execute((path,))?;
+    let (summary_bucket, summary_increment) = message_summary_values(path);
+
+    cxn.prepare_cached(
+        "INSERT INTO `message` (`path`, `summary_bucket`, `summary_increment`) \
+         VALUES (?, ?, ?)")?
+        .execute((path, summary_bucket, summary_increment))?;
 
     Ok(MessageId(cxn.last_insert_rowid()))
 }

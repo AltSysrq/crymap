@@ -86,19 +86,10 @@ impl Account {
         &mut self,
         now: DateTime<Utc>,
     ) -> Result<(), Error> {
-        // TODO This is unnecessarily slow. Possible optimisation: For each
-        // message, derive an 8-bit group key and a positive 16-bit increment
-        // from the path alone. We could then grab a summary out of the
-        // database in one go:
-        //   SELECT group_key, SUM(increment)
-        //   FROM message
-        //   GROUP BY group_key
-        //
-        // Then, we would first make a pass through the message store and
-        // compute the same summary. (There's ultimately no way to avoid the
-        // file scan, but the scan alone is reasonably fast. We should optimise
-        // the first pass to not check the modification times though to avoid
-        // the extra `stat` system calls.)
+        // Finding unaccounted files is done on the basis of a "message
+        // summary". Messages are classified into 256 buckets and assigned
+        // non-zero 16-bit increments based on their path alone. The summary is
+        // the sum of those increments for each bucket.
         //
         // With high probability, if the database and message store disagree
         // for a message group, the summaries will also be different. The only
@@ -106,17 +97,49 @@ impl Account {
         // is for the database to have files that don't actually exist AND for
         // the message store to have unaccounted files AND that the sums of
         // their increments happen to be equal.
+
+        // First, we compute the summary data based only on looking at message
+        // paths to quickly discover which buckets need more attention.
         //
-        // If all groups match, we're done. Otherwise, we make another pass,
-        // and inspect all files in groups which don't match.
+        // There's no way to avoid the full message store scan, but we're only
+        // making one system call per directory entry, so it shouldn't be too
+        // slow.
+        let database_summary = self.metadb.summarise_messages()?;
+        let mut computed_summary = Box::new([0u64; 256]);
+        for path in self.message_store.list(None) {
+            let Ok(path) = path.into_os_string().into_string() else {
+                continue;
+            };
+
+            let (bucket, incr) = storage::message_summary_values(&path);
+            computed_summary[usize::from(bucket)] += u64::from(incr);
+        }
+
+        // If the summary exactly matches, there's nothing to do.
+        if database_summary == computed_summary {
+            return Ok(());
+        }
+
+        // If the summary doesn't match, make another pass and look for
+        // messages that are actually missing.
 
         let inbox_id = self.metadb.find_mailbox("INBOX")?;
 
         let mut recovered = 0;
-        for path in self.message_store.list(now - chrono::Duration::hours(1)) {
+        for path in self
+            .message_store
+            .list(Some(now - chrono::Duration::hours(1)))
+        {
             let Ok(path) = path.into_os_string().into_string() else {
                 continue;
             };
+
+            let (bucket, _) = storage::message_summary_values(&path);
+            if database_summary[usize::from(bucket)]
+                == computed_summary[usize::from(bucket)]
+            {
+                continue;
+            }
 
             // Skip messages represented in either database. While the two
             // checks are nominally racy, there's a 1 hour minimum delay

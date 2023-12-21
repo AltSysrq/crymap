@@ -115,10 +115,17 @@ CREATE TABLE `message` (
   -- The number of references from `mailbox_message` to this message. This is
   -- maintained automatically by triggers.
   `refcount` INTEGER NOT NULL DEFAULT 0,
+  -- `summary_bucket` and `summary_increment` are used to efficiently determine
+  -- whether there could be any files in the message store. They are based on
+  -- hashes of `path`. `summary_bucket` ranges from 0..=255 and
+  -- `summary_increment` from 1..=65535.
+  `summary_bucket` INTEGER NOT NULL,
+  `summary_increment` INTEGER NOT NULL,
   UNIQUE (`path`)
 ) STRICT;
 
 CREATE INDEX `message_orphan_status` ON `message` (`refcount`, `last_activity`);
+CREATE INDEX `message_summary` ON `message` (`summary_bucket`, `summary_increment`);
 
 -- An instance of a message within a mailbox.
 CREATE TABLE `mailbox_message` (

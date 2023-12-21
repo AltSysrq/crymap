@@ -34,6 +34,6 @@ mod types;
 
 pub use deliverydb::Connection as DeliveryDb;
 pub use messages::MessageStore;
-pub use metadb::Connection as MetaDb;
+pub use metadb::{message_summary_values, Connection as MetaDb};
 pub use sqlite_xex_vfs::XexVfs;
 pub use types::*;

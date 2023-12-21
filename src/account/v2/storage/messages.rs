@@ -126,7 +126,8 @@ impl MessageStore {
     }
 
     /// Lists the relative paths within the message store which were modified
-    /// before `modified_before`.
+    /// before `modified_before` (or all regular files if `modified_before` is
+    /// `None`).
     ///
     /// This is used to identify messages in the message store that are not
     /// accounted for in the main database. The modification time threshold is
@@ -141,18 +142,21 @@ impl MessageStore {
     /// prevent a race condition between recovery and message removal.
     pub fn list(
         &self,
-        modified_before: DateTime<Utc>,
+        modified_before: Option<DateTime<Utc>>,
     ) -> impl Iterator<Item = PathBuf> + '_ {
         walkdir::WalkDir::new(&self.root)
             .into_iter()
             .filter_map(|e| e.ok())
             .filter(move |e| {
-                e.metadata().ok().is_some_and(|md| {
-                    md.is_file()
-                        && md.modified().ok().is_some_and(|mt| {
-                            DateTime::<Utc>::from(mt) < modified_before
-                        })
-                })
+                e.file_type().is_file()
+                    && modified_before.map_or(true, |modified_before| {
+                        e.metadata()
+                            .ok()
+                            .and_then(|md| md.modified().ok())
+                            .is_some_and(|mt| {
+                                DateTime::<Utc>::from(mt) < modified_before
+                            })
+                    })
             })
             .map(move |e| e.path().strip_prefix(&self.root).unwrap().to_owned())
     }
@@ -222,22 +226,24 @@ mod test {
         assert_eq!(b"foo", &buf[..]);
 
         let mut listed = store
-            .list(Utc::now() + Duration::from_secs(5))
+            .list(Some(Utc::now() + Duration::from_secs(5)))
             .collect::<Vec<_>>();
         assert_eq!(3, listed.len());
         assert!(listed.contains(&foo_canonical));
         assert!(listed.contains(&bar_canonical));
         assert!(listed.contains(&baz_canonical));
 
+        assert_eq!(3, store.list(None).count());
+
         listed = store
-            .list(DateTime::from_timestamp(0, 0).unwrap())
+            .list(Some(DateTime::from_timestamp(0, 0).unwrap()))
             .collect::<Vec<_>>();
         assert_eq!(0, listed.len());
 
         store.delete(&bar_canonical).unwrap();
         assert!(store.open(&bar_canonical).is_err());
         listed = store
-            .list(Utc::now() + Duration::from_secs(5))
+            .list(Some(Utc::now() + Duration::from_secs(5)))
             .collect::<Vec<_>>();
         assert_eq!(2, listed.len());
         assert!(listed.contains(&foo_canonical));
