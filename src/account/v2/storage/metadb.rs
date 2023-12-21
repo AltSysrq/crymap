@@ -20,6 +20,7 @@ use std::convert::TryFrom;
 use std::fmt::Write as _;
 use std::fs;
 use std::io;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -51,9 +52,18 @@ impl Connection {
         let mut cxn = rusqlite::Connection::open_with_flags_and_vfs(
             &path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
-                | rusqlite::OpenFlags::SQLITE_OPEN_CREATE,
+                | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
             xex.name(),
         )?;
+
+        // Set the database mode to what we want. There's a `modeof` query
+        // parm, but instead of actually taking a mode, it takes a *file path*
+        // and copies that file's mode, so this is the saner option. SQLite
+        // will copy the mode of the database file when it creates the journal
+        // file, and as long as all processes do the chmod before any
+        // transactions, this will always have the desired effect.
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
 
         cxn.pragma_update(None, "foreign_keys", true)?;
         // NB Changing this to WAL has implications for the backup process.

@@ -17,6 +17,8 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::fmt::Write as _;
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::Duration;
 
@@ -38,8 +40,18 @@ impl Connection {
         let mut cxn = rusqlite::Connection::open_with_flags(
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
-                | rusqlite::OpenFlags::SQLITE_OPEN_CREATE,
+                | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
+
+        // See notes in metadb::Connection::new about setting the permissions
+        // this way.
+        let _ = fs::set_permissions(
+            &path,
+            // Needs to be group writable since the MDA may run under a
+            // different user.
+            fs::Permissions::from_mode(0o660),
+        );
 
         cxn.pragma_update(None, "foreign_keys", true)?;
         cxn.pragma_update(None, "journal_mode", "PERSIST")?;
