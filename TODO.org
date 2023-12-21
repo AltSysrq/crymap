@@ -1,7 +1,4 @@
-- V2 maintenance:
-  - Orphan cleanup
-  - Unaccounted recovery
-  - Database backups
-  - tmp/garbage cleanup
 - Implement SAVEDATE
 - Ensure delivery DB is group-writable
+- Instead of returning an error when fetching a message whose backing is
+  unreadable, generate a message describing the problem.

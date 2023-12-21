@@ -18,9 +18,12 @@
 
 use std::convert::TryFrom;
 use std::fmt::Write as _;
-use std::path::Path;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use log::error;
 use rusqlite::OptionalExtension as _;
 
 use super::{sqlite_xex_vfs::XexVfs, types::*};
@@ -34,6 +37,7 @@ use crate::{
 
 /// A connection to the encrypted `meta.sqlite.xex` database.
 pub struct Connection {
+    path: PathBuf,
     cxn: rusqlite::Connection,
 
     #[cfg(test)]
@@ -43,15 +47,16 @@ pub struct Connection {
 static MIGRATIONS: &[&str] = &[include_str!("metadb.v1.sql")];
 
 impl Connection {
-    pub fn new(path: &Path, xex: &XexVfs) -> Result<Self, Error> {
+    pub fn new(path: PathBuf, xex: &XexVfs) -> Result<Self, Error> {
         let mut cxn = rusqlite::Connection::open_with_flags_and_vfs(
-            path,
+            &path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
                 | rusqlite::OpenFlags::SQLITE_OPEN_CREATE,
             xex.name(),
         )?;
 
         cxn.pragma_update(None, "foreign_keys", true)?;
+        // NB Changing this to WAL has implications for the backup process.
         cxn.pragma_update(None, "journal_mode", "PERSIST")?;
         cxn.pragma_update(None, "journal_size_limit", 1024 * 1024)?;
         cxn.busy_timeout(Duration::from_secs(10))?;
@@ -60,6 +65,7 @@ impl Connection {
 
         Ok(Self {
             cxn,
+            path,
             #[cfg(test)]
             override_savedate: None,
         })
@@ -376,6 +382,11 @@ impl Connection {
         Ok(ret)
     }
 
+    /// Returns whether `path` is currently a known message.
+    pub fn is_known_message(&self, path: &str) -> Result<bool, Error> {
+        get_message_by_path(&self.cxn, path).map(|e| e.is_some())
+    }
+
     /// Fetches the ID and path of every message which is currently orphaned
     /// (i.e. not referenced by any mailbox) and which has a `last_activity`
     /// time less than `last_activity_before`.
@@ -493,6 +504,37 @@ impl Connection {
         txn.commit()?;
 
         Ok(uid)
+    }
+
+    /// Atomically interns a message by path and adds it to the given mailbox,
+    /// but only if the message was not already interned.
+    ///
+    /// Returns whether anything was recovered.
+    pub fn recover_message_into_mailbox(
+        &mut self,
+        mailbox_id: MailboxId,
+        path: &str,
+        flags: Option<&SmallBitset>,
+    ) -> Result<bool, Error> {
+        let savedate = self.savedate();
+        let txn = self.cxn.write_tx()?;
+
+        if get_message_by_path(&txn, path)?.is_some() {
+            return Ok(false);
+        }
+
+        require_selectable_mailbox(&txn, mailbox_id)?;
+
+        let message_id = intern_message_as_orphan(&txn, path)?;
+        append_mailbox_messages(
+            &txn,
+            mailbox_id,
+            savedate,
+            &mut std::iter::once(Ok((message_id, flags))),
+        )?;
+        txn.commit()?;
+
+        Ok(true)
     }
 
     /// Copy the messages represented by `src_uids` (which must be sorted
@@ -1391,6 +1433,80 @@ impl Connection {
         Ok(())
     }
 
+    /// See if the given maintenance should be started.
+    pub fn start_maintenance(
+        &mut self,
+        name: &str,
+        if_not_since: UnixTimestamp,
+    ) -> Result<bool, Error> {
+        let txn = self.cxn.write_tx()?;
+        if txn
+            .prepare(
+                "SELECT 1 FROM `maintenance` \
+                 WHERE `name` = ? AND `last_started` >= ?",
+            )?
+            .exists((name, if_not_since))?
+        {
+            return Ok(false);
+        }
+
+        txn.execute(
+            "INSERT OR REPLACE INTO `maintenance` (`name`, `last_started`) \
+             VALUES (?, ?)",
+            (name, UnixTimestamp::now()),
+        )?;
+        txn.commit()?;
+
+        Ok(true)
+    }
+
+    #[cfg(test)]
+    pub fn clear_maintenance(&mut self, name: &str) -> Result<(), Error> {
+        self.cxn
+            .execute("DELETE FROM `maintenance` WHERE `name` = ?", (name,))?;
+        Ok(())
+    }
+
+    /// Creates a backup copy of the database.
+    ///
+    /// The backup is staged in the `tmp` directory and ultimately placed at
+    /// `out`. `out` will never be overwritten.
+    pub fn back_up(&mut self, tmp: &Path, out: &Path) -> Result<(), Error> {
+        // We do the backup by starting a read transaction and then doing a
+        // plain file copy. This is faster and far operationally simpler than
+        // going through SQLite's backup API (which would need to decrypt and
+        // re-encrypt XEX). It also addresses the fact that the XEX VFS layer
+        // will use different keys for different file names; the expectation is
+        // that one of these backups can be renamed back to METADB_NAME and be
+        // expected to work.
+
+        let txn = self.cxn.read_tx()?;
+        let journal_mode = txn.query_row(
+            "SELECT `journal_mode` FROM `pragma_journal_mode`",
+            (),
+            from_single::<String>,
+        )?;
+
+        // Doing a plain file copy makes this incompatible with WAL mode.
+        if journal_mode.eq_ignore_ascii_case("WAL") {
+            error!("can't back up database because it is in WAL mode");
+            return Err(Error::CorruptFileLayout);
+        }
+
+        let mut tmpfile = tempfile::NamedTempFile::new_in(tmp)?;
+        let mut infile = fs::File::open(&self.path)?;
+        io::copy(&mut infile, &mut tmpfile)?;
+        tmpfile.as_file_mut().sync_all()?;
+        tmpfile
+            .persist_noclobber(out)
+            .map_err(|e| Error::Io(e.error))?;
+
+        // Explicitly ensure that the transaction is carried to here.
+        let _ = txn.rollback();
+
+        Ok(())
+    }
+
     #[cfg(not(test))]
     fn savedate(&self) -> UnixTimestamp {
         UnixTimestamp::now()
@@ -1597,15 +1713,21 @@ fn move_mailbox(
     Ok(())
 }
 
+fn get_message_by_path(
+    cxn: &rusqlite::Connection,
+    path: &str,
+) -> Result<Option<MessageId>, Error> {
+    cxn.prepare_cached("SELECT `id` FROM `message` WHERE `path` = ?")?
+        .query_row((path,), from_single)
+        .optional()
+        .map_err(Into::into)
+}
+
 fn intern_message_as_orphan(
     cxn: &rusqlite::Connection,
     path: &str,
 ) -> Result<MessageId, Error> {
-    let existing = cxn
-        .prepare_cached("SELECT `id` FROM `message` WHERE `path` = ?")?
-        .query_row((path,), from_single)
-        .optional()?;
-    if let Some(existing) = existing {
+    if let Some(existing) = get_message_by_path(cxn, path)? {
         return Ok(existing);
     }
 
@@ -2012,7 +2134,7 @@ mod test {
             let master_key = Arc::new(MasterKey::new());
             let xex = XexVfs::new(master_key).unwrap();
             let mut cxn =
-                Connection::new(&tmpdir.path().join("meta.sqlite.xex"), &xex)
+                Connection::new(tmpdir.path().join("meta.sqlite.xex"), &xex)
                     .unwrap();
             cxn.override_savedate = Some(savedate);
 

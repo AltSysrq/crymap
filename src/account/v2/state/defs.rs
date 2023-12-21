@@ -28,6 +28,9 @@ use crate::account::{key_store::KeyStore, model::*};
 use crate::crypt::master_key::MasterKey;
 use crate::support::{error::Error, small_bitset::SmallBitset};
 
+pub(super) const METADB_NAME: &str = "meta.sqlite.xex";
+pub(super) const DELIVERYDB_NAME: &str = "delivery.sqlite";
+
 /// A logged-in user account.
 pub struct Account {
     pub(super) master_key: Arc<MasterKey>,
@@ -39,6 +42,7 @@ pub struct Account {
     pub(super) key_store: KeyStore,
     pub(super) root: PathBuf,
     pub(super) common_paths: Arc<CommonPaths>,
+    pub(super) backup_path: PathBuf,
     pub(super) log_prefix: String,
 }
 

@@ -32,6 +32,7 @@ mod flags;
 mod idle;
 mod init;
 mod mailboxes;
+mod maintenance;
 mod messages;
 mod migration;
 mod poll;

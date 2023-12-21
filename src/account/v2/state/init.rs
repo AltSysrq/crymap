@@ -54,12 +54,12 @@ impl Account {
             Some(Arc::clone(&master_key)),
         );
 
-        let metadb_path = root.join("meta.sqlite.xex");
-        let deliverydb_path = root.join("delivery.sqlite");
+        let metadb_path = root.join(METADB_NAME);
+        let deliverydb_path = root.join(DELIVERYDB_NAME);
 
         let xex_vfs = storage::XexVfs::new(Arc::clone(&master_key))?;
         // TODO Database setup logs stuff but doesn't have the log prefix.
-        let metadb = storage::MetaDb::new(&metadb_path, &xex_vfs)?;
+        let metadb = storage::MetaDb::new(metadb_path.clone(), &xex_vfs)?;
         let deliverydb = storage::DeliveryDb::new(&deliverydb_path)?;
         let message_store = storage::MessageStore::new(root.join("messages"));
 
@@ -71,6 +71,7 @@ impl Account {
             deliverydb_path,
             message_store,
             key_store,
+            backup_path: root.join("backups"),
             root,
             common_paths,
             log_prefix,
@@ -102,6 +103,8 @@ impl Account {
             name: "INBOX".to_owned(),
             special_use: vec![],
         })?;
+
+        self.run_maintenance();
 
         Ok(())
     }
