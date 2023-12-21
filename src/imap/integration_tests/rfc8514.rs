@@ -90,4 +90,6 @@ fn search() {
     check(true, &format!("UID SEARCH SAVEDSINCE {yesterday}"));
     check(false, &format!("UID SEARCH SAVEDSINCE {today}"));
     check(false, &format!("UID SEARCH SAVEDSINCE {tomorrow}"));
+
+    check(true, &format!("UID SEARCH SAVEDATESUPPORTED"));
 }
