@@ -55,6 +55,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "OBJECTID",
     "QRESYNC",
     "SASL-IR",
+    "SAVEDATE",
     "SEARCHRES",
     "SPECIAL-USE",
     "STATUS=SIZE",

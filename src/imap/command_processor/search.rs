@@ -250,6 +250,9 @@ impl CommandProcessor {
                 s::SimpleSearchKey::Unseen => SearchQuery::Unseen,
                 s::SimpleSearchKey::Draft => SearchQuery::Draft,
                 s::SimpleSearchKey::Undraft => SearchQuery::Undraft,
+                s::SimpleSearchKey::SaveDateSupported => {
+                    SearchQuery::SaveDateSupported
+                },
             }),
             s::SearchKey::Text(text_key) => {
                 let val = text_key.value.into_owned();
@@ -275,6 +278,13 @@ impl CommandProcessor {
                     s::DateSearchKeyType::SentOn => SearchQuery::SentOn(date),
                     s::DateSearchKeyType::SentSince => {
                         SearchQuery::SentSince(date)
+                    },
+                    s::DateSearchKeyType::SavedBefore => {
+                        SearchQuery::SavedBefore(date)
+                    },
+                    s::DateSearchKeyType::SavedOn => SearchQuery::SavedOn(date),
+                    s::DateSearchKeyType::SavedSince => {
+                        SearchQuery::SavedSince(date)
                     },
                 })
             },

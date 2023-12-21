@@ -1166,6 +1166,8 @@ where
     pub rfc822size: bool,
     /// Return internal date?
     pub internal_date: bool,
+    /// Return save date?
+    pub save_date: bool,
     /// Return envelope?
     pub envelope: bool,
     /// Return bodystructure?
@@ -1421,6 +1423,11 @@ pub enum SearchQuery {
     Modseq(Modseq),
     EmailId(String),
     ThreadId(String),
+    // RFC 8514
+    SavedBefore(NaiveDate),
+    SavedOn(NaiveDate),
+    SavedSince(NaiveDate),
+    SaveDateSupported,
 }
 
 /// The response from the `SEARCH` (`ID` = `Seqnum`) or `UID SEARCH`

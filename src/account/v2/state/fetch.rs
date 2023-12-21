@@ -136,6 +136,7 @@ impl Account {
             flags: request.flags,
             rfc822size: request.rfc822size,
             internal_date: request.internal_date,
+            save_date: request.save_date,
             envelope: request.envelope,
             bodystructure: request.bodystructure,
             sections: request.sections,
@@ -246,6 +247,9 @@ impl Account {
                 }
                 if request.internal_date {
                     fetcher.add_internal_date();
+                }
+                if request.save_date {
+                    fetcher.add_save_date();
                 }
                 if request.email_id {
                     fetcher.add_email_id();
@@ -525,6 +529,7 @@ mod test {
             flags: true,
             rfc822size: true,
             internal_date: true,
+            save_date: true,
             envelope: true,
             bodystructure: true,
             sections: vec![section::BodySection::default()],
@@ -550,6 +555,7 @@ mod test {
             let mut has_flags = false;
             let mut has_rfc822size = false;
             let mut has_internal_date = false;
+            let mut has_save_date = false;
             let mut has_envelope = false;
             let mut has_bodystructure = false;
             let mut has_section = false;
@@ -563,6 +569,7 @@ mod test {
                     FetchedItem::Flags(_) => has_flags = true,
                     FetchedItem::Rfc822Size(_) => has_rfc822size = true,
                     FetchedItem::InternalDate(_) => has_internal_date = true,
+                    FetchedItem::SaveDate(d) => has_save_date = d.is_some(),
                     FetchedItem::Envelope(_) => has_envelope = true,
                     FetchedItem::BodyStructure(_) => has_bodystructure = true,
                     FetchedItem::BodySection((_, Ok(_))) => has_section = true,
@@ -577,6 +584,7 @@ mod test {
             assert!(has_flags);
             assert!(has_rfc822size);
             assert!(has_internal_date);
+            assert!(has_save_date);
             assert!(has_envelope);
             assert!(has_bodystructure);
             assert!(has_section);

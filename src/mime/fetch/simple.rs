@@ -154,3 +154,31 @@ impl Visitor for EmailIdFetcher {
         panic!("EmailIdFetcher.end()")
     }
 }
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SaveDateFetcher;
+
+impl Visitor for SaveDateFetcher {
+    type Output = Option<DateTime<FixedOffset>>;
+
+    fn savedate(
+        &mut self,
+        savedate: DateTime<Utc>,
+    ) -> Result<(), Option<DateTime<FixedOffset>>> {
+        Err(Some(savedate.into()))
+    }
+
+    fn metadata(
+        &mut self,
+        _: &MessageMetadata,
+    ) -> Result<(), Option<DateTime<FixedOffset>>> {
+        // If we haven't gotten the SAVEDATE by now, we never will.
+        //Err(None)
+        Ok(())
+    }
+
+    fn end(&mut self) -> Option<DateTime<FixedOffset>> {
+        //None
+        panic!("SaveDateFetcher.end()")
+    }
+}

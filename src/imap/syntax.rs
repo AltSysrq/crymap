@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -1018,6 +1018,9 @@ syntax_rule! {
         #[]
         #[tag("INTERNALDATE")]
         InternalDate(()),
+        #[]
+        #[tag("SAVEDATE")]
+        SaveDate(()),
         #[prefix("RFC822") opt]
         #[delegate(FetchAttRfc822)]
         Rfc822(Option<FetchAttRfc822>),
@@ -1194,6 +1197,9 @@ syntax_rule! {
         #[prefix("INTERNALDATE ")]
         #[primitive(datetime, datetime)]
         InternalDate(DateTime<FixedOffset>),
+        #[prefix("SAVEDATE ") opt]
+        #[primitive(datetime, datetime)]
+        SaveDate(Option<DateTime<FixedOffset>>),
         // The formal grammar permits NIL for all these literals, but the
         // recommendation on the mailing list generally seems to be to never do
         // that and return empty strings instead, so we don't consider the NIL
@@ -1311,6 +1317,8 @@ simple_enum! {
         Unseen("UNSEEN"),
         Draft("DRAFT"),
         Undraft("UNDRAFT"),
+        // RFC 8514
+        SaveDateSupported("SAVEDATESUPPORTED"),
     }
 }
 
@@ -1358,6 +1366,10 @@ simple_enum! {
         SentBefore("SENTBEFORE"),
         SentOn("SENTON"),
         SentSince("SENTSINCE"),
+        // RFC 8514
+        SavedBefore("SAVEDBEFORE"),
+        SavedOn("SAVEDON"),
+        SavedSince("SAVEDSINCE"),
     }
 }
 

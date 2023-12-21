@@ -366,6 +366,7 @@ where
         s::FetchAtt::Envelope(()) => request.envelope = true,
         s::FetchAtt::Flags(()) => request.flags = true,
         s::FetchAtt::InternalDate(()) => request.internal_date = true,
+        s::FetchAtt::SaveDate(()) => request.save_date = true,
         s::FetchAtt::Rfc822(Some(s::FetchAttRfc822::Size)) => {
             request.rfc822size = true;
         },
@@ -527,6 +528,7 @@ fn fetch_att_to_ast(
         })),
         FI::Rfc822Size(size) => Some(s::MsgAtt::Rfc822Size(size)),
         FI::InternalDate(dt) => Some(s::MsgAtt::InternalDate(dt)),
+        FI::SaveDate(dt) => Some(s::MsgAtt::SaveDate(dt)),
         FI::EmailId(ei) => Some(s::MsgAtt::EmailId(Cow::Owned(ei))),
         FI::ThreadIdNil => Some(s::MsgAtt::ThreadIdNil(())),
         FI::Envelope(env) => Some(s::MsgAtt::Envelope(envelope_to_ast(*env))),

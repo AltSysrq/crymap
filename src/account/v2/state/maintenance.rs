@@ -183,7 +183,7 @@ impl Account {
             today.day(),
         );
 
-        let backup_path = self.backup_path.join(&backup_name);
+        let backup_path = self.backup_path.join(backup_name);
 
         match self.metadb.back_up(&self.common_paths.tmp, &backup_path) {
             // If something else already created the backup, ignore.

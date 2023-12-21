@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -75,7 +75,19 @@ pub struct SearchData {
     pub last_modified: Option<Modseq>,
     pub flags: Option<Vec<Flag>>,
     pub recent: Option<bool>,
+    /// The `EMAILID`.
+    ///
+    /// This will be copied from `metadata` if that is encountered first.
+    pub email_id: Option<String>,
+    /// The `RFC822.SIZE`.
+    ///
+    /// This will be copied from `metadata` if that is encountered first.
+    pub rfc822_size: Option<u32>,
 
+    /// The save date of the message. This will be copied from
+    /// `metadata.internal_date` if the save date is not found by the time the
+    /// message is opened.
+    pub save_date: Option<DateTime<FixedOffset>>,
     pub metadata: Option<MessageMetadata>,
 
     /// All headers on the message, with encoded words decoded.
@@ -190,6 +202,11 @@ impl<F: FnMut(&SearchData) -> Option<bool>> Visitor for SearchFetcher<F> {
         Ok(())
     }
 
+    fn email_id(&mut self, email_id: &str) -> Result<(), bool> {
+        self.data.email_id = Some(email_id.to_owned());
+        self.eval()
+    }
+
     fn last_modified(&mut self, modseq: Modseq) -> Result<(), bool> {
         self.data.last_modified = Some(modseq);
         self.eval()
@@ -215,8 +232,29 @@ impl<F: FnMut(&SearchData) -> Option<bool>> Visitor for SearchFetcher<F> {
         self.eval()
     }
 
+    fn rfc822_size(&mut self, size: u32) -> Result<(), bool> {
+        self.data.rfc822_size = Some(size);
+        self.eval()
+    }
+
+    fn savedate(&mut self, date: DateTime<Utc>) -> Result<(), bool> {
+        self.data.save_date = Some(date.into());
+        self.eval()
+    }
+
     fn metadata(&mut self, md: &MessageMetadata) -> Result<(), bool> {
         self.data.metadata = Some(md.to_owned());
+
+        if self.data.email_id.is_none() {
+            self.data.email_id = Some(md.format_email_id());
+        }
+        if self.data.rfc822_size.is_none() {
+            self.data.rfc822_size = Some(md.size);
+        }
+        if self.data.save_date.is_none() {
+            self.data.save_date = Some(md.internal_date);
+        }
+
         self.eval()
     }
 
@@ -455,9 +493,12 @@ mod test {
         let message = message.replace('\n', "\r\n");
         let mut accessor = grovel::SimpleAccessor {
             uid: Uid::u(42),
+            email_id: Some("E1234".to_owned()),
             last_modified: Modseq::of(56100),
             recent: true,
             flags: vec![Flag::Flagged],
+            rfc822_size: Some(12345),
+            savedate: Some(Utc.timestamp_millis_opt(2000).unwrap()),
             metadata: MessageMetadata {
                 size: 12345,
                 internal_date: FixedOffset::eastx(3600)

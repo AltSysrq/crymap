@@ -41,6 +41,7 @@ pub enum FetchedItem {
     Flags(simple::FlagsInfo),
     Rfc822Size(u32),
     InternalDate(DateTime<FixedOffset>),
+    SaveDate(Option<DateTime<FixedOffset>>),
     EmailId(String),
     ThreadIdNil,
     Envelope(Box<envelope::Envelope>),
@@ -146,6 +147,15 @@ impl MultiFetcher {
         self.add_fetcher(Box::new(VisitorMap::new(
             Box::new(simple::InternalDateFetcher),
             FetchedItem::InternalDate,
+            FetchedItem::into_none,
+        )))
+    }
+
+    /// Fetch the "save date" of the message.
+    pub fn add_save_date(&mut self) {
+        self.add_fetcher(Box::new(VisitorMap::new(
+            Box::new(simple::SaveDateFetcher),
+            FetchedItem::SaveDate,
             FetchedItem::into_none,
         )))
     }
@@ -416,19 +426,24 @@ mod test {
         fetcher.add_flags();
         fetcher.add_rfc822size();
         fetcher.add_internal_date();
+        fetcher.add_save_date();
         fetcher.add_email_id();
 
         let uid = Uid::u(42);
         let modseq = Modseq::of(56100);
         let internal_date =
             FixedOffset::zero().timestamp_millis_opt(1000).unwrap();
+        let savedate = Utc.timestamp_millis_opt(2000).unwrap();
         let mut result = grovel::grovel(
             &mut grovel::SimpleAccessor {
                 data: crate::test_data::RFC3501_P56.to_owned().into(),
                 uid,
+                email_id: Some("E1234".to_owned()),
                 last_modified: modseq,
                 recent: true,
                 flags: vec![Flag::Deleted],
+                rfc822_size: Some(1234),
+                savedate: Some(savedate),
                 metadata: MessageMetadata {
                     size: 1234,
                     internal_date,
@@ -441,7 +456,7 @@ mod test {
         )
         .unwrap();
 
-        assert_eq!(10, result.len());
+        assert_eq!(11, result.len());
 
         match &result[0] {
             &FetchedItem::Envelope(ref envelope) => {
@@ -511,8 +526,15 @@ mod test {
         }
 
         match &result[9] {
+            &FetchedItem::SaveDate(sd) => {
+                assert_eq!(Some(DateTime::<FixedOffset>::from(savedate)), sd);
+            },
+            r => panic!("Unexpected save date result: {r:#?}"),
+        }
+
+        match &result[10] {
             &FetchedItem::EmailId(ref id) => {
-                assert_eq!("EAQIDBAUGBwgJCgsMDQ4P", id);
+                assert_eq!("E1234", id);
             },
             r => panic!("Unexpected email id result: {:#?}", r),
         }

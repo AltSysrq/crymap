@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -57,6 +57,7 @@ pub enum Op {
     AnyHeader(Arc<Regex>),
     Content(Arc<Regex>),
     InternalDateCompare(NaiveDate, bool, bool, bool),
+    SaveDateCompare(NaiveDate, bool, bool, bool),
     DateCompare(NaiveDate, bool, bool, bool),
     SizeCompare(u32, bool, bool, bool),
     UidIn(SeqRange<Uid>),
@@ -133,10 +134,9 @@ pub fn eval(ops: &[Op], data: &SearchData) -> Option<bool> {
                 s.o(data.last_modified.map(|m| m.raw() >= thresh))
             },
             // RFC 8474 requires case-sensitive comparison
-            Op::EmailId(ref email_id) => s.o(data
-                .metadata
-                .as_ref()
-                .map(|md| md.format_email_id() == *email_id)),
+            Op::EmailId(ref email_id) => {
+                s.o(data.email_id.as_ref().map(|id| id == email_id))
+            },
 
             Op::From(ref r) => s.o(data.from.as_ref().map(|v| r.is_match(v))),
             Op::Cc(ref r) => s.o(data.cc.as_ref().map(|v| r.is_match(v))),
@@ -169,17 +169,14 @@ pub fn eval(ops: &[Op], data: &SearchData) -> Option<bool> {
                     gt,
                 ));
             },
+            Op::SaveDateCompare(ref relative, lt, eq, gt) => {
+                s.o(cmp_date(data.save_date.as_ref(), relative, lt, eq, gt));
+            },
             Op::DateCompare(ref relative, lt, eq, gt) => {
                 s.o(cmp_date(data.date.as_ref(), relative, lt, eq, gt));
             },
             Op::SizeCompare(ref relative, lt, eq, gt) => {
-                s.o(cmp(
-                    data.metadata.as_ref().map(|md| &md.size),
-                    relative,
-                    lt,
-                    eq,
-                    gt,
-                ));
+                s.o(cmp(data.rfc822_size.as_ref(), relative, lt, eq, gt));
             },
 
             Op::UidIn(ref set) => s.o(data.uid.map(|u| set.contains(u))),
@@ -231,6 +228,7 @@ pub fn want(ops: &[Op]) -> OptionalSearchParts {
             | Op::Not
             | Op::Content(..)
             | Op::InternalDateCompare(..)
+            | Op::SaveDateCompare(..)
             | Op::SizeCompare(..)
             | Op::UidIn(..)
             | Op::Modseq(..)
@@ -800,9 +798,6 @@ mod test {
 
     #[test]
     fn single_size_compare() {
-        let datetime0 =
-            DateTime::parse_from_rfc3339("2020-06-28T12:34:56+23:59").unwrap();
-
         let ops = &[Op::SizeCompare(100, true, false, false)];
         assert_eq!(None, eval(ops, &SearchData::default()));
         assert_eq!(
@@ -810,11 +805,7 @@ mod test {
             eval(
                 ops,
                 &SearchData {
-                    metadata: Some(MessageMetadata {
-                        size: 99,
-                        internal_date: datetime0,
-                        ..MessageMetadata::default()
-                    }),
+                    rfc822_size: Some(99),
                     ..SearchData::default()
                 }
             )
@@ -824,11 +815,7 @@ mod test {
             eval(
                 ops,
                 &SearchData {
-                    metadata: Some(MessageMetadata {
-                        size: 100,
-                        internal_date: datetime0,
-                        ..MessageMetadata::default()
-                    }),
+                    rfc822_size: Some(100),
                     ..SearchData::default()
                 }
             )
@@ -838,11 +825,7 @@ mod test {
             eval(
                 ops,
                 &SearchData {
-                    metadata: Some(MessageMetadata {
-                        size: 101,
-                        internal_date: datetime0,
-                        ..MessageMetadata::default()
-                    }),
+                    rfc822_size: Some(101),
                     ..SearchData::default()
                 }
             )
@@ -855,11 +838,7 @@ mod test {
             eval(
                 ops,
                 &SearchData {
-                    metadata: Some(MessageMetadata {
-                        size: 99,
-                        internal_date: datetime0,
-                        ..MessageMetadata::default()
-                    }),
+                    rfc822_size: Some(99),
                     ..SearchData::default()
                 }
             )
@@ -869,11 +848,7 @@ mod test {
             eval(
                 ops,
                 &SearchData {
-                    metadata: Some(MessageMetadata {
-                        size: 100,
-                        internal_date: datetime0,
-                        ..MessageMetadata::default()
-                    }),
+                    rfc822_size: Some(100),
                     ..SearchData::default()
                 }
             )
@@ -883,11 +858,7 @@ mod test {
             eval(
                 ops,
                 &SearchData {
-                    metadata: Some(MessageMetadata {
-                        size: 101,
-                        internal_date: datetime0,
-                        ..MessageMetadata::default()
-                    }),
+                    rfc822_size: Some(101),
                     ..SearchData::default()
                 }
             )
@@ -900,11 +871,7 @@ mod test {
             eval(
                 ops,
                 &SearchData {
-                    metadata: Some(MessageMetadata {
-                        size: 99,
-                        internal_date: datetime0,
-                        ..MessageMetadata::default()
-                    }),
+                    rfc822_size: Some(99),
                     ..SearchData::default()
                 }
             )
@@ -914,11 +881,7 @@ mod test {
             eval(
                 ops,
                 &SearchData {
-                    metadata: Some(MessageMetadata {
-                        size: 100,
-                        internal_date: datetime0,
-                        ..MessageMetadata::default()
-                    }),
+                    rfc822_size: Some(100),
                     ..SearchData::default()
                 }
             )
@@ -928,11 +891,7 @@ mod test {
             eval(
                 ops,
                 &SearchData {
-                    metadata: Some(MessageMetadata {
-                        size: 101,
-                        internal_date: datetime0,
-                        ..MessageMetadata::default()
-                    }),
+                    rfc822_size: Some(101),
                     ..SearchData::default()
                 }
             )

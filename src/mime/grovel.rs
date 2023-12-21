@@ -224,13 +224,15 @@ pub trait MessageAccessor {
     fn open(&mut self) -> Result<(MessageMetadata, Self::Reader), Error>;
 }
 
-// TODO Upgrade this to work like the V2 data store.
 #[cfg(test)]
 pub struct SimpleAccessor {
     pub uid: Uid,
+    pub email_id: Option<String>,
     pub last_modified: Modseq,
     pub recent: bool,
     pub flags: Vec<Flag>,
+    pub savedate: Option<DateTime<Utc>>,
+    pub rfc822_size: Option<u32>,
     pub metadata: MessageMetadata,
     pub data: Vec<u8>,
 }
@@ -240,9 +242,12 @@ impl Default for SimpleAccessor {
     fn default() -> Self {
         SimpleAccessor {
             uid: Uid::MIN,
+            email_id: None,
             last_modified: Modseq::MIN,
             recent: false,
             flags: vec![],
+            savedate: None,
+            rfc822_size: None,
             metadata: MessageMetadata::default(),
             data: vec![],
         }
@@ -260,7 +265,7 @@ impl MessageAccessor for SimpleAccessor {
     }
 
     fn email_id(&mut self) -> Option<String> {
-        None
+        self.email_id.clone()
     }
 
     fn last_modified(&mut self) -> Modseq {
@@ -268,7 +273,7 @@ impl MessageAccessor for SimpleAccessor {
     }
 
     fn savedate(&mut self) -> Option<DateTime<Utc>> {
-        None
+        self.savedate
     }
 
     fn is_recent(&mut self) -> bool {
@@ -280,7 +285,7 @@ impl MessageAccessor for SimpleAccessor {
     }
 
     fn rfc822_size(&mut self) -> Option<u32> {
-        None
+        self.rfc822_size
     }
 
     fn open(&mut self) -> Result<(MessageMetadata, Self::Reader), Error> {
@@ -908,10 +913,21 @@ impl<
         self.delegate.uid(uid).map_err(&mut self.map_to)
     }
 
+    fn email_id(&mut self, id: &str) -> Result<(), Self::Output> {
+        self.delegate.email_id(id).map_err(&mut self.map_to)
+    }
+
     fn last_modified(&mut self, modseq: Modseq) -> Result<(), Self::Output> {
         self.delegate
             .last_modified(modseq)
             .map_err(&mut self.map_to)
+    }
+
+    fn savedate(
+        &mut self,
+        savedate: DateTime<Utc>,
+    ) -> Result<(), Self::Output> {
+        self.delegate.savedate(savedate).map_err(&mut self.map_to)
     }
 
     fn want_flags(&self) -> bool {
@@ -928,6 +944,10 @@ impl<
 
     fn end_flags(&mut self) -> Result<(), Self::Output> {
         self.delegate.end_flags().map_err(&mut self.map_to)
+    }
+
+    fn rfc822_size(&mut self, size: u32) -> Result<(), Self::Output> {
+        self.delegate.rfc822_size(size).map_err(&mut self.map_to)
     }
 
     fn metadata(

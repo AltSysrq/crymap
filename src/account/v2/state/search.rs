@@ -317,6 +317,20 @@ impl Mailbox {
                 dst.push(Op::True);
                 dst.push(Op::Not);
             },
+
+            SearchQuery::SaveDateSupported => {
+                dst.push(Op::True);
+            },
+
+            SearchQuery::SavedBefore(date) => {
+                dst.push(Op::SaveDateCompare(date, true, false, false));
+            },
+            SearchQuery::SavedOn(date) => {
+                dst.push(Op::SaveDateCompare(date, false, true, false));
+            },
+            SearchQuery::SavedSince(date) => {
+                dst.push(Op::SaveDateCompare(date, false, false, true));
+            },
         }
     }
 }

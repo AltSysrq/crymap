@@ -181,6 +181,7 @@ impl StatefulMailbox {
             flags: request.flags,
             rfc822size: request.rfc822size,
             internal_date: request.internal_date,
+            save_date: request.save_date,
             envelope: request.envelope,
             bodystructure: request.bodystructure,
             sections: request.sections,
@@ -439,6 +440,7 @@ mod test {
             flags: true,
             rfc822size: true,
             internal_date: true,
+            save_date: false, // Unsupported by V1
             envelope: true,
             bodystructure: true,
             sections: vec![section::BodySection::default()],
