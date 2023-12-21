@@ -285,7 +285,7 @@ unsafe extern "C" fn vfs_open(
         return SQLITE_IOERR_CONVPATH;
     };
 
-    let Some(name_str) = CStr::from_ptr(name.cast())
+    let Some(mut name_str) = CStr::from_ptr(name.cast())
         .to_str()
         .ok()
         .map(Path::new)
@@ -294,6 +294,9 @@ unsafe extern "C" fn vfs_open(
     else {
         return SQLITE_IOERR_CONVPATH;
     };
+
+    // Strip any query parms
+    name_str = name_str.split_once('?').map(|s| s.0).unwrap_or(name_str);
 
     let xex = match xex::Xex::new(&app_data.master_key, name_str) {
         Ok(xex) => xex,
