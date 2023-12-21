@@ -26,14 +26,14 @@ use log::error;
 
 use super::super::storage;
 use super::defs::*;
-use crate::mime::{
-    fetch::multi::*,
-    grovel::{grovel, MessageAccessor},
-};
 use crate::{
     account::{message_format, model::*},
     crypt::data_stream,
-    support::error::Error,
+    mime::{
+        fetch::multi::*,
+        grovel::{grovel, MessageAccessor},
+    },
+    support::{chronox::*, error::Error},
 };
 
 pub type FetchReceiver<'a> = &'a mut (dyn FnMut(Seqnum, Vec<FetchedItem>) + 'a);
@@ -334,14 +334,56 @@ impl Account {
         message_id: storage::MessageId,
         access: &storage::MessageAccessData,
     ) -> Result<(MessageMetadata, Box<dyn BufRead>), Error> {
-        let file =
-            self.message_store.open(access.path.as_ref()).map_err(|e| {
-                if io::ErrorKind::NotFound == e.kind() {
-                    Error::ExpungedMessage
-                } else {
-                    Error::Io(e)
-                }
-            })?;
+        let file = match self.message_store.open(access.path.as_ref()) {
+            Ok(reader) => reader,
+            Err(e) => {
+                // If we can't open the message file, generate synthetic
+                // contents to return instead. Set the dates to a point in the
+                // distant future so that the message will show up at the top
+                // of the mailbox and be more obvious.
+                //
+                // This is to make the situation where a partial backup was
+                // restored more graceful. We still return an expunged error to
+                // the client if it's been sitting on its snapshot long enough
+                // that the database entry for the message is gone entirely;
+                // i.e. getting here implies that the database is tracking a
+                // file we can't read but is supposed to still be there.
+                let data = format!(
+                    "\
+From: \"UNKNOWN SENDER\" <unknown>\r
+Date: Wed, 1 Jan 3000 00:00:00 +0000\r
+Subject: [UNREADABLE MESSAGE]\r
+Message-ID: <message-placeholder-{message_id}@localhost>\r
+Content-Type: text/plain; charset=utf-8\r
+Content-Transfer-Encoding: 8bit\r
+\r
+The server was unable to access this message.\r
+The file which is supposed to contain it is missing or corrupt.\r
+\r
+Error message:\r
+  {e:?}\r
+Expected file path:
+  {file_path}\r
+\r
+You might consider asking your administrator to look into this or to search\r
+for a copy of the file in a backup.\r
+\r
+If you cannot restore the message, it is safe to just delete this placeholder.\r
+",
+                    message_id = message_id.0,
+                    file_path = access.path,
+                );
+
+                let metadata = MessageMetadata {
+                    email_id: Default::default(),
+                    size: data.len() as u32,
+                    internal_date: FixedOffset::zero()
+                        .ymd_hmsx(3000, 1, 1, 0, 0, 0),
+                };
+                let reader: Box<dyn BufRead> = Box::new(io::Cursor::new(data));
+                return Ok((metadata, reader));
+            },
+        };
 
         let csk = access.session_key.as_ref().map(|sk| {
             data_stream::CachedSessionKey {

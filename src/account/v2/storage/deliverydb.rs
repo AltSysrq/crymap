@@ -47,7 +47,7 @@ impl Connection {
         // See notes in metadb::Connection::new about setting the permissions
         // this way.
         let _ = fs::set_permissions(
-            &path,
+            path,
             // Needs to be group writable since the MDA may run under a
             // different user.
             fs::Permissions::from_mode(0o660),

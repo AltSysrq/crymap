@@ -1,2 +1,0 @@
-- Instead of returning an error when fetching a message whose backing is
-  unreadable, generate a message describing the problem.
