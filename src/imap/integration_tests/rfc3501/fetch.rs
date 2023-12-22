@@ -881,7 +881,9 @@ fn implicit_seen() {
 
 #[test]
 fn error_conditions() {
-    let setup = set_up();
+    // Using a unique account so that XCRY PURGE doesn't interfere with other
+    // tests.
+    let setup = set_up_new_root();
     let mut client = setup.connect("3501feec");
     quick_log_in(&mut client);
     quick_create(&mut client, "3501feec");
