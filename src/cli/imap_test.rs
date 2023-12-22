@@ -29,7 +29,7 @@ use crate::account::v2::Account;
 use crate::crypt::master_key::MasterKey;
 use crate::imap::command_processor::CommandProcessor;
 use crate::imap::server::Server;
-use crate::support::system_config::*;
+use crate::support::{log_prefix::LogPrefix, system_config::*};
 
 pub fn imap_test() {
     crate::init_simple_log();
@@ -54,7 +54,7 @@ pub fn imap_test() {
 
     {
         let mut account = Account::new(
-            "initial-setup".to_owned(),
+            LogPrefix::new("initial-setup".to_owned()),
             user_dir,
             Arc::new(MasterKey::new()),
         )
@@ -75,7 +75,7 @@ pub fn imap_test() {
             listener.accept().expect("Failed to listen for connections");
 
         let processor = CommandProcessor::new(
-            origin.to_string(),
+            LogPrefix::new(origin.to_string()),
             Arc::clone(&system_config),
             system_root.clone(),
         );

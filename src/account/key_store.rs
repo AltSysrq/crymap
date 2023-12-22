@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -48,10 +48,15 @@ use openssl::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::crypt::master_key::MasterKey;
-use crate::support::error::Error;
-use crate::support::file_ops::{self, IgnoreKinds};
-use crate::support::safe_name::is_safe_name;
+use crate::{
+    crypt::master_key::MasterKey,
+    support::{
+        error::Error,
+        file_ops::{self, IgnoreKinds},
+        log_prefix::LogPrefix,
+        safe_name::is_safe_name,
+    },
+};
 
 const RSA_BITS: u32 = 4096;
 const MAX_KEY_FILE_SIZE: u64 = 256 * 1024;
@@ -104,7 +109,7 @@ impl Default for KeyStoreConfig {
 /// keeping them in memory too long, long-term processes such as the IMAP
 /// server itself should regularly call `clear_cache()` to clear these caches.
 pub struct KeyStore {
-    log_prefix: String,
+    log_prefix: LogPrefix,
     root: PathBuf,
     tmp: PathBuf,
     master_key: Option<Arc<MasterKey>>,
@@ -116,7 +121,7 @@ pub struct KeyStore {
 
 impl KeyStore {
     pub fn new(
-        log_prefix: String,
+        log_prefix: LogPrefix,
         root: PathBuf,
         tmp: PathBuf,
         master_key: Option<Arc<MasterKey>>,
@@ -393,13 +398,13 @@ mod test {
         let master_key = Arc::new(MasterKey::new());
 
         let mut authed_store = KeyStore::new(
-            "authed".to_owned(),
+            LogPrefix::new("authed".to_owned()),
             root.path().to_owned(),
             tmp.path().to_owned(),
             Some(Arc::clone(&master_key)),
         );
         let mut anon_store = KeyStore::new(
-            "anon".to_owned(),
+            LogPrefix::new("anon".to_owned()),
             root.path().to_owned(),
             tmp.path().to_owned(),
             None,

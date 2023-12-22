@@ -407,13 +407,10 @@ impl CommandProcessor {
             }
 
             if !user_agent_name.is_empty() {
-                self.log_prefix.push('(');
-                self.log_prefix.push_str(&user_agent_name);
-                if !user_agent_version.is_empty() {
-                    self.log_prefix.push('/');
-                    self.log_prefix.push_str(&user_agent_version);
-                }
-                self.log_prefix.push(')');
+                self.log_prefix.set_user_agent(
+                    Some(user_agent_name),
+                    Some(user_agent_version).filter(|v| !v.is_empty()),
+                );
             }
 
             info!(

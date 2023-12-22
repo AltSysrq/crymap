@@ -412,10 +412,9 @@ If you cannot restore the message, it is safe to just delete this placeholder.\r
                 session_key,
                 metadata.size.into(),
             ) {
-                // TODO log prefix
                 error!(
-                    "failed to cache access data for message {}: {:?}",
-                    message_id.0, e,
+                    "{} Failed to cache access data for message {}: {:?}",
+                    self.log_prefix, message_id.0, e,
                 );
             }
         }

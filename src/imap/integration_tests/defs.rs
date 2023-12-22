@@ -36,7 +36,9 @@ use crate::imap::command_processor::CommandProcessor;
 use crate::imap::literal_source::LiteralSource;
 use crate::imap::mailbox_name::MailboxName;
 use crate::imap::server::Server;
-use crate::support::{chronox::*, error::Error, system_config::*};
+use crate::support::{
+    chronox::*, error::Error, log_prefix::LogPrefix, system_config::*,
+};
 use crate::test_data::*;
 
 pub(super) use crate::imap::syntax as s;
@@ -70,7 +72,7 @@ pub fn set_up_new_root() -> Setup {
     fs::create_dir(&user_dir).unwrap();
 
     let mut account = Account::new(
-        "initial-setup".to_owned(),
+        LogPrefix::new("initial-setup".to_owned()),
         user_dir,
         Arc::new(MasterKey::new()),
     )
@@ -95,7 +97,7 @@ impl Setup {
 
         std::thread::spawn(move || {
             let processor = CommandProcessor::new(
-                name.to_owned(),
+                LogPrefix::new(name.to_owned()),
                 Arc::new(SystemConfig::default()),
                 data_root,
             );

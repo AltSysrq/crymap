@@ -30,7 +30,10 @@ use crate::{
         model::*,
     },
     crypt::master_key::MasterKey,
-    support::{error::Error, file_ops::IgnoreKinds, user_config::UserConfig},
+    support::{
+        error::Error, file_ops::IgnoreKinds, log_prefix::LogPrefix,
+        user_config::UserConfig,
+    },
 };
 
 impl Account {
@@ -38,7 +41,7 @@ impl Account {
     ///
     /// The directory must already exist, but it need not have any contents.
     pub fn new(
-        log_prefix: String,
+        log_prefix: LogPrefix,
         root: PathBuf,
         master_key: Arc<MasterKey>,
     ) -> Result<Self, Error> {
@@ -58,9 +61,10 @@ impl Account {
         let deliverydb_path = root.join(DELIVERYDB_NAME);
 
         let xex_vfs = storage::XexVfs::new(Arc::clone(&master_key))?;
-        // TODO Database setup logs stuff but doesn't have the log prefix.
-        let metadb = storage::MetaDb::new(metadb_path.clone(), &xex_vfs)?;
-        let deliverydb = storage::DeliveryDb::new(&deliverydb_path)?;
+        let metadb =
+            storage::MetaDb::new(&log_prefix, metadb_path.clone(), &xex_vfs)?;
+        let deliverydb =
+            storage::DeliveryDb::new(&log_prefix, &deliverydb_path)?;
         let message_store = storage::MessageStore::new(root.join("messages"));
 
         Ok(Self {

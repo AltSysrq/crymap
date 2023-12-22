@@ -16,12 +16,16 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+#[macro_use]
+pub mod append_limit;
 pub mod buffer;
 pub mod chronox;
 pub mod compression;
 pub mod diagnostic;
 pub mod error;
 pub mod file_ops;
+pub mod log_prefix;
+pub mod mailbox_paths;
 pub mod rcio;
 pub mod safe_name;
 pub mod small_bitset;
@@ -31,6 +35,3 @@ pub mod threading;
 pub mod un64;
 pub mod unix_privileges;
 pub mod user_config;
-#[macro_use]
-pub mod append_limit;
-pub mod mailbox_paths;

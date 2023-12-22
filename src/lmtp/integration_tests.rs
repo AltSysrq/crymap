@@ -36,8 +36,8 @@ use crate::account::model::Uid;
 use crate::account::v2::Account;
 use crate::crypt::master_key::MasterKey;
 use crate::support::{
-    append_limit::APPEND_SIZE_LIMIT, error::Error, rcio::RcIo,
-    system_config::SystemConfig,
+    append_limit::APPEND_SIZE_LIMIT, error::Error, log_prefix::LogPrefix,
+    rcio::RcIo, system_config::SystemConfig,
 };
 
 // Similar to the IMAP integration tests, we share a system directory between
@@ -80,7 +80,7 @@ fn set_up_new_root() -> Setup {
             fs::create_dir(&user_dir).unwrap();
 
             let mut account = Account::new(
-                "initial-setup".to_owned(),
+                LogPrefix::new("initial-setup".to_owned()),
                 user_dir,
                 Arc::clone(&master_key),
             )
@@ -142,7 +142,7 @@ impl Setup {
                 Box::new(io::BufReader::new(server_io.clone())),
                 Box::new(io::BufWriter::new(server_io)),
                 Arc::new(SystemConfig::default()),
-                cxn_name.to_owned(),
+                LogPrefix::new(cxn_name.to_owned()),
                 ssl_acceptor,
                 data_root,
                 "localhost".to_owned(),
@@ -212,7 +212,7 @@ fn simple_command(cxn: &mut (impl Read + Write), command: &str, prefix: &str) {
 /// Return whether the given account received the specified email.
 fn received_email(setup: &Setup, account_name: &str, email: &str) -> bool {
     let mut account = Account::new(
-        "verify".to_owned(),
+        LogPrefix::new("verify".to_owned()),
         setup.system_dir.path().join(account_name),
         Arc::clone(&setup.master_key),
     )

@@ -30,7 +30,7 @@ use crate::support::error::Error;
 impl Account {
     pub(super) fn run_maintenance(&mut self) {
         if let Err(e) = self.run_maintenance_impl() {
-            error!("{} error running maintenance: {e:?}", self.log_prefix);
+            error!("{} Error running maintenance: {e:?}", self.log_prefix);
         }
     }
 
@@ -44,7 +44,7 @@ impl Account {
             return Ok(());
         }
 
-        info!("{} running daily maintenance...", self.log_prefix);
+        info!("{} Running daily maintenance...", self.log_prefix);
         self.clean_up_orphans(now)?;
         // Process any pending deliveries immediately before running
         // unaccounted recovery so that optimisations are not defeated by
@@ -162,7 +162,7 @@ impl Account {
 
         if recovered > 0 {
             warn!(
-                "{} recovered {recovered} messages into INBOX",
+                "{} Recovered {recovered} messages into INBOX",
                 self.log_prefix,
             );
         }
@@ -256,7 +256,7 @@ impl Account {
             {
                 let path = entry.path();
                 warn!(
-                    "{} removing orphaned temp file: {}",
+                    "{} Removing orphaned temp file: {}",
                     self.log_prefix,
                     path.display()
                 );
@@ -297,7 +297,7 @@ mod test {
     use std::sync::Arc;
 
     use super::*;
-    use crate::support::chronox::*;
+    use crate::support::{chronox::*, log_prefix::LogPrefix};
 
     #[test]
     fn no_error_at_top_level() {
@@ -316,7 +316,7 @@ mod test {
     fn unaccounted_recovery() {
         let mut fixture = TestFixture::new();
         let mut delivery = super::super::DeliveryAccount::new(
-            "delivery".to_owned(),
+            LogPrefix::new("delivery".to_owned()),
             fixture.root.path().to_owned(),
         )
         .unwrap();
@@ -468,7 +468,7 @@ mod test {
         drop(fixture.account);
         fs::rename(&backup_src, &backup_dst).unwrap();
         fixture.account = Account::new(
-            "recovered".to_owned(),
+            LogPrefix::new("recovered".to_owned()),
             fixture.root.path().to_owned(),
             master_key,
         )

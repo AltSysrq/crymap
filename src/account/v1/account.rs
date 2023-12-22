@@ -77,7 +77,7 @@ impl Account {
         });
 
         let key_store = KeyStore::new(
-            log_prefix.clone(),
+            crate::support::log_prefix::LogPrefix::new(log_prefix.clone()),
             root.join("keys"),
             common_paths.tmp.clone(),
             master_key.clone(),

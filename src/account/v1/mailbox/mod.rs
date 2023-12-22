@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -270,7 +270,7 @@ mod test_prelude {
     use crate::account::key_store::{KeyStore, KeyStoreConfig};
     use crate::account::model::*;
     use crate::crypt::master_key::MasterKey;
-    use crate::support::chronox::*;
+    use crate::support::{chronox::*, log_prefix::LogPrefix};
 
     pub(super) struct Setup {
         pub root: TempDir,
@@ -287,7 +287,7 @@ mod test_prelude {
         });
 
         let mut key_store = KeyStore::new(
-            "key-store".to_owned(),
+            LogPrefix::new("key-store".to_owned()),
             root.path().join("keys"),
             common_paths.tmp.clone(),
             Some(Arc::new(MasterKey::new())),

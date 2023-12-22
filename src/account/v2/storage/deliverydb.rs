@@ -26,7 +26,7 @@ use chrono::prelude::*;
 use rusqlite::OptionalExtension as _;
 
 use super::types::*;
-use crate::support::error::Error;
+use crate::support::{error::Error, log_prefix::LogPrefix};
 
 /// A connection to the cleartext `delivery.sqlite` database.
 pub struct Connection {
@@ -36,7 +36,7 @@ pub struct Connection {
 static MIGRATIONS: &[&str] = &[include_str!("deliverydb.v1.sql")];
 
 impl Connection {
-    pub fn new(path: &Path) -> Result<Self, Error> {
+    pub fn new(log_prefix: &LogPrefix, path: &Path) -> Result<Self, Error> {
         let mut cxn = rusqlite::Connection::open_with_flags(
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -59,7 +59,7 @@ impl Connection {
         cxn.busy_timeout(Duration::from_secs(10))?;
 
         super::db_migrations::apply_migrations(
-            &mut cxn, "delivery", MIGRATIONS,
+            log_prefix, &mut cxn, "delivery", MIGRATIONS,
         )?;
 
         Ok(Self { cxn })
@@ -125,8 +125,11 @@ mod test {
     #[test]
     fn test_delivery() {
         let tmpdir = TempDir::new().unwrap();
-        let mut cxn =
-            Connection::new(&tmpdir.path().join("delivery.sqlite")).unwrap();
+        let mut cxn = Connection::new(
+            &LogPrefix::new("test".to_owned()),
+            &tmpdir.path().join("delivery.sqlite"),
+        )
+        .unwrap();
 
         let delivery1 = Delivery {
             path: "foo/bar".to_owned(),

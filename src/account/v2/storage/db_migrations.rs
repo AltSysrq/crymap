@@ -19,9 +19,10 @@
 use log::info;
 
 use super::types::*;
-use crate::support::error::Error;
+use crate::support::{error::Error, log_prefix::LogPrefix};
 
 pub fn apply_migrations(
+    log_prefix: &LogPrefix,
     cxn: &mut rusqlite::Connection,
     db_name: &str,
     migrations: &[&str],
@@ -63,7 +64,7 @@ pub fn apply_migrations(
         .map(|(ix, migration)| (ix + 1, migration))
         .skip(current_version)
     {
-        info!("Applying V{version} migration to {db_name} DB");
+        info!("{log_prefix} Applying V{version} migration to {db_name} DB");
         txn.execute_batch(migration)?;
         txn.execute(
             "INSERT INTO `migration` (`version`, `applied_at`) \

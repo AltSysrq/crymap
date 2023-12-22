@@ -132,8 +132,7 @@ impl Account {
             // Delete the message itself first so that it will never get
             // "recovered" into the INBOX.
             if let Err(e) = self.message_store.delete(path.as_ref()) {
-                // TODO log prefix
-                warn!("delete message at {path:?}: {e:?}");
+                warn!("{} Delete message at {path:?}: {e:?}", self.log_prefix);
             } else {
                 self.metadb.forget_message(message)?;
                 removed += 1;

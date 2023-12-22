@@ -27,7 +27,7 @@ use super::main::ServerDeliverSubcommand;
 use crate::account::model::*;
 use crate::account::v2::DeliveryAccount;
 use crate::support::{
-    error::Error, safe_name::is_safe_name, sysexits::*,
+    error::Error, log_prefix::LogPrefix, safe_name::is_safe_name, sysexits::*,
     system_config::SystemConfig, unix_privileges,
 };
 
@@ -65,14 +65,15 @@ pub(super) fn deliver(
     }
 
     let mut user_root = users_root.join(&user_name);
-    let log_prefix = format!("delivery:~{}", user_name);
+    let log_prefix = LogPrefix::new("delivery".to_owned());
+    log_prefix.set_user(user_name.clone());
 
     if !user_root.is_dir() {
         die!(EX_NOUSER, "{} is not a Crymap user.", user_name);
     }
 
     if let Err(exit) = unix_privileges::assume_user_privileges(
-        &log_prefix,
+        &log_prefix.to_string(),
         system_config.security.chroot_system,
         &mut user_root,
         false,

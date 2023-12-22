@@ -36,6 +36,7 @@ use crate::support::{
     append_limit::APPEND_SIZE_LIMIT,
     buffer::BufferWriter,
     error::Error,
+    log_prefix::LogPrefix,
     rcio::RcIo,
     safe_name::is_safe_name,
     system_config::{LmtpConfig, SystemConfig},
@@ -71,7 +72,7 @@ pub struct Server {
     read: Box<dyn BufRead>,
     write: Box<dyn Write>,
     config: Arc<SystemConfig>,
-    log_prefix: String,
+    log_prefix: LogPrefix,
     ssl_acceptor: SslAcceptor,
 
     users_dir: PathBuf,
@@ -130,7 +131,7 @@ impl Server {
         read: Box<dyn BufRead>,
         write: Box<dyn Write>,
         config: Arc<SystemConfig>,
-        log_prefix: String,
+        log_prefix: LogPrefix,
         ssl_acceptor: SslAcceptor,
         users_dir: PathBuf,
         host_name: String,
@@ -702,7 +703,7 @@ impl Server {
             let _restore_uid_gid = RestoreUidGid;
 
             if unix_privileges::assume_user_privileges(
-                &self.log_prefix,
+                &self.log_prefix.to_string(),
                 self.config.security.chroot_system,
                 &mut user_dir,
                 true,
@@ -747,17 +748,16 @@ impl Server {
                 smtp_date
             );
 
-            let result = DeliveryAccount::new(
-                format!("{}:~{}", self.log_prefix, recipient.normalised),
-                user_dir,
-            )
-            .and_then(|mut account| {
-                account.deliver(
-                    "INBOX",
-                    &[],
-                    message_prefix.as_bytes().chain(&mut data_buffer),
-                )
-            });
+            let sub_log_prefix = self.log_prefix.deep_clone();
+            sub_log_prefix.set_user(recipient.normalised.clone());
+            let result = DeliveryAccount::new(sub_log_prefix, user_dir)
+                .and_then(|mut account| {
+                    account.deliver(
+                        "INBOX",
+                        &[],
+                        message_prefix.as_bytes().chain(&mut data_buffer),
+                    )
+                });
 
             match result {
                 Ok(_) => {

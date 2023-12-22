@@ -38,12 +38,12 @@ impl Account {
         }
 
         info!(
-            "{}: Beginning migration from V1 storage model",
+            "{} Beginning migration from V1 storage model",
             self.log_prefix
         );
         let result = self.metadb.migrate_v1_to_v2(&mut |migrator| {
             let v1_account = v1::account::Account::new(
-                self.log_prefix.clone(),
+                self.log_prefix.to_string(),
                 self.root.clone(),
                 Some(Arc::clone(&self.master_key)),
             );
@@ -69,8 +69,8 @@ impl Account {
                         Err(Error::MailboxUnselectable) => continue,
                         Err(e) => {
                             error!(
-                                "{}: Couldn't get handle on mailbox '{}', \
-                             skipping migration: {e:?}",
+                                "{} Couldn't get handle on mailbox '{}', \
+                                 skipping migration: {e:?}",
                                 self.log_prefix, list_response.name,
                             );
                             continue;
@@ -82,7 +82,7 @@ impl Account {
                     Err(Error::MailboxUnselectable) => continue,
                     Err(e) => {
                         error!(
-                            "{}: Couldn't select mailbox '{}', \
+                            "{} Couldn't select mailbox '{}', \
                              skipping migration: {e:?}",
                             self.log_prefix, list_response.name,
                         );
@@ -108,7 +108,7 @@ impl Account {
                         Ok(p) => p,
                         Err(e) => {
                             error!(
-                                "{}: Couldn't read {src_path:?}; the message \
+                                "{} Couldn't read {src_path:?}; the message \
                                  will not be migrated: {e:?}",
                                 self.log_prefix,
                             );
@@ -125,7 +125,7 @@ impl Account {
                         self.message_store.insert(&src_path, &canonical_path)
                     {
                         error!(
-                            "{}: Couldn't add {src_path:?} to the V2 message \
+                            "{} Couldn't add {src_path:?} to the V2 message \
                              store; the message will not be migrated: {e:?}",
                             self.log_prefix,
                         );
@@ -171,7 +171,7 @@ impl Account {
 
         if let Err(e) = result {
             // Ensure there's an obviously relevant log message.
-            error!("{}: Failed V1 migration: {e:?}", self.log_prefix);
+            error!("{} Failed V1 migration: {e:?}", self.log_prefix);
             return Err(e);
         }
 
@@ -186,7 +186,7 @@ impl Account {
             );
         }
 
-        info!("{}: Migration from V1 succeeded", self.log_prefix);
+        info!("{} Migration from V1 succeeded", self.log_prefix);
 
         result
     }
@@ -197,6 +197,7 @@ mod test {
     use chrono::prelude::*;
 
     use super::*;
+    use crate::support::log_prefix::LogPrefix;
 
     #[test]
     fn test_migration() {
@@ -284,7 +285,7 @@ mod test {
             .unwrap();
 
         let mut v2_account = Account::new(
-            "v2_account".to_owned(),
+            LogPrefix::new("v2_account".to_owned()),
             root.path().to_owned(),
             Arc::clone(&master_key),
         )
@@ -339,7 +340,7 @@ mod test {
 
         // Opening the account again has no additional effect.
         let mut v2_account2 = Account::new(
-            "v2_account2".to_owned(),
+            LogPrefix::new("v2_account2".to_owned()),
             root.path().to_owned(),
             Arc::clone(&master_key),
         )

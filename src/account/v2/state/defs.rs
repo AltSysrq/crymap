@@ -24,9 +24,11 @@ use std::sync::Arc;
 use chrono::prelude::*;
 
 use super::super::storage;
-use crate::account::{key_store::KeyStore, model::*};
-use crate::crypt::master_key::MasterKey;
-use crate::support::{error::Error, small_bitset::SmallBitset};
+use crate::{
+    account::{key_store::KeyStore, model::*},
+    crypt::master_key::MasterKey,
+    support::{error::Error, log_prefix::LogPrefix, small_bitset::SmallBitset},
+};
 
 pub(super) const METADB_NAME: &str = "meta.sqlite.xex";
 pub(super) const DELIVERYDB_NAME: &str = "delivery.sqlite";
@@ -43,7 +45,7 @@ pub struct Account {
     pub(super) root: PathBuf,
     pub(super) common_paths: Arc<CommonPaths>,
     pub(super) backup_path: PathBuf,
-    pub(super) log_prefix: String,
+    pub(super) log_prefix: LogPrefix,
 }
 
 /// The state for a selected mailbox.
@@ -382,7 +384,7 @@ impl TestFixture {
     pub(super) fn new() -> Self {
         let root = tempfile::TempDir::new().unwrap();
         let mut account = Account::new(
-            "account".to_owned(),
+            LogPrefix::new("account".to_owned()),
             root.path().to_owned(),
             std::sync::Arc::new(crate::crypt::master_key::MasterKey::new()),
         )

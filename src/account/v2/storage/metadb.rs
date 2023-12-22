@@ -31,7 +31,7 @@ use super::{sqlite_xex_vfs::XexVfs, types::*};
 use crate::{
     account::model::*,
     support::{
-        error::Error, mailbox_paths::parse_mailbox_path,
+        error::Error, log_prefix::LogPrefix, mailbox_paths::parse_mailbox_path,
         safe_name::is_safe_name, small_bitset::SmallBitset,
     },
 };
@@ -48,7 +48,11 @@ pub struct Connection {
 static MIGRATIONS: &[&str] = &[include_str!("metadb.v1.sql")];
 
 impl Connection {
-    pub fn new(path: PathBuf, xex: &XexVfs) -> Result<Self, Error> {
+    pub fn new(
+        log_prefix: &LogPrefix,
+        path: PathBuf,
+        xex: &XexVfs,
+    ) -> Result<Self, Error> {
         let mut cxn = rusqlite::Connection::open_with_flags_and_vfs(
             &path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -71,7 +75,9 @@ impl Connection {
         cxn.pragma_update(None, "journal_size_limit", 1024 * 1024)?;
         cxn.busy_timeout(Duration::from_secs(10))?;
 
-        super::db_migrations::apply_migrations(&mut cxn, "meta", MIGRATIONS)?;
+        super::db_migrations::apply_migrations(
+            log_prefix, &mut cxn, "meta", MIGRATIONS,
+        )?;
 
         Ok(Self {
             cxn,
@@ -2188,9 +2194,12 @@ mod test {
             let tmpdir = TempDir::new().unwrap();
             let master_key = Arc::new(MasterKey::new());
             let xex = XexVfs::new(master_key).unwrap();
-            let mut cxn =
-                Connection::new(tmpdir.path().join("meta.sqlite.xex"), &xex)
-                    .unwrap();
+            let mut cxn = Connection::new(
+                &LogPrefix::new("test".to_owned()),
+                tmpdir.path().join("meta.sqlite.xex"),
+                &xex,
+            )
+            .unwrap();
             cxn.override_savedate = Some(savedate);
 
             Self {

@@ -24,11 +24,15 @@ use std::sync::Arc;
 
 use log::error;
 
-use crate::account::{
-    model::*,
-    v2::{Account, Mailbox},
+use crate::{
+    account::{
+        model::*,
+        v2::{Account, Mailbox},
+    },
+    support::{
+        error::Error, log_prefix::LogPrefix, system_config::SystemConfig,
+    },
 };
-use crate::support::{error::Error, system_config::SystemConfig};
 
 pub(super) use crate::imap::syntax as s;
 
@@ -88,7 +92,7 @@ pub(super) static TAGLINE: &str = concat!(
 /// command does multiple distinct actions (e.g. `FETCH BODY[]` does an
 /// implicit `STORE`, `CLOSE` does an implicit `EXPUNGE`).
 pub struct CommandProcessor {
-    pub(super) log_prefix: String,
+    pub(super) log_prefix: LogPrefix,
     pub(super) system_config: Arc<SystemConfig>,
     pub(super) data_root: PathBuf,
 
@@ -133,7 +137,7 @@ pub(super) type SendResponse<'a> = &'a (dyn Send + Sync + Fn(s::Response<'_>));
 
 impl CommandProcessor {
     pub fn new(
-        log_prefix: String,
+        log_prefix: LogPrefix,
         system_config: Arc<SystemConfig>,
         data_root: PathBuf,
     ) -> Self {
@@ -168,7 +172,7 @@ impl CommandProcessor {
         self.logged_out
     }
 
-    pub fn log_prefix(&self) -> &str {
+    pub fn log_prefix(&self) -> &LogPrefix {
         &self.log_prefix
     }
 
@@ -269,7 +273,7 @@ where
 #[cfg(not(test))]
 pub(super) fn catch_all_error_handling(
     selected_ok: bool,
-    log_prefix: &str,
+    log_prefix: &LogPrefix,
     e: Error,
 ) -> s::Response<'static> {
     // Don't log if the selected mailbox is gone; it's probably a result of
@@ -298,7 +302,7 @@ pub(super) fn catch_all_error_handling(
 #[cfg(test)]
 pub(super) fn catch_all_error_handling(
     selected_ok: bool,
-    log_prefix: &str,
+    log_prefix: &LogPrefix,
     e: Error,
 ) -> s::Response<'static> {
     if !selected_ok {

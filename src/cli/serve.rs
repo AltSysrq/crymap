@@ -26,10 +26,12 @@ use nix::poll::{poll, PollFd, PollFlags};
 use nix::sys::time::TimeValLike;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
 
-use crate::imap::command_processor::CommandProcessor;
-use crate::imap::server::Server;
-use crate::support::system_config::SystemConfig;
-use crate::support::unix_privileges;
+use crate::{
+    imap::{command_processor::CommandProcessor, server::Server},
+    support::{
+        log_prefix::LogPrefix, system_config::SystemConfig, unix_privileges,
+    },
+};
 
 const STDIN: RawFd = 0;
 const STDOUT: RawFd = 1;
@@ -53,24 +55,25 @@ pub fn imaps(
 
     // We've opened access to everything on the main system we need; now we can
     // apply chroot and privilege deescalation.
-    let peer_name = configure_system("", &system_config, &mut users_root);
+    let (log_prefix, _) =
+        configure_system("imaps", &system_config, &mut users_root);
 
     let ssl_stream = match acceptor.accept(Stdio) {
         Ok(ss) => ss,
         Err(e) => {
-            warn!("{} SSL handshake failed: {}", peer_name, e);
+            warn!("{} SSL handshake failed: {}", log_prefix, e);
             std::process::exit(0)
         },
     };
 
-    info!("{} SSL handshake succeeded", peer_name);
+    info!("{} SSL handshake succeeded", log_prefix);
 
     // This mutex is pretty unfortunate, but needed right now to split
     // SslStream into two pieces.
     let ssl_stream = Arc::new(Mutex::new(ssl_stream));
 
     let processor =
-        CommandProcessor::new(peer_name.clone(), system_config, users_root);
+        CommandProcessor::new(log_prefix.clone(), system_config, users_root);
 
     let mut server = Server::new(
         io::BufReader::new(WrappedIo(Arc::clone(&ssl_stream))),
@@ -91,14 +94,14 @@ pub fn imaps(
         fatal!(
             EX_OSERR,
             "{} Unable to put input/output into non-blocking mode: {}",
-            peer_name,
+            log_prefix,
             e
         );
     }
 
     match server.run() {
-        Ok(_) => info!("{} Normal client disconnect", peer_name),
-        Err(e) => warn!("{} Abnormal client disconnect: {}", peer_name, e),
+        Ok(_) => info!("{} Normal client disconnect", log_prefix),
+        Err(e) => warn!("{} Abnormal client disconnect: {}", log_prefix, e),
     }
 }
 
@@ -130,22 +133,23 @@ pub fn lmtp(
 
     // We've opened access to everything on the main system we need; now we can
     // apply chroot and privilege deescalation.
-    let peer_name = configure_system("lmtp:", &system_config, &mut users_root);
+    let (log_prefix, peer_name) =
+        configure_system("lmtp", &system_config, &mut users_root);
 
     let mut server = crate::lmtp::server::Server::new(
         Box::new(io::BufReader::new(Stdio)),
         Box::new(io::BufWriter::new(Stdio)),
         Arc::new(system_config),
-        format!("lmtp:{}", peer_name),
+        log_prefix.clone(),
         ssl_acceptor,
         users_root,
         host_name,
-        peer_name.clone(),
+        peer_name,
     );
 
     match server.run() {
-        Ok(_) => info!("lmtp:{} Normal client disconnect", peer_name),
-        Err(e) => warn!("lmtp:{} Abnormal client disconnect: {}", peer_name, e),
+        Ok(_) => info!("{} Normal client disconnect", log_prefix),
+        Err(e) => warn!("{} Abnormal client disconnect: {}", log_prefix, e),
     }
 }
 
@@ -194,10 +198,10 @@ fn create_ssl_acceptor(
 }
 
 fn configure_system(
-    log_prefix: &str,
+    protocol: &str,
     system_config: &SystemConfig,
     users_root: &mut PathBuf,
-) -> String {
+) -> (LogPrefix, String) {
     if let Err(exit) =
         unix_privileges::assume_system(&system_config.security, users_root)
     {
@@ -234,6 +238,7 @@ fn configure_system(
     if peer_name.contains('\0') {
         peer_name = "unknown-socket".to_owned();
     }
+    let log_prefix = LogPrefix::new(format!("{protocol}:{peer_name}"));
 
     if let Err(e) = nix::sys::socket::setsockopt(
         &std::io::stdin(),
@@ -258,8 +263,8 @@ fn configure_system(
         &true,
     );
 
-    info!("{}{} Connection established", log_prefix, peer_name);
-    peer_name
+    info!("{} Connection established", log_prefix);
+    (log_prefix, peer_name)
 }
 
 // Read and write to the stdio FDs without buffering

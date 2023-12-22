@@ -121,8 +121,8 @@ impl Account {
             Err(Error::ExpungedMessage) | Err(Error::NxMessage) => false,
             Err(e) => {
                 warn!(
-                    // TODO log prefix
-                    "error evaluating UID {} for search: {}",
+                    "{} Error evaluating UID {} for search: {}",
+                    self.log_prefix,
                     message.uid.0.get(),
                     e,
                 );

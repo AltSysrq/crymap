@@ -26,7 +26,7 @@ use rand::{rngs::OsRng, Rng};
 use super::main::ServerUserAddSubcommand;
 use crate::account::v2::Account;
 use crate::crypt::master_key::MasterKey;
-use crate::support::safe_name::is_safe_name;
+use crate::support::{log_prefix::LogPrefix, safe_name::is_safe_name};
 
 pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
     if !is_safe_name(&cmd.name) {
@@ -162,12 +162,11 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
         }
     }
 
-    if let Err(e) = Account::new(
-        "account-setup".to_owned(),
-        actual_path,
-        Arc::new(MasterKey::new()),
-    )
-    .and_then(|mut account| account.provision(password.as_bytes()))
+    let log_prefix = LogPrefix::new("account-setup".to_owned());
+    log_prefix.set_user(cmd.name.clone());
+    if let Err(e) =
+        Account::new(log_prefix, actual_path, Arc::new(MasterKey::new()))
+            .and_then(|mut account| account.provision(password.as_bytes()))
     {
         die!(EX_SOFTWARE, "Error provisioning account: {}", e);
     }

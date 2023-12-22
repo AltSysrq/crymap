@@ -27,7 +27,7 @@ use super::super::storage;
 use super::defs::*;
 use crate::{
     account::{key_store::KeyStore, model::*},
-    support::{error::Error, small_bitset::SmallBitset},
+    support::{error::Error, log_prefix::LogPrefix, small_bitset::SmallBitset},
 };
 
 /// A not-logged-in handle on an account which can be used for delivering
@@ -38,14 +38,14 @@ pub struct DeliveryAccount {
     message_store: storage::MessageStore,
     root: PathBuf,
     common_paths: Arc<CommonPaths>,
-    log_prefix: String,
+    log_prefix: LogPrefix,
 }
 
 impl DeliveryAccount {
     /// Sets up a new `Account` object in the given directory.
     ///
     /// The directory must already exist, but it need not have any contents.
-    pub fn new(log_prefix: String, root: PathBuf) -> Result<Self, Error> {
+    pub fn new(log_prefix: LogPrefix, root: PathBuf) -> Result<Self, Error> {
         let common_paths = Arc::new(CommonPaths {
             tmp: root.join("tmp"),
             garbage: root.join("garbage"),
@@ -59,7 +59,8 @@ impl DeliveryAccount {
         );
 
         let deliverydb_path = root.join("delivery.sqlite");
-        let deliverydb = storage::DeliveryDb::new(&deliverydb_path)?;
+        let deliverydb =
+            storage::DeliveryDb::new(&log_prefix, &deliverydb_path)?;
         let message_store = storage::MessageStore::new(root.join("messages"));
 
         Ok(Self {
@@ -130,10 +131,7 @@ impl DeliveryAccount {
         // path that can make it grow. This way we have one less transaction
         // per IMAP command cycle.
         if let Err(e) = self.deliverydb.clear_old_deliveries() {
-            error!(
-                "{}: failed to clear old deliveries: {e:?}",
-                self.log_prefix,
-            );
+            error!("{} Failed to clear old deliveries: {e:?}", self.log_prefix,);
         }
 
         Ok(())
@@ -155,10 +153,7 @@ impl Account {
                 Ok(None) => return,
                 Ok(Some(d)) => d,
                 Err(e) => {
-                    error!(
-                        "{}: failed to pop delivery: {e:?}",
-                        self.log_prefix
-                    );
+                    error!("{} Failed to pop delivery: {e:?}", self.log_prefix);
                     return;
                 },
             };
@@ -167,7 +162,7 @@ impl Account {
                 Ok(id) => id,
                 Err(e) => {
                     error!(
-                        "{}: failed to look up INBOX for delivery: {e:?}",
+                        "{} Failed to look up INBOX for delivery: {e:?}",
                         self.log_prefix,
                     );
                     return;
@@ -178,7 +173,7 @@ impl Account {
                 Ok(id) => id,
                 Err(e) => {
                     error!(
-                        "{}: delivering message to INBOX instead of '{}': \
+                        "{} Delivering message to INBOX instead of '{}': \
                          {e:?}",
                         self.log_prefix, delivery.mailbox,
                     );
@@ -199,7 +194,7 @@ impl Account {
             );
             if let Err(e) = r {
                 error!(
-                    "{}: failed to deliver message to '{}', \
+                    "{} Failed to deliver message to '{}', \
                      retrying with INBOX: {e:?}",
                     self.log_prefix, delivery.mailbox,
                 );
@@ -210,7 +205,7 @@ impl Account {
                 );
                 if let Err(e) = r {
                     error!(
-                        "{}: failed to deliver message to INBOX: {e:?}",
+                        "{} Failed to deliver message to INBOX: {e:?}",
                         self.log_prefix,
                     );
                     return;
@@ -228,7 +223,7 @@ mod test {
     fn deliver_success() {
         let mut fixture = TestFixture::new();
         let mut delivery = DeliveryAccount::new(
-            "delivery".to_owned(),
+            LogPrefix::new("delivery".to_owned()),
             fixture.root.path().to_owned(),
         )
         .unwrap();
@@ -258,7 +253,7 @@ mod test {
     fn deliver_bad_destination() {
         let mut fixture = TestFixture::new();
         let mut delivery = DeliveryAccount::new(
-            "delivery".to_owned(),
+            LogPrefix::new("delivery".to_owned()),
             fixture.root.path().to_owned(),
         )
         .unwrap();

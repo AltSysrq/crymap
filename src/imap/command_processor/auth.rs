@@ -198,8 +198,7 @@ impl CommandProcessor {
 
         // Login successful (at least barring further operational issues)
 
-        self.log_prefix.push_str(":~");
-        self.log_prefix.push_str(&cmd.userid);
+        self.log_prefix.set_user(cmd.userid.into_owned());
         info!("{} Login successful", self.log_prefix);
 
         self.drop_privileges(&mut user_dir)?;
@@ -226,7 +225,7 @@ impl CommandProcessor {
 
     fn drop_privileges(&mut self, user_dir: &mut PathBuf) -> PartialResult<()> {
         if unix_privileges::assume_user_privileges(
-            &self.log_prefix,
+            &self.log_prefix.to_string(),
             self.system_config.security.chroot_system,
             user_dir,
             false,
