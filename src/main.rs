@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -22,7 +22,8 @@
     clippy::type_complexity,
     clippy::too_many_arguments,
     clippy::needless_range_loop,
-    clippy::needless_borrowed_reference
+    clippy::needless_borrowed_reference,
+    clippy::precedence
 )]
 #![deny(clippy::pattern_type_mismatch)]
 

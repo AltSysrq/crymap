@@ -43,38 +43,55 @@
 //!   tweak(nonce, 0) = encrypt_ecb(key, nonce)
 //!   tweak(nonce, n) = {
 //!     let pred = tweak(nonce, n - 1);
+//!     // 2 * pred   in GF(2**128)
 //!     if 0 == pred & 1 << 127 {
 //!       pred << 1
 //!     } else {
-//!       (pred << 1) ^ 5
+//!       (pred << 1) ^ 0b10000111
 //!     }
 //!   }
+//!   // In general,
+//!   tweak(nonce, n) = 2**n * nonce   in GF(2**128)
 //! ```
 //!
 //! The stated goal of this approach is that generating each successive tweak
 //! is extremely fast, at the cost of making it expensive to generate a tweak
-//! in the middle of the stream. There is no cryptographic significance of this
-//! particular sequence, only that it be independent of what is being fed into
-//! the inner encryption algorithm and that it does not repeat.
+//! in the middle of the stream.
 //!
-//! This implementation differs in that it uses KMAC-128 to statelessly derive
-//! the tweak:
+//! The particular choice of this approach appears to be a desire to support
+//! multi-dimensional indices at the level of the cryptographic primitive (as
+//! opposed to folding multiple dimensions into one dimension outside of the
+//! primitive), as the paper also presents an option based on powers of 2 and 3
+//! for two-dimensional indexing, and even powers of 2, 3, and 11 for
+//! three-dimensional indexing.
 //!
+//! The issue for us is that computing a power of 2 in a Galois Field is more
+//! expensive than the encryption itself if we don't have access to carry-less
+//! multiplication primitives (which are present on most modern processors, but
+//! OpenSSL doesn't expose functionality to do this multiplication, and Crymap
+//! is not the place for novel assembly-coded algorithms).
+//!
+//! The proofs rely solely on the fact that these power-of-prime schemes
+//! generate distinct values within the field for all input indices. This would
+//! also be true of a simple increment function, something the paper does not
+//! mention.
+//!
+//! The paper notably entirely fails to define serif-N (not to be confused with
+//! sans-serif-N).
+//!
+//! Wikipedia gives some more details on the practical implementation of XEX:
+//! <https://en.wikipedia.org/wiki/XTS_mode#Xor–encrypt–xor_(XEX)>
+//! (Fascinatingly, the dedicated page on XEX does not have these details.)
+//!
+//! Wikipedia effectively defines
 //! ```text
-//!   tweak(nonce, n) = kmac128(nonce, "xex", n)
+//! tweak(n) = encrypt_ecb(key, n / sector_size) * 2**(n%sector_size)  in GF(2**128)
 //! ```
 //!
-//! This gives lower performance in exchange for simpler and more obviously
-//! correct implementation.
-//!
-//! Strictly speaking, KMAC-128 will repeat earlier than the original XEX
-//! algorithm: XEX goes 2¹²⁸ blocks without repeating, while KMAC-128 has a 50%
-//! chance of repeating after around 2⁶⁴ blocks, or 128EB. Realistically,
-//! repeated blocks will never happen.
-//!
-//! (At the end of the day, we do treat the XEX-encrypted data as weaker and
-//! use another layer of encryption to encrypt the session keys cached in the
-//! database.)
+//! For this implementation, we define a "sector" to be 64 blocks (1KB).
+//! GF(2**128) multiplication can be done by powers of 2 up to 120 by a handful
+//! of bitshifts and masks. We additionally XOR a constant nonce into the input
+//! of `encrypt_ecb` to avoid revealing the encryption of the zero block.
 //!
 //! SQLite will try to create files that are not a whole multiple of the block
 //! size. This implementation pads such writes to a full block size so that we
@@ -82,8 +99,6 @@
 //! arbitrary garbage at the end of its files.
 
 use std::mem;
-
-use tiny_keccak::{Hasher, Kmac};
 
 use super::{master_key::MasterKey, AES_BLOCK, AES_BLOCK64};
 
@@ -119,6 +134,7 @@ pub struct Xex {
 
     enc: openssl::symm::Crypter,
     dec: openssl::symm::Crypter,
+    tweaker: Tweaker,
 
     // Reusable buffers to avoid having large memsets in leaf functions for
     // stack buffers or unsafe code for uninitialised buffers.
@@ -156,6 +172,7 @@ impl Xex {
             enc,
             dec,
 
+            tweaker: Tweaker::new(),
             tmp_tweaks: Default::default(),
             tmp_enc: [0u8; AES_BLOCK * GROUP_STRIDE + AES_BLOCK],
             tmp_write: Default::default(),
@@ -413,7 +430,8 @@ impl Xex {
                 .zip(tweaks.iter_mut())
                 .zip((offset..).step_by(AES_BLOCK))
             {
-                *tweak = gen_tweak(&self.nonce, offset);
+                *tweak =
+                    self.tweaker.gen_tweak(&mut self.enc, &self.nonce, offset);
                 for (b, t) in block.iter_mut().zip(tweak.iter().copied()) {
                     *b ^= t;
                 }
@@ -456,15 +474,62 @@ impl Xex {
     }
 }
 
-/// Computes the tweak to be used for the block with the given offset.
-fn gen_tweak(nonce: &[u8; AES_BLOCK], offset: u64) -> [u8; AES_BLOCK] {
-    debug_assert_eq!(0, offset % AES_BLOCK64);
+const TWEAK_SECTOR_SIZE_BLOCKS: u64 = 64;
+struct Tweaker {
+    sector: u64,
+    base: u128,
+}
 
-    let mut k = Kmac::v128(nonce, b"xex");
-    k.update(&offset.to_le_bytes());
-    let mut hash = [0u8; 16];
-    k.finalize(&mut hash);
-    hash
+impl Tweaker {
+    fn new() -> Self {
+        Self {
+            sector: u64::MAX,
+            base: 0,
+        }
+    }
+
+    fn gen_tweak(
+        &mut self,
+        enc: &mut openssl::symm::Crypter,
+        nonce: &[u8; AES_BLOCK],
+        file_offset: u64,
+    ) -> [u8; AES_BLOCK] {
+        debug_assert_eq!(0, file_offset % AES_BLOCK64);
+        let block = file_offset / AES_BLOCK64;
+        let sector = block / TWEAK_SECTOR_SIZE_BLOCKS;
+        let block_in_sector = (block % TWEAK_SECTOR_SIZE_BLOCKS) as u32;
+
+        if sector != self.sector {
+            let mut enc_in = *nonce;
+            for (b, e) in sector.to_le_bytes().into_iter().zip(&mut enc_in) {
+                *e ^= b;
+            }
+
+            let mut enc_out = [0u8; AES_BLOCK * 2];
+            let n = enc.update(&enc_in, &mut enc_out).unwrap();
+            assert_eq!(AES_BLOCK, n);
+
+            self.sector = sector;
+            self.base =
+                u128::from_le_bytes(enc_out[..AES_BLOCK].try_into().unwrap());
+        }
+
+        gf128_mul_exp2(self.base, block_in_sector).to_le_bytes()
+    }
+}
+
+/// Compute `n * 2**exp2` in GF(2**128) for small values of `exp2`.
+fn gf128_mul_exp2(n: u128, exp2: u32) -> u128 {
+    debug_assert!(exp2 <= 120);
+
+    if 0 == exp2 {
+        return n;
+    }
+
+    let lo_half = n << exp2;
+    let hi_half = n >> 128 - exp2;
+
+    lo_half ^ (hi_half << 7) ^ (hi_half << 2) ^ (hi_half << 1) ^ hi_half
 }
 
 #[cfg(test)]
@@ -632,5 +697,42 @@ mod test {
         // Misaligned start and end, straddling two boundaries
         xex.read(&mut backing, &mut read[..34], 10).unwrap();
         assert_eq!(b"brown fox jumps over the lazy dog.", &read[..34]);
+    }
+
+    #[test]
+    fn test_gf128_mul_exp2() {
+        fn gf128_mul_exp2_slow(mut n: u128, exp2: u32) -> u128 {
+            // The simple one-at-a-time algorithm described in the XEX paper.
+            for _ in 0..exp2 {
+                let high_bit = 0 != n >> 127;
+                n <<= 1;
+                if high_bit {
+                    n ^= 0b10000111;
+                }
+            }
+
+            n
+        }
+
+        for n in [
+            1u128,
+            2,
+            3,
+            4,
+            0x2ee4108684a71b2f89d0c73a9ef65217,
+            0xb596d9bfada34102f38f7a24fa107bd7,
+            0xacf0daba883f2031ccba47bf3947abfa,
+            0xbfc3ed42a15e8c4afc13c344692ae1e3,
+            0xd03cfd5db6e15417e9d3144450f4f5f1,
+            0xc2b8bd6e23b61e678140bafd3bb15307,
+            0x828197e375f4979e39c138ca9e4e8657,
+            0x2c7a7ad6a2709581124e17791209dc60,
+        ] {
+            for exp2 in 0..=64 {
+                let slow = gf128_mul_exp2_slow(n, exp2);
+                let fast = gf128_mul_exp2(n, exp2);
+                assert_eq!(slow, fast, "for {n} * 2**{exp2}");
+            }
+        }
     }
 }
