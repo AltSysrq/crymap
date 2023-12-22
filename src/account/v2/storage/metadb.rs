@@ -1638,7 +1638,11 @@ fn create_mailbox(
         (parent, name, special_use),
     )?;
 
-    Ok(MailboxId(txn.last_insert_rowid()))
+    let Ok(mailbox_id) = u32::try_from(txn.last_insert_rowid()) else {
+        return Err(Error::MailboxIdOutOfRange);
+    };
+
+    Ok(MailboxId(mailbox_id))
 }
 
 /// Creates any mailboxes needed so that `path` can be represented as a
@@ -2230,7 +2234,7 @@ mod test {
         );
         assert_matches!(
             Err(Error::NxMailbox),
-            fixture.cxn.create_mailbox(MailboxId(-1), "quux", None),
+            fixture.cxn.create_mailbox(MailboxId(999), "quux", None),
         );
 
         // Retrieval
@@ -2263,7 +2267,7 @@ mod test {
 
         assert_matches!(
             Err(Error::NxMailbox),
-            fixture.cxn.fetch_mailbox(MailboxId(-1)),
+            fixture.cxn.fetch_mailbox(MailboxId(999)),
         );
 
         // Path resolution
@@ -2352,11 +2356,11 @@ mod test {
         );
         assert_matches!(
             Err(Error::NxMailbox),
-            fixture.cxn.move_mailbox(MailboxId(-1), foo_id, "plugh"),
+            fixture.cxn.move_mailbox(MailboxId(999), foo_id, "plugh"),
         );
         assert_matches!(
             Err(Error::NxMailbox),
-            fixture.cxn.move_mailbox(foo_id, MailboxId(-1), "plugh"),
+            fixture.cxn.move_mailbox(foo_id, MailboxId(999), "plugh"),
         );
         assert_matches!(
             Err(Error::MailboxExists),
@@ -2668,7 +2672,7 @@ mod test {
         assert_matches!(
             Err(Error::NxMailbox),
             fixture.cxn.append_mailbox_messages(
-                MailboxId(-1),
+                MailboxId(999),
                 &mut [(us_flag_mboxmsg.message_id, None)].iter().copied(),
             ),
         );
@@ -2682,7 +2686,7 @@ mod test {
         assert_matches!(
             Err(Error::NxMailbox),
             fixture.cxn.intern_and_append_mailbox_messages(
-                MailboxId(-1),
+                MailboxId(999),
                 &mut [("foo", None)].iter().copied(),
             ),
         );
@@ -2696,7 +2700,7 @@ mod test {
         assert_matches!(
             Err(Error::NxMailbox),
             fixture.cxn.expunge_mailbox_messages(
-                MailboxId(-1),
+                MailboxId(999),
                 &mut [us_uid_flag].iter().copied(),
             ),
         );
@@ -2714,7 +2718,7 @@ mod test {
         assert_matches!(
             Err(Error::NxMailbox),
             fixture.cxn.modify_mailbox_message_flags(
-                MailboxId(-1),
+                MailboxId(999),
                 &SmallBitset::new(),
                 false,
                 false,
@@ -3421,7 +3425,7 @@ mod test {
         assert_matches!(
             Err(Error::NxMailbox),
             fixture.cxn.copy_mailbox_messages(
-                MailboxId(-1),
+                MailboxId(999),
                 &mut std::iter::empty(),
                 copy_dst,
             ),
@@ -3431,13 +3435,13 @@ mod test {
             fixture.cxn.copy_mailbox_messages(
                 copy_src,
                 &mut std::iter::empty(),
-                MailboxId(-1),
+                MailboxId(999),
             ),
         );
         assert_matches!(
             Err(Error::NxMailbox),
             fixture.cxn.move_mailbox_messages(
-                MailboxId(-1),
+                MailboxId(999),
                 std::iter::empty(),
                 move_dst,
             ),
@@ -3447,13 +3451,13 @@ mod test {
             fixture.cxn.move_mailbox_messages(
                 copy_src,
                 std::iter::empty(),
-                MailboxId(-1),
+                MailboxId(999),
             ),
         );
         assert_matches!(
             Err(Error::NxMailbox),
             fixture.cxn.move_all_mailbox_messages_into_create_hierarchy(
-                MailboxId(-1),
+                MailboxId(999),
                 "other",
             ),
         );
@@ -3915,7 +3919,7 @@ mod test {
 
         assert_matches!(
             Err(Error::NxMailbox),
-            fixture.cxn.select(MailboxId(-1), false, None),
+            fixture.cxn.select(MailboxId(999), false, None),
         );
 
         let unselectable = fixture
@@ -4295,7 +4299,7 @@ mod test {
         assert_matches!(
             Err(Error::NxMailbox),
             fixture.cxn.mini_poll(
-                MailboxId(-1),
+                MailboxId(999),
                 FlagId(0),
                 None,
                 Modseq::MIN,
@@ -4306,7 +4310,7 @@ mod test {
         assert_matches!(
             Err(Error::NxMailbox),
             fixture.cxn.full_poll(
-                MailboxId(-1),
+                MailboxId(999),
                 true,
                 FlagId(0),
                 None,

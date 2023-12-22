@@ -188,7 +188,7 @@ impl Account {
                     .ok()
                     .and_then(|mad| mad.rfc822_size)
                 {
-                    size += rfc822_size;
+                    size += u64::from(rfc822_size);
                 } else if let Ok((md, _)) = self.open_message(message.id) {
                     size += u64::from(md.size);
                 }
@@ -1211,8 +1211,8 @@ mod test {
     #[test]
     fn test_reify_mailbox_hierarchy() {
         fn mailbox(
-            parent: Option<i64>,
-            id: i64,
+            parent: Option<u32>,
+            id: u32,
             name: &str,
         ) -> storage::Mailbox {
             storage::Mailbox {

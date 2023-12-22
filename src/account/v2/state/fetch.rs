@@ -474,10 +474,7 @@ impl MessageAccessor for MailboxMessageAccessor<'_, '_> {
             .access_message(self.message_status.id)
             .ok();
 
-        self.access
-            .as_ref()
-            .and_then(|a| a.rfc822_size)
-            .map(|s| s as u32)
+        self.access.as_ref().and_then(|a| a.rfc822_size)
     }
 
     fn open(&mut self) -> Result<(MessageMetadata, Self::Reader), Error> {

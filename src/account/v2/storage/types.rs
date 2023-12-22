@@ -19,7 +19,6 @@
 //! Bindings for our model types to `rusqlite`, plus model types specific to
 //! the database itself.
 
-use std::convert::TryFrom;
 use std::str::FromStr;
 
 use chrono::prelude::*;
@@ -53,10 +52,8 @@ macro_rules! transparent_from_sql {
     };
 }
 
-// TODO This should just contain a `u32` since it needs to be one to be a
-// UIDVALIDITY anyway, and this way it just wastes memory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MailboxId(pub i64);
+pub struct MailboxId(pub u32);
 transparent_to_sql!(MailboxId);
 transparent_from_sql!(MailboxId);
 
@@ -69,10 +66,11 @@ impl MailboxId {
     pub const ROOT: Self = Self(0);
 
     pub fn as_uid_validity(self) -> Result<u32, Error> {
-        u32::try_from(self.0)
-            .ok()
-            .filter(|&u| u != 0)
-            .ok_or(Error::MailboxIdOutOfRange)
+        if self.0 == 0 {
+            Err(Error::MailboxIdOutOfRange)
+        } else {
+            Ok(self.0)
+        }
     }
 
     /// Returns the RFC 8474 `MAILBOXID` string derived from this ID.
@@ -430,8 +428,7 @@ pub struct MessageAccessData {
     /// The cached session key (still encrypted), if available.
     pub session_key: Option<SessionKey>,
     /// The value of RFC822.SIZE, if available.
-    // TODO Switch everything to u64 or change this back to u32
-    pub rfc822_size: Option<u64>,
+    pub rfc822_size: Option<u32>,
 }
 
 impl FromRow for MessageAccessData {
