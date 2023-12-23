@@ -369,6 +369,26 @@ mod test {
                 .unwrap();
         }
 
+        // Try to append some messages to a \Noselect mailbox. The \Noselect
+        // state is only detected after the messages have been added to the
+        // message store. To ensure they do not get recovered, the append code
+        // is supposed to intern the messages as orphans first in a separate
+        // transaction, so these won't be recovered.
+        fixture.create("noselect/foo");
+        fixture.delete("noselect").unwrap();
+        for i in 0..3 {
+            let data = format!("noselect-{i}");
+            assert_matches!(
+                Err(Error::MailboxUnselectable),
+                fixture.append(
+                    "noselect",
+                    now.into(),
+                    std::iter::empty(),
+                    data.as_bytes(),
+                ),
+            );
+        }
+
         // Change the modification timestamp of all the files to 25hr ago to
         // make them candidates for recovery.
         let timeval = nix::sys::time::TimeVal::new(

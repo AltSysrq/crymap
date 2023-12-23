@@ -157,11 +157,6 @@ impl Account {
         // adding them to the destination mailbox, they'll be recognised as
         // orphaned messages and deleted rather than being recovered into the
         // inbox.
-        //
-        // TODO Add a unit test that recovery won't bring these files into
-        // existence. This case can be triggered easily by trying to append to
-        // a \Noselect mailbox, since that isn't discovered until the final
-        // step.
         let message_ids = self.metadb.intern_messages_as_orphans(
             &mut canonical_paths.iter().map(|path| {
                 path.to_str().expect("canonical paths are always UTF-8")
