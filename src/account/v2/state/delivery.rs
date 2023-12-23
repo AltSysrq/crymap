@@ -36,7 +36,6 @@ pub struct DeliveryAccount {
     deliverydb: storage::DeliveryDb,
     key_store: KeyStore,
     message_store: storage::MessageStore,
-    root: PathBuf,
     common_paths: Arc<CommonPaths>,
     log_prefix: LogPrefix,
 }
@@ -67,7 +66,6 @@ impl DeliveryAccount {
             deliverydb,
             key_store,
             message_store,
-            root,
             common_paths,
             log_prefix,
         })

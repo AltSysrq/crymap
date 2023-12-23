@@ -90,6 +90,7 @@ impl Connection {
     /// Creates a mailbox with the given name, parent, and special use.
     ///
     /// On success, returns the ID of the created mailbox.
+    #[cfg(test)]
     pub fn create_mailbox(
         &mut self,
         parent: MailboxId,
@@ -158,6 +159,7 @@ impl Connection {
     ///
     /// This can return `MailboxId::ROOT` if `path` names a top-level mailbox,
     /// but if `path` has no components, it will return `NxMailbox`.
+    #[cfg(test)]
     pub fn find_mailbox_parent<'a>(
         &mut self,
         path: &'a str,
@@ -205,6 +207,7 @@ impl Connection {
 
     /// Moves and renames `mailbox_id` to have name `new_name` and be placed
     /// under `new_parent`.
+    #[cfg(test)]
     pub fn move_mailbox(
         &mut self,
         mailbox_id: MailboxId,
@@ -344,6 +347,7 @@ impl Connection {
 
     /// Finds the ID of the given flag, if it exists. Returns `None` without
     /// modifying the database otherwise.
+    #[cfg(test)]
     pub fn look_up_flag_id(
         &mut self,
         flag: &Flag,
@@ -370,6 +374,7 @@ impl Connection {
     }
 
     /// Retrieves all flags that currently exist in the account.
+    #[cfg(test)]
     pub fn fetch_all_flags(&mut self) -> Result<Vec<(FlagId, Flag)>, Error> {
         self.cxn.enable_write(false)?;
         self.cxn
@@ -966,6 +971,7 @@ impl Connection {
     }
 
     /// Directly fetches the raw data for the given message.
+    #[cfg(test)]
     fn fetch_raw_message(
         &mut self,
         message_id: MessageId,
@@ -982,6 +988,7 @@ impl Connection {
     }
 
     /// Directly fetches the raw data for the given mailbox message.
+    #[cfg(test)]
     fn fetch_raw_mailbox_message(
         &mut self,
         mailbox_id: MailboxId,

@@ -18,9 +18,6 @@
 
 //! The V2 storage and state system was introduced with Crymap 2.0.0.
 
-// TODO REMOVE
-#![allow(dead_code)]
-
 mod state;
 mod storage;
 

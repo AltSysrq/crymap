@@ -113,6 +113,7 @@ impl Account {
     ///
     /// This is not exactly the RFC 3501 `APPEND` command; see `multiappend`
     /// for that.
+    #[cfg(any(test, feature = "dev-tools"))]
     pub fn append(
         &mut self,
         mailbox: &str,

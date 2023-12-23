@@ -104,6 +104,7 @@ impl UnixTimestamp {
         Self(Utc::now())
     }
 
+    #[cfg(test)]
     pub fn zero() -> Self {
         Self(DateTime::<Utc>::from_timestamp(0, 0).unwrap())
     }
