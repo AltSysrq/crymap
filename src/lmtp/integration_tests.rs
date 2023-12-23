@@ -36,8 +36,8 @@ use crate::account::model::Uid;
 use crate::account::v2::Account;
 use crate::crypt::master_key::MasterKey;
 use crate::support::{
-    append_limit::APPEND_SIZE_LIMIT, error::Error, log_prefix::LogPrefix,
-    rcio::RcIo, system_config::SystemConfig,
+    append_limit::APPEND_SIZE_LIMIT, async_io::ServerIo, error::Error,
+    log_prefix::LogPrefix, system_config::SystemConfig,
 };
 
 // Similar to the IMAP integration tests, we share a system directory between
@@ -126,42 +126,43 @@ impl Setup {
         // and terminates.
         let data_root: PathBuf = self.system_dir.path().to_owned();
 
-        std::thread::spawn(move || {
-            let server_io = RcIo::wrap(server_io);
-            let mut ssl_acceptor =
-                SslAcceptor::mozilla_intermediate_v5(SslMethod::tls_server())
-                    .unwrap();
-            ssl_acceptor
-                .set_private_key(&CERTIFICATE_PRIVATE_KEY)
-                .unwrap();
-            ssl_acceptor.set_certificate(&CERTIFICATE).unwrap();
-
-            let ssl_acceptor = ssl_acceptor.build();
-
-            let mut server = Server::new(
-                Box::new(io::BufReader::new(server_io.clone())),
-                Box::new(io::BufWriter::new(server_io)),
-                Arc::new(SystemConfig::default()),
-                LogPrefix::new(cxn_name.to_owned()),
-                ssl_acceptor,
-                data_root,
-                "localhost".to_owned(),
-                cxn_name.to_owned(),
-            );
-
-            match server.run() {
-                Ok(()) => (),
-                Err(crate::support::error::Error::Io(e))
-                    if io::ErrorKind::UnexpectedEof == e.kind()
-                        || Some(nix::libc::EPIPE) == e.raw_os_error() =>
-                {
-                    ()
-                },
-                Err(e) => panic!("Unexpected server error: {}", e),
-            }
-        });
+        std::thread::spawn(move || run_server(data_root, cxn_name, server_io));
 
         client_io
+    }
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn run_server(data_root: PathBuf, cxn_name: &str, server_io: UnixStream) {
+    let server_io = ServerIo::new_owned_socket(server_io).unwrap();
+    let mut ssl_acceptor =
+        SslAcceptor::mozilla_intermediate_v5(SslMethod::tls_server()).unwrap();
+    ssl_acceptor
+        .set_private_key(&CERTIFICATE_PRIVATE_KEY)
+        .unwrap();
+    ssl_acceptor.set_certificate(&CERTIFICATE).unwrap();
+
+    let ssl_acceptor = ssl_acceptor.build();
+
+    let mut server = Server::new(
+        server_io,
+        Arc::new(SystemConfig::default()),
+        LogPrefix::new(cxn_name.to_owned()),
+        ssl_acceptor,
+        data_root,
+        "localhost".to_owned(),
+        cxn_name.to_owned(),
+    );
+
+    match server.run().await {
+        Ok(()) => (),
+        Err(crate::support::error::Error::Io(e))
+            if io::ErrorKind::UnexpectedEof == e.kind()
+                || Some(nix::libc::EPIPE) == e.raw_os_error() =>
+        {
+            ()
+        },
+        Err(e) => panic!("Unexpected server error: {e} {e:?}"),
     }
 }
 
@@ -575,6 +576,8 @@ fn start_tls() {
         .connect("localhost", cxn)
         .map_err(|_| "SSL handshake failed")
         .unwrap();
+    // Sleep briefly to ensure the async code has a chance to observe a stall.
+    std::thread::sleep(std::time::Duration::from_millis(100));
     skip_pleasantries(&mut cxn, "starttls");
 
     let tls_email = "Subject: TLS\r\n\r\nThis message was sent over TLS.\r\n";

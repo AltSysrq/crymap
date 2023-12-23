@@ -17,16 +17,17 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
-use std::fmt;
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, Write};
 use std::mem;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::str;
 use std::sync::Arc;
 
 use chrono::prelude::*;
 use log::error;
 use openssl::ssl::SslAcceptor;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufStream};
 
 use super::codes::*;
 use super::syntax::*;
@@ -34,10 +35,10 @@ use crate::account::model::CommonPaths;
 use crate::account::v2::DeliveryAccount;
 use crate::support::{
     append_limit::APPEND_SIZE_LIMIT,
+    async_io::ServerIo,
     buffer::BufferWriter,
     error::Error,
     log_prefix::LogPrefix,
-    rcio::RcIo,
     safe_name::is_safe_name,
     system_config::{LmtpConfig, SystemConfig},
     unix_privileges,
@@ -45,7 +46,7 @@ use crate::support::{
 
 macro_rules! require {
     ($this:expr, $($fns:ident = $arg:expr,)* @else $el:block) => {
-        $(if let Some(r) = $this.$fns($arg) { $el; return r; })*
+        $(if let Some(r) = $this.$fns($arg).await { $el; return r; })*
     };
     ($this:expr, $($fns:ident = $arg:expr),*) => {
         require!($this, $($fns = $arg,)* @else {})
@@ -69,8 +70,7 @@ static EXTENSIONS: &[&str] = &[
 ];
 
 pub struct Server {
-    read: Box<dyn BufRead>,
-    write: Box<dyn Write>,
+    io: BufStream<ServerIo>,
     config: Arc<SystemConfig>,
     log_prefix: LogPrefix,
     ssl_acceptor: SslAcceptor,
@@ -128,8 +128,7 @@ use self::ResponseKind::*;
 
 impl Server {
     pub fn new(
-        read: Box<dyn BufRead>,
-        write: Box<dyn Write>,
+        io: ServerIo,
         config: Arc<SystemConfig>,
         log_prefix: LogPrefix,
         ssl_acceptor: SslAcceptor,
@@ -144,8 +143,7 @@ impl Server {
 
         Server {
             data_buffer: BufferWriter::new(Arc::clone(&common_paths)),
-            read,
-            write,
+            io: BufStream::new(io),
             config,
             log_prefix,
             ssl_acceptor,
@@ -161,24 +159,24 @@ impl Server {
         }
     }
 
-    pub fn run(&mut self) -> Result<(), Error> {
-        self.send_greeting()?;
+    pub async fn run(&mut self) -> Result<(), Error> {
+        self.send_greeting().await?;
 
         let mut buffer = Vec::new();
         while !self.quit {
-            self.run_command(&mut buffer)?;
+            self.run_command(&mut buffer).await?;
         }
 
         Ok(())
     }
 
-    fn run_command(&mut self, buffer: &mut Vec<u8>) -> Result<(), Error> {
+    async fn run_command(&mut self, buffer: &mut Vec<u8>) -> Result<(), Error> {
         buffer.clear();
 
-        self.read
-            .by_ref()
+        (&mut self.io)
             .take(MAX_LINE as u64)
-            .read_until(b'\n', buffer)?;
+            .read_until(b'\n', buffer)
+            .await?;
         if buffer.is_empty() {
             return Err(Error::Io(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
@@ -193,15 +191,16 @@ impl Server {
                     pc::CommandSyntaxError,
                     Some((cc::PermFail, sc::OtherProtocolStatus)),
                     Cow::Borrowed("Command line too long"),
-                )?;
+                )
+                .await?;
 
                 // Skip the rest of the line
                 while !buffer.is_empty() && !buffer.ends_with(b"\n") {
                     buffer.clear();
-                    self.read
-                        .by_ref()
+                    (&mut self.io)
                         .take(MAX_LINE as u64)
-                        .read_until(b'\n', buffer)?;
+                        .read_until(b'\n', buffer)
+                        .await?;
                 }
 
                 return Ok(());
@@ -219,7 +218,8 @@ impl Server {
                 pc::CommandSyntaxError,
                 Some((cc::PermFail, sc::SyntaxError)),
                 Cow::Borrowed("Sadly we cannot allow UNIX newlines here"),
-            )?;
+            )
+            .await?;
             return Ok(());
         }
 
@@ -231,7 +231,8 @@ impl Server {
                     pc::CommandSyntaxError,
                     Some((cc::PermFail, sc::OtherProtocolStatus)),
                     Cow::Borrowed("Malformed UTF-8"),
-                )?;
+                )
+                .await?;
                 return Ok(());
             },
         };
@@ -245,21 +246,24 @@ impl Server {
                         pc::ParameterSyntaxError,
                         Some((cc::PermFail, sc::InvalidCommandArguments)),
                         Cow::Borrowed("Unknown command syntax"),
-                    )?;
+                    )
+                    .await?;
                 } else if looks_like_smtp_helo(command_line) {
                     self.send_response(
                         Final,
                         pc::CommandSyntaxError,
                         Some((cc::PermFail, sc::WrongProtocolVersion)),
                         Cow::Borrowed("This is LMTP, not SMTP"),
-                    )?;
+                    )
+                    .await?;
                 } else {
                     self.send_response(
                         Final,
                         pc::CommandSyntaxError,
                         Some((cc::PermFail, sc::InvalidCommand)),
                         Cow::Borrowed("Unrecognised command"),
-                    )?;
+                    )
+                    .await?;
                 }
 
                 return Ok(());
@@ -267,22 +271,26 @@ impl Server {
         };
 
         match command {
-            Command::Lhlo(origin) => self.cmd_lhlo(origin),
-            Command::MailFrom(email, size) => self.cmd_mail_from(email, size),
-            Command::Recipient(email) => self.cmd_recipient(email),
-            Command::Data => self.cmd_data(),
-            Command::BinaryData(len, last) => self.cmd_binary_data(len, last),
-            Command::Reset => self.cmd_reset(),
-            Command::Verify => self.cmd_verify(),
-            Command::Expand => self.cmd_expand(),
-            Command::Help => self.cmd_help(),
-            Command::Noop => self.cmd_noop(),
-            Command::Quit => self.cmd_quit(),
-            Command::StartTls => self.cmd_start_tls(),
+            Command::Lhlo(origin) => self.cmd_lhlo(origin).await,
+            Command::MailFrom(email, size) => {
+                self.cmd_mail_from(email, size).await
+            },
+            Command::Recipient(email) => self.cmd_recipient(email).await,
+            Command::Data => self.cmd_data().await,
+            Command::BinaryData(len, last) => {
+                self.cmd_binary_data(len, last).await
+            },
+            Command::Reset => self.cmd_reset().await,
+            Command::Verify => self.cmd_verify().await,
+            Command::Expand => self.cmd_expand().await,
+            Command::Help => self.cmd_help().await,
+            Command::Noop => self.cmd_noop().await,
+            Command::Quit => self.cmd_quit().await,
+            Command::StartTls => self.cmd_start_tls().await,
         }
     }
 
-    fn cmd_lhlo(&mut self, origin: String) -> Result<(), Error> {
+    async fn cmd_lhlo(&mut self, origin: String) -> Result<(), Error> {
         require!(self, need_lhlo = false);
 
         self.send_response(
@@ -290,7 +298,8 @@ impl Server {
             pc::Ok,
             None,
             Cow::Owned(format!("{} salutations, {}", self.host_name, origin)),
-        )?;
+        )
+        .await?;
         self.peer_id = Some(origin);
 
         for (ix, &ext) in EXTENSIONS.iter().enumerate() {
@@ -305,13 +314,14 @@ impl Server {
                 pc::Ok,
                 None,
                 Cow::Borrowed(ext),
-            )?;
+            )
+            .await?;
         }
 
         Ok(())
     }
 
-    fn cmd_mail_from(
+    async fn cmd_mail_from(
         &mut self,
         return_path: String,
         approx_size: Option<u64>,
@@ -319,15 +329,17 @@ impl Server {
         require!(self, need_lhlo = true, need_return_path = false);
 
         if approx_size.unwrap_or(0) > APPEND_SIZE_LIMIT as u64 {
-            return self.send_response(
-                Final,
-                pc::ExceededStorageAllocation,
-                Some((cc::PermFail, sc::MessageLengthExceedsLimit)),
-                Cow::Owned(format!(
-                    "Maximum message size is {} bytes",
-                    APPEND_SIZE_LIMIT
-                )),
-            );
+            return self
+                .send_response(
+                    Final,
+                    pc::ExceededStorageAllocation,
+                    Some((cc::PermFail, sc::MessageLengthExceedsLimit)),
+                    Cow::Owned(format!(
+                        "Maximum message size is {} bytes",
+                        APPEND_SIZE_LIMIT
+                    )),
+                )
+                .await;
         }
 
         // Ensure there is no buffered data (or anything else).
@@ -341,9 +353,13 @@ impl Server {
             Some((cc::Success, sc::Undefined)),
             Cow::Borrowed("OK"),
         )
+        .await
     }
 
-    fn cmd_recipient(&mut self, forward_path: String) -> Result<(), Error> {
+    async fn cmd_recipient(
+        &mut self,
+        forward_path: String,
+    ) -> Result<(), Error> {
         require!(
             self,
             need_lhlo = true,
@@ -352,17 +368,20 @@ impl Server {
         );
 
         match Recipient::normalise(&self.config.lmtp, forward_path.clone()) {
-            None => self.send_response(
-                Final,
-                pc::ActionNotTakenPermanent,
-                Some((cc::PermFail, sc::BadDestinationMailboxAddress)),
-                // The "no such user - " prefix has significance with some
-                // agents according to RFC 5321
-                Cow::Owned(format!(
-                    "no such user - {} (disallowed name)",
-                    forward_path
-                )),
-            ),
+            None => {
+                self.send_response(
+                    Final,
+                    pc::ActionNotTakenPermanent,
+                    Some((cc::PermFail, sc::BadDestinationMailboxAddress)),
+                    // The "no such user - " prefix has significance with some
+                    // agents according to RFC 5321
+                    Cow::Owned(format!(
+                        "no such user - {} (disallowed name)",
+                        forward_path
+                    )),
+                )
+                .await
+            },
 
             Some(recipient) => {
                 if self.users_dir.join(&recipient.normalised).is_dir() {
@@ -373,6 +392,7 @@ impl Server {
                         Some((cc::Success, sc::DestinationAddressValid)),
                         Cow::Borrowed("OK"),
                     )
+                    .await
                 } else {
                     self.send_response(
                         Final,
@@ -380,12 +400,13 @@ impl Server {
                         Some((cc::PermFail, sc::BadDestinationMailboxAddress)),
                         Cow::Owned(format!("no such user - {}", forward_path)),
                     )
+                    .await
                 }
             },
         }
     }
 
-    fn cmd_data(&mut self) -> Result<(), Error> {
+    async fn cmd_data(&mut self) -> Result<(), Error> {
         require!(
             self,
             need_lhlo = true,
@@ -399,12 +420,18 @@ impl Server {
             pc::StartMailInput,
             None,
             Cow::Borrowed("Go ahead"),
-        )?;
-        copy_with_dot_stuffing(&mut self.data_buffer, &mut self.read)?;
-        self.deliver()
+        )
+        .await?;
+        copy_with_dot_stuffing(&mut self.data_buffer, Pin::new(&mut self.io))
+            .await?;
+        self.deliver().await
     }
 
-    fn cmd_binary_data(&mut self, len: u64, last: bool) -> Result<(), Error> {
+    async fn cmd_binary_data(
+        &mut self,
+        len: u64,
+        last: bool,
+    ) -> Result<(), Error> {
         require!(
             self,
             need_lhlo = true,
@@ -413,28 +440,38 @@ impl Server {
             @else {
                 // Discard the chunk
                 let nread =
-                    io::copy(&mut self.read.by_ref().take(len), &mut io::sink())?;
+                    tokio::io::copy(&mut (&mut self.io).take(len), &mut tokio::io::sink()).await?;
                 if nread != len {
                     return Err(Error::Io(io::Error::new(
                         io::ErrorKind::UnexpectedEof,
                         "EOF before end of BDAT",
                     )));
                 }
-
             }
         );
 
-        let nread =
-            io::copy(&mut self.read.by_ref().take(len), &mut self.data_buffer)?;
-        if nread != len {
-            return Err(Error::Io(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "EOF before end of BDAT",
-            )));
+        {
+            let mut buf = [0u8; 4096];
+            let mut remaining = len;
+            while remaining > 0 {
+                let max = usize::try_from(remaining)
+                    .unwrap_or(buf.len())
+                    .min(buf.len());
+                let nread = self.io.read(&mut buf[..max]).await?;
+                if 0 == nread {
+                    return Err(Error::Io(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "EOF before end of BDAT",
+                    )));
+                }
+
+                remaining -= nread as u64;
+                self.data_buffer.write_all(&buf[..nread])?;
+            }
         }
 
         if last {
-            self.deliver()
+            self.deliver().await
         } else {
             self.send_response(
                 Final,
@@ -442,10 +479,11 @@ impl Server {
                 Some((cc::Success, sc::Undefined)),
                 Cow::Borrowed("OK"),
             )
+            .await
         }
     }
 
-    fn cmd_reset(&mut self) -> Result<(), Error> {
+    async fn cmd_reset(&mut self) -> Result<(), Error> {
         self.reset();
         self.send_response(
             Final,
@@ -453,80 +491,91 @@ impl Server {
             Some((cc::Success, sc::Undefined)),
             Cow::Borrowed("OK"),
         )
+        .await
     }
 
-    fn cmd_verify(&mut self) -> Result<(), Error> {
+    async fn cmd_verify(&mut self) -> Result<(), Error> {
         self.send_response(
             Final,
             pc::CannotVerify,
             Some((cc::Success, sc::OtherSecurity)),
             Cow::Borrowed("VRFY not supported"),
         )
+        .await
     }
 
-    fn cmd_expand(&mut self) -> Result<(), Error> {
+    async fn cmd_expand(&mut self) -> Result<(), Error> {
         self.send_response(
             Final,
             pc::ActionNotTakenPermanent,
             Some((cc::PermFail, sc::SystemNotCapableOfSelectedFeatures)),
             Cow::Borrowed("There are no mailing lists here"),
         )
+        .await
     }
 
-    fn cmd_help(&mut self) -> Result<(), Error> {
+    async fn cmd_help(&mut self) -> Result<(), Error> {
         self.send_response(
             Delayable,
             pc::HelpMessage,
             Some((cc::Success, sc::Undefined)),
             Cow::Borrowed("You have asked me for help"),
-        )?;
+        )
+        .await?;
         self.send_response(
             Delayable,
             pc::HelpMessage,
             Some((cc::Success, sc::Undefined)),
             Cow::Borrowed("An LMTP server!"),
-        )?;
+        )
+        .await?;
         self.send_response(
             Delayable,
             pc::HelpMessage,
             Some((cc::Success, sc::Undefined)),
             Cow::Borrowed("What a strange life choice"),
-        )?;
+        )
+        .await?;
         self.send_response(
             Delayable,
             pc::HelpMessage,
             Some((cc::Success, sc::Undefined)),
             Cow::Borrowed("This is the Crymap LMTP server."),
-        )?;
+        )
+        .await?;
         self.send_response(
             Final,
             pc::HelpMessage,
             Some((cc::Success, sc::Undefined)),
             Cow::Borrowed("End of HELP"),
         )
+        .await
     }
 
-    fn cmd_noop(&mut self) -> Result<(), Error> {
+    async fn cmd_noop(&mut self) -> Result<(), Error> {
         self.send_response(
             Final,
             pc::Ok,
             Some((cc::Success, sc::Undefined)),
             Cow::Borrowed("OK"),
         )
+        .await
     }
 
-    fn cmd_quit(&mut self) -> Result<(), Error> {
+    async fn cmd_quit(&mut self) -> Result<(), Error> {
         self.quit = true;
-        let _ = self.send_response(
-            Final,
-            pc::ServiceClosing,
-            Some((cc::Success, sc::Undefined)),
-            Cow::Borrowed("Bye"),
-        );
+        let _ = self
+            .send_response(
+                Final,
+                pc::ServiceClosing,
+                Some((cc::Success, sc::Undefined)),
+                Cow::Borrowed("Bye"),
+            )
+            .await;
         Ok(())
     }
 
-    fn cmd_start_tls(&mut self) -> Result<(), Error> {
+    async fn cmd_start_tls(&mut self) -> Result<(), Error> {
         require!(self, need_tls = false);
         self.started_tls = true;
         self.send_response(
@@ -534,101 +583,72 @@ impl Server {
             pc::ServiceReady,
             Some((cc::Success, sc::Undefined)),
             Cow::Borrowed("Switching to TLS"),
-        )?;
+        )
+        .await?;
 
-        struct RecombinedIo<R, W> {
-            r: R,
-            w: W,
-        }
-        impl<R: Read, W> Read for RecombinedIo<R, W> {
-            fn read(&mut self, dst: &mut [u8]) -> io::Result<usize> {
-                self.r.read(dst)
-            }
-        }
-        impl<R, W: Write> Write for RecombinedIo<R, W> {
-            fn write(&mut self, src: &[u8]) -> io::Result<usize> {
-                self.w.write(src)
-            }
-
-            fn flush(&mut self) -> io::Result<()> {
-                self.w.flush()
-            }
-        }
-        impl<R, W> fmt::Debug for RecombinedIo<R, W> {
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                write!(f, "RecombinedIo")
-            }
-        }
-
-        #[allow(clippy::box_default)] // not helpful here
-        let ssl_stream = match self.ssl_acceptor.accept(RecombinedIo {
-            r: mem::replace(&mut self.read, Box::new(&[] as &[u8])),
-            w: mem::replace(&mut self.write, Box::new(Vec::<u8>::new())),
-        }) {
-            Ok(ss) => ss,
-            Err(e) => {
-                return Err(Error::Io(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("SSL handshake failed: {}", e),
-                )))
-            },
-        };
-
-        let ssl_stream = RcIo::wrap(ssl_stream);
-        self.read = Box::new(io::BufReader::new(ssl_stream.clone()));
-        self.write = Box::new(io::BufWriter::new(ssl_stream));
-
+        self.io.get_mut().ssl_accept(&self.ssl_acceptor).await?;
         self.reset();
         self.peer_id = None;
-        self.send_greeting()
+        self.send_greeting().await
     }
 
-    fn need_lhlo(&mut self, present: bool) -> Option<Result<(), Error>> {
+    async fn need_lhlo(&mut self, present: bool) -> Option<Result<(), Error>> {
         self.check_need(
             self.peer_id.is_some(),
             present,
             "Already got LHLO",
             "Still waiting for LHLO",
         )
+        .await
     }
 
-    fn need_return_path(&mut self, present: bool) -> Option<Result<(), Error>> {
+    async fn need_return_path(
+        &mut self,
+        present: bool,
+    ) -> Option<Result<(), Error>> {
         self.check_need(
             self.return_path.is_some(),
             present,
             "Already got MAIL FROM",
             "Still waiting for MAIL FROM",
         )
+        .await
     }
 
-    fn need_recipients(&mut self, present: bool) -> Option<Result<(), Error>> {
+    async fn need_recipients(
+        &mut self,
+        present: bool,
+    ) -> Option<Result<(), Error>> {
         self.check_need(
             !self.recipients.is_empty(),
             present,
             "Already have recipients",
             "No recipients",
         )
+        .await
     }
 
-    fn need_data(&mut self, present: bool) -> Option<Result<(), Error>> {
+    async fn need_data(&mut self, present: bool) -> Option<Result<(), Error>> {
         self.check_need(
             self.data_buffer.len() > 0,
             present,
             "Already have data buffered",
             "No data buffered",
         )
+        .await
     }
 
-    fn need_tls(&mut self, present: bool) -> Option<Result<(), Error>> {
+    async fn need_tls(&mut self, present: bool) -> Option<Result<(), Error>> {
         self.check_need(
             self.started_tls,
             present,
             "TLS already started",
             "TLS not started",
         )
+        .await
     }
 
-    fn check_need(
+    async fn check_need(
         &mut self,
         current_status: bool,
         desired_status: bool,
@@ -636,16 +656,19 @@ impl Server {
         message_if_missing: &str,
     ) -> Option<Result<(), Error>> {
         if current_status != desired_status {
-            Some(self.send_response(
-                Final,
-                pc::BadSequenceOfCommands,
-                Some((cc::PermFail, sc::InvalidCommand)),
-                Cow::Borrowed(if current_status {
-                    message_if_already_present
-                } else {
-                    message_if_missing
-                }),
-            ))
+            Some(
+                self.send_response(
+                    Final,
+                    pc::BadSequenceOfCommands,
+                    Some((cc::PermFail, sc::InvalidCommand)),
+                    Cow::Borrowed(if current_status {
+                        message_if_already_present
+                    } else {
+                        message_if_missing
+                    }),
+                )
+                .await,
+            )
         } else {
             None
         }
@@ -657,7 +680,7 @@ impl Server {
         self.data_buffer = BufferWriter::new(Arc::clone(&self.common_paths));
     }
 
-    fn deliver(&mut self) -> Result<(), Error> {
+    async fn deliver(&mut self) -> Result<(), Error> {
         struct RestoreUidGid;
         impl Drop for RestoreUidGid {
             fn drop(&mut self) {
@@ -692,7 +715,8 @@ impl Server {
                         "Maximum message size is {} bytes",
                         APPEND_SIZE_LIMIT
                     )),
-                )?;
+                )
+                .await?;
                 continue;
             }
 
@@ -722,7 +746,8 @@ impl Server {
                         },
                     )),
                     Cow::Borrowed("Problem with mailbox permissions"),
-                )?;
+                )
+                .await?;
                 continue;
             }
 
@@ -755,7 +780,10 @@ impl Server {
                     account.deliver(
                         "INBOX",
                         &[],
-                        message_prefix.as_bytes().chain(&mut data_buffer),
+                        io::Read::chain(
+                            message_prefix.as_bytes(),
+                            &mut data_buffer,
+                        ),
                     )
                 });
 
@@ -766,7 +794,8 @@ impl Server {
                         pc::Ok,
                         Some((cc::Success, sc::Undefined)),
                         Cow::Borrowed("OK"),
-                    )?;
+                    )
+                    .await?;
                 },
 
                 Err(e) => {
@@ -784,7 +813,8 @@ impl Server {
                             "Unexpected problem accessing INBOX; \
                              see LMTP server logs for details",
                         ),
-                    )?;
+                    )
+                    .await?;
                 },
             }
         }
@@ -794,7 +824,7 @@ impl Server {
         Ok(())
     }
 
-    fn send_greeting(&mut self) -> Result<(), Error> {
+    async fn send_greeting(&mut self) -> Result<(), Error> {
         self.send_response(
             Final,
             pc::ServiceReady,
@@ -809,31 +839,31 @@ impl Server {
                 if self.started_tls { "+TLS" } else { "" }
             )),
         )
+        .await
     }
 
-    fn send_response(
+    async fn send_response(
         &mut self,
         kind: ResponseKind,
         primary_code: PrimaryCode,
         secondary_code: Option<(ClassCode, SubjectCode)>,
         quip: Cow<'_, str>,
     ) -> Result<(), Error> {
-        write!(self.write, "{}{}", primary_code as u16, kind.indicator())?;
+        use std::fmt::Write as _;
+
+        let mut s = String::new();
+        let _ = write!(s, "{}{}", primary_code as u16, kind.indicator());
         if let Some((class, subject)) = secondary_code {
             let subject = subject as u8;
-            write!(
-                self.write,
-                "{}.{}.{} ",
-                class as u8,
-                subject / 10,
-                subject % 10
-            )?;
+            let _ =
+                write!(s, "{}.{}.{} ", class as u8, subject / 10, subject % 10);
         }
 
-        write!(self.write, "{}\r\n", quip)?;
+        let _ = write!(s, "{}\r\n", quip);
 
+        self.io.write_all(s.as_bytes()).await?;
         match kind {
-            Final | Urgent => self.write.flush()?,
+            Final | Urgent => self.io.flush().await?,
             Delayable => (),
         }
 
@@ -881,9 +911,9 @@ impl Recipient {
     }
 }
 
-fn copy_with_dot_stuffing(
+async fn copy_with_dot_stuffing(
     mut dst: impl Write,
-    mut src: impl BufRead,
+    mut src: Pin<&mut impl AsyncBufReadExt>,
 ) -> io::Result<()> {
     // Copy src to dst until a line which is just ".\r\n" is encountered. If a
     // line which is not ".\r\n" is found which begins with '.', the first '.'
@@ -905,7 +935,7 @@ fn copy_with_dot_stuffing(
 
     loop {
         buffer.clear();
-        src.read_until(b'\n', &mut buffer)?;
+        src.read_until(b'\n', &mut buffer).await?;
 
         if buffer.is_empty() {
             return Err(io::Error::new(
@@ -1012,10 +1042,11 @@ mod test {
             stuffed.push_str(".\r\n");
 
             let mut decoded_bytes = Vec::<u8>::new();
-            copy_with_dot_stuffing(
+            let mut reader = tokio::io::BufReader::with_capacity(
+                buffer_size, stuffed.as_bytes());
+            futures::executor::block_on(copy_with_dot_stuffing(
                 &mut decoded_bytes,
-                io::BufReader::with_capacity(buffer_size, stuffed.as_bytes()))
-                .unwrap();
+                Pin::new(&mut reader))).unwrap();
 
             assert_eq!(content, str::from_utf8(&decoded_bytes).unwrap());
         }

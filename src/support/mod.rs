@@ -18,6 +18,7 @@
 
 #[macro_use]
 pub mod append_limit;
+pub mod async_io;
 pub mod buffer;
 pub mod chronox;
 pub mod compression;

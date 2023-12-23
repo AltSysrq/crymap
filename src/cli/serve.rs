@@ -29,7 +29,8 @@ use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
 use crate::{
     imap::{command_processor::CommandProcessor, server::Server},
     support::{
-        log_prefix::LogPrefix, system_config::SystemConfig, unix_privileges,
+        async_io::ServerIo, log_prefix::LogPrefix, system_config::SystemConfig,
+        unix_privileges,
     },
 };
 
@@ -44,7 +45,8 @@ macro_rules! fatal {
     }}
 }
 
-pub fn imaps(
+#[tokio::main(flavor = "current_thread")]
+pub async fn imaps(
     system_config: SystemConfig,
     system_root: PathBuf,
     mut users_root: PathBuf,
@@ -58,6 +60,7 @@ pub fn imaps(
     let (log_prefix, _) =
         configure_system("imaps", &system_config, &mut users_root);
 
+    // stdio is still synchronous here.
     let ssl_stream = match acceptor.accept(Stdio) {
         Ok(ss) => ss,
         Err(e) => {
@@ -105,7 +108,8 @@ pub fn imaps(
     }
 }
 
-pub fn lmtp(
+#[tokio::main(flavor = "current_thread")]
+pub async fn lmtp(
     system_config: SystemConfig,
     system_root: PathBuf,
     mut users_root: PathBuf,
@@ -136,9 +140,14 @@ pub fn lmtp(
     let (log_prefix, peer_name) =
         configure_system("lmtp", &system_config, &mut users_root);
 
+    let io = ServerIo::new_stdio().unwrap_or_else(|e| {
+        fatal!(
+            EX_OSERR,
+            "Failed to put stdio into non-blocking mode: {e:?}",
+        )
+    });
     let mut server = crate::lmtp::server::Server::new(
-        Box::new(io::BufReader::new(Stdio)),
-        Box::new(io::BufWriter::new(Stdio)),
+        io,
         Arc::new(system_config),
         log_prefix.clone(),
         ssl_acceptor,
@@ -147,7 +156,7 @@ pub fn lmtp(
         peer_name,
     );
 
-    match server.run() {
+    match server.run().await {
         Ok(_) => info!("{} Normal client disconnect", log_prefix),
         Err(e) => warn!("{} Abnormal client disconnect: {}", log_prefix, e),
     }
@@ -267,7 +276,11 @@ fn configure_system(
     (log_prefix, peer_name)
 }
 
-// Read and write to the stdio FDs without buffering
+/// Provides read and write implementations to stdio without taking ownership
+/// and without buffering or locking.
+///
+/// Async implementations assume the stdio file descriptors have already been
+/// put into non-blocking mode.
 #[derive(Debug)]
 struct Stdio;
 
