@@ -119,10 +119,10 @@ impl CommandProcessor {
         Ok(())
     }
 
-    pub fn cmd_append_commit(
+    pub async fn cmd_append_commit(
         &mut self,
         tag: Cow<'static, str>,
-        sender: SendResponse<'_>,
+        sender: SendResponse,
     ) -> s::ResponseLine<'static> {
         let account = account!(self)
             .expect("APPEND couldn't have started if there were no account");
@@ -157,7 +157,8 @@ impl CommandProcessor {
                 cmd: s::Command::Simple(s::SimpleCommand::XAppendFinishedNoop),
             },
             sender,
-        );
+        )
+        .await;
 
         s::ResponseLine {
             tag: Some(tag),
@@ -176,10 +177,7 @@ impl CommandProcessor {
         self.multiappend = None;
     }
 
-    pub(super) fn cmd_expunge(
-        &mut self,
-        _sender: SendResponse<'_>,
-    ) -> CmdResult {
+    pub(super) fn cmd_expunge(&mut self) -> CmdResult {
         // As with NOOP, the unsolicited responses that go with this are part
         // of the natural poll cycle.
         account!(self)?
@@ -191,11 +189,7 @@ impl CommandProcessor {
         success()
     }
 
-    pub(super) fn cmd_uid_expunge(
-        &mut self,
-        uids: Cow<'_, str>,
-        _sender: SendResponse<'_>,
-    ) -> CmdResult {
+    pub(super) fn cmd_uid_expunge(&mut self, uids: Cow<'_, str>) -> CmdResult {
         let uids = self.parse_uid_range(&uids)?;
         account!(self)?
             .expunge_deleted(selected!(self)?, &uids)
@@ -216,11 +210,7 @@ impl CommandProcessor {
         success()
     }
 
-    pub(super) fn cmd_vanquish(
-        &mut self,
-        uids: Cow<'_, str>,
-        _sender: SendResponse<'_>,
-    ) -> CmdResult {
+    pub(super) fn cmd_vanquish(&mut self, uids: Cow<'_, str>) -> CmdResult {
         let uids = self.parse_uid_range(&uids)?;
         account!(self)?.vanquish(selected!(self)?, &uids).map_err(map_error! {
             self,
@@ -240,10 +230,10 @@ impl CommandProcessor {
         }))
     }
 
-    pub(super) fn cmd_copy(
+    pub(super) async fn cmd_copy(
         &mut self,
         cmd: s::CopyCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let messages = self.parse_seqnum_range(&cmd.messages)?;
         let request = CopyRequest { ids: messages };
@@ -254,12 +244,13 @@ impl CommandProcessor {
             false,
             Account::seqnum_copy,
         )
+        .await
     }
 
-    pub(super) fn cmd_move(
+    pub(super) async fn cmd_move(
         &mut self,
         cmd: s::MoveCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let messages = self.parse_seqnum_range(&cmd.messages)?;
         let request = CopyRequest { ids: messages };
@@ -270,33 +261,36 @@ impl CommandProcessor {
             true,
             Account::seqnum_moove,
         )
+        .await
     }
 
-    pub(super) fn cmd_uid_copy(
+    pub(super) async fn cmd_uid_copy(
         &mut self,
         cmd: s::CopyCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let messages = self.parse_uid_range(&cmd.messages)?;
         let request = CopyRequest { ids: messages };
         self.copy_or_move(&cmd.dst, request, sender, false, Account::copy)
+            .await
     }
 
-    pub(super) fn cmd_uid_move(
+    pub(super) async fn cmd_uid_move(
         &mut self,
         cmd: s::MoveCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let messages = self.parse_uid_range(&cmd.messages)?;
         let request = CopyRequest { ids: messages };
         self.copy_or_move(&cmd.dst, request, sender, true, Account::moove)
+            .await
     }
 
-    fn copy_or_move<T>(
+    async fn copy_or_move<T>(
         &mut self,
         dst: &MailboxName<'_>,
         request: T,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
         copyuid_in_separate_response: bool,
         f: impl FnOnce(
             &mut Account,
@@ -339,11 +333,15 @@ impl CommandProcessor {
         if copyuid_in_separate_response {
             // RFC 6851 recommends sending the COPYUID response in an untagged
             // response before any EXPUNGE responses.
-            sender(s::Response::Cond(s::CondResponse {
-                cond: s::RespCondType::Ok,
-                code: copyuid_code.take(),
-                quip: None,
-            }));
+            send_response(
+                sender,
+                s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Ok,
+                    code: copyuid_code.take(),
+                    quip: None,
+                }),
+            )
+            .await;
         }
 
         Ok(s::Response::Cond(s::CondResponse {

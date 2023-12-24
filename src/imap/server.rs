@@ -368,13 +368,24 @@ impl Server {
                 } => self.handle_idle(tag)?,
 
                 cmdline => {
-                    let r = self.processor.handle_command(
-                        cmdline,
-                        &response_sender(
-                            &self.write,
-                            self.processor.unicode_aware(),
-                        ),
+                    let sync_sender = response_sender(
+                        &self.write,
+                        self.processor.unicode_aware(),
                     );
+                    let (async_tx, mut async_rx) =
+                        tokio::sync::mpsc::channel(1);
+                    let send_responses = async move {
+                        while let Some(r) = async_rx.recv().await {
+                            sync_sender(r);
+                        }
+                    };
+                    let command =
+                        self.processor.handle_command(cmdline, async_tx);
+
+                    let (r, _) = futures::executor::block_on(async {
+                        tokio::join!(command, send_responses)
+                    });
+
                     self.send_response(r)?;
                 },
             }
@@ -502,13 +513,21 @@ impl Server {
 
             // End of append if the command line is empty
             if cmdline.is_empty() {
-                let r = self.processor.cmd_append_commit(
-                    Cow::Owned(tag),
-                    &response_sender(
-                        &self.write,
-                        self.processor.unicode_aware(),
-                    ),
+                let sync_sender = response_sender(
+                    &self.write,
+                    self.processor.unicode_aware(),
                 );
+                let (async_tx, mut async_rx) = tokio::sync::mpsc::channel(1);
+                let send_responses = async move {
+                    while let Some(r) = async_rx.recv().await {
+                        sync_sender(r);
+                    }
+                };
+                let commit =
+                    self.processor.cmd_append_commit(Cow::Owned(tag), async_tx);
+                let (r, _) = futures::executor::block_on(async {
+                    tokio::join!(commit, send_responses)
+                });
                 self.send_response(r)?;
                 break;
             }
@@ -675,6 +694,10 @@ impl Server {
     }
 
     fn handle_idle(&mut self, tag: Cow<'_, str>) -> Result<(), Error> {
+        if true {
+            panic!("this implementation doesn't actually work");
+        }
+
         // This is a bit complicated so it needs some explanation.
         //
         // When we start the IDLE command, we first let cmd_idle() check
@@ -706,14 +729,20 @@ impl Server {
             }));
         let mut started_idle = false;
 
-        let sender =
+        let sync_sender =
             response_sender(&self.write, self.processor.unicode_aware());
+        let (async_tx, mut async_rx) = tokio::sync::mpsc::channel(1);
+        let send_responses = async move {
+            while let Some(r) = async_rx.recv().await {
+                sync_sender(r);
+            }
+        };
 
         let read_ref = &mut self.read;
         let write_ref = &self.write;
         let log_prefix = self.processor.log_prefix().to_owned();
 
-        let response = self.processor.cmd_idle(
+        let idle_fut = self.processor.cmd_idle(
             || {
                 let mut w = write_ref.lock().unwrap();
                 w.write_all(b"+ idling\r\n")?;
@@ -777,10 +806,12 @@ impl Server {
                 Ok(())
             },
             tag,
-            &sender,
+            async_tx,
         );
 
-        drop(sender);
+        let (response, _) = futures::executor::block_on(async {
+            tokio::join!(idle_fut, send_responses)
+        });
 
         if started_idle {
             self.read = recv_read.recv().unwrap()?;

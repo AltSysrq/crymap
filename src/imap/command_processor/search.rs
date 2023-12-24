@@ -25,31 +25,32 @@ use crate::account::v2::{Account, Mailbox};
 use crate::support::error::Error;
 
 impl CommandProcessor {
-    pub(super) fn cmd_search(
+    pub(super) async fn cmd_search(
         &mut self,
         cmd: s::SearchCommand<'_>,
         tag: &str,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         self.search(cmd, tag, sender, false, Account::seqnum_search)
+            .await
     }
 
-    pub(super) fn cmd_uid_search(
+    pub(super) async fn cmd_uid_search(
         &mut self,
         cmd: s::SearchCommand<'_>,
         tag: &str,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
-        self.search(cmd, tag, sender, true, Account::search)
+        self.search(cmd, tag, sender, true, Account::search).await
     }
 
-    fn search<
+    async fn search<
         T: Into<u32> + TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync + Copy,
     >(
         &mut self,
         mut cmd: s::SearchCommand<'_>,
         tag: &str,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
         is_uid: bool,
         f: impl FnOnce(
             &mut Account,
@@ -74,7 +75,7 @@ impl CommandProcessor {
         let request = self.search_command_from_ast(&mut has_modseq, cmd)?;
 
         if has_modseq && self.selected.is_some() {
-            self.enable_condstore(sender, true);
+            self.enable_condstore(sender, true).await;
         }
 
         let response = f(account!(self)?, selected!(self)?, &request)
@@ -191,7 +192,7 @@ impl CommandProcessor {
         };
 
         if return_response {
-            sender(response);
+            send_response(sender, response).await;
         }
         success()
     }

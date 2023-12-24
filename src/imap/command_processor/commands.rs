@@ -42,15 +42,16 @@ impl CommandProcessor {
     /// Handles a regular command, i.e., one that the protocol level does not
     /// give special treatment to.
     ///
-    /// `sender` can be called with secondary responses as needed.
+    /// `sender` can passed secondary responses as needed.
     ///
     /// Returns the final, tagged response. If the response condition is `BYE`,
     /// the connection will be closed after sending it.
-    pub fn handle_command<'a>(
+    pub async fn handle_command<'a>(
         &mut self,
         command_line: s::CommandLine<'a>,
-        sender: SendResponse<'_>,
+        mut sender: SendResponse,
     ) -> s::ResponseLine<'a> {
+        let sender = &mut sender;
         let allow_full_poll = match command_line.cmd {
             // FETCH, STORE, and SEARCH (the non-UID versions) are the only
             // cursed commands that don't allow us to update the message state
@@ -75,38 +76,36 @@ impl CommandProcessor {
 
         let res = match command_line.cmd {
             s::Command::Simple(s::SimpleCommand::Capability) => {
-                self.cmd_capability(sender)
+                self.cmd_capability(sender).await
             },
             s::Command::Simple(s::SimpleCommand::Check) => {
-                self.cmd_noop("Nothing exciting", sender)
+                self.cmd_noop("Nothing exciting")
             },
-            s::Command::Simple(s::SimpleCommand::Close) => {
-                self.cmd_close(sender)
-            },
+            s::Command::Simple(s::SimpleCommand::Close) => self.cmd_close(),
             s::Command::Simple(s::SimpleCommand::Compress) => {
                 panic!("COMPRESS DEFLATE should be handled by server.rs")
             },
             s::Command::Simple(s::SimpleCommand::Expunge) => {
                 staple_highest_modseq = self.qresync_enabled;
-                self.cmd_expunge(sender)
+                self.cmd_expunge()
             },
             s::Command::Simple(s::SimpleCommand::Idle) => {
                 panic!("IDLE should be dispatched by server.rs")
             },
             s::Command::Simple(s::SimpleCommand::LogOut) => {
-                self.cmd_log_out(sender)
+                self.cmd_log_out(sender).await
             },
             s::Command::Simple(s::SimpleCommand::Namespace) => {
-                self.cmd_namespace(sender)
+                self.cmd_namespace(sender).await
             },
             s::Command::Simple(s::SimpleCommand::Noop) => {
-                self.cmd_noop("NOOP OK", sender)
+                self.cmd_noop("NOOP OK")
             },
             s::Command::Simple(s::SimpleCommand::StartTls) => {
-                self.cmd_start_tls(sender)
+                self.cmd_start_tls()
             },
             s::Command::Simple(s::SimpleCommand::Unselect) => {
-                self.cmd_unselect(sender)
+                self.cmd_unselect()
             },
             s::Command::Simple(s::SimpleCommand::XCryFlagsOff) => {
                 self.flag_responses_enabled = false;
@@ -120,73 +119,73 @@ impl CommandProcessor {
                 self.cmd_xcry_purge()
             },
             s::Command::Simple(s::SimpleCommand::XCryGetUserConfig) => {
-                self.cmd_xcry_get_user_config(sender)
+                self.cmd_xcry_get_user_config(sender).await
             },
             s::Command::Simple(s::SimpleCommand::XCryZstdTrain) => {
                 self.cmd_xcry_zstd_train()
             },
             s::Command::Simple(s::SimpleCommand::Xyzzy) => {
-                self.cmd_noop("Nothing happens", sender)
+                self.cmd_noop("Nothing happens")
             },
             s::Command::Simple(s::SimpleCommand::XAppendFinishedNoop) => {
-                self.cmd_noop("APPEND OK", sender)
+                self.cmd_noop("APPEND OK")
             },
 
-            s::Command::Create(cmd) => self.cmd_create(cmd, sender),
-            s::Command::Delete(cmd) => self.cmd_delete(cmd, sender),
-            s::Command::Examine(cmd) => self.cmd_examine(cmd, sender),
-            s::Command::List(cmd) => self.cmd_list(cmd, sender),
-            s::Command::Lsub(cmd) => self.cmd_lsub(cmd, sender),
-            s::Command::Xlist(cmd) => self.cmd_xlist(cmd, sender),
-            s::Command::Rename(cmd) => self.cmd_rename(cmd, sender),
-            s::Command::Select(cmd) => self.cmd_select(cmd, sender),
-            s::Command::Status(cmd) => self.cmd_status(cmd, sender),
-            s::Command::Subscribe(cmd) => self.cmd_subscribe(cmd, sender),
-            s::Command::Unsubscribe(cmd) => self.cmd_unsubscribe(cmd, sender),
+            s::Command::Create(cmd) => self.cmd_create(cmd),
+            s::Command::Delete(cmd) => self.cmd_delete(cmd),
+            s::Command::Examine(cmd) => self.cmd_examine(cmd, sender).await,
+            s::Command::List(cmd) => self.cmd_list(cmd, sender).await,
+            s::Command::Lsub(cmd) => self.cmd_lsub(cmd, sender).await,
+            s::Command::Xlist(cmd) => self.cmd_xlist(cmd, sender).await,
+            s::Command::Rename(cmd) => self.cmd_rename(cmd),
+            s::Command::Select(cmd) => self.cmd_select(cmd, sender).await,
+            s::Command::Status(cmd) => self.cmd_status(cmd, sender).await,
+            s::Command::Subscribe(cmd) => self.cmd_subscribe(cmd),
+            s::Command::Unsubscribe(cmd) => self.cmd_unsubscribe(cmd),
             s::Command::LogIn(cmd) => self.cmd_log_in(cmd),
-            s::Command::Copy(cmd) => self.cmd_copy(cmd, sender),
-            s::Command::Move(cmd) => self.cmd_move(cmd, sender),
-            s::Command::Fetch(cmd) => self.cmd_fetch(cmd, sender),
-            s::Command::Store(cmd) => self.cmd_store(cmd, sender),
+            s::Command::Copy(cmd) => self.cmd_copy(cmd, sender).await,
+            s::Command::Move(cmd) => self.cmd_move(cmd, sender).await,
+            s::Command::Fetch(cmd) => self.cmd_fetch(cmd, sender).await,
+            s::Command::Store(cmd) => self.cmd_store(cmd, sender).await,
             s::Command::Search(cmd) => {
-                self.cmd_search(cmd, &command_line.tag, sender)
+                self.cmd_search(cmd, &command_line.tag, sender).await
             },
-            s::Command::XVanquish(uids) => self.cmd_vanquish(uids, sender),
+            s::Command::XVanquish(uids) => self.cmd_vanquish(uids),
 
             s::Command::Uid(s::UidCommand::Copy(cmd)) => {
-                self.cmd_uid_copy(cmd, sender)
+                self.cmd_uid_copy(cmd, sender).await
             },
             s::Command::Uid(s::UidCommand::Move(cmd)) => {
-                self.cmd_uid_move(cmd, sender)
+                self.cmd_uid_move(cmd, sender).await
             },
             s::Command::Uid(s::UidCommand::Fetch(cmd)) => {
-                self.cmd_uid_fetch(cmd, sender)
+                self.cmd_uid_fetch(cmd, sender).await
             },
             s::Command::Uid(s::UidCommand::Search(cmd)) => {
-                self.cmd_uid_search(cmd, &command_line.tag, sender)
+                self.cmd_uid_search(cmd, &command_line.tag, sender).await
             },
             s::Command::Uid(s::UidCommand::Store(cmd)) => {
-                self.cmd_uid_store(cmd, sender)
+                self.cmd_uid_store(cmd, sender).await
             },
             s::Command::Uid(s::UidCommand::Expunge(uids)) => {
                 staple_highest_modseq = self.qresync_enabled;
-                self.cmd_uid_expunge(uids, sender)
+                self.cmd_uid_expunge(uids)
             },
 
-            s::Command::Id(parms) => self.cmd_id(parms, sender),
+            s::Command::Id(parms) => self.cmd_id(parms, sender).await,
 
-            s::Command::Enable(exts) => self.cmd_enable(exts, sender),
+            s::Command::Enable(exts) => self.cmd_enable(exts, sender).await,
 
             s::Command::XCrySetUserConfig(configs) => {
-                self.cmd_xcry_set_user_config(configs, sender)
+                self.cmd_xcry_set_user_config(configs, sender).await
             },
         };
 
         if res.is_ok() {
             let poll_res = if allow_full_poll {
-                self.full_poll(sender)
+                self.full_poll(sender).await
             } else {
-                self.mini_poll(sender)
+                self.mini_poll(sender).await
             };
 
             if let Err(err) = poll_res {
@@ -268,15 +267,15 @@ impl CommandProcessor {
         }
     }
 
-    fn cmd_capability(&mut self, sender: SendResponse<'_>) -> CmdResult {
-        sender(s::Response::Capability(capability_data()));
+    async fn cmd_capability(&mut self, sender: &mut SendResponse) -> CmdResult {
+        send_response(sender, s::Response::Capability(capability_data())).await;
         success()
     }
 
-    fn cmd_enable(
+    async fn cmd_enable(
         &mut self,
         exts: Vec<Cow<'_, str>>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let mut enabled = Vec::new();
         // Per RFC 5161, we silently ignore any extension which isn't
@@ -290,7 +289,7 @@ impl CommandProcessor {
                 self.utf8_enabled = true;
                 enabled.push(ext);
             } else if "CONDSTORE".eq_ignore_ascii_case(&ext) {
-                self.enable_condstore(sender, false);
+                self.enable_condstore(sender, false).await;
                 enabled.push(ext);
             } else if "QRESYNC".eq_ignore_ascii_case(&ext) {
                 // RFC 7162 says:
@@ -320,7 +319,7 @@ impl CommandProcessor {
                 //   * ENABLED CONDSTORE QRESYNC
                 //
                 // This is what we do here as well.
-                self.enable_condstore(sender, false);
+                self.enable_condstore(sender, false).await;
                 self.qresync_enabled = true;
                 enabled.push(ext);
             } else if "IMAP4rev2".eq_ignore_ascii_case(&ext) {
@@ -336,7 +335,7 @@ impl CommandProcessor {
             "The future is now"
         };
 
-        sender(s::Response::Enabled(enabled));
+        send_response(sender, s::Response::Enabled(enabled)).await;
         Ok(s::Response::Cond(s::CondResponse {
             cond: s::RespCondType::Ok,
             code: None,
@@ -344,9 +343,9 @@ impl CommandProcessor {
         }))
     }
 
-    pub(super) fn enable_condstore(
+    pub(super) async fn enable_condstore(
         &mut self,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
         implicit: bool,
     ) {
         if self.condstore_enabled {
@@ -360,22 +359,26 @@ impl CommandProcessor {
 
         // Only send an untagged OK if there's something interesting to say
         if implicit || highest_modseq.is_some() {
-            sender(s::Response::Cond(s::CondResponse {
-                cond: s::RespCondType::Ok,
-                code: highest_modseq.map(s::RespTextCode::HighestModseq),
-                quip: Some(Cow::Borrowed(if implicit {
-                    "CONDSTORE enabled implicitly"
-                } else {
-                    "CONDSTORE enabled while already selected"
-                })),
-            }));
+            send_response(
+                sender,
+                s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Ok,
+                    code: highest_modseq.map(s::RespTextCode::HighestModseq),
+                    quip: Some(Cow::Borrowed(if implicit {
+                        "CONDSTORE enabled implicitly"
+                    } else {
+                        "CONDSTORE enabled while already selected"
+                    })),
+                }),
+            )
+            .await;
         }
     }
 
-    fn cmd_id(
+    async fn cmd_id(
         &mut self,
         ids: Vec<Option<Cow<'_, str>>>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         // Only take action on the first ID exchange so we don't keep
         // accumulating stuff in the log prefix.
@@ -441,20 +444,16 @@ impl CommandProcessor {
             id_info.push(Some(Cow::Owned(value.clone())));
         }
 
-        sender(s::Response::Id(id_info));
+        send_response(sender, s::Response::Id(id_info)).await;
         success()
     }
 
-    fn cmd_namespace(&mut self, sender: SendResponse<'_>) -> CmdResult {
-        sender(s::Response::Namespace(()));
+    async fn cmd_namespace(&mut self, sender: &mut SendResponse) -> CmdResult {
+        send_response(sender, s::Response::Namespace(())).await;
         success()
     }
 
-    fn cmd_noop(
-        &mut self,
-        quip: &'static str,
-        _sender: SendResponse<'_>,
-    ) -> CmdResult {
+    fn cmd_noop(&mut self, quip: &'static str) -> CmdResult {
         // Nothing to do here; shared command processing takes care of the
         // actual poll operation.
         Ok(s::Response::Cond(s::CondResponse {
@@ -464,22 +463,26 @@ impl CommandProcessor {
         }))
     }
 
-    fn cmd_log_out(&mut self, sender: SendResponse<'_>) -> CmdResult {
+    async fn cmd_log_out(&mut self, sender: &mut SendResponse) -> CmdResult {
         self.selected = None;
         self.account = None;
 
         // LOGOUT is a bit weird because RFC 3501 requires sending an OK
         // response *AFTER* the BYE.
         self.logged_out = true;
-        sender(s::Response::Cond(s::CondResponse {
-            cond: s::RespCondType::Bye,
-            code: None,
-            quip: Some(Cow::Borrowed("BYE")),
-        }));
+        send_response(
+            sender,
+            s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Bye,
+                code: None,
+                quip: Some(Cow::Borrowed("BYE")),
+            }),
+        )
+        .await;
         success()
     }
 
-    fn cmd_start_tls(&mut self, _sender: SendResponse<'_>) -> CmdResult {
+    fn cmd_start_tls(&mut self) -> CmdResult {
         Err(s::Response::Cond(s::CondResponse {
             cond: s::RespCondType::Bad,
             code: None,
@@ -549,7 +552,10 @@ Content-Transfer-Encoding: base64
         success()
     }
 
-    fn full_poll(&mut self, sender: SendResponse<'_>) -> Result<(), Error> {
+    async fn full_poll(
+        &mut self,
+        sender: &mut SendResponse,
+    ) -> Result<(), Error> {
         let Some(ref mut account) = self.account else {
             return Ok(());
         };
@@ -567,43 +573,63 @@ Content-Transfer-Encoding: base64
                 for (_, uid) in poll.expunge {
                     sr.append(uid);
                 }
-                sender(s::Response::Vanished(s::VanishedResponse {
-                    earlier: false,
-                    uids: Cow::Owned(sr.to_string()),
-                }));
+                send_response(
+                    sender,
+                    s::Response::Vanished(s::VanishedResponse {
+                        earlier: false,
+                        uids: Cow::Owned(sr.to_string()),
+                    }),
+                )
+                .await;
             }
         } else {
             for (seqnum, _) in poll.expunge.into_iter().rev() {
-                sender(s::Response::Expunge(seqnum.0.get()));
+                send_response(sender, s::Response::Expunge(seqnum.0.get()))
+                    .await;
             }
         }
         if let Some(exists) = poll.exists {
-            sender(s::Response::Exists(exists.try_into().unwrap_or(u32::MAX)));
+            send_response(
+                sender,
+                s::Response::Exists(exists.try_into().unwrap_or(u32::MAX)),
+            )
+            .await;
         }
         if let Some(recent) = poll.recent {
-            sender(s::Response::Recent(recent.try_into().unwrap_or(u32::MAX)));
+            send_response(
+                sender,
+                s::Response::Recent(recent.try_into().unwrap_or(u32::MAX)),
+            )
+            .await;
         }
 
-        self.fetch_for_background_update(sender, poll.fetch);
+        self.fetch_for_background_update(sender, poll.fetch).await;
 
         // This must come after fetch_for_background_update so that we can
         // override the client's own calculation of HIGHESTMODSEQ
         if let Some(max_modseq) = poll.max_modseq {
             if self.condstore_enabled {
-                sender(s::Response::Cond(s::CondResponse {
-                    cond: s::RespCondType::Ok,
-                    code: Some(s::RespTextCode::HighestModseq(
-                        max_modseq.raw(),
-                    )),
-                    quip: None,
-                }));
+                send_response(
+                    sender,
+                    s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Ok,
+                        code: Some(s::RespTextCode::HighestModseq(
+                            max_modseq.raw(),
+                        )),
+                        quip: None,
+                    }),
+                )
+                .await;
             }
         }
 
         Ok(())
     }
 
-    fn mini_poll(&mut self, sender: SendResponse<'_>) -> Result<(), Error> {
+    async fn mini_poll(
+        &mut self,
+        sender: &mut SendResponse,
+    ) -> Result<(), Error> {
         let Some(ref mut account) = self.account else {
             return Ok(());
         };
@@ -615,7 +641,7 @@ Content-Transfer-Encoding: base64
         let poll = account.mini_poll(selected)?;
         let uids_empty = poll.fetch.is_empty();
 
-        self.fetch_for_background_update(sender, poll.fetch);
+        self.fetch_for_background_update(sender, poll.fetch).await;
 
         // If the true max modseq is not the same as the reported max modseq,
         // we need to also send a HIGHESTMODSEQ response (after the fetches
@@ -624,13 +650,19 @@ Content-Transfer-Encoding: base64
         // be greater than of an expungement the client hasn't seen.
         if !uids_empty && self.condstore_enabled {
             if let Some(divergent_modseq) = poll.divergent_modseq {
-                sender(s::Response::Cond(s::CondResponse {
-                    cond: s::RespCondType::Ok,
-                    code: Some(s::RespTextCode::HighestModseq(
-                        divergent_modseq.raw(),
-                    )),
-                    quip: Some(Cow::Borrowed("Snapshot diverged from reality")),
-                }));
+                send_response(
+                    sender,
+                    s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Ok,
+                        code: Some(s::RespTextCode::HighestModseq(
+                            divergent_modseq.raw(),
+                        )),
+                        quip: Some(Cow::Borrowed(
+                            "Snapshot diverged from reality",
+                        )),
+                    }),
+                )
+                .await;
             }
         }
 
@@ -652,13 +684,13 @@ Content-Transfer-Encoding: base64
     ///
     /// `after_poll` is invoked each time immediately after sending poll
     /// responses. It is used to flush the output stream.
-    pub fn cmd_idle<'a>(
+    pub async fn cmd_idle<'a>(
         &mut self,
         before_first_idle: impl FnOnce() -> Result<(), Error>,
         mut keep_idling: impl FnMut(&IdleListener) -> bool,
         mut after_poll: impl FnMut() -> Result<(), Error>,
         tag: Cow<'a, str>,
-        sender: SendResponse<'_>,
+        mut sender: SendResponse,
     ) -> s::ResponseLine<'a> {
         let mut before_first_idle = Some(before_first_idle);
 
@@ -679,7 +711,9 @@ Content-Transfer-Encoding: base64
                     Err(e) => break Err(e),
                 };
 
-            if let Err(e) = self.full_poll(sender).map_err(map_error!(self)) {
+            if let Err(e) =
+                self.full_poll(&mut sender).await.map_err(map_error!(self))
+            {
                 break Err(e);
             }
 

@@ -34,10 +34,10 @@ use crate::mime::fetch::{self, section::*};
 use crate::support::error::Error;
 
 impl CommandProcessor {
-    pub(super) fn cmd_fetch(
+    pub(super) async fn cmd_fetch(
         &mut self,
         cmd: s::FetchCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let ids = self.parse_seqnum_range(&cmd.messages)?;
         self.fetch(
@@ -50,12 +50,13 @@ impl CommandProcessor {
             |a, mb, r| a.seqnum_prefetch(mb, r),
             Account::seqnum_fetch,
         )
+        .await
     }
 
-    pub(super) fn cmd_uid_fetch(
+    pub(super) async fn cmd_uid_fetch(
         &mut self,
         cmd: s::FetchCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let ids = self.parse_uid_range(&cmd.messages)?;
         self.fetch(
@@ -68,11 +69,12 @@ impl CommandProcessor {
             |a, mb, r| a.prefetch(mb, r),
             |a, mb, r, f| a.fetch(mb, r, f),
         )
+        .await
     }
 
-    pub(super) fn fetch_for_background_update(
+    pub(super) async fn fetch_for_background_update(
         &mut self,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
         uids: Vec<Uid>,
     ) {
         let mut ids = SeqRange::new();
@@ -87,30 +89,32 @@ impl CommandProcessor {
             what.push(s::FetchAtt::Modseq(()));
         }
 
-        let _ = self.fetch(
-            s::FetchCommand {
-                messages: Cow::Borrowed(""),
-                target: s::FetchCommandTarget::Multi(what),
-                modifiers: None,
-            },
-            sender,
-            ids,
-            false,
-            false,
-            |_, _, _| panic!("Shouldn't STORE in background update"),
-            |a, mb, r| a.prefetch(mb, r),
-            |a, mb, r, f| a.fetch(mb, r, f),
-        );
+        let _ = self
+            .fetch(
+                s::FetchCommand {
+                    messages: Cow::Borrowed(""),
+                    target: s::FetchCommandTarget::Multi(what),
+                    modifiers: None,
+                },
+                sender,
+                ids,
+                false,
+                false,
+                |_, _, _| panic!("Shouldn't STORE in background update"),
+                |a, mb, r| a.prefetch(mb, r),
+                |a, mb, r, f| a.fetch(mb, r, f),
+            )
+            .await;
     }
 
-    fn fetch<
+    async fn fetch<
         'a,
         ID: Default,
         F: Future<Output = Result<FetchResponse, Error>> + 'a,
     >(
         &'a mut self,
         cmd: s::FetchCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
         ids: SeqRange<ID>,
         force_fetch_uid: bool,
         allow_vanished: bool,
@@ -211,7 +215,7 @@ impl CommandProcessor {
         // Don't implicitly enable CONDSTORE if not selected since we will
         // return BAD in that case.
         if (enable_condstore || request.modseq) && self.selected.is_some() {
-            self.enable_condstore(sender, true);
+            self.enable_condstore(sender, true).await;
         }
 
         // If there are non-.PEEK body sections in the request, implicitly set
@@ -261,7 +265,7 @@ impl CommandProcessor {
         if !self.flag_responses_enabled {
             prefetch.flags.clear();
         }
-        fetch_preresponse(sender, prefetch)?;
+        fetch_preresponse(sender, prefetch).await?;
 
         let (receiver_tx, mut receiver_rx) =
             tokio::sync::mpsc::channel(fetch_properties.channel_buffer_size);
@@ -270,17 +274,12 @@ impl CommandProcessor {
             f_fetch(account!(self)?, selected!(self)?, request, receiver_tx);
         let send_responses = async move {
             while let Some((seqnum, items)) = receiver_rx.recv().await {
-                fetch_response(sender, fetch_properties, seqnum, items);
+                fetch_response(sender, fetch_properties, seqnum, items).await;
             }
         };
 
-        let main = async move {
-            let (response, _) = tokio::join!(do_fetch, send_responses);
-            response
-        };
-
-        let response = futures::executor::block_on(main)
-        .map_err(map_error! {
+        let (response, _) = tokio::join!(do_fetch, send_responses);
+        let response = response.map_err(map_error! {
             // XXX We can't use the `self` form because `f_fetch` borrows
             // `self.account` and `self.mailbox` permanently. This is due to a
             // limitation in the type system. Ideally, we'd declare `f_fetch`
@@ -515,37 +514,45 @@ where
     }
 }
 
-fn fetch_preresponse(
-    sender: SendResponse,
+async fn fetch_preresponse(
+    sender: &mut SendResponse,
     response: PrefetchResponse,
 ) -> PartialResult<()> {
     if !response.vanished.is_empty() {
-        sender(s::Response::Vanished(s::VanishedResponse {
-            earlier: true,
-            uids: Cow::Owned(response.vanished.to_string()),
-        }));
+        send_response(
+            sender,
+            s::Response::Vanished(s::VanishedResponse {
+                earlier: true,
+                uids: Cow::Owned(response.vanished.to_string()),
+            }),
+        )
+        .await;
     }
     if !response.flags.is_empty() {
-        sender(s::Response::Flags(response.flags));
+        send_response(sender, s::Response::Flags(response.flags)).await;
     }
     Ok(())
 }
 
-fn fetch_response(
-    sender: SendResponse,
+async fn fetch_response(
+    sender: &mut SendResponse,
     fetch_properties: FetchProperties,
     seqnum: Seqnum,
     items: Vec<fetch::multi::FetchedItem>,
 ) {
-    sender(s::Response::Fetch(s::FetchResponse {
-        seqnum: seqnum.0.get(),
-        atts: s::MsgAtts {
-            atts: items
-                .into_iter()
-                .filter_map(|att| fetch_att_to_ast(att, fetch_properties))
-                .collect(),
-        },
-    }));
+    send_response(
+        sender,
+        s::Response::Fetch(s::FetchResponse {
+            seqnum: seqnum.0.get(),
+            atts: s::MsgAtts {
+                atts: items
+                    .into_iter()
+                    .filter_map(|att| fetch_att_to_ast(att, fetch_properties))
+                    .collect(),
+            },
+        }),
+    )
+    .await;
 }
 
 fn fetch_response_final(response: FetchResponse) -> CmdResult {

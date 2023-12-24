@@ -132,8 +132,22 @@ pub(super) type CmdResult = Result<s::Response<'static>, s::Response<'static>>;
 /// fail with an IMAP response.
 pub(super) type PartialResult<T> = Result<T, s::Response<'static>>;
 
+/// Channel used to send additional non-tagged responses as they become
+/// available.
 /// Function pointer used to send additional non-tagged responses.
-pub(super) type SendResponse<'a> = &'a dyn Fn(s::Response<'static>);
+pub(super) type SendResponse = tokio::sync::mpsc::Sender<s::Response<'static>>;
+
+/// Send a response through `sender`, ignoring errors.
+///
+/// This ensures that ignoring the future entirely with `let _` doesn't happen,
+/// and may simplify making `SendResponse` take control information in the
+/// future.
+pub(super) async fn send_response(
+    sender: &mut SendResponse,
+    response: s::Response<'static>,
+) {
+    let _ = sender.send(response).await;
+}
 
 impl CommandProcessor {
     pub fn new(

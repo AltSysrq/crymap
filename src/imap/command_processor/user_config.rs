@@ -23,35 +23,39 @@ use crate::account::model::*;
 use crate::support::error::Error;
 
 impl CommandProcessor {
-    pub(super) fn cmd_xcry_get_user_config(
+    pub(super) async fn cmd_xcry_get_user_config(
         &mut self,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let user_config =
             account!(self)?.load_config().map_err(map_error!(self))?;
 
-        sender(s::Response::XCryUserConfig(s::XCryUserConfigData {
-            capabilities: vec![
-                Cow::Borrowed("INTERNAL-KEY-PATTERN"),
-                Cow::Borrowed("EXTERNAL-KEY-PATTERN"),
-                Cow::Borrowed("PASSWORD"),
-            ],
-            internal_key_pattern: Cow::Owned(
-                user_config.key_store.internal_key_pattern,
-            ),
-            external_key_pattern: Cow::Owned(
-                user_config.key_store.external_key_pattern,
-            ),
-            password_changed: user_config.master_key.last_changed,
-            extended: vec![],
-        }));
+        send_response(
+            sender,
+            s::Response::XCryUserConfig(s::XCryUserConfigData {
+                capabilities: vec![
+                    Cow::Borrowed("INTERNAL-KEY-PATTERN"),
+                    Cow::Borrowed("EXTERNAL-KEY-PATTERN"),
+                    Cow::Borrowed("PASSWORD"),
+                ],
+                internal_key_pattern: Cow::Owned(
+                    user_config.key_store.internal_key_pattern,
+                ),
+                external_key_pattern: Cow::Owned(
+                    user_config.key_store.external_key_pattern,
+                ),
+                password_changed: user_config.master_key.last_changed,
+                extended: vec![],
+            }),
+        )
+        .await;
         success()
     }
 
-    pub(super) fn cmd_xcry_set_user_config(
+    pub(super) async fn cmd_xcry_set_user_config(
         &mut self,
         configs: Vec<s::XCryUserConfigOption<'_>>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let mut request = SetUserConfigRequest::default();
         for config in configs {
@@ -74,7 +78,11 @@ impl CommandProcessor {
                 UnsafeName => (No, Some(s::RespTextCode::Cannot(()))),
             })?;
 
-        sender(s::Response::XCryBackupFile(Cow::Owned(backup_file)));
+        send_response(
+            sender,
+            s::Response::XCryBackupFile(Cow::Owned(backup_file)),
+        )
+        .await;
         success()
     }
 }

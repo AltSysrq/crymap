@@ -27,29 +27,29 @@ use crate::account::{
 use crate::support::error::Error;
 
 impl CommandProcessor {
-    pub(crate) fn cmd_store(
+    pub(crate) async fn cmd_store(
         &mut self,
         cmd: s::StoreCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let ids = self.parse_seqnum_range(&cmd.messages)?;
-        self.store(ids, cmd, sender, Account::seqnum_store)
+        self.store(ids, cmd, sender, Account::seqnum_store).await
     }
 
-    pub(crate) fn cmd_uid_store(
+    pub(crate) async fn cmd_uid_store(
         &mut self,
         cmd: s::StoreCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let ids = self.parse_uid_range(&cmd.messages)?;
-        self.store(ids, cmd, sender, Account::store)
+        self.store(ids, cmd, sender, Account::store).await
     }
 
-    fn store<ID>(
+    async fn store<ID>(
         &mut self,
         ids: SeqRange<ID>,
         cmd: s::StoreCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
         f: impl FnOnce(
             &mut Account,
             &mut Mailbox,
@@ -60,7 +60,7 @@ impl CommandProcessor {
         SeqRange<ID>: fmt::Debug,
     {
         if cmd.unchanged_since.is_some() {
-            self.enable_condstore(sender, true);
+            self.enable_condstore(sender, true).await;
         }
 
         let request = StoreRequest {
