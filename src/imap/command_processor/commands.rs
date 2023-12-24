@@ -282,6 +282,7 @@ impl CommandProcessor {
         // Per RFC 5161, we silently ignore any extension which isn't
         // ENABLE-able or known.
         for ext in exts {
+            let ext = Cow::Owned(ext.clone().into_owned());
             if "XYZZY".eq_ignore_ascii_case(&ext) {
                 enabled.push(ext);
             } else if "UTF8=ACCEPT".eq_ignore_ascii_case(&ext) {

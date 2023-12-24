@@ -133,7 +133,7 @@ pub(super) type CmdResult = Result<s::Response<'static>, s::Response<'static>>;
 pub(super) type PartialResult<T> = Result<T, s::Response<'static>>;
 
 /// Function pointer used to send additional non-tagged responses.
-pub(super) type SendResponse<'a> = &'a dyn Fn(s::Response<'_>);
+pub(super) type SendResponse<'a> = &'a dyn Fn(s::Response<'static>);
 
 impl CommandProcessor {
     pub fn new(

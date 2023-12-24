@@ -86,7 +86,7 @@ impl CommandProcessor {
 
         let response = if return_extended {
             let mut r = s::EsearchResponse {
-                tag: Cow::Borrowed(tag),
+                tag: Cow::Owned(tag.to_owned()),
                 uid: is_uid,
                 min: None,
                 max: None,
