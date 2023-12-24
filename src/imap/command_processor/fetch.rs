@@ -20,13 +20,15 @@ use std::borrow::Cow;
 use std::convert::TryInto;
 use std::fmt;
 use std::mem;
+use std::pin::pin;
 
+use genawaiter::GeneratorState;
 use log::{error, warn};
 
 use super::defs::*;
 use crate::account::{
     model::*,
-    v2::{Account, FetchReceiver, Mailbox},
+    v2::{Account, FetchGenerator, Mailbox},
 };
 use crate::imap::literal_source::LiteralSource;
 use crate::mime::fetch::{self, section::*};
@@ -65,7 +67,7 @@ impl CommandProcessor {
             true,
             Account::store,
             |a, mb, r| a.prefetch(mb, r),
-            |a, mb, r, f| a.fetch(mb, &r, f),
+            |a, mb, r| Ok(a.fetch(mb, r)),
         )
     }
 
@@ -98,12 +100,12 @@ impl CommandProcessor {
             false,
             |_, _, _| panic!("Shouldn't STORE in background update"),
             |a, mb, r| a.prefetch(mb, r),
-            |a, mb, r, f| a.fetch(mb, &r, f),
+            |a, mb, r| Ok(a.fetch(mb, r)),
         );
     }
 
-    fn fetch<ID: Default>(
-        &mut self,
+    fn fetch<'a, ID: Default, G: FetchGenerator + 'a>(
+        &'a mut self,
         cmd: s::FetchCommand<'_>,
         sender: SendResponse<'_>,
         ids: SeqRange<ID>,
@@ -120,11 +122,10 @@ impl CommandProcessor {
             &FetchRequest<ID>,
         ) -> Result<PrefetchResponse, Error>,
         f_fetch: impl FnOnce(
-            &mut Account,
-            &mut Mailbox,
+            &'a mut Account,
+            &'a mut Mailbox,
             FetchRequest<ID>,
-            FetchReceiver<'_>,
-        ) -> Result<FetchResponse, Error>,
+        ) -> Result<G, Error>,
     ) -> CmdResult
     where
         SeqRange<ID>: fmt::Debug,
@@ -258,18 +259,43 @@ impl CommandProcessor {
         }
         fetch_preresponse(sender, prefetch)?;
 
-        let mut receiver = |seqnum, items| {
-            fetch_response(sender, fetch_properties, seqnum, items);
+        let response = {
+            let fetch_generator = f_fetch(
+                account!(self)?,
+                selected!(self)?,
+                request,
+            ).map_err(map_error! {
+                log_prefix = &self.log_prefix,
+                ExpungedMessage => (No, Some(s::RespTextCode::ExpungeIssued(()))),
+                NxMessage => (No, Some(s::RespTextCode::Nonexistent(()))),
+                UnaddressableMessage => (No, Some(s::RespTextCode::ClientBug(()))),
+            })?;
+            let mut fetch_generator = pin!(fetch_generator);
+            loop {
+                match fetch_generator.as_mut().resume() {
+                    GeneratorState::Yielded((seqnum, items)) => {
+                        fetch_response(sender, fetch_properties, seqnum, items);
+                    },
+
+                    GeneratorState::Complete(r) => break r,
+                }
+            }
         };
 
-        let response = f_fetch(
-            account!(self)?,
-            selected!(self)?,
-            request,
-            &mut receiver,
-        )
-        .map_err(map_error! {
-            self,
+        let response = response.map_err(map_error! {
+            // XXX We can't use the `self` form because f_fetch permanently
+            // borrows `self.account` and `self.selected`. This is because
+            // there's no way to talk about the correct type of `f_fetch`:
+            //
+            //   f_fetch: for <'a> impl FnOnce(
+            //     &'a mut Account,
+            //     &'a mut Mailbox,
+            //     FetchRequest<ID>,
+            //   ) -> Result<impl FetchGenerator + 'a, Error>
+            //
+            // This doesn't matter too much since we shouldn't be sensitive to
+            // the mailbox disappearing out from under us here anyway.
+            log_prefix = &self.log_prefix,
             MasterKeyUnavailable => (No, Some(s::RespTextCode::ServerBug(()))),
             BadEncryptedKey => (No, Some(s::RespTextCode::Corruption(()))),
             ExpungedMessage => (No, Some(s::RespTextCode::ExpungeIssued(()))),

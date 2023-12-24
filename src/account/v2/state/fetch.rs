@@ -36,7 +36,21 @@ use crate::{
     support::{chronox::*, error::Error},
 };
 
-pub type FetchReceiver<'a> = &'a mut (dyn FnMut(Seqnum, Vec<FetchedItem>) + 'a);
+pub trait FetchGenerator:
+    genawaiter::Generator<
+    Yield = (Seqnum, Vec<FetchedItem>),
+    Return = Result<FetchResponse, Error>,
+>
+{
+}
+impl<
+        T: genawaiter::Generator<
+            Yield = (Seqnum, Vec<FetchedItem>),
+            Return = Result<FetchResponse, Error>,
+        >,
+    > FetchGenerator for T
+{
+}
 
 impl Account {
     /// Create an accessor for the given message.
@@ -120,16 +134,13 @@ impl Account {
 
     /// The `FETCH` command.
     ///
-    /// `receiver` is called with fetched data as it becomes available.
-    ///
     /// This does not include the implicit `STORE` which `FETCH` sometimes
     /// implies.
-    pub fn seqnum_fetch(
-        &mut self,
-        mailbox: &mut Mailbox,
+    pub fn seqnum_fetch<'a>(
+        &'a mut self,
+        mailbox: &'a mut Mailbox,
         request: FetchRequest<Seqnum>,
-        receiver: FetchReceiver<'_>,
-    ) -> Result<FetchResponse, Error> {
+    ) -> Result<impl FetchGenerator + 'a, Error> {
         let request = FetchRequest {
             ids: mailbox.seqnum_range_to_uid(&request.ids, false)?,
             uid: request.uid,
@@ -146,20 +157,28 @@ impl Account {
             email_id: request.email_id,
             thread_id: request.thread_id,
         };
-        self.fetch(mailbox, &request, receiver)
+        Ok(self.fetch(mailbox, request))
     }
 
     /// The `UID FETCH` command.
     ///
-    /// `receiver` is called with fetched data as it becomes available.
-    ///
     /// This does not include the implicit `UID STORE` which `UID FETCH`
     /// sometimes implies.
-    pub fn fetch(
+    pub fn fetch<'a>(
+        &'a mut self,
+        mailbox: &'a mut Mailbox,
+        request: FetchRequest<Uid>,
+    ) -> impl FetchGenerator + 'a {
+        genawaiter::rc::Gen::new(move |co| {
+            self.fetch_impl(mailbox, request, co)
+        })
+    }
+
+    async fn fetch_impl(
         &mut self,
         mailbox: &mut Mailbox,
-        request: &FetchRequest<Uid>,
-        receiver: FetchReceiver<'_>,
+        request: FetchRequest<Uid>,
+        co: genawaiter::rc::Co<(Seqnum, Vec<FetchedItem>), ()>,
     ) -> Result<FetchResponse, Error> {
         enum StrippedFetchResponse {
             Nil,
@@ -169,7 +188,8 @@ impl Account {
         let mut fetched = Vec::<Result<StrippedFetchResponse, Error>>::new();
 
         for uid in request.ids.items(mailbox.next_uid.0.get()) {
-            let full_response = match self.fetch_single(mailbox, request, uid) {
+            let full_response = match self.fetch_single(mailbox, &request, uid)
+            {
                 Ok(r) => r,
                 Err(e) => {
                     fetched.push(Err(e));
@@ -179,7 +199,7 @@ impl Account {
 
             let stripped_response = match full_response {
                 SingleFetchResponse::Fetched(seqnum, fetched) => {
-                    receiver(seqnum, fetched);
+                    co.yield_((seqnum, fetched)).await;
                     Ok(StrippedFetchResponse::Nil)
                 },
 
@@ -496,8 +516,7 @@ enum SingleFetchResponse {
 
 #[cfg(test)]
 mod test {
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use std::pin::pin;
 
     use super::*;
     use crate::mime::fetch::section;
@@ -506,8 +525,6 @@ mod test {
     struct FetchFixture {
         fixture: TestFixture,
         uids: Vec<Uid>,
-
-        received: Rc<RefCell<Vec<(Seqnum, Vec<FetchedItem>)>>>,
     }
 
     impl FetchFixture {
@@ -518,24 +535,7 @@ mod test {
                 .map(|data| fixture.simple_append_data("INBOX", data))
                 .collect::<Vec<_>>();
 
-            Self {
-                fixture,
-                uids,
-                received: Rc::new(RefCell::new(Vec::new())),
-            }
-        }
-
-        fn receiver(
-            &mut self,
-        ) -> impl FnMut(Seqnum, Vec<FetchedItem>) + 'static {
-            let received = Rc::clone(&self.received);
-            move |seqnum, fetched| {
-                received.borrow_mut().push((seqnum, fetched));
-            }
-        }
-
-        fn received(&mut self) -> Vec<(Seqnum, Vec<FetchedItem>)> {
-            mem::take(&mut *self.received.borrow_mut())
+            Self { fixture, uids }
         }
     }
 
@@ -550,6 +550,22 @@ mod test {
     impl std::ops::DerefMut for FetchFixture {
         fn deref_mut(&mut self) -> &mut TestFixture {
             &mut self.fixture
+        }
+    }
+
+    fn consume(
+        f: impl FetchGenerator,
+    ) -> (
+        Vec<(Seqnum, Vec<FetchedItem>)>,
+        Result<FetchResponse, Error>,
+    ) {
+        let mut f = pin!(f);
+        let mut fetched = Vec::new();
+        loop {
+            match f.as_mut().resume() {
+                genawaiter::GeneratorState::Yielded(p) => fetched.push(p),
+                genawaiter::GeneratorState::Complete(r) => return (fetched, r),
+            }
         }
     }
 
@@ -578,10 +594,8 @@ mod test {
             thread_id: true,
         };
         let prefetch = fixture.prefetch(&mut mb, &request).unwrap();
-        let mut receiver = fixture.receiver();
-        let response = fixture.fetch(&mut mb, &request, &mut receiver).unwrap();
-
-        let fetched = fixture.received();
+        let (fetched, response) = consume(fixture.fetch(&mut mb, request));
+        let response = response.unwrap();
 
         assert_eq!(FetchResponseKind::Ok, response.kind);
         assert!(prefetch.flags.is_empty());
@@ -636,7 +650,6 @@ mod test {
     fn fetches_correct_data() {
         let mut fixture = FetchFixture::new();
         let mut mb = fixture.select("INBOX", true, None).unwrap().0;
-        let mut receiver = fixture.receiver();
 
         // Make a hole between UIDs 1 and 3
         fixture
@@ -655,9 +668,8 @@ mod test {
             ..FetchRequest::default()
         };
         fixture.prefetch(&mut mb, &request).unwrap();
-        fixture.fetch(&mut mb, &request, &mut receiver).unwrap();
+        let (mut fetched, _) = consume(fixture.fetch(&mut mb, request));
 
-        let mut fetched = fixture.received();
         fetched.sort_by_key(|&(seqnum, _)| seqnum);
         assert_eq!(2, fetched.len());
 
@@ -734,7 +746,6 @@ mod test {
     fn filter_not_modified() {
         let mut fixture = FetchFixture::new();
         let mut mb = fixture.select("INBOX", true, None).unwrap().0;
-        let mut receiver = fixture.receiver();
 
         fixture
             .fixture
@@ -775,9 +786,8 @@ mod test {
             ..FetchRequest::default()
         };
         fixture.prefetch(&mut mb, &request).unwrap();
-        fixture.fetch(&mut mb, &request, &mut receiver).unwrap();
+        let (fetched, _) = consume(fixture.fetch(&mut mb, request));
 
-        let fetched = fixture.received();
         assert_eq!(1, fetched.len());
         assert_eq!(Seqnum::u(4), fetched[0].0);
         match &fetched[0].1[0] {
@@ -886,7 +896,6 @@ mod test {
     fn fetch_unexpected_expunged() {
         let mut fixture = FetchFixture::new();
         let mut mb = fixture.select("INBOX", true, None).unwrap().0;
-        let mut receiver = fixture.receiver();
 
         // Remove a message, but don't bring the expungement into the snapshot.
         fixture
@@ -905,10 +914,9 @@ mod test {
             ..FetchRequest::default()
         };
         fixture.seqnum_prefetch(&mut mb, &request).unwrap();
-        let result = fixture
-            .seqnum_fetch(&mut mb, request.clone(), &mut receiver)
-            .unwrap();
-        assert_eq!(FetchResponseKind::No, result.kind);
+        let (_, result) =
+            consume(fixture.seqnum_fetch(&mut mb, request.clone()).unwrap());
+        assert_eq!(FetchResponseKind::No, result.unwrap().kind);
 
         // Happens implicitly after command
         fixture.mini_poll(&mut mb).unwrap();
@@ -916,16 +924,15 @@ mod test {
         // Buggy client retries without even doing anything that would cause a
         // full poll.
         fixture.seqnum_prefetch(&mut mb, &request).unwrap();
-        let result = fixture
-            .seqnum_fetch(&mut mb, request, &mut receiver)
-            .unwrap();
+        let (_, result) =
+            consume(fixture.seqnum_fetch(&mut mb, request).unwrap());
+        let result = result.unwrap();
         assert_eq!(FetchResponseKind::Bye, result.kind);
     }
 
     #[test]
     fn seqnum_fetch() {
         let mut fixture = FetchFixture::new();
-        let mut receiver = fixture.receiver();
         let mut mb = fixture.select("INBOX", true, None).unwrap().0;
 
         fixture
@@ -940,11 +947,10 @@ mod test {
             ..FetchRequest::default()
         };
         fixture.seqnum_prefetch(&mut mb, &request).unwrap();
-        fixture
-            .seqnum_fetch(&mut mb, request, &mut receiver)
-            .unwrap();
+        let (fetched, response) =
+            consume(fixture.seqnum_fetch(&mut mb, request).unwrap());
+        response.unwrap();
 
-        let fetched = fixture.received();
         assert_eq!(1, fetched.len());
         assert_eq!(Seqnum::u(1), fetched[0].0);
         match &fetched[0].1[0] {

@@ -23,6 +23,6 @@ mod storage;
 
 pub use super::v1::account::account_config_file;
 pub use state::{
-    Account, DeliveryAccount, FetchReceiver, IdleListener, IdleNotifier,
+    Account, DeliveryAccount, FetchGenerator, IdleListener, IdleNotifier,
     Mailbox,
 };

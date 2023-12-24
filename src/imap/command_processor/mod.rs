@@ -35,6 +35,20 @@ macro_rules! map_error {
         }
     }};
 
+    (log_prefix = $log_prefix:expr, $($($kind:ident)|+ => ($cond:ident, $code:expr),)+) => {{
+        let log_prefix = $log_prefix;
+        move |e| match e {
+            $($(Error::$kind)|* => s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::$cond,
+                code: $code,
+                quip: Some(Cow::Owned(e.to_string())),
+            }),)*
+            e => {
+                catch_all_error_handling(true, log_prefix, e)
+            }
+        }
+    }};
+
     ($this:expr, $($($kind:ident)|+ => ($cond:ident, $code:expr),)+) => {{
         let log_prefix = &$this.log_prefix;
         let account = $this.account.as_mut();
