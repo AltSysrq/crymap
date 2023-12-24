@@ -35,11 +35,13 @@
 //! }
 //! ```
 
+#![allow(dead_code)] // TODO REMOVE
+
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use super::defs::*;
-use crate::support::error::Error;
+use crate::{account::model::*, support::error::Error};
 
 impl Account {
     /// Prepares to idle.
@@ -59,9 +61,40 @@ impl Account {
 
     /// Idles.
     ///
+    /// This blocks (asynchronously) until there is a non-trivial poll response
+    /// to return or an error occurs.
+    ///
+    /// The idle is cancelled by simply dropping the future. `mailbox` is only
+    /// mutated upon a non-trivial poll.
+    pub async fn idle(
+        &mut self,
+        mailbox: &mut Mailbox,
+    ) -> Result<PollResponse, Error> {
+        // TODO Use something other than polling when possible.
+        let mut last_metadb = SystemTime::UNIX_EPOCH;
+        let mut last_deliverydb = SystemTime::UNIX_EPOCH;
+        loop {
+            let metadb = self.metadb_mtime()?;
+            let deliverydb = self.deliverydb_mtime()?;
+            if (last_metadb, last_deliverydb) != (metadb, deliverydb) {
+                last_metadb = metadb;
+                last_deliverydb = deliverydb;
+                self.drain_deliveries();
+                let poll = self.poll(mailbox)?;
+                if PollResponse::default() != poll {
+                    return Ok(poll);
+                }
+            }
+
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    /// Idles.
+    ///
     /// This blocks until either a possible change has been detected, an error
     /// occurs, or something invokes `idle.notifier()`.
-    pub fn idle(&self, idle: IdleListener) -> Result<(), Error> {
+    pub fn idle_sync(&self, idle: IdleListener) -> Result<(), Error> {
         // TODO Use something other than polling.
         //
         // This is pending a final decision on whether to make the entire

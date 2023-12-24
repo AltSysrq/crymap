@@ -934,7 +934,7 @@ pub struct MiniPollResponse {
 
 /// Unsolicited responses that can be sent after commands (other than `FETCH`,
 /// `STORE`, `SEARCH`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PollResponse {
     /// Any messages to report as expunged.
     ///

@@ -22,7 +22,7 @@ use std::convert::TryInto;
 use log::{error, info};
 
 use super::defs::*;
-use crate::account::model::SeqRange;
+use crate::account::model::{PollResponse, SeqRange};
 use crate::account::v2::IdleListener;
 use crate::support::error::Error;
 
@@ -247,24 +247,7 @@ impl CommandProcessor {
             }
         }
 
-        if matches!(
-            res,
-            s::Response::Cond(s::CondResponse {
-                cond: s::RespCondType::Bye,
-                ..
-            })
-        ) {
-            // BYE is never tagged
-            s::ResponseLine {
-                tag: None,
-                response: res,
-            }
-        } else {
-            s::ResponseLine {
-                tag: Some(command_line.tag),
-                response: res,
-            }
-        }
+        maybe_tagged_response(command_line.tag, res)
     }
 
     async fn cmd_capability(&mut self, sender: &mut SendResponse) -> CmdResult {
@@ -567,6 +550,15 @@ Content-Transfer-Encoding: base64
         };
 
         let poll = account.poll(selected)?;
+        self.send_full_poll_responses(sender, poll).await;
+        Ok(())
+    }
+
+    async fn send_full_poll_responses(
+        &mut self,
+        sender: &mut SendResponse,
+        poll: PollResponse,
+    ) {
         if self.qresync_enabled {
             if !poll.expunge.is_empty() {
                 let mut sr = SeqRange::new();
@@ -622,8 +614,6 @@ Content-Transfer-Encoding: base64
                 .await;
             }
         }
-
-        Ok(())
     }
 
     async fn mini_poll(
@@ -669,6 +659,96 @@ Content-Transfer-Encoding: base64
         Ok(())
     }
 
+    /// Performs preflight checks before idling.
+    ///
+    /// If this returns a response, IDLE is not currently possible. That
+    /// response should be sent as the response to IDLE and the IDLE workflow
+    /// must be aborted.
+    ///
+    /// If this returns no response, the `+ idling` continuation line should be
+    /// sent, then `cmd_idle` invoked to perform idling.
+    #[allow(dead_code)] // TODO REMOVE
+    pub async fn cmd_idle_preflight<'a>(
+        &mut self,
+        tag: &'a str,
+    ) -> Option<s::ResponseLine<'a>> {
+        if let Err(e) = account!(self) {
+            return Some(maybe_tagged_response(Cow::Borrowed(tag), e));
+        }
+
+        if let Err(e) = selected!(self) {
+            return Some(maybe_tagged_response(Cow::Borrowed(tag), e));
+        }
+
+        None
+    }
+
+    /// The IDLE command.
+    ///
+    /// This idles on the currently selected mailbox until `cancel` completes
+    /// or an error occurs. Data is sent through `sender` as it becomes
+    /// available.
+    ///
+    /// This is not cancel-safe if the connection is expected to continue being
+    /// used. Dropping the future before it completes may result in updates to
+    /// the mailbox state that have not been sent to the client.
+    ///
+    /// The returned response should be sent as a tagged response line.
+    #[allow(dead_code)]
+    pub async fn cmd_idle<'a>(
+        &mut self,
+        tag: &'a str,
+        mut sender: SendResponse,
+        mut cancel: tokio::sync::oneshot::Receiver<()>,
+    ) -> s::ResponseLine<'a> {
+        let result = loop {
+            let account = self
+                .account
+                .as_mut()
+                .expect("account was validated by cmd_idle_preflight");
+            let selected = self
+                .selected
+                .as_mut()
+                .expect("selected was validated by cmd_idle_preflight");
+
+            tokio::select! {
+                _ = &mut cancel => break Ok(()),
+                r = account.idle(selected) => match r {
+                    Ok(poll) => {
+                        self.send_full_poll_responses(&mut sender, poll).await;
+                        // TODO We need some way to signal a flush.
+                    },
+
+                    Err(e) => break Err(e),
+                },
+            }
+        };
+
+        let result = result.map_err(map_error!(self));
+        let response = match result {
+            Ok(()) => s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Ok,
+                code: None,
+                quip: None,
+            }),
+            Err(mut e) => {
+                if let s::Response::Cond(s::CondResponse {
+                    ref mut cond, ..
+                }) = e
+                {
+                    // We aren't allowed to send a tagged NO response once
+                    // we've sent the continuation line, so we need to commit
+                    // to hanging up the connection instead.
+                    *cond = s::RespCondType::Bye;
+                }
+
+                e
+            },
+        };
+
+        maybe_tagged_response(Cow::Borrowed(tag), response)
+    }
+
     /// The IDLE command.
     ///
     /// This needs to be dispatched directly by server.rs since it interacts
@@ -684,7 +764,7 @@ Content-Transfer-Encoding: base64
     ///
     /// `after_poll` is invoked each time immediately after sending poll
     /// responses. It is used to flush the output stream.
-    pub async fn cmd_idle<'a>(
+    pub async fn cmd_idle_sync<'a>(
         &mut self,
         before_first_idle: impl FnOnce() -> Result<(), Error>,
         mut keep_idling: impl FnMut(&IdleListener) -> bool,
@@ -735,7 +815,9 @@ Content-Transfer-Encoding: base64
                 Ok(a) => a,
                 Err(e) => break Err(e),
             };
-            if let Err(e) = account.idle(listener).map_err(map_error!(self)) {
+            if let Err(e) =
+                account.idle_sync(listener).map_err(map_error!(self))
+            {
                 break Err(e);
             }
         };
@@ -790,5 +872,29 @@ Content-Transfer-Encoding: base64
 pub(super) fn capability_data() -> s::CapabilityData<'static> {
     s::CapabilityData {
         capabilities: CAPABILITIES.iter().copied().map(Cow::Borrowed).collect(),
+    }
+}
+
+fn maybe_tagged_response<'a>(
+    tag: Cow<'a, str>,
+    res: s::Response<'static>,
+) -> s::ResponseLine<'a> {
+    if matches!(
+        res,
+        s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Bye,
+            ..
+        })
+    ) {
+        // BYE is never tagged
+        s::ResponseLine {
+            tag: None,
+            response: res,
+        }
+    } else {
+        s::ResponseLine {
+            tag: Some(tag),
+            response: res,
+        }
     }
 }

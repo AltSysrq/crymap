@@ -742,7 +742,7 @@ impl Server {
         let write_ref = &self.write;
         let log_prefix = self.processor.log_prefix().to_owned();
 
-        let idle_fut = self.processor.cmd_idle(
+        let idle_fut = self.processor.cmd_idle_sync(
             || {
                 let mut w = write_ref.lock().unwrap();
                 w.write_all(b"+ idling\r\n")?;
