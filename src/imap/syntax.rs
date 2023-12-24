@@ -129,7 +129,7 @@
 )]
 
 use std::borrow::Cow;
-use std::io::{self, Write};
+use std::io;
 use std::str;
 
 use chrono::prelude::*;
@@ -140,7 +140,7 @@ use nom::{
     *,
 };
 
-use super::lex::LexWriter;
+use super::lex::{LexOutput, LexWriter};
 use super::literal_source::LiteralSource;
 use super::mailbox_name::MailboxName;
 use crate::account::model::Flag;

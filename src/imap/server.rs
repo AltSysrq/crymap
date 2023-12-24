@@ -27,7 +27,7 @@ use log::{error, info};
 use regex::bytes::Regex;
 
 use super::command_processor::CommandProcessor;
-use super::lex::LexWriter;
+use super::lex::{InlineSplice, LexWriter};
 use super::syntax as s;
 use crate::account::v2::IdleNotifier;
 use crate::support::append_limit::APPEND_SIZE_LIMIT;
@@ -670,7 +670,7 @@ impl Server {
                 }),
             };
             let mut w = LexWriter::new(
-                &mut write,
+                InlineSplice(&mut write),
                 self.processor.unicode_aware(),
                 false,
             );
@@ -838,8 +838,11 @@ impl Server {
 
         let mut w = self.write.lock().unwrap();
         {
-            let mut w =
-                LexWriter::new(&mut *w, self.processor.unicode_aware(), false);
+            let mut w = LexWriter::new(
+                InlineSplice(&mut *w),
+                self.processor.unicode_aware(),
+                false,
+            );
             r.write_to(&mut w)?;
             w.verbatim_bytes(b"\r\n")?;
         }
@@ -854,7 +857,7 @@ fn response_sender(
 ) -> impl Fn(s::Response<'_>) + Send + Sync + '_ {
     move |r| {
         let mut w = w.lock().unwrap();
-        let mut w = LexWriter::new(&mut *w, unicode_aware, false);
+        let mut w = LexWriter::new(InlineSplice(&mut *w), unicode_aware, false);
         let _ = s::ResponseLine {
             tag: None,
             response: r,

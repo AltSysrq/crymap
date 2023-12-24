@@ -35,7 +35,7 @@ use lazy_static::lazy_static;
 use regex::bytes::Regex;
 use thiserror::Error;
 
-use super::lex::LexWriter;
+use super::lex::{InlineSplice, LexWriter};
 use super::mailbox_name::MailboxName;
 use super::syntax as s;
 
@@ -240,7 +240,11 @@ impl<R: BufRead, W: Write> Client<R, W> {
                 tag: Cow::Owned(format!("{}", tag)),
                 cmd: command,
             }
-            .write_to(&mut LexWriter::new(&mut command_buffer, true, true))
+            .write_to(&mut LexWriter::new(
+                InlineSplice(&mut command_buffer),
+                true,
+                true,
+            ))
             .unwrap();
         }
 
@@ -268,7 +272,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
 
         let mut request_buffer = Vec::<u8>::new();
         command.write_to(&mut LexWriter::new(
-            &mut request_buffer,
+            InlineSplice(&mut request_buffer),
             true,
             true,
         ))?;
@@ -304,7 +308,11 @@ impl<R: BufRead, W: Write> Client<R, W> {
         data: &[u8],
     ) -> Result<(), Error> {
         let mut request_buffer = Vec::<u8>::new();
-        frag.write_to(&mut LexWriter::new(&mut request_buffer, true, true))?;
+        frag.write_to(&mut LexWriter::new(
+            InlineSplice(&mut request_buffer),
+            true,
+            true,
+        ))?;
         write!(request_buffer, "{{{}}}\r\n", data.len())?;
 
         self.trace(false, ">>[app]", &request_buffer);
