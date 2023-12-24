@@ -19,6 +19,7 @@
 use std::borrow::Cow;
 use std::convert::TryInto;
 use std::fmt;
+use std::future::Future;
 use std::mem;
 
 use log::{error, warn};
@@ -65,7 +66,7 @@ impl CommandProcessor {
             true,
             Account::store,
             |a, mb, r| a.prefetch(mb, r),
-            |a, mb, r, f| a.fetch(mb, &r, f),
+            |a, mb, r, f| a.fetch(mb, r, f),
         )
     }
 
@@ -98,12 +99,16 @@ impl CommandProcessor {
             false,
             |_, _, _| panic!("Shouldn't STORE in background update"),
             |a, mb, r| a.prefetch(mb, r),
-            |a, mb, r, f| a.fetch(mb, &r, f),
+            |a, mb, r, f| a.fetch(mb, r, f),
         );
     }
 
-    fn fetch<ID: Default>(
-        &mut self,
+    fn fetch<
+        'a,
+        ID: Default,
+        F: Future<Output = Result<FetchResponse, Error>> + 'a,
+    >(
+        &'a mut self,
         cmd: s::FetchCommand<'_>,
         sender: SendResponse<'_>,
         ids: SeqRange<ID>,
@@ -120,11 +125,11 @@ impl CommandProcessor {
             &FetchRequest<ID>,
         ) -> Result<PrefetchResponse, Error>,
         f_fetch: impl FnOnce(
-            &mut Account,
-            &mut Mailbox,
+            &'a mut Account,
+            &'a mut Mailbox,
             FetchRequest<ID>,
-            FetchReceiver<'_>,
-        ) -> Result<FetchResponse, Error>,
+            FetchReceiver,
+        ) -> F,
     ) -> CmdResult
     where
         SeqRange<ID>: fmt::Debug,
@@ -258,18 +263,43 @@ impl CommandProcessor {
         }
         fetch_preresponse(sender, prefetch)?;
 
-        let mut receiver = |seqnum, items| {
-            fetch_response(sender, fetch_properties, seqnum, items);
+        let (receiver_tx, mut receiver_rx) =
+            tokio::sync::mpsc::channel(fetch_properties.channel_buffer_size);
+
+        let do_fetch =
+            f_fetch(account!(self)?, selected!(self)?, request, receiver_tx);
+        let send_responses = async move {
+            while let Some((seqnum, items)) = receiver_rx.recv().await {
+                fetch_response(sender, fetch_properties, seqnum, items);
+            }
         };
 
-        let response = f_fetch(
-            account!(self)?,
-            selected!(self)?,
-            request,
-            &mut receiver,
-        )
+        let main = async move {
+            let (response, _) = tokio::join!(do_fetch, send_responses);
+            response
+        };
+
+        let response = futures::executor::block_on(main)
         .map_err(map_error! {
-            self,
+            // XXX We can't use the `self` form because `f_fetch` borrows
+            // `self.account` and `self.mailbox` permanently. This is due to a
+            // limitation in the type system. Ideally, we'd declare `f_fetch`
+            // as
+            //
+            //   impl for<'a> FnOnce (
+            //     &'a mut Account,
+            //     &'a mut Mailbox,
+            //     ...
+            //   ) -> impl Future<...> + 'a
+            //
+            // but there's no way to express that right now --- we need to
+            // commit to some lifetime which exists for the entirety of this
+            // function.
+            //
+            // This isn't that big of a problem though, as once we've gotten
+            // past prefetch, there isn't really any way for the storage layer
+            // to discover that the mailbox was deleted out from under us.
+            log_prefix = &self.log_prefix,
             MasterKeyUnavailable => (No, Some(s::RespTextCode::ServerBug(()))),
             BadEncryptedKey => (No, Some(s::RespTextCode::Corruption(()))),
             ExpungedMessage => (No, Some(s::RespTextCode::ExpungeIssued(()))),
@@ -281,10 +311,21 @@ impl CommandProcessor {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 struct FetchProperties {
     set_seen: bool,
     extended_body_structure: bool,
+    channel_buffer_size: usize,
+}
+
+impl Default for FetchProperties {
+    fn default() -> Self {
+        Self {
+            set_seen: false,
+            extended_body_structure: false,
+            channel_buffer_size: 64,
+        }
+    }
 }
 
 fn fetch_properties(target: &s::FetchCommandTarget<'_>) -> FetchProperties {
@@ -306,6 +347,20 @@ fn fetch_properties(target: &s::FetchCommandTarget<'_>) -> FetchProperties {
 }
 
 fn scan_fetch_properties(props: &mut FetchProperties, att: &s::FetchAtt<'_>) {
+    if matches!(
+        *att,
+        s::FetchAtt::Envelope(_)
+            | s::FetchAtt::InternalDate(_)
+            | s::FetchAtt::Rfc822(_)
+            | s::FetchAtt::Body(_)
+            | s::FetchAtt::ExtendedBodyStructure(_)
+            | s::FetchAtt::ShortBodyStructure(_),
+    ) {
+        // Use a smaller channel size if we're fetching things that involve
+        // actually reading the message.
+        props.channel_buffer_size = 1;
+    }
+
     match *att {
         s::FetchAtt::ExtendedBodyStructure(_) => {
             props.extended_body_structure = true;
