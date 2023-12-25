@@ -382,6 +382,13 @@ impl LexOutput for Vec<u8> {
     }
 }
 
+impl LexOutput for &mut Vec<u8> {
+    fn splice<R: Read + 'static>(&mut self, mut data: R) -> io::Result<()> {
+        io::copy(&mut data, self)?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

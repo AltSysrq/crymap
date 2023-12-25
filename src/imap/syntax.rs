@@ -2067,7 +2067,7 @@ fn literal(i: &[u8]) -> IResult<&[u8], &[u8]> {
     let (i, len) = sequence::delimited(
         alt((tag("~{"), tag("{"))),
         number,
-        alt((tag("+}\r\n"), tag("}\r\n"))),
+        alt((tag("+}\r\n"), tag("+}\n"), tag("}\r\n"), tag("}\n"))),
     )(i)?;
     bytes::complete::take(len)(i)
 }
@@ -2088,8 +2088,10 @@ fn literal_source(i: &[u8]) -> IResult<&[u8], LiteralSource> {
 fn literal_literal_source(i: &[u8]) -> IResult<&[u8], LiteralSource> {
     let (i, prefix) = alt((tag("~{"), tag("{")))(i)?;
     let binary = prefix.starts_with(b"~");
-    let (i, len) =
-        sequence::terminated(number, alt((tag("+}\r\n"), tag("}\r\n"))))(i)?;
+    let (i, len) = sequence::terminated(
+        number,
+        alt((tag("+}\r\n"), tag("+}\n"), tag("}\r\n"), tag("}\n"))),
+    )(i)?;
     let (i, data) = bytes::complete::take(len)(i)?;
 
     Ok((

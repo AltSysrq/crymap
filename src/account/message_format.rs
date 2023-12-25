@@ -31,10 +31,12 @@
 
 use std::convert::TryInto;
 use std::io::{self, BufRead, Read, Seek, Write};
+use std::pin::Pin;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::prelude::*;
 use rand::{rngs::OsRng, Rng};
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 use super::{key_store::KeyStore, model::*};
 use crate::crypt::data_stream;
@@ -111,6 +113,69 @@ pub fn write_message(
             compressor.write_all(&metadata_bytes)?;
 
             let size = io::copy(&mut message_contents, &mut compressor)?;
+            size_xor = metadata.size ^ size.try_into().unwrap_or(u32::MAX);
+            compressor.finish()?;
+        }
+        crypt_writer.flush()?;
+    }
+
+    out.seek(io::SeekFrom::Start(0))?;
+    out.write_u32::<LittleEndian>(size_xor)?;
+    Ok(())
+}
+
+/// Writes a message to `out`, using `key_store` to obtain the public key and
+/// the full data from `message_contents` as the payload.
+///
+/// `internal_date` is passed through to the payload.
+///
+/// `out`'s position after this returns is unspecified.
+#[allow(dead_code)] // TODO REMOVE
+pub async fn write_message_async(
+    mut out: impl Write + Seek,
+    key_store: &mut KeyStore,
+    internal_date: DateTime<FixedOffset>,
+    mut message_contents: Pin<&mut impl AsyncRead>,
+) -> Result<(), Error> {
+    let size_xor: u32;
+    let metadata = MessageMetadata {
+        size: OsRng.gen(),
+        internal_date,
+        email_id: OsRng.gen(),
+    };
+    let compression = Compression::DEFAULT_FOR_MESSAGE;
+
+    out.write_u32::<LittleEndian>(0)?;
+    {
+        let mut crypt_writer = {
+            let (key_name, pub_key) = key_store.get_default_public_key()?;
+
+            data_stream::Writer::new(
+                &mut out,
+                pub_key,
+                key_name.to_owned(),
+                compression,
+            )?
+        };
+        {
+            let mut compressor = compression.compressor(&mut crypt_writer)?;
+            let metadata_bytes = serde_cbor::to_vec(&metadata)?;
+            compressor.write_u16::<LittleEndian>(
+                metadata_bytes.len().try_into().unwrap(),
+            )?;
+            compressor.write_all(&metadata_bytes)?;
+
+            let mut size = 0u64;
+            let mut buffer = [0u8; 1024];
+            loop {
+                let nread = message_contents.as_mut().read(&mut buffer).await?;
+                if 0 == nread {
+                    break;
+                }
+
+                compressor.write_all(&buffer[..nread])?;
+                size += nread as u64;
+            }
             size_xor = metadata.size ^ size.try_into().unwrap_or(u32::MAX);
             compressor.finish()?;
         }

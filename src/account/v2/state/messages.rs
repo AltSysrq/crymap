@@ -19,6 +19,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
+use std::pin::Pin;
 
 use chrono::prelude::*;
 use tempfile::NamedTempFile;
@@ -55,6 +56,27 @@ pub(super) fn buffer_message(
     Ok(BufferedMessage(buffer_file.into_temp_path()))
 }
 
+#[allow(dead_code)] // TODO REMOVE
+pub(super) async fn buffer_message_async(
+    key_store: &mut KeyStore,
+    common_paths: &CommonPaths,
+    internal_date: DateTime<FixedOffset>,
+    data: Pin<&mut impl tokio::io::AsyncRead>,
+) -> Result<BufferedMessage, Error> {
+    let mut buffer_file = NamedTempFile::new_in(&common_paths.tmp)?;
+    message_format::write_message_async(
+        &mut buffer_file,
+        key_store,
+        internal_date,
+        data,
+    )
+    .await?;
+
+    file_ops::chmod(buffer_file.path(), 0o440)?;
+    buffer_file.as_file_mut().sync_all()?;
+    Ok(BufferedMessage(buffer_file.into_temp_path()))
+}
+
 impl Account {
     /// Buffer the given data stream into a file that can later be appended
     /// directly.
@@ -77,6 +99,31 @@ impl Account {
             internal_date,
             data,
         )
+    }
+
+    /// Buffer the given data stream into a file that can later be appended
+    /// directly.
+    ///
+    /// This is used when reading `APPEND` commands to directly transfer the
+    /// network input into the final file, instead of going through the extra
+    /// time and memory use of the `crate::support::buffer` system.
+    ///
+    /// The returned object is a reference to a file in the temporary directory
+    /// which will be deleted when dropped, but does not contain an actual file
+    /// handle.
+    #[allow(dead_code)] // TODO REMOVE
+    pub async fn buffer_message_async(
+        &mut self,
+        internal_date: DateTime<FixedOffset>,
+        data: Pin<&mut impl tokio::io::AsyncRead>,
+    ) -> Result<BufferedMessage, Error> {
+        buffer_message_async(
+            &mut self.key_store,
+            &self.common_paths,
+            internal_date,
+            data,
+        )
+        .await
     }
 
     /// Append the message(s) from the request to the given mailbox.

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -21,6 +21,8 @@ pub mod command_processor;
 mod lex;
 mod literal_source;
 mod mailbox_name;
+mod request_reader;
+mod response_writer;
 pub mod server;
 pub mod syntax;
 
