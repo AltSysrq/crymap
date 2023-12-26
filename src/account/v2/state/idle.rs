@@ -84,6 +84,108 @@ impl Account {
             while inotify.read_events().ok().is_some_and(|v| !v.is_empty()) {}
         }
 
+        #[cfg(target_os = "freebsd")]
+        struct Handle {
+            kqueue: nix::sys::event::Kqueue,
+            metadb: std::fs::File,
+            deliverydb: std::fs::File,
+        }
+
+        #[cfg(target_os = "freebsd")]
+        fn init(
+            metadb_path: &Path,
+            deliverydb_path: &Path,
+        ) -> io::Result<(nix::sys::event::Kqueue, AsyncFd<RawFd>)> {
+            use nix::sys::event;
+            use std::mem;
+
+            let metadb = std::fs::File::open(metadb_path)?;
+            let deliverydb = std::fs::File::open(deliverydb_path)?;
+
+            let kqueue = event::Kqueue::new();
+            handle.kevent(
+                &[
+                    event::KEvent::new(
+                        metadb.as_raw_fd(),
+                        event::EventFilter::EVFILT_VNODE,
+                        event::EventFlag::NOTE_EXTEND
+                            | event::EventFlag::NOTE_WRITE,
+                        event::FilterFlag::EVFILT_ADD
+                            | event::FilterFlag::EVFILT_ENABLE,
+                        0, // nullptr, no system data
+                        0, // nullptr, no user data
+                    ),
+                    event::KEvent::new(
+                        deliverydb.as_raw_fd(),
+                        event::EventFilter::EVFILT_VNODE,
+                        event::EventFlag::NOTE_EXTEND
+                            | event::EventFlag::NOTE_WRITE,
+                        event::FilterFlag::EVFILT_ADD
+                            | event::FilterFlag::EVFILT_ENABLE,
+                        0, // nullptr, no system data
+                        0, // nullptr, no user data
+                    ),
+                ],
+                &mut [],
+                Some(nix::libc::timespec {
+                    tv_sec: 0,
+                    tv_nsec: 0,
+                }),
+            )?;
+
+            // XXX Kqueue strangely doesn't give access to its file descriptor.
+            // As of nix 0.27.1, it is just a #[repr(transparent)] wrapper
+            // struct around RawFd.
+            //
+            // SAFETY: The assertions make this memory-safe. If, somehow,
+            // Kqueue turns into a struct with the same size and alignment as
+            // RawFd but contains something else, we'll end up polling some
+            // other value instead of a file descriptor, but it won't cause a
+            // memory safety issue.
+            let fd: RawFd = unsafe {
+                assert_eq!(
+                    mem::size_of::<RawFd>(),
+                    mem::size_of::<event::Kqueue>(),
+                );
+                assert_eq!(
+                    mem::align_of::<RawFd>(),
+                    mem::align_of::<event::Kqueue>(),
+                );
+                mem::transmute_copy(&handle)
+            };
+
+            let asyncfd = tokio::io::unix::AsyncFd::with_interest(
+                fd,
+                tokio::io::Interest::READABLE,
+            )
+            .unwrap();
+
+            Ok(
+                Handle {
+                    kqueue,
+                    metadb,
+                    deliverydb,
+                },
+                asyncfd,
+            )
+        }
+
+        #[cfg(target_os = "freebsd")]
+        fn clear_events(handle: &Handle) {
+            use nix::sys::event;
+            let mut buf = [event::KEvent; 4];
+            let zero = nix::libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            while handle
+                .kqueue
+                .kevent(&[], &mut buf, Some(zero))
+                .ok()
+                .is_some_and(|n| n > 0)
+            {}
+        }
+
         let (handle, asyncfd) = init(&self.metadb_path, &self.deliverydb_path)?;
         loop {
             self.drain_deliveries();
