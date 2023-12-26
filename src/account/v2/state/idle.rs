@@ -178,9 +178,7 @@ impl Account {
         fn clear_events(handle: &Handle) {
             use nix::sys::event;
             // SAFETY: KEvent is a C struct with no data invariants and no destructor.
-            let mut buf: [event::KEvent; 4] = unsafe {
-              std::mem::zeroed()
-            };
+            let mut buf: [event::KEvent; 4] = unsafe { std::mem::zeroed() };
             let zero = nix::libc::timespec {
                 tv_sec: 0,
                 tv_nsec: 0,
