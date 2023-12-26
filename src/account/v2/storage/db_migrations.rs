@@ -64,7 +64,7 @@ pub fn apply_migrations(
         .map(|(ix, migration)| (ix + 1, migration))
         .skip(current_version)
     {
-        info!("{log_prefix} Applying V{version} migration to {db_name} DB");
+        info!("{log_prefix} Applying #{version} migration to {db_name} DB");
         txn.execute_batch(migration)?;
         txn.execute(
             "INSERT INTO `migration` (`version`, `applied_at`) \
