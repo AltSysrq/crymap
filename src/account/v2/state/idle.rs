@@ -23,6 +23,8 @@
 //! Notifications are implemented by watching for modifications on the main
 //! database files.
 
+use std::io;
+use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 use super::defs::*;
@@ -36,11 +38,72 @@ impl Account {
     ///
     /// The idle is cancelled by simply dropping the future. `mailbox` is only
     /// mutated upon a non-trivial poll.
+    #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
     pub async fn idle(
         &mut self,
         mailbox: &mut Mailbox,
     ) -> Result<PollResponse, Error> {
-        // TODO Use something other than polling when possible.
+        self.idle_poll(mailbox).await
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    pub async fn idle(
+        &mut self,
+        mailbox: &mut Mailbox,
+    ) -> Result<PollResponse, Error> {
+        use std::os::unix::io::RawFd;
+        use tokio::io::unix::AsyncFd;
+
+        #[cfg(target_os = "linux")]
+        fn init(
+            metadb_path: &Path,
+            deliverydb_path: &Path,
+        ) -> io::Result<(nix::sys::inotify::Inotify, AsyncFd<RawFd>)> {
+            use nix::sys::inotify;
+            use std::os::fd::{AsFd, AsRawFd};
+
+            let handle = inotify::Inotify::init(
+                inotify::InitFlags::IN_CLOEXEC
+                    | inotify::InitFlags::IN_NONBLOCK,
+            )?;
+            handle.add_watch(metadb_path, inotify::AddWatchFlags::IN_MODIFY)?;
+            handle.add_watch(
+                deliverydb_path,
+                inotify::AddWatchFlags::IN_MODIFY,
+            )?;
+            let asyncfd = tokio::io::unix::AsyncFd::with_interest(
+                handle.as_fd().as_raw_fd(),
+                tokio::io::Interest::READABLE,
+            )
+            .unwrap();
+            Ok((handle, asyncfd))
+        }
+
+        #[cfg(target_os = "linux")]
+        fn clear_events(inotify: &nix::sys::inotify::Inotify) {
+            while inotify.read_events().ok().is_some_and(|v| !v.is_empty()) {}
+        }
+
+        let (handle, asyncfd) = init(&self.metadb_path, &self.deliverydb_path)?;
+        loop {
+            self.drain_deliveries();
+            let poll = self.poll(mailbox)?;
+            if PollResponse::default() != poll {
+                return Ok(poll);
+            }
+
+            let mut readable = asyncfd.readable().await?;
+            clear_events(&handle);
+            readable.clear_ready();
+        }
+    }
+
+    // Always compiled to verify it builds.
+    #[allow(dead_code)]
+    async fn idle_poll(
+        &mut self,
+        mailbox: &mut Mailbox,
+    ) -> Result<PollResponse, Error> {
         let mut last_metadb = SystemTime::UNIX_EPOCH;
         let mut last_deliverydb = SystemTime::UNIX_EPOCH;
         loop {

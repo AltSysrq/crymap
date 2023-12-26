@@ -79,7 +79,7 @@ features = [
 
 [dependencies.nix]
 version = "0.27.1"
-features = [ "fs", "hostname", "net", "poll", "process", "user" ]
+features = [ "event", "fs", "hostname", "inotify", "net", "poll", "process", "user" ]
 
 [dependencies.tokio]
 version = "1.35.1"
