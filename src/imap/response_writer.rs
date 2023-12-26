@@ -238,9 +238,6 @@ impl State {
             Ok(())
         }
 
-        // TODO Ensure the integration tests make some cases with large data
-        // that gets split apart.
-
         let mut offset = 0usize;
         for mut splice in self.splices.drain(..) {
             if splice.offset > offset {
@@ -284,22 +281,19 @@ impl State {
             if let Some(ref mut compress) = self.compress {
                 loop {
                     let before_out = compress.total_out();
-                    let status = compress
+                    compress
                         .compress(&[], &mut self.compressed, flush_compress)
                         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
                     let after_out = compress.total_out();
 
-                    if after_out > before_out {
-                        io.write_all(
-                            &self.compressed
-                                [..(after_out - before_out) as usize],
-                        )
-                        .await?;
-
-                        if flate2::Status::BufError != status {
-                            break;
-                        }
+                    if after_out == before_out {
+                        break;
                     }
+
+                    io.write_all(
+                        &self.compressed[..(after_out - before_out) as usize],
+                    )
+                    .await?;
                 }
             }
         }

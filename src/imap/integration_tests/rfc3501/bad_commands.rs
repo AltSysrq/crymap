@@ -222,3 +222,55 @@ fn bad_append_recovery() {
         s::Response::Exists(0) in responses
     }
 }
+
+#[test]
+fn connection_closed_after_too_many_unauthed_commands() {
+    let setup = set_up();
+    let mut client = setup.connect("3501ccuc");
+    skip_greeting(&mut client);
+
+    for i in 0..100 {
+        let mut buffer = Vec::new();
+        // If the server is done with us, we may or may not succeed to write
+        // the request onto the wire depending on when exactly the server
+        // closes its side of the pipe.
+        match client.write_raw(format!("N{i} NOOP\r\n").as_bytes()) {
+            Ok(()) => {
+                let response = client.read_one_response(&mut buffer).unwrap();
+                match response.response {
+                    s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Ok,
+                        ..
+                    }) => continue,
+
+                    s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Bye,
+                        ..
+                    }) => {
+                        // The connection should be disconnected.
+                        assert!(client.read_one_response(&mut buffer).is_err());
+                        return;
+                    },
+
+                    _ => panic!("unexpected response: {response:?}"),
+                }
+            },
+
+            Err(_) => {
+                // The server closed the pipe before we could write the
+                // request, but the BYE should still be on the wire.
+                let response = client.read_one_response(&mut buffer).unwrap();
+                assert_matches!(
+                    s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Bye,
+                        ..
+                    }),
+                    response.response,
+                );
+                return;
+            },
+        }
+    }
+
+    panic!("connection was never closed");
+}

@@ -55,6 +55,8 @@ pub struct RequestReader<R> {
     compressed: Vec<u8>,
     /// The range of `compressed` which is yet to be processed.
     compressed_range: Range<usize>,
+    /// Whether we've seen an EOF from the reader.
+    reader_eof: bool,
 }
 
 /// Possible outcomes of trying to read the start of a command line.
@@ -126,6 +128,7 @@ impl<R: AsyncRead + Unpin> RequestReader<R> {
             decompress: None,
             compressed: Vec::new(),
             compressed_range: 0..0,
+            reader_eof: false,
         }
     }
 
@@ -555,6 +558,7 @@ impl<R: AsyncRead + Unpin> RequestReader<R> {
                         decompress,
                         &mut this.compressed,
                         &mut this.compressed_range,
+                        &mut this.reader_eof,
                     )
                 } else {
                     Pin::new(&mut this.io).poll_read(ctx, &mut buf)
@@ -611,6 +615,7 @@ impl<R: AsyncRead + Unpin> AsyncRead for RequestReader<R> {
                 decompress,
                 &mut this.compressed,
                 &mut this.compressed_range,
+                &mut this.reader_eof,
             )
         } else {
             // No buffered data and no decompression, so just pass through the
@@ -632,26 +637,17 @@ fn poll_decompress<R: AsyncRead>(
     decompress: &mut flate2::Decompress,
     compressed: &mut [u8],
     compressed_range: &mut Range<usize>,
+    reader_eof: &mut bool,
 ) -> task::Poll<io::Result<()>> {
     loop {
-        if (*compressed_range).is_empty() {
-            let mut compressed_buf = ReadBuf::new(compressed);
-            futures::ready!(src.as_mut().poll_read(ctx, &mut compressed_buf))?;
-
-            *compressed_range = 0..compressed_buf.filled().len();
-        }
-
-        // If compressed_range is empty after a successful read, we've hit EOF.
-        // We still need to go through the decompressor to drain anything it
-        // still has buffered.
-        let eof = (*compressed_range).is_empty();
-
+        // First, try to squeeze data out of the decompressor even if we have
+        // nothing else to give it.
         let before_in = decompress.total_in();
         let before_out = decompress.total_out();
         if let Err(e) = decompress.decompress(
             &compressed[compressed_range.clone()],
             dst.initialize_unfilled(),
-            if eof {
+            if *reader_eof {
                 flate2::FlushDecompress::Finish
             } else {
                 flate2::FlushDecompress::Sync
@@ -666,9 +662,25 @@ fn poll_decompress<R: AsyncRead>(
         let after_out = decompress.total_out();
 
         compressed_range.start += (after_in - before_in) as usize;
-        if after_out != before_out || eof {
+        if after_out != before_out || *reader_eof {
             dst.advance((after_out - before_out) as usize);
             return task::Poll::Ready(Ok(()));
+        }
+
+        // We can't get anything more from the compressor with the data we
+        // have. If *compressed_range is not yet empty, we'll just make another
+        // pass through the decompressor. Otherwise, try to read more data.
+        if (*compressed_range).is_empty() {
+            if *reader_eof {
+                // Neither the decompressor nor the stream has more data for us.
+                return task::Poll::Ready(Ok(()));
+            }
+
+            let mut compressed_buf = ReadBuf::new(compressed);
+            futures::ready!(src.as_mut().poll_read(ctx, &mut compressed_buf))?;
+
+            *compressed_range = 0..compressed_buf.filled().len();
+            *reader_eof = (*compressed_range).is_empty();
         }
     }
 }

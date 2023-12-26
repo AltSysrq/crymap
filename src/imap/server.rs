@@ -216,7 +216,6 @@ async fn process_input(
             // Limit the number of commands that can be executed before
             // authenticating. This limits the effectiveness of using COMPRESS
             // to flood the server with NOOPs etc.
-            // TODO Integration test
             if unauthenticated_commands > 30 {
                 bye!(
                     output_tx,
