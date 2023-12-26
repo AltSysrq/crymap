@@ -85,6 +85,7 @@ impl Account {
         }
 
         #[cfg(target_os = "freebsd")]
+        #[allow(dead_code)]
         struct Handle {
             kqueue: nix::sys::event::Kqueue,
             metadb: std::fs::File,
@@ -95,33 +96,36 @@ impl Account {
         fn init(
             metadb_path: &Path,
             deliverydb_path: &Path,
-        ) -> io::Result<(nix::sys::event::Kqueue, AsyncFd<RawFd>)> {
+        ) -> io::Result<(Handle, AsyncFd<RawFd>)> {
             use nix::sys::event;
             use std::mem;
+            use std::os::fd::AsRawFd;
 
             let metadb = std::fs::File::open(metadb_path)?;
             let deliverydb = std::fs::File::open(deliverydb_path)?;
 
-            let kqueue = event::Kqueue::new();
-            handle.kevent(
+            let kqueue = event::Kqueue::new()?;
+            kqueue.kevent(
                 &[
                     event::KEvent::new(
-                        metadb.as_raw_fd(),
+                        metadb.as_raw_fd() as usize,
                         event::EventFilter::EVFILT_VNODE,
-                        event::EventFlag::NOTE_EXTEND
-                            | event::EventFlag::NOTE_WRITE,
-                        event::FilterFlag::EVFILT_ADD
-                            | event::FilterFlag::EVFILT_ENABLE,
+                        event::EventFlag::EV_ADD
+                            | event::EventFlag::EV_ENABLE
+                            | event::EventFlag::EV_CLEAR,
+                        event::FilterFlag::NOTE_EXTEND
+                            | event::FilterFlag::NOTE_WRITE,
                         0, // nullptr, no system data
                         0, // nullptr, no user data
                     ),
                     event::KEvent::new(
-                        deliverydb.as_raw_fd(),
+                        deliverydb.as_raw_fd() as usize,
                         event::EventFilter::EVFILT_VNODE,
-                        event::EventFlag::NOTE_EXTEND
-                            | event::EventFlag::NOTE_WRITE,
-                        event::FilterFlag::EVFILT_ADD
-                            | event::FilterFlag::EVFILT_ENABLE,
+                        event::EventFlag::EV_ADD
+                            | event::EventFlag::EV_ENABLE
+                            | event::EventFlag::EV_CLEAR,
+                        event::FilterFlag::NOTE_EXTEND
+                            | event::FilterFlag::NOTE_WRITE,
                         0, // nullptr, no system data
                         0, // nullptr, no user data
                     ),
@@ -151,7 +155,7 @@ impl Account {
                     mem::align_of::<RawFd>(),
                     mem::align_of::<event::Kqueue>(),
                 );
-                mem::transmute_copy(&handle)
+                mem::transmute_copy(&kqueue)
             };
 
             let asyncfd = tokio::io::unix::AsyncFd::with_interest(
@@ -160,20 +164,23 @@ impl Account {
             )
             .unwrap();
 
-            Ok(
+            Ok((
                 Handle {
                     kqueue,
                     metadb,
                     deliverydb,
                 },
                 asyncfd,
-            )
+            ))
         }
 
         #[cfg(target_os = "freebsd")]
         fn clear_events(handle: &Handle) {
             use nix::sys::event;
-            let mut buf = [event::KEvent; 4];
+            // SAFETY: KEvent is a C struct with no data invariants and no destructor.
+            let mut buf: [event::KEvent; 4] = unsafe {
+              std::mem::zeroed()
+            };
             let zero = nix::libc::timespec {
                 tv_sec: 0,
                 tv_nsec: 0,
