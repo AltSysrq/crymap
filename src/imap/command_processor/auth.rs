@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -41,17 +41,17 @@ impl CommandProcessor {
     ///
     /// Note that we currently only support `AUTHENTICATE` flows that take at
     /// most one input from the client and no server challenge.
-    pub(crate) fn authenticate_start<'a>(
+    pub(crate) fn authenticate_start(
         &mut self,
-        cmd: &'a s::AuthenticateCommandStart<'a>,
-    ) -> Option<s::ResponseLine<'a>> {
+        cmd: &s::AuthenticateCommandStart<'_>,
+    ) -> Option<s::ResponseLine<'static>> {
         if "plain".eq_ignore_ascii_case(&cmd.auth_type) {
             cmd.initial_response.as_ref().map(|ir| {
                 self.authenticate_finish(cmd.to_owned(), ir.as_bytes())
             })
         } else {
             Some(s::ResponseLine {
-                tag: Some(Cow::Borrowed(&cmd.tag)),
+                tag: Some(Cow::Owned(cmd.tag.clone().into_owned())),
                 response: s::Response::Cond(s::CondResponse {
                     cond: s::RespCondType::Bad,
                     code: Some(s::RespTextCode::Cannot(())),
@@ -61,14 +61,15 @@ impl CommandProcessor {
         }
     }
 
-    pub(crate) fn authenticate_finish<'a>(
+    pub(crate) fn authenticate_finish(
         &mut self,
-        cmd: s::AuthenticateCommandStart<'a>,
+        cmd: s::AuthenticateCommandStart<'_>,
         data: &[u8],
-    ) -> s::ResponseLine<'a> {
+    ) -> s::ResponseLine<'static> {
+        let tag = Cow::Owned(cmd.tag.into_owned());
         if b"*" == data {
             return s::ResponseLine {
-                tag: Some(cmd.tag),
+                tag: Some(tag),
                 response: s::Response::Cond(s::CondResponse {
                     cond: s::RespCondType::Bad,
                     code: None,
@@ -84,7 +85,7 @@ impl CommandProcessor {
             Some(s) => s,
             None => {
                 return s::ResponseLine {
-                    tag: Some(cmd.tag),
+                    tag: Some(tag),
                     response: s::Response::Cond(s::CondResponse {
                         cond: s::RespCondType::Bad,
                         code: Some(s::RespTextCode::Parse(())),
@@ -102,7 +103,7 @@ impl CommandProcessor {
             (Some(authorise), Some(authenticate), Some(password), None) => {
                 if !authorise.is_empty() && authorise != authenticate {
                     return s::ResponseLine {
-                        tag: Some(cmd.tag),
+                        tag: Some(tag),
                         response: s::Response::Cond(s::CondResponse {
                             cond: s::RespCondType::No,
                             code: Some(s::RespTextCode::Cannot(())),
@@ -125,12 +126,12 @@ impl CommandProcessor {
                 };
 
                 s::ResponseLine {
-                    tag: Some(cmd.tag),
+                    tag: Some(tag),
                     response: r,
                 }
             },
             _ => s::ResponseLine {
-                tag: Some(cmd.tag),
+                tag: Some(tag),
                 response: s::Response::Cond(s::CondResponse {
                     cond: s::RespCondType::Bad,
                     code: Some(s::RespTextCode::Parse(())),

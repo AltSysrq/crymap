@@ -29,6 +29,7 @@ use crate::{
         model::*,
         v2::{Account, Mailbox},
     },
+    imap::response_writer::{OutputControl, OutputEvent},
     support::{
         error::Error, log_prefix::LogPrefix, system_config::SystemConfig,
     },
@@ -134,19 +135,38 @@ pub(super) type PartialResult<T> = Result<T, s::Response<'static>>;
 
 /// Channel used to send additional non-tagged responses as they become
 /// available.
-/// Function pointer used to send additional non-tagged responses.
-pub(super) type SendResponse = tokio::sync::mpsc::Sender<s::Response<'static>>;
+pub(super) type SendResponse = tokio::sync::mpsc::Sender<OutputEvent>;
+
+/// Send an event through the sender, ignoring errors.
+///
+/// This ensures that ignoring the future entirely with `let _` doesn't happen.
+pub(super) async fn send_event(sender: &mut SendResponse, event: OutputEvent) {
+    let _ = sender.send(event).await;
+}
 
 /// Send a response through `sender`, ignoring errors.
 ///
-/// This ensures that ignoring the future entirely with `let _` doesn't happen,
-/// and may simplify making `SendResponse` take control information in the
-/// future.
+/// `OutputControl` is set implicitly by inspecting the response.
 pub(super) async fn send_response(
     sender: &mut SendResponse,
     response: s::Response<'static>,
 ) {
-    let _ = sender.send(response).await;
+    let ctl = match response {
+        s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Bye,
+            ..
+        }) => OutputControl::Disconnect,
+        _ => OutputControl::Buffer,
+    };
+    let _ = sender
+        .send(OutputEvent::ResponseLine {
+            ctl,
+            line: s::ResponseLine {
+                tag: None,
+                response,
+            },
+        })
+        .await;
 }
 
 impl CommandProcessor {
@@ -178,8 +198,8 @@ impl CommandProcessor {
         }
     }
 
-    pub fn unicode_aware(&self) -> bool {
-        self.unicode_aware
+    pub fn is_authenticated(&self) -> bool {
+        self.account.is_some()
     }
 
     pub fn logged_out(&self) -> bool {
@@ -320,11 +340,12 @@ pub(super) fn catch_all_error_handling(
     e: Error,
 ) -> s::Response<'static> {
     if !selected_ok {
+        error!("{} Unhandled error, but !selected_ok: {}", log_prefix, e);
         s::Response::Cond(s::CondResponse {
             cond: s::RespCondType::No,
             code: Some(s::RespTextCode::ServerBug(())),
             quip: Some(Cow::Borrowed(
-                "Unexpected error; check server logs for details",
+                "Unexpected error; was the mailbox deleted?",
             )),
         })
     } else {

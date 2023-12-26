@@ -17,7 +17,6 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
-use std::io::Read;
 
 use chrono::prelude::*;
 
@@ -30,9 +29,11 @@ use crate::support::error::Error;
 impl CommandProcessor {
     /// Start an append command.
     ///
-    /// This call adds the first item to the append. Further items are added by
-    /// subsequent calls to `cmd_append_item()`. Once everything is done,
-    /// `cmd_append_commit()` is called to actually run the commit.
+    /// This call performs the initial sanity checks.
+    ///
+    /// Items are added by calling `cmd_append_item()` one or more times. Once
+    /// everything is done, `cmd_append_commit()` is called to actually run the
+    /// commit.
     ///
     /// If `cmd_append_start()` or `cmd_append_item()` fails,
     /// `cmd_append_abort()` must be called, and then the error response from
@@ -40,10 +41,9 @@ impl CommandProcessor {
     /// request.
     pub fn cmd_append_start(
         &mut self,
-        cmd: s::AppendCommandStart<'_>,
-        item_size: u32,
-        item_data: impl Read,
+        cmd: &s::AppendCommandStart<'_>,
     ) -> PartialResult<()> {
+        // This version shall not include an append_item call!
         let mailbox = cmd.mailbox.get_utf8(self.unicode_aware);
         account!(self)?
             .probe_mailbox(&mailbox)
@@ -60,14 +60,14 @@ impl CommandProcessor {
             dst: mailbox.into_owned(),
             request: AppendRequest { items: vec![] },
         });
-        self.cmd_append_item(cmd.first_fragment, item_size, item_data)
+        Ok(())
     }
 
-    pub fn cmd_append_item(
+    pub async fn cmd_append_item(
         &mut self,
-        cmd: s::AppendFragment,
+        cmd: &s::AppendFragment,
         item_size: u32,
-        item_data: impl Read,
+        item_data: std::pin::Pin<&mut impl tokio::io::AsyncRead>,
     ) -> PartialResult<()> {
         if 0 == item_size {
             return Err(s::Response::Cond(s::CondResponse {
@@ -106,14 +106,15 @@ impl CommandProcessor {
         }
 
         let buffered = account!(self)?
-            .buffer_message(
+            .buffer_message_async(
                 cmd.internal_date.unwrap_or_else(|| Utc::now().into()),
                 item_data,
             )
+            .await
             .map_err(map_error!(self))?;
         append.request.items.push(AppendItem {
             buffer_file: buffered,
-            flags: cmd.flags.unwrap_or_default(),
+            flags: cmd.flags.clone().unwrap_or_default(),
         });
 
         Ok(())

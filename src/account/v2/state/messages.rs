@@ -56,7 +56,6 @@ pub(super) fn buffer_message(
     Ok(BufferedMessage(buffer_file.into_temp_path()))
 }
 
-#[allow(dead_code)] // TODO REMOVE
 pub(super) async fn buffer_message_async(
     key_store: &mut KeyStore,
     common_paths: &CommonPaths,
@@ -88,6 +87,7 @@ impl Account {
     /// The returned object is a reference to a file in the temporary directory
     /// which will be deleted when dropped, but does not contain an actual file
     /// handle.
+    #[cfg(any(test, feature = "dev-tools"))]
     pub fn buffer_message(
         &mut self,
         internal_date: DateTime<FixedOffset>,
@@ -111,7 +111,6 @@ impl Account {
     /// The returned object is a reference to a file in the temporary directory
     /// which will be deleted when dropped, but does not contain an actual file
     /// handle.
-    #[allow(dead_code)] // TODO REMOVE
     pub async fn buffer_message_async(
         &mut self,
         internal_date: DateTime<FixedOffset>,

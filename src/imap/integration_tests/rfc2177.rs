@@ -137,7 +137,9 @@ fn delete_mailbox_during_idle() {
 
     ok_command!(client, c("DELETE 2177dmdi"));
 
-    victim.write_raw(b"DONE\r\n").unwrap();
+    // We need to sleep for a bit to give the poll-based idle implementation
+    // time to notice.
+    std::thread::sleep(std::time::Duration::from_secs(3));
 
     buffer.clear();
     let response = victim.read_one_response(&mut buffer).unwrap();

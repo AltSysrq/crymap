@@ -59,20 +59,39 @@ impl ServerIo {
     ///
     /// This only fails if making stdio non-blocking fails.
     pub fn new_stdio() -> Result<Self, nix::Error> {
+        Self::new_pair_raw(STDIN, STDOUT, None)
+    }
+
+    /// Sets up a `ServerIo` using separate input and output file descriptors.
+    #[cfg(test)]
+    pub fn new_owned_pair(
+        inf: impl AsRawFd + Any,
+        outf: impl AsRawFd + Any,
+    ) -> Result<Self, nix::Error> {
+        let infd = inf.as_raw_fd();
+        let outfd = outf.as_raw_fd();
+        Self::new_pair_raw(infd, outfd, Some(Rc::new((inf, outf))))
+    }
+
+    fn new_pair_raw(
+        infd: RawFd,
+        outfd: RawFd,
+        owned: Option<Rc<dyn std::any::Any>>,
+    ) -> Result<Self, nix::Error> {
         nix::fcntl::fcntl(
-            STDIN,
+            infd,
             nix::fcntl::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
         )?;
         nix::fcntl::fcntl(
-            STDOUT,
+            outfd,
             nix::fcntl::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
         )?;
 
         let fd_pair = Rc::new(FdPair {
-            read: AsyncFd::with_interest(STDIN, tokio::io::Interest::READABLE)
+            read: AsyncFd::with_interest(infd, tokio::io::Interest::READABLE)
                 .unwrap(),
             write: Some(
-                AsyncFd::with_interest(STDOUT, tokio::io::Interest::WRITABLE)
+                AsyncFd::with_interest(outfd, tokio::io::Interest::WRITABLE)
                     .unwrap(),
             ),
         });
@@ -80,7 +99,7 @@ impl ServerIo {
         Ok(Self {
             fd_pair: Rc::clone(&fd_pair),
             mode: Rc::new(RefCell::new(Mode::Cleartext(FdPairRw(fd_pair)))),
-            _owned: None,
+            _owned: owned,
         })
     }
 

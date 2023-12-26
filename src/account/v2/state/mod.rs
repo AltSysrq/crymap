@@ -46,4 +46,3 @@ mod zstd_train;
 pub use defs::{Account, Mailbox};
 pub use delivery::DeliveryAccount;
 pub use fetch::FetchReceiver;
-pub use idle::{IdleListener, IdleNotifier};

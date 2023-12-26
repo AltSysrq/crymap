@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -22,7 +22,8 @@ use super::super::defs::*;
 fn unknown_commands() {
     let setup = set_up();
     let mut client = setup.connect("3501bcuc");
-    skip_greeting(&mut client);
+    // Log in so that long-line recovery is enabled.
+    quick_log_in(&mut client);
 
     client.write_raw(b"1 PLUGH\r\n").unwrap();
     let mut buffer = Vec::new();
@@ -81,7 +82,9 @@ fn unknown_commands() {
     // Ensure that command discarding does not end up recurring if a continued
     // line is itself too long.
     client.write_raw(b"5 CREATE {100000+}\r\n").unwrap();
-    // The initial NO is actually sent after the first line
+    client.write_raw("x".repeat(100000).as_bytes()).unwrap();
+    client.write_raw(b"\r\n").unwrap();
+    // Now that we've completed the huge "line", we get the NO.
     let mut buffer = Vec::new();
     let r = client.read_one_response(&mut buffer).unwrap();
     unpack_cond_response! {
@@ -90,21 +93,23 @@ fn unknown_commands() {
             assert_eq!("Command line too long", quip);
         }
     }
-    client.write_raw("x".repeat(100000).as_bytes()).unwrap();
-    // Server may hang up on this one
-    let _ = client.write_raw("6 ".repeat(50000).as_bytes());
-    // Now we get a BYE due to rejecting the continuation line
+
+    client.write_raw("6 ".repeat(50000).as_bytes()).unwrap();
+    client.write_raw(b"\r\n").unwrap();
     let mut buffer = Vec::new();
     let r = client.read_one_response(&mut buffer).unwrap();
     unpack_cond_response! {
-        (None, s::RespCondType::Bye, None, _) = r => { }
+        (Some(tag), s::RespCondType::No, None, Some(quip)) = r => {
+            assert_eq!("6", tag);
+            assert_eq!("Command line too long", quip);
+        }
     }
 
     client = setup.connect("3501bcuc");
     skip_greeting(&mut client);
 
     // Ignore errors here since the server may hang up before we write the full
-    // payload
+    // payload, as long line recovery is disabled while logged out.
     let _ = client.write_raw("x".repeat(100_000).as_bytes());
     let mut buffer = Vec::new();
     let r = client.read_one_response(&mut buffer).unwrap();

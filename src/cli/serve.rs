@@ -20,6 +20,7 @@ use std::io::{self, Read, Write};
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use log::{error, info, warn};
 use nix::poll::{poll, PollFd, PollFlags};
@@ -27,7 +28,7 @@ use nix::sys::time::TimeValLike;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
 
 use crate::{
-    imap::{command_processor::CommandProcessor, server::Server},
+    imap::command_processor::CommandProcessor,
     support::{
         async_io::ServerIo, log_prefix::LogPrefix, system_config::SystemConfig,
         unix_privileges,
@@ -60,52 +61,40 @@ pub async fn imaps(
     let (log_prefix, _) =
         configure_system("imaps", &system_config, &mut users_root);
 
-    // stdio is still synchronous here.
-    let ssl_stream = match acceptor.accept(Stdio) {
-        Ok(ss) => ss,
-        Err(e) => {
-            warn!("{} SSL handshake failed: {}", log_prefix, e);
-            std::process::exit(0)
-        },
-    };
-
-    info!("{} SSL handshake succeeded", log_prefix);
-
-    // This mutex is pretty unfortunate, but needed right now to split
-    // SslStream into two pieces.
-    let ssl_stream = Arc::new(Mutex::new(ssl_stream));
-
-    let processor =
-        CommandProcessor::new(log_prefix.clone(), system_config, users_root);
-
-    let mut server = Server::new(
-        io::BufReader::new(WrappedIo(Arc::clone(&ssl_stream))),
-        io::BufWriter::new(WrappedIo(Arc::clone(&ssl_stream))),
-        processor,
-    );
-
-    if let Err(e) = nix::fcntl::fcntl(
-        STDIN,
-        nix::fcntl::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
-    )
-    .and_then(|_| {
-        nix::fcntl::fcntl(
-            STDOUT,
-            nix::fcntl::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
-        )
-    }) {
+    let io = ServerIo::new_stdio().unwrap_or_else(|e| {
         fatal!(
             EX_OSERR,
             "{} Unable to put input/output into non-blocking mode: {}",
             log_prefix,
             e
-        );
+        )
+    });
+
+    match tokio::time::timeout(
+        Duration::from_secs(30),
+        io.ssl_accept(&acceptor),
+    )
+    .await
+    {
+        Ok(Ok(())) => {},
+        Ok(Err(e)) => {
+            warn!("{} SSL handshake failed: {}", log_prefix, e);
+            std::process::exit(0)
+        },
+        Err(_timeout) => {
+            warn!("{} SSL handshake timed out", log_prefix);
+            std::process::exit(0)
+        },
     }
 
-    match server.run() {
-        Ok(_) => info!("{} Normal client disconnect", log_prefix),
-        Err(e) => warn!("{} Abnormal client disconnect: {}", log_prefix, e),
-    }
+    // Get the key material out of memory.
+    drop(acceptor);
+
+    info!("{} SSL handshake succeeded", log_prefix);
+
+    let processor =
+        CommandProcessor::new(log_prefix.clone(), system_config, users_root);
+    crate::imap::server::run(io, processor).await;
 }
 
 #[tokio::main(flavor = "current_thread")]

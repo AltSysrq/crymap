@@ -130,7 +130,6 @@ pub fn write_message(
 /// `internal_date` is passed through to the payload.
 ///
 /// `out`'s position after this returns is unspecified.
-#[allow(dead_code)] // TODO REMOVE
 pub async fn write_message_async(
     mut out: impl Write + Seek,
     key_store: &mut KeyStore,

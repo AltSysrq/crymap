@@ -28,18 +28,19 @@ use lazy_static::lazy_static;
 use regex::bytes::Regex;
 use tempfile::TempDir;
 
-use crate::account::model::Flag;
-use crate::account::v2::Account;
-use crate::crypt::master_key::MasterKey;
-use crate::imap::client::Client;
-use crate::imap::command_processor::CommandProcessor;
-use crate::imap::literal_source::LiteralSource;
-use crate::imap::mailbox_name::MailboxName;
-use crate::imap::server::Server;
-use crate::support::{
-    chronox::*, error::Error, log_prefix::LogPrefix, system_config::*,
-};
 use crate::test_data::*;
+use crate::{
+    account::{model::Flag, v2::Account},
+    crypt::master_key::MasterKey,
+    imap::{
+        client::Client, command_processor::CommandProcessor,
+        literal_source::LiteralSource, mailbox_name::MailboxName,
+    },
+    support::{
+        async_io::ServerIo, chronox::*, error::Error, log_prefix::LogPrefix,
+        system_config::*,
+    },
+};
 
 pub(super) use crate::imap::syntax as s;
 
@@ -96,31 +97,27 @@ impl Setup {
         let data_root: PathBuf = self.system_dir.path().to_owned();
 
         std::thread::spawn(move || {
-            let processor = CommandProcessor::new(
-                LogPrefix::new(name.to_owned()),
-                Arc::new(SystemConfig::default()),
-                data_root,
-            );
-            let mut server = Server::new(
-                io::BufReader::new(server_in),
-                io::BufWriter::new(server_out),
-                processor,
-            );
-
-            match server.run() {
-                Ok(()) => (),
-                Err(crate::support::error::Error::Io(e))
-                    if io::ErrorKind::UnexpectedEof == e.kind()
-                        || Some(nix::libc::EPIPE) == e.raw_os_error() =>
-                {
-                    ()
-                },
-                Err(e) => panic!("Unexpected server error: {}", e),
-            }
+            run_imap_server(name, data_root, server_in, server_out);
         });
 
         Client::new(io::BufReader::new(client_in), client_out, Some(name))
     }
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn run_imap_server(
+    name: &'static str,
+    data_root: PathBuf,
+    server_in: UnixStream,
+    server_out: UnixStream,
+) {
+    let processor = CommandProcessor::new(
+        LogPrefix::new(name.to_owned()),
+        Arc::new(SystemConfig::default()),
+        data_root,
+    );
+    let io = ServerIo::new_owned_pair(server_in, server_out).unwrap();
+    crate::imap::server::run(io, processor).await;
 }
 
 pub fn receive_line_like(client: &mut PipeClient, pat: &str) {

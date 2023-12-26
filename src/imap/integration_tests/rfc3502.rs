@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -128,8 +128,8 @@ fn literal_plus_interaction() {
     client
         .write_raw(
             b"A1 APPEND 3502lit+ {3+}\r\n\
-                       foo {4+}\r\n\
-                       baar\r\n",
+              foo {4+}\r\n\
+              baar\r\n",
         )
         .unwrap();
     let mut buffer = Vec::new();
@@ -154,7 +154,7 @@ fn abort_on_zero() {
     let mut responses =
         client.read_responses_until_tagged(&mut buffer).unwrap();
     unpack_cond_response! {
-        (Some(_), s::RespCondType::Bad, None, _) = responses.pop().unwrap()
+        (Some(_), s::RespCondType::No, None, _) = responses.pop().unwrap()
     };
 
     client.write_raw(b"A2 APPEND 3502abrt {3}\r\n").unwrap();
@@ -167,36 +167,36 @@ fn abort_on_zero() {
     let mut responses =
         client.read_responses_until_tagged(&mut buffer).unwrap();
     unpack_cond_response! {
-        (Some(_), s::RespCondType::Bad, None, _) = responses.pop().unwrap()
+        (Some(_), s::RespCondType::No, None, _) = responses.pop().unwrap()
     };
 
     client
         .write_raw(
             b"A3 APPEND 3502abrt {0+}\r\n\
-                       {3+}\r\n\
-                       foo\r\n",
+              {3+}\r\n\
+              foo\r\n",
         )
         .unwrap();
     buffer.clear();
     let mut responses =
         client.read_responses_until_tagged(&mut buffer).unwrap();
     unpack_cond_response! {
-        (Some(_), s::RespCondType::Bad, None, _) = responses.pop().unwrap()
+        (Some(_), s::RespCondType::No, None, _) = responses.pop().unwrap()
     };
 
     client
         .write_raw(
             b"A4 APPEND 3502abrt {3+}\r\n\
-                       foo {0+}\r\n\
-                       {3+}\r\n\
-                       bar\r\n",
+              foo {0+}\r\n\
+              {3+}\r\n\
+              bar\r\n",
         )
         .unwrap();
     buffer.clear();
     let mut responses =
         client.read_responses_until_tagged(&mut buffer).unwrap();
     unpack_cond_response! {
-        (Some(_), s::RespCondType::Bad, None, _) = responses.pop().unwrap()
+        (Some(_), s::RespCondType::No, None, _) = responses.pop().unwrap()
     };
 
     // Make sure nothing was written
@@ -220,8 +220,8 @@ fn abort_on_over_length() {
     let mut responses =
         client.read_responses_until_tagged(&mut buffer).unwrap();
     unpack_cond_response! {
-        (Some(_), s::RespCondType::Bad,
-         Some(s::RespTextCode::Limit(())), _) = responses.pop().unwrap()
+        (Some(_), s::RespCondType::No,
+         Some(s::RespTextCode::TooBig(())), _) = responses.pop().unwrap()
     };
 
     client.write_raw(b"A2 APPEND 3502maxl {3}\r\n").unwrap();
@@ -234,8 +234,8 @@ fn abort_on_over_length() {
     let mut responses =
         client.read_responses_until_tagged(&mut buffer).unwrap();
     unpack_cond_response! {
-        (Some(_), s::RespCondType::Bad,
-         Some(s::RespTextCode::Limit(())), _) = responses.pop().unwrap()
+        (Some(_), s::RespCondType::No,
+         Some(s::RespTextCode::TooBig(())), _) = responses.pop().unwrap()
     };
 }
 
@@ -250,7 +250,7 @@ fn syntax_errors_in_continuation() {
     client
         .write_raw(
             "A1 APPEND 3502syne {3+}\r\n\
-                      foo ‽ {42}\r\n"
+             foo ‽ {42}\r\n"
                 .as_bytes(),
         )
         .unwrap();
@@ -267,7 +267,7 @@ fn syntax_errors_in_continuation() {
     client
         .write_raw(
             "A2 APPEND 3502syne {3+}\r\n\
-                      foo bar\r\n"
+             foo bar\r\n"
                 .as_bytes(),
         )
         .unwrap();
@@ -284,8 +284,8 @@ fn syntax_errors_in_continuation() {
     client
         .write_raw(
             "A2 APPEND 3502syne {3+}\r\n\
-                      foo ‽{3+}\r\n\
-                      bar\r\n"
+             foo ‽{3+}\r\n\
+             bar\r\n"
                 .as_bytes(),
         )
         .unwrap();

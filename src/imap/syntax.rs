@@ -372,6 +372,10 @@ syntax_rule! {
         #[prefix("COPYUID ")]
         #[delegate]
         CopyUid(CopyUidData<'a>),
+        // RFC 4469, by proxy of RFC 7889
+        #[]
+        #[tag("TOOBIG")]
+        TooBig(()),
         // RFC 6154
         #[]
         #[tag("USEATTR")]

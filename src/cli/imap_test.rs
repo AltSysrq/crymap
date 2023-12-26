@@ -17,21 +17,27 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::fs;
-use std::io;
-use std::net::TcpListener;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use log::{info, warn};
+use log::info;
+use tokio::net::TcpListener;
 
 use crate::account::v2::Account;
 use crate::crypt::master_key::MasterKey;
 use crate::imap::command_processor::CommandProcessor;
-use crate::imap::server::Server;
-use crate::support::{log_prefix::LogPrefix, system_config::*};
+use crate::support::{
+    async_io::ServerIo, log_prefix::LogPrefix, system_config::*,
+};
 
-pub fn imap_test() {
+#[tokio::main(flavor = "current_thread")]
+pub async fn imap_test() {
+    let local = tokio::task::LocalSet::new();
+    local.run_until(imap_test_impl()).await
+}
+
+async fn imap_test_impl() {
     crate::init_simple_log();
 
     let system_root: PathBuf =
@@ -65,14 +71,22 @@ pub fn imap_test() {
     }
 
     let listener = TcpListener::bind("127.0.0.1:14143")
+        .await
         .expect("Failed to bind listener socket");
 
     info!("Initialised successfully.");
     info!("Connect to: localhost:14143, username 'user', password 'hunter2'");
 
     loop {
-        let (stream_in, origin) =
-            listener.accept().expect("Failed to listen for connections");
+        let (tcp_sock, origin) = listener
+            .accept()
+            .await
+            .expect("Failed to listen for connections");
+        // Convert to the std type so that the FD is deregistered from the
+        // tokio runtime.
+        let tcp_sock = tcp_sock.into_std().unwrap();
+        let io = ServerIo::new_owned_socket(tcp_sock)
+            .expect("Failed to make socket non-blocking");
 
         let processor = CommandProcessor::new(
             LogPrefix::new(origin.to_string()),
@@ -80,22 +94,6 @@ pub fn imap_test() {
             system_root.clone(),
         );
 
-        let stream_out = stream_in
-            .try_clone()
-            .expect("Failed to duplicate socket handle");
-        let mut server = Server::new(
-            io::BufReader::new(stream_in),
-            io::BufWriter::new(stream_out),
-            processor,
-        );
-
-        std::thread::spawn(move || {
-            info!("{} Accepted connection from", origin);
-
-            match server.run() {
-                Ok(_) => info!("{} Connection closed normally", origin),
-                Err(e) => warn!("{} Connection error: {}", origin, e),
-            }
-        });
+        tokio::task::spawn_local(crate::imap::server::run(io, processor));
     }
 }

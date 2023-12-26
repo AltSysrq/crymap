@@ -16,8 +16,6 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-#![allow(dead_code)] // TODO REMOVE
-
 use std::io::{self, Read};
 use std::time::{Duration, Instant};
 
@@ -37,8 +35,6 @@ pub enum OutputEvent {
         line: s::ResponseLine<'static>,
         /// Any special handling for this line.
         ctl: OutputControl,
-        /// Is the client currently Unicode-aware?
-        unicode_aware: bool,
     },
     /// A continuation line (i.e. "+ {message}\r\n").
     ContinuationLine {
@@ -47,6 +43,8 @@ pub enum OutputEvent {
     },
     /// Flush the buffers immediately if non-empty.
     Flush,
+    /// Mark the client as Unicode-aware for all further responses.
+    EnableUnicode,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,6 +61,15 @@ pub enum OutputControl {
     Disconnect,
 }
 
+/// The reason `write_responses` terminated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputDisconnect {
+    /// The disconnect was initiated by `OutputControl::Disconnect`.
+    ByControl,
+    /// The `OutputEvent` receiver was closed.
+    InputClosed,
+}
+
 /// Actor for writing responses to the client.
 ///
 /// The actor runs until one of the following:
@@ -72,7 +79,7 @@ pub enum OutputControl {
 pub async fn write_responses(
     mut io: ServerIo,
     mut outputs: tokio::sync::mpsc::Receiver<OutputEvent>,
-) -> io::Result<()> {
+) -> io::Result<OutputDisconnect> {
     let mut state = State::new();
     while let Some(evt) = outputs.recv().await {
         // Reset last_flush if there's not actually anything pending.
@@ -81,16 +88,9 @@ pub async fn write_responses(
         }
 
         let ctl = match evt {
-            OutputEvent::ResponseLine {
-                mut line,
-                ctl,
-                unicode_aware,
-            } => {
-                line.write_to(&mut LexWriter::new(
-                    &mut state,
-                    unicode_aware,
-                    false,
-                ))?;
+            OutputEvent::ResponseLine { mut line, ctl } => {
+                let unicode = state.unicode;
+                line.write_to(&mut LexWriter::new(&mut state, unicode, false))?;
                 state.text.extend_from_slice(b"\r\n");
                 ctl
             },
@@ -103,6 +103,11 @@ pub async fn write_responses(
             },
 
             OutputEvent::Flush => OutputControl::Flush,
+
+            OutputEvent::EnableUnicode => {
+                state.unicode = true;
+                continue;
+            },
         };
 
         match ctl {
@@ -142,12 +147,14 @@ pub async fn write_responses(
 
             OutputControl::Disconnect => {
                 state.flush(&mut io, flate2::FlushCompress::Finish).await?;
-                break;
+                return Ok(OutputDisconnect::ByControl);
             },
         }
     }
 
-    Ok(())
+    state.flush(&mut io, flate2::FlushCompress::Finish).await?;
+
+    Ok(OutputDisconnect::InputClosed)
 }
 
 const TEXT_FLUSH_THRESH: usize = 4096;
@@ -169,6 +176,8 @@ struct State {
     compressed: Vec<u8>,
     /// The last time a flush was completed.
     last_flush: Instant,
+    /// Whether the Unicode output is enabled.
+    unicode: bool,
 }
 
 struct LiteralSplice {
@@ -186,6 +195,7 @@ impl State {
             compress: None,
             compressed: Vec::new(),
             last_flush: Instant::now(),
+            unicode: false,
         }
     }
 

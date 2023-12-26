@@ -22,9 +22,11 @@ use std::convert::TryInto;
 use log::{error, info};
 
 use super::defs::*;
-use crate::account::model::{PollResponse, SeqRange};
-use crate::account::v2::IdleListener;
-use crate::support::error::Error;
+use crate::{
+    account::model::{PollResponse, SeqRange},
+    imap::response_writer::{OutputControl, OutputEvent},
+    support::error::Error,
+};
 
 impl CommandProcessor {
     /// Return the greeting line to return to the client.
@@ -46,11 +48,11 @@ impl CommandProcessor {
     ///
     /// Returns the final, tagged response. If the response condition is `BYE`,
     /// the connection will be closed after sending it.
-    pub async fn handle_command<'a>(
+    pub async fn handle_command(
         &mut self,
-        command_line: s::CommandLine<'a>,
+        command_line: s::CommandLine<'_>,
         mut sender: SendResponse,
-    ) -> s::ResponseLine<'a> {
+    ) -> s::ResponseLine<'static> {
         let sender = &mut sender;
         let allow_full_poll = match command_line.cmd {
             // FETCH, STORE, and SEARCH (the non-UID versions) are the only
@@ -270,6 +272,7 @@ impl CommandProcessor {
             } else if "UTF8=ACCEPT".eq_ignore_ascii_case(&ext) {
                 self.unicode_aware = true;
                 self.utf8_enabled = true;
+                send_event(sender, OutputEvent::EnableUnicode).await;
                 enabled.push(ext);
             } else if "CONDSTORE".eq_ignore_ascii_case(&ext) {
                 self.enable_condstore(sender, false).await;
@@ -308,6 +311,7 @@ impl CommandProcessor {
             } else if "IMAP4rev2".eq_ignore_ascii_case(&ext) {
                 self.unicode_aware = true;
                 self.imap4rev2_enabled = true;
+                send_event(sender, OutputEvent::EnableUnicode).await;
                 enabled.push(ext);
             }
         }
@@ -453,13 +457,19 @@ impl CommandProcessor {
         // LOGOUT is a bit weird because RFC 3501 requires sending an OK
         // response *AFTER* the BYE.
         self.logged_out = true;
-        send_response(
+        send_event(
             sender,
-            s::Response::Cond(s::CondResponse {
-                cond: s::RespCondType::Bye,
-                code: None,
-                quip: Some(Cow::Borrowed("BYE")),
-            }),
+            OutputEvent::ResponseLine {
+                line: s::ResponseLine {
+                    tag: None,
+                    response: s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Bye,
+                        code: None,
+                        quip: Some(Cow::Borrowed("BYE")),
+                    }),
+                },
+                ctl: OutputControl::Buffer,
+            },
         )
         .await;
         success()
@@ -667,17 +677,16 @@ Content-Transfer-Encoding: base64
     ///
     /// If this returns no response, the `+ idling` continuation line should be
     /// sent, then `cmd_idle` invoked to perform idling.
-    #[allow(dead_code)] // TODO REMOVE
-    pub async fn cmd_idle_preflight<'a>(
+    pub fn cmd_idle_preflight(
         &mut self,
-        tag: &'a str,
-    ) -> Option<s::ResponseLine<'a>> {
+        tag: &str,
+    ) -> Option<s::ResponseLine<'static>> {
         if let Err(e) = account!(self) {
-            return Some(maybe_tagged_response(Cow::Borrowed(tag), e));
+            return Some(maybe_tagged_response(Cow::Owned(tag.to_owned()), e));
         }
 
         if let Err(e) = selected!(self) {
-            return Some(maybe_tagged_response(Cow::Borrowed(tag), e));
+            return Some(maybe_tagged_response(Cow::Owned(tag.to_owned()), e));
         }
 
         None
@@ -694,13 +703,12 @@ Content-Transfer-Encoding: base64
     /// the mailbox state that have not been sent to the client.
     ///
     /// The returned response should be sent as a tagged response line.
-    #[allow(dead_code)]
-    pub async fn cmd_idle<'a>(
+    pub async fn cmd_idle(
         &mut self,
-        tag: &'a str,
+        tag: &str,
         mut sender: SendResponse,
         mut cancel: tokio::sync::oneshot::Receiver<()>,
-    ) -> s::ResponseLine<'a> {
+    ) -> s::ResponseLine<'static> {
         let result = loop {
             let account = self
                 .account
@@ -716,7 +724,7 @@ Content-Transfer-Encoding: base64
                 r = account.idle(selected) => match r {
                     Ok(poll) => {
                         self.send_full_poll_responses(&mut sender, poll).await;
-                        // TODO We need some way to signal a flush.
+                        send_event(&mut sender, OutputEvent::Flush).await;
                     },
 
                     Err(e) => break Err(e),
@@ -724,7 +732,11 @@ Content-Transfer-Encoding: base64
             }
         };
 
-        let result = result.map_err(map_error!(self));
+        let result = result.map_err(map_error!(
+            self,
+            NxMailbox => (Bye, None),
+            MailboxUnselectable => (Bye, None),
+        ));
         let response = match result {
             Ok(()) => s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::Ok,
@@ -746,126 +758,7 @@ Content-Transfer-Encoding: base64
             },
         };
 
-        maybe_tagged_response(Cow::Borrowed(tag), response)
-    }
-
-    /// The IDLE command.
-    ///
-    /// This needs to be dispatched directly by server.rs since it interacts
-    /// with the protocol flow.
-    ///
-    /// `before_first_idle` is invoked after the first idle operation is
-    /// prepared but before any waiting happens. This is used to send the
-    /// continuation line back to the client.
-    ///
-    /// `keep_idling` is invoked each time immediately before idling is
-    /// performed on the given listener. If it returns `false`, the idle
-    /// command ends.
-    ///
-    /// `after_poll` is invoked each time immediately after sending poll
-    /// responses. It is used to flush the output stream.
-    pub async fn cmd_idle_sync<'a>(
-        &mut self,
-        before_first_idle: impl FnOnce() -> Result<(), Error>,
-        mut keep_idling: impl FnMut(&IdleListener) -> bool,
-        mut after_poll: impl FnMut() -> Result<(), Error>,
-        tag: Cow<'a, str>,
-        mut sender: SendResponse,
-    ) -> s::ResponseLine<'a> {
-        let mut before_first_idle = Some(before_first_idle);
-
-        let result = loop {
-            let account = match account!(self) {
-                Ok(a) => a,
-                Err(e) => break Err(e),
-            };
-
-            // Ensure a mailbox is actually selected before we even start.
-            if let Err(e) = selected!(self) {
-                break Err(e);
-            };
-
-            let listener =
-                match account.prepare_idle().map_err(map_error!(self)) {
-                    Ok(l) => l,
-                    Err(e) => break Err(e),
-                };
-
-            if let Err(e) =
-                self.full_poll(&mut sender).await.map_err(map_error!(self))
-            {
-                break Err(e);
-            }
-
-            if let Err(e) = after_poll().map_err(map_error!(self)) {
-                break Err(e);
-            }
-
-            if let Some(before_first_idle) = before_first_idle.take() {
-                if let Err(e) = before_first_idle().map_err(map_error!(self)) {
-                    break Err(e);
-                }
-            }
-
-            if !keep_idling(&listener) {
-                break Ok(());
-            }
-
-            let account = match account!(self) {
-                Ok(a) => a,
-                Err(e) => break Err(e),
-            };
-            if let Err(e) =
-                account.idle_sync(listener).map_err(map_error!(self))
-            {
-                break Err(e);
-            }
-        };
-
-        if let Err(response) = result {
-            if before_first_idle.is_some() {
-                // We never sent the continuation line, so we're ok to return
-                // the response
-                s::ResponseLine {
-                    tag: Some(tag),
-                    response,
-                }
-            } else {
-                // We sent a continuation line. We're not allowed to return any
-                // tagged response, so die instead.
-                let response = if self.account.as_mut().is_some_and(|a| {
-                    self.selected
-                        .as_ref()
-                        .is_some_and(|s| a.is_usable_mailbox(s))
-                }) {
-                    s::Response::Cond(s::CondResponse {
-                        cond: s::RespCondType::Bye,
-                        code: Some(s::RespTextCode::ServerBug(())),
-                        quip: Some(Cow::Borrowed("Unexpected internal error")),
-                    })
-                } else {
-                    s::Response::Cond(s::CondResponse {
-                        cond: s::RespCondType::Bye,
-                        code: None,
-                        quip: Some(Cow::Borrowed("Mailbox deleted or renamed")),
-                    })
-                };
-
-                s::ResponseLine {
-                    tag: None,
-                    response,
-                }
-            }
-        } else {
-            s::ResponseLine {
-                tag: Some(tag),
-                response: s::Response::Cond(s::CondResponse {
-                    cond: s::RespCondType::Ok,
-                    code: None,
-                    quip: Some(Cow::Borrowed("IDLE done")),
-                }),
-            }
-        }
+        maybe_tagged_response(Cow::Owned(tag.to_owned()), response)
     }
 }
 
@@ -875,10 +768,10 @@ pub(super) fn capability_data() -> s::CapabilityData<'static> {
     }
 }
 
-fn maybe_tagged_response<'a>(
-    tag: Cow<'a, str>,
+fn maybe_tagged_response(
+    tag: Cow<'_, str>,
     res: s::Response<'static>,
-) -> s::ResponseLine<'a> {
+) -> s::ResponseLine<'static> {
     if matches!(
         res,
         s::Response::Cond(s::CondResponse {
@@ -893,7 +786,7 @@ fn maybe_tagged_response<'a>(
         }
     } else {
         s::ResponseLine {
-            tag: Some(tag),
+            tag: Some(Cow::Owned(tag.into_owned())),
             response: res,
         }
     }

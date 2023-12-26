@@ -16,8 +16,6 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-#![allow(dead_code)] // TODO REMOVE
-
 use std::future::Future;
 use std::io;
 use std::ops::Range;
@@ -273,6 +271,19 @@ impl<R: AsyncRead + Unpin> RequestReader<R> {
         }
 
         self.skip_command(OverflowState::LiteralPlus(len)).await
+    }
+
+    /// Abort the in-progress `APPEND` command after having read the entire
+    /// literal.
+    pub async fn abort_append_after_literal(&mut self) -> io::Result<()> {
+        match self.continue_append(false).await? {
+            AppendContinuation::Done
+            | AppendContinuation::SyntaxError
+            | AppendContinuation::TooLong => Ok(()),
+            AppendContinuation::NextPart {
+                size, literal_plus, ..
+            } => self.abort_append(size, literal_plus).await,
+        }
     }
 
     /// Continues parsing an `APPEND` command.

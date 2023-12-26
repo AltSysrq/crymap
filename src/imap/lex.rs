@@ -124,11 +124,6 @@ impl<W: LexOutput> LexWriter<W> {
         Ok(())
     }
 
-    pub fn verbatim_bytes(&mut self, s: &[u8]) -> io::Result<()> {
-        self.writer.write_all(s)?;
-        Ok(())
-    }
-
     pub fn nil(&mut self) -> io::Result<()> {
         self.verbatim("NIL")
     }
