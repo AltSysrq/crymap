@@ -28,6 +28,8 @@ encoding_rs = "0.8.33"
 # causing the problem here.
 flate2 = { version = "1.0", default-features = false, features = ["zlib"] }
 futures = "0.3.29"
+hickory-resolver = "0.24.0"
+idna = "0.5.0"
 itertools = "0.12.0"
 lazy_static = "1.4"
 log = "0.4.8"
