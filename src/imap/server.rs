@@ -115,8 +115,10 @@ async fn run_impl(
     Option<io::Result<OutputDisconnect>>,
 ) {
     let (output_tx, output_rx) = tokio::sync::mpsc::channel(16);
+    let (ping_tx, ping_rx) = tokio::sync::mpsc::channel(1);
+    let inactivity_monitor = inactivity_monitor(ping_rx, output_tx.clone());
     let mut input_processor =
-        pin!(process_input(io.clone(), processor, output_tx));
+        pin!(process_input(io.clone(), processor, ping_tx, output_tx));
     let mut response_writer =
         pin!(response_writer::write_responses(io, output_rx));
 
@@ -127,29 +129,25 @@ async fn run_impl(
     // been closed, so we give a few seconds for things to respond, then give
     // up.
     tokio::select! {
-        input_result = &mut input_processor => {
-            tokio::select! {
-                output_result = response_writer => {
-                    (Some(input_result), Some(output_result))
-                },
+        _ = inactivity_monitor => {
+            let output_result = tokio::time::timeout(
+                Duration::from_secs(5),
+                response_writer).await.ok();
+            (Some(Err(ProcessError::Loitering)), output_result)
+        },
 
-                _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                    (Some(input_result), None)
-                },
-            }
+        input_result = &mut input_processor => {
+            let output_result = tokio::time::timeout(
+                Duration::from_secs(5),
+                response_writer).await.ok();
+            (Some(input_result), output_result)
         },
 
         output_result = &mut response_writer => {
-            tokio::select! {
-                input_result = input_processor => {
-                    (Some(input_result), Some(output_result))
-                },
-
-                _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                    (None, Some(output_result))
-                },
-
-            }
+            let input_result = tokio::time::timeout(
+                Duration::from_secs(5),
+                input_processor).await.ok();
+            (input_result, Some(output_result))
         },
     }
 }
@@ -195,6 +193,7 @@ macro_rules! send_cond {
 async fn process_input(
     io: ServerIo,
     processor: &mut CommandProcessor,
+    ping_tx: tokio::sync::mpsc::Sender<bool>,
     mut output_tx: tokio::sync::mpsc::Sender<OutputEvent>,
 ) -> Result<(), ProcessError> {
     let mut request_reader = RequestReader::new(io);
@@ -210,6 +209,7 @@ async fn process_input(
 
     while !processor.logged_out() {
         let authenticated = processor.is_authenticated();
+        let _ = ping_tx.send(authenticated).await;
 
         if !authenticated {
             unauthenticated_commands += 1;
@@ -698,6 +698,54 @@ async fn handle_idle(
         .await
         .map_err(|_| ProcessError::OutputClosed)?;
     Ok(())
+}
+
+/// Monitors for request inactivity.
+///
+/// Each message on `ping` resets the clock and informs whether the connection
+/// is authenticated.
+///
+/// This only terminates if the inactivity timer elapses.
+async fn inactivity_monitor(
+    mut ping: tokio::sync::mpsc::Receiver<bool>,
+    output_tx: tokio::sync::mpsc::Sender<OutputEvent>,
+) {
+    let mut authenticated = false;
+    loop {
+        let timeout = if authenticated {
+            // A bit over the required 30 minutes
+            Duration::from_secs(31 * 60)
+        } else {
+            // RFC 3501 requires the timer to be at least 30 minutes, but
+            // possibly only intends that to apply to logged in clients. RFC
+            // 9051 amends it to explicitly allow shorter timeouts for
+            // not-logged-in clients.
+            Duration::from_secs(300)
+        };
+
+        tokio::select! {
+            _ = tokio::time::sleep(timeout) => break,
+            auth = ping.recv() => authenticated = auth.unwrap_or(false),
+        }
+    }
+
+    let _ = output_tx
+        .send(OutputEvent::ResponseLine {
+            ctl: OutputControl::Disconnect,
+            line: s::ResponseLine {
+                tag: None,
+                response: s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Bye,
+                    code: None,
+                    quip: Some(Cow::Borrowed(if authenticated {
+                        "Inactivity timer elapsed"
+                    } else {
+                        "Authentication timed out"
+                    })),
+                }),
+            },
+        })
+        .await;
 }
 
 fn command_end_ctl(response: &s::Response<'_>) -> OutputControl {

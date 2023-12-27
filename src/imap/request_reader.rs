@@ -40,6 +40,9 @@ const MAX_CMDLINE: usize = 65536;
 /// `RequestReader` cannot be an independent actor like the `request_writer`
 /// module because the zero-copy command parser borrows into the internal
 /// buffer.
+///
+/// There are no read-side network timeouts. Abandoned connections are
+/// collected via the dedicated inactivity monitor in the server.
 pub struct RequestReader<R> {
     io: R,
     /// The (decompressed) text buffer. The `Vec` itself is used as a

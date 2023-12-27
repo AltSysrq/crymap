@@ -204,6 +204,19 @@ impl State {
         io: &mut ServerIo,
         flush_compress: flate2::FlushCompress,
     ) -> io::Result<()> {
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            self.flush_impl(io, flush_compress),
+        )
+        .await
+        .unwrap_or_else(|_| Err(io::ErrorKind::TimedOut.into()))
+    }
+
+    async fn flush_impl(
+        &mut self,
+        io: &mut ServerIo,
+        flush_compress: flate2::FlushCompress,
+    ) -> io::Result<()> {
         #[allow(clippy::collapsible_else_if)] // clearer
         async fn do_write(
             io: &mut ServerIo,
