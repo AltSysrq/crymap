@@ -71,8 +71,8 @@ impl HeaderCanonicalisation {
     /// header name from the header value. If `end` is non-empty, it may not
     /// begin with whitespace and start may not end with whitespace.
     ///
-    /// This function writes the implicit CRLF at the end of the header value
-    /// itself.
+    /// This function does *not* write the implicit CRLF at the end of the
+    /// header value itself.
     pub(super) fn write(
         self,
         mut out: impl Write,
@@ -93,7 +93,6 @@ impl HeaderCanonicalisation {
                 // RFC 6376 § 3.4.1
                 out.write_all(start.as_bytes())?;
                 out.write_all(end.as_bytes())?;
-                out.write_all(b"\r\n")?;
             },
 
             Self::Relaxed => {
@@ -171,8 +170,6 @@ impl HeaderCanonicalisation {
                         out.write_all(part.as_bytes())?;
                     }
                 }
-
-                out.write_all(b"\r\n")?;
             },
         }
 
@@ -387,11 +384,11 @@ mod test {
         simple.write(&mut out, "Ü無: Ü無", "").unwrap();
 
         assert_eq!(
-            "A: X\r\n\
-             B : Y\t\r\n\tZ  \r\n\
-             Reply-To: FoO@bar.com\r\n\
-             DKIM-Signature: foo=bar;b=;x  =y\r\n\
-             Ü無: Ü無\r\n",
+            "A: X\
+             B : Y\t\r\n\tZ  \
+             Reply-To: FoO@bar.com\
+             DKIM-Signature: foo=bar;b=;x  =y\
+             Ü無: Ü無",
             String::from_utf8(out).unwrap(),
         );
     }
@@ -414,11 +411,11 @@ mod test {
         relaxed.write(&mut out, "Ü無: Ü無", "").unwrap();
 
         assert_eq!(
-            "a:X\r\n\
-             b:Y Z\r\n\
-             reply-to:FoO@bar.com\r\n\
-             dkim-signature:foo=bar;b=;x =y\r\n\
-             ü無:Ü無\r\n",
+            "a:X\
+             b:Y Z\
+             reply-to:FoO@bar.com\
+             dkim-signature:foo=bar;b=;x =y\
+             ü無:Ü無",
             String::from_utf8(out).unwrap(),
         );
     }
