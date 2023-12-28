@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::fmt;
 use std::ops::Range;
 
 use chrono::prelude::*;
@@ -15,6 +16,15 @@ pub enum HashAlgorithm {
     Sha1,
     /// RFC 6376
     Sha256,
+}
+
+impl HashAlgorithm {
+    pub fn message_digest(self) -> openssl::hash::MessageDigest {
+        match self {
+            Self::Sha1 => openssl::hash::MessageDigest::sha1(),
+            Self::Sha256 => openssl::hash::MessageDigest::sha256(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,6 +85,149 @@ impl<'a> Header<'a> {
     #[cfg(test)]
     fn without_raw(self) -> Self {
         Self { raw: None, ..self }
+    }
+
+    /// If this `Header` has a raw representation, returns it. Otherwise, it
+    /// generates the one Crymap uses when signing.
+    pub fn raw(&self) -> Cow<'_, RawHeader<'a>> {
+        use std::fmt::Write as _;
+
+        const MAX_LINE: usize = 76;
+
+        fn reserve_space(
+            dst: &mut String,
+            line_length: &mut usize,
+            required: usize,
+        ) {
+            if *line_length + required > MAX_LINE {
+                dst.push_str("\r\n ");
+                *line_length = 1;
+            }
+
+            *line_length += required;
+        }
+
+        fn append_field(
+            dst: &mut String,
+            line_length: &mut usize,
+            tag: &str,
+            value: &str,
+        ) {
+            let size = tag.len() + value.len() + 2;
+            reserve_space(dst, line_length, size);
+            let _ = write!(dst, "{}={};", tag, value);
+        }
+
+        fn append_base64(
+            dst: &mut String,
+            line_length: &mut usize,
+            tag: &str,
+            mut data: &[u8],
+            last: bool,
+        ) -> usize {
+            reserve_space(dst, line_length, tag.len() + 1);
+            let _ = write!(dst, "{}=", tag);
+            let start = dst.len();
+            while !data.is_empty() {
+                let mut avail = MAX_LINE.saturating_sub(*line_length) * 3 / 4;
+                if 0 == avail {
+                    dst.push_str("\r\n ");
+                    *line_length = 1;
+                    avail = (MAX_LINE - 1) * 3 / 4;
+                }
+
+                let len = (avail * 3).min(data.len());
+                let old_str_len = dst.len();
+                // This only produces padding if len is not a multiple of 3,
+                // which only happens when we hit the end of `data`.
+                base64::encode_config_buf(&data[..len], base64::STANDARD, dst);
+
+                data = &data[len..];
+                *line_length += dst.len() - old_str_len;
+            }
+
+            if !last {
+                reserve_space(dst, line_length, 1);
+                dst.push(';');
+            }
+
+            start
+        }
+
+        if let Some(ref raw) = self.raw {
+            return Cow::Borrowed(raw);
+        }
+
+        let mut text = String::with_capacity(256);
+        let _ = write!(
+            text,
+            "{HEADER_NAME}: v=1;a={algorithm};c={canon};",
+            algorithm = self.algorithm,
+            canon = self.canonicalisation,
+        );
+        let mut line_length = text.len();
+        append_field(&mut text, &mut line_length, "d", &self.sdid);
+        reserve_space(&mut text, &mut line_length, 2);
+        text.push_str("h=");
+        for (ix, h) in self.signed_headers.iter().enumerate() {
+            reserve_space(&mut text, &mut line_length, h.len() + 1);
+            text.push_str(h);
+            text.push(if ix + 1 == self.signed_headers.len() {
+                ';'
+            } else {
+                ':'
+            });
+        }
+        if self.signed_headers.is_empty() {
+            // Shouldn't happen, but at least make something syntactically
+            // valid.
+            text.push(';');
+            line_length += 1;
+        }
+        if let Some(body_length) = self.body_length {
+            append_field(
+                &mut text,
+                &mut line_length,
+                "l",
+                &body_length.to_string(),
+            );
+        }
+        append_field(&mut text, &mut line_length, "s", &self.selector);
+        if let Some(ts) = self.signature_timestamp {
+            append_field(
+                &mut text,
+                &mut line_length,
+                "t",
+                &ts.timestamp().to_string(),
+            );
+        }
+        if let Some(ts) = self.signature_expiration {
+            append_field(
+                &mut text,
+                &mut line_length,
+                "x",
+                &ts.timestamp().to_string(),
+            );
+        }
+        append_base64(
+            &mut text,
+            &mut line_length,
+            "bh",
+            &self.body_hash,
+            false,
+        );
+        let b_start = append_base64(
+            &mut text,
+            &mut line_length,
+            "b",
+            &self.signature,
+            true,
+        );
+
+        Cow::Owned(RawHeader {
+            b: b_start..text.len(),
+            text: Cow::Owned(text),
+        })
     }
 
     /// Parses the given string.
@@ -199,6 +352,15 @@ impl SignatureAlgorithm {
     }
 }
 
+impl fmt::Display for SignatureAlgorithm {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Self::Rsa => write!(f, "rsa"),
+            Self::Ed25519 => write!(f, "ed25519"),
+        }
+    }
+}
+
 impl HashAlgorithm {
     fn parse(hash: &str) -> Result<Self, String> {
         match hash {
@@ -206,6 +368,21 @@ impl HashAlgorithm {
             "sha256" => Ok(Self::Sha256),
             h => Err(format!("unknown hash algorithm: {h}")),
         }
+    }
+}
+
+impl fmt::Display for HashAlgorithm {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Self::Sha1 => write!(f, "sha1"),
+            Self::Sha256 => write!(f, "sha256"),
+        }
+    }
+}
+
+impl fmt::Display for Algorithm {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}-{}", self.signature, self.hash)
     }
 }
 
@@ -435,7 +612,9 @@ fn decode_timestamp(s: &str) -> Result<DateTime<Utc>, String> {
 
 #[cfg(test)]
 mod test {
-    use super::super::{BodyCanonicalisation, HeaderCanonicalisation};
+    use super::super::{
+        test_domain_keys, BodyCanonicalisation, HeaderCanonicalisation,
+    };
     use super::*;
 
     #[test]
@@ -769,23 +948,7 @@ DKIM-Signature: v=1; a=rsa-sha1; c=relaxed; d=lin.gl; h=message-id:date
                     strict: true,
                 },
             },
-            // selector1._domainkey.lin.gl, 2023-12-27
-            TxtRecord::parse(
-                "v=DKIM1;p=MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAxCRVe\
-                 M0ctOIvf0NRKs2bcYE3gXjfE9G0s+IY1Iw8cE/XAhisgUraQg5Vzv0d4La+\
-                 SgQIJEm5XtkTeHFUgWIJM7ZXCI+WOi33+BRn9lwNe9TvoX+zYMCvTLFkEUF\
-                 /tXihfg/8VcKMC1pc2Ik9bMh020XQUpPJkA/tduYJpq762n1gML0XhxaXHW\
-                 41Qzkxh2TlATzbBv4V0Lcm4/JXFS9psUB8Sm6TB8N5G5g1zpCQbsA9jFyt3\
-                 G8VkzUJ4gFJpAqE9czME7BPtVEKHDOSVqA+sztfrUsVjxHoqRXEQR6nj99/\
-                 uIPprEvjdJ1PyZQKaj9mWqnX7XZor0nGl1tNW+rmfKgIhSh+cRvt2hRbtTF\
-                 nXL+q6efqK+CwfN5j8pyLkox+S7WITdGrTTXoqPiPSDkjfaJhNi9Uhd/Mbk\
-                 xF854vDeAm8ZYIIsjwt1p+XIscDP8X7niUOrRuWcpElX+CRtqc2qi2atqAJ\
-                 hMySZQbh8NW8XVI+EPDYbWA5/JFA5lrf16TuCoyN5uwfaiYTBzTXxlQHWUm\
-                 sZN/tXkpbO6fHAmc7bvBZfKGMYpmDvKhNZMhmeQjDLkOaSb47AEQf7+weMi\
-                 qsZEIUhKoQf0En6KNhVWBjezH8022dy7GkxP3Hek+ESxvbwSJHH5mby+TGS\
-                 U6a+mRausK4Ji72JhXH4PvnEvtimECAwEAAQ==;s=email;t=s",
-            )
-            .unwrap(),
+            TxtRecord::parse(test_domain_keys::SELECTOR1_LIN_GL).unwrap(),
         );
         assert_eq!(
             TxtRecord {
@@ -799,17 +962,7 @@ DKIM-Signature: v=1; a=rsa-sha1; c=relaxed; d=lin.gl; h=message-id:date
                 is_email: true,
                 flags: TxtFlags::default(),
             },
-            // s2048._domainkey.yahoo.com, 2023-12-27
-            TxtRecord::parse(
-                "k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuoWufg\
-                 bWw58MczUGbMv176RaxdZGOMkQmn8OOJ/HGoQ6dalSMWiLaj8IMcHC1cubJ\
-                 x2gziAPQHVPtFYayyLA4ayJUSNk10/uqfByiU8qiPCE4JSFrpxflhMIKV4b\
-                 t+g1uHw7wLzguCf4YAoR6XxUKRsAoHuoF7M+v6bMZ/X1G+viWHkBl4UfgJQ\
-                 6O8F1ckKKoZ5KqUkJH5pDaqbgs+F3PpyiAUQfB6EEzOA1KMPRWJGpzgPtKo\
-                 ukDcQuKUw9GAul7kSIyEcizqrbaUKNLGAmz0elkqRnzIsVpz6jdT1/YV5Ri\
-                 6YUOQ5sN5bqNzZ8TxoQlkbVRy6eKOjUnoSSTmSAhwIDAQAB;",
-            )
-            .unwrap(),
+            TxtRecord::parse(test_domain_keys::S2048_YAHOO_COM).unwrap(),
         );
         assert_eq!(
             TxtRecord {
@@ -825,14 +978,7 @@ DKIM-Signature: v=1; a=rsa-sha1; c=relaxed; d=lin.gl; h=message-id:date
                 is_email: true,
                 flags: TxtFlags::default(),
             },
-            // yg4mwqurec7fkhzutopddd3ytuaqrvuz._domainkey.amazon.com, 2023-12-27
-            TxtRecord::parse(
-                "p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC5bK96ORNNFosbAaVNZ\
-                 U/gVzhANHyd00o1O7qbEeMNLKPNpS8/TYwdlrVnQ7JtJHjIR9EPj61jgtS6\
-                 04XpAltDMYvic2I40AaKgSfr4dDlRcALRtlVqmG7U5MdLiMyabxXPl2s/oq\
-                 kevALySg0sr/defHC+qAhmdot9Ii/ZQ3YcQIDAQAB",
-            )
-            .unwrap(),
+            TxtRecord::parse(test_domain_keys::YG4_AMAZON_COM).unwrap(),
         );
         assert_eq!(
             TxtRecord {
@@ -846,17 +992,7 @@ DKIM-Signature: v=1; a=rsa-sha1; c=relaxed; d=lin.gl; h=message-id:date
                 is_email: true,
                 flags: TxtFlags::default(),
             },
-            // 20230601._domainkey.gmail.com, 2023-12-27
-            TxtRecord::parse(
-                "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCA\
-                 QEAntvSKT1hkqhKe0xcaZ0x+QbouDsJuBfby/S82jxsoC/SodmfmVs2D1KA\
-                 H3mi1AqdMdU12h2VfETeOJkgGYq5ljd996AJ7ud2SyOLQmlhaNHH7Lx+Mda\
-                 b8/zDN1SdxPARDgcM7AsRECHwQ15R20FaKUABGu4NTbR2fDKnYwiq5jQyBk\
-                 LWP+LgGOgfUF4T4HZb2PY2bQtEP6QeqOtcW4rrsH24L7XhD+HSZb1hsitrE\
-                 0VPbhJzxDwI4JF815XMnSVjZgYUXP8CxI1Y0FONlqtQYgsorZ9apoW1KPQe\
-                 8brSSlRsi9sXB/tu56LmG7tEDNmrZ5XUwQYUUADBOu7t1niwXwIDAQAB",
-            )
-            .unwrap(),
+            TxtRecord::parse(test_domain_keys::K20230601_GMAIL_COM).unwrap(),
         );
         assert_eq!(
             TxtRecord {

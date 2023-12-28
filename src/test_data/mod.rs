@@ -90,6 +90,9 @@ pub static DKIM_LINGL_RSA_SHA1: &[u8] =
 
 /// Message sent by Amazon SES with 2 `rsa-sha256` DKIM signatures using
 /// `relaxed/strict` canonicalisation and different headers on each signature.
+///
+/// Note that the domain key for the `amazon.co.jp` signature has been revoked
+/// and the original value is not known.
 pub static DKIM_AMAZONCOJP_RSA_SHA256: &[u8] =
     include_bytes!("dkim-amazoncojp-2x-rsa-sha256.eml");
 

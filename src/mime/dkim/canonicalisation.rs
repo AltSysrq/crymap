@@ -16,6 +16,7 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+use std::fmt;
 use std::io::{self, Write};
 
 use super::header::FWS;
@@ -29,6 +30,15 @@ pub enum BodyCanonicalisation {
     Relaxed,
 }
 
+impl fmt::Display for BodyCanonicalisation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Self::Simple => write!(f, "simple"),
+            Self::Relaxed => write!(f, "relaxed"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum HeaderCanonicalisation {
     /// RFC 6376
@@ -38,10 +48,25 @@ pub enum HeaderCanonicalisation {
     Relaxed,
 }
 
+impl fmt::Display for HeaderCanonicalisation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Self::Simple => write!(f, "simple"),
+            Self::Relaxed => write!(f, "relaxed"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Canonicalisation {
     pub header: HeaderCanonicalisation,
     pub body: BodyCanonicalisation,
+}
+
+impl fmt::Display for Canonicalisation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}/{}", self.header, self.body)
+    }
 }
 
 impl Canonicalisation {

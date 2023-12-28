@@ -23,6 +23,9 @@ mod error;
 mod hash;
 mod header;
 
+#[cfg(test)]
+mod test_domain_keys;
+
 pub use canonicalisation::{
     BodyCanonicalisation, BodyCanonicaliser, Canonicalisation,
     HeaderCanonicalisation,
