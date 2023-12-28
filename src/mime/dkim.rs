@@ -115,10 +115,12 @@ impl<'a> Header<'a> {
     ///
     /// The string must include the `DKIM-Header:` prefix and must not contain
     /// the final line ending.
-    pub fn parse(s: &'a str) -> Result<Self, String> {
-        let Some((_, s)) = s.split_once(':') else {
+    pub fn parse(whole_header: &'a str) -> Result<Self, String> {
+        let Some((header_name, s)) = whole_header.split_once(':') else {
             return Err("DKIM header didn't have :".to_owned());
         };
+
+        let header_text_offset = header_name.len() + 1;
 
         debug_assert!(!s.ends_with('\n'));
 
@@ -136,6 +138,9 @@ impl<'a> Header<'a> {
         let mut signature_expiration = None::<DateTime<Utc>>;
 
         for (k, v, v_range) in split_kv_pairs(s) {
+            let v_range = v_range.start + header_text_offset
+                ..v_range.end + header_text_offset;
+
             match k {
                 "v" => {
                     set_opt(
@@ -193,7 +198,7 @@ impl<'a> Header<'a> {
         let (signature, signature_range) = signature.ok_or("missing b= tag")?;
         Ok(Self {
             raw: Some(RawHeader {
-                text: Cow::Borrowed(s),
+                text: Cow::Borrowed(whole_header),
                 b: signature_range,
             }),
             version: version.ok_or("missing v= tag")?,
@@ -784,6 +789,35 @@ DKIM-Signature: v=1; a=rsa-sha1; c=relaxed; d=lin.gl; h=message-id:date
             .unwrap()
             .without_raw(),
         );
+
+        // Verify that `raw.b` has the correct text.
+        let header = Header::parse(
+            "DKIM-Signature: v=1;a=rsa-sha1;b=food;bh=;c=simple;\
+             d=example.com;h=from;s=selector",
+        )
+        .unwrap();
+        let raw = header.raw.unwrap();
+        assert!(raw.text.starts_with("DKIM-Signature: "));
+        assert_eq!("food", &raw.text[raw.b.clone()]);
+
+        let header = Header::parse(
+            "DkIm-SiGnAtUrE   :    v=1;a=rsa-sha1;b=  \r\n\
+             \t food  \r\n\
+             ;bh=;c=simple;\
+             d=example.com;h=from;s=selector",
+        )
+        .unwrap();
+        let raw = header.raw.unwrap();
+        assert!(raw.text.starts_with("DkIm-SiGnAtUrE   :   "));
+        assert_eq!("  \r\n\t food  \r\n", &raw.text[raw.b.clone()]);
+
+        let header = Header::parse(
+            "DKIM-Signature: v=1;a=rsa-sha1;bh=;c=simple;\
+             d=example.com;h=from;s=selector;b = food",
+        )
+        .unwrap();
+        let raw = header.raw.unwrap();
+        assert_eq!(" food", &raw.text[raw.b.clone()]);
     }
 
     #[test]
