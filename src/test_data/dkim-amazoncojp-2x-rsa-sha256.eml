@@ -1,0 +1,2866 @@
+Received: from localhost (unknown-socket)
+	by tenshi (crymap 1.0.1) via LMTP
+	for <jason>;
+	Tue, 12 Sep 2023 01:14:09 +0000
+Return-Path: <20230912011407f438abdb2bfd42d09817019b49f0p0fe-CDLN7I7O8SJR0@bounces.amazon.co.jp>
+Delivered-To: jason@lin.gl
+Received: from a24-133.smtp-out.us-west-2.amazonses.com (a24-133.smtp-out.us-west-2.amazonses.com [54.240.24.133])
+	by tenshi.cloud.lin.gl (OpenSMTPD) with ESMTPS id fc4c7422 (TLSv1.2:ECDHE-ECDSA-AES256-GCM-SHA384:256:NO)
+	for <jason@lin.gl>;
+	Tue, 12 Sep 2023 01:14:09 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha256; q=dns/txt; c=relaxed/simple;
+	s=55v6dsnbko3asrylf5mgtqv5mgll5any; d=amazon.co.jp; t=1694481247;
+	h=Date:From:To:Message-ID:Subject:MIME-Version:Content-Type;
+	bh=HcKSAdwhXQ1MiHCZKbdFHJoJhb1uuMH9sTy0jsyxiew=;
+	b=ecUXEi+KbhDZ8+Y3k3XJxtZ3dYTzdCDAe1O1ygHGLLoYcOmBparE0myStp1cdBVe
+	tOnaMIj0i5afjK9ZIYU6h/jWlg3LY2k3s4ZBPpTfOQW95Zdmg4fI5C9bwzLpRXCSTLN
+	71u70JkwQTfwfKystbtMteWRT6v/jNCktKTXZV0E=
+DKIM-Signature: v=1; a=rsa-sha256; q=dns/txt; c=relaxed/simple;
+	s=hsbnp7p3ensaochzwyq5wwmceodymuwv; d=amazonses.com; t=1694481247;
+	h=Date:From:To:Message-ID:Subject:MIME-Version:Content-Type:Feedback-ID;
+	bh=HcKSAdwhXQ1MiHCZKbdFHJoJhb1uuMH9sTy0jsyxiew=;
+	b=A73TkEfibJkl5fuGUnXHfjk4sv0D8/H7VC4Kr5uwXMS7iAQizi+YKXcbYebGVhie
+	WqHgaocFDkqbuBwstcGrvBk4ECCd3NcTDvQC+7Etrs+Rr3x2NNQOwE6RVJsrd7Y+Yq1
+	GNvc5EE2FMTEJnwTGvMpLFv7/KAdFp7hgAjArV1Y=
+Date: Tue, 12 Sep 2023 01:14:07 +0000
+From: "Amazon.co.jp" <store-news@amazon.co.jp>
+To: jason@lin.gl
+Message-ID: <0101018a86f3ed7f-fe8d791b-adcd-4244-8b46-fa7d227050bc-000000@us-west-2.amazonses.com>
+Subject: =?UTF-8?B?6LOt44Kx44Kw44Or44Kk5Y+MKDE0KSAo44Ks44Oz44Ks44Oz?=
+ =?UTF-8?B?44Kz44Of44OD44Kv44K5Sk9LRVIp44Gq44Gp44GK55+l44KJ44Gb?=
+MIME-Version: 1.0
+Content-Type: multipart/alternative; 
+	boundary="----=_Part_375994_2040052076.1694481247599"
+X-AMAZON-MAIL-RELAY-TYPE: notification
+Bounces-to: 20230912011407f438abdb2bfd42d09817019b49f0p0fe-CDLN7I7O8SJR0@bounces.amazon.co.jp
+X-AMAZON-METADATA: CA=CDLN7I7O8SJR0-CU=A2GZAAI3NGZJHL
+X-Original-MessageID: <urn.rtn.msg.20230912011407f438abdb2bfd42d09817019b49f0p0fe@1694481247602.>
+Feedback-ID: 1.us-west-2.Ci45k5OkUuH90u7dO0Ory1StkcbFm601BtN95yGGkr4=:AmazonSES
+X-SES-Outgoing: 2023.09.12-54.240.24.133
+
+------=_Part_375994_2040052076.1694481247599
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+
+
+
+
+
+=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D
+AMAZON.CO.JP
+=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D
+
+=E3=81=8A=E5=AE=A2=E6=A7=98=E3=81=AE=E3=81=8A=E8=B2=B7=E3=81=84=E7=89=A9=E5=
+=82=BE=E5=90=91=E3=82=84=E9=96=B2=E8=A6=A7=E5=B1=A5=E6=AD=B4=E3=81=AB=E3=82=
+=82=E3=81=A8=E3=81=A5=E3=81=8F=E3=81=8A=E3=81=99=E3=81=99=E3=82=81=E5=95=86=
+=E5=93=81=E3=82=92=E3=81=8A=E7=9F=A5=E3=82=89=E3=81=9B=E3=81=97=E3=81=BE=E3=
+=81=99=E3=80=82=E3=81=8A=E3=81=99=E3=81=99=E3=82=81=E3=81=AE=E7=90=86=E7=94=
+=B1=E3=81=AF=E3=81=93=E3=81=A1=E3=82=89=E3=81=8B=E3=82=89=E3=80=82
+https://www.amazon.co.jp/gp/yourstore/ref=3Drex2_intro
+   =20
+
+
+       =20
+       =20
+       =20
+       =20
+       =20
+       =20
+       =20
+       =20
+       =20
+       =20
+       =20
+       =20
+       =20
+       =20
+       =20
+       =20
+=E8=B3=AD=E3=82=B1=E3=82=B0=E3=83=AB=E3=82=A4=E5=8F=8C(14) (=E3=82=AC=E3=83=
+=B3=E3=82=AC=E3=83=B3=E3=82=B3=E3=83=9F=E3=83=83=E3=82=AF=E3=82=B9JOKER)
+
+https://www.amazon.co.jp/gp/product/4757586752/ref=3Dpe_1103802_497645132_e=
+m_1p_1_ti
+  =20
+=E4=BE=A1=E6=A0=BC=EF=BC=9A =EF=BF=A5730
+
+...
+       =20
+=E3=81=97=E3=81=97=E3=82=8A=E3=81=B0=E3=81=AE=E5=AE=B6 (=E8=A7=92=E5=B7=9D=
+=E3=83=9B=E3=83=A9=E3=83=BC=E6=96=87=E5=BA=AB)
+=E6=BE=A4=E6=9D=91=E4=BC=8A=E6=99=BA
+https://www.amazon.co.jp/gp/product/4041085438/ref=3Dpe_1103802_497645132_e=
+m_1p_2_ti
+  =20
+=E4=BE=A1=E6=A0=BC=EF=BC=9A =EF=BF=A5748
+
+...
+       =20
+=E3=81=9A=E3=81=86=E3=81=AE=E3=82=81=E4=BA=BA=E5=BD=A2 (=E8=A7=92=E5=B7=9D=
+=E3=83=9B=E3=83=A9=E3=83=BC=E6=96=87=E5=BA=AB)
+=E6=BE=A4=E6=9D=91=E4=BC=8A=E6=99=BA
+https://www.amazon.co.jp/gp/product/4041067685/ref=3Dpe_1103802_497645132_e=
+m_1p_3_ti
+  =20
+=E4=BE=A1=E6=A0=BC=EF=BC=9A =EF=BF=A5836
+
+...
+       =20
+=E3=81=95=E3=81=88=E3=81=A5=E3=81=A1=E3=81=AE=E7=9C=BC (=E8=A7=92=E5=B7=9D=
+=E3=83=9B=E3=83=A9=E3=83=BC=E6=96=87=E5=BA=AB)
+=E6=BE=A4=E6=9D=91=E4=BC=8A=E6=99=BA
+https://www.amazon.co.jp/gp/product/4041117364/ref=3Dpe_1103802_497645132_e=
+m_1p_4_ti
+  =20
+=E4=BE=A1=E6=A0=BC=EF=BC=9A =EF=BF=A5836
+
+...
+       =20
+=E4=BA=88=E8=A8=80=E3=81=AE=E5=B3=B6 (=E8=A7=92=E5=B7=9D=E3=83=9B=E3=83=A9=
+=E3=83=BC=E6=96=87=E5=BA=AB)
+=E6=BE=A4=E6=9D=91=E4=BC=8A=E6=99=BA
+https://www.amazon.co.jp/gp/product/4041113121/ref=3Dpe_1103802_497645132_e=
+m_1p_5_ti
+  =20
+=E4=BE=A1=E6=A0=BC=EF=BC=9A =EF=BF=A5748
+
+...
+       =20
+=E3=81=B0=E3=81=8F=E3=81=86=E3=81=A9=E3=81=AE=E6=82=AA=E5=A4=A2
+=E6=BE=A4=E6=9D=91=E4=BC=8A=E6=99=BA
+https://www.amazon.co.jp/gp/product/4041098785/ref=3Dpe_1103802_497645132_e=
+m_1p_6_ti
+  =20
+=E4=BE=A1=E6=A0=BC=EF=BC=9A =EF=BF=A52,035
+
+...
+       =20
+=E8=B3=AD=E3=82=B1=E3=82=B0=E3=83=AB=E3=82=A4(=E4=BB=AE)(10)(=E5=AE=8C) (=
+=E3=82=AC=E3=83=B3=E3=82=AC=E3=83=B3=E3=82=B3=E3=83=9F=E3=83=83=E3=82=AF=E3=
+=82=B9JOKER)
+
+https://www.amazon.co.jp/gp/product/4757586760/ref=3Dpe_1103802_497645132_e=
+m_1p_7_ti
+  =20
+=E4=BE=A1=E6=A0=BC=EF=BC=9A =EF=BF=A5730
+
+...
+       =20
+=E3=82=A2=E3=82=A6=E3=82=BF=E3=83=BCQ =E5=BC=B1=E5=B0=8FWeb=E3=83=9E=E3=82=
+=AC=E3=82=B8=E3=83=B3=E3=81=AE=E4=BA=8B=E4=BB=B6=E7=B0=BF (=E5=8F=8C=E8=91=
+=89=E6=96=87=E5=BA=AB =E3=81=95 50-01)
+=E6=BE=A4=E6=9D=91 =E4=BC=8A=E6=99=BA
+https://www.amazon.co.jp/gp/product/457552669X/ref=3Dpe_1103802_497645132_e=
+m_1p_8_ti
+  =20
+=E4=BE=A1=E6=A0=BC=EF=BC=9A =EF=BF=A5825
+
+...
+
+
+=E4=BB=96=E3=81=AE=E3=81=8A=E3=81=99=E3=81=99=E3=82=81=E5=95=86=E5=93=81=E3=
+=82=92=E8=A6=8B=E3=82=8B
+https://www.amazon.co.jp/gp/history/
+
+=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D
+Amazon.co.jp
+https://www.amazon.co.jp/ref=3Dfooter-amazonlogo/
+
+=E7=99=BB=E9=8C=B2=E3=81=99=E3=82=8B
+https://www.amazon.co.jp/b?node=3D3377800051&ref=3Dsef_line
+
+https://www.amazon.co.jp/gp/redirect.html/ref=3Dsef_fb?ie=3DUTF8&location=
+=3Dhttp://www.facebook.com/AmazonJP&token=3D86832A1B02B913A0D0480954073642D=
+6974B75BF
+
+http://www.amazon.co.jp/gp/redirect.html/ref=3Dsef_twttr?location=3Dhttp://=
+twitter.com/AmazonJP&token=3DAC218851624B70F64162A758701BE2C503F77D9E
+
+   =20
+
+
+Amazon.co.jp=E3=81=AE=E3=81=8A=E5=AE=A2=E6=A7=98=E3=80=81=E8=B3=BC=E8=AA=AD=
+=E8=80=85=E3=80=81=E3=82=B3=E3=83=B3=E3=83=86=E3=82=B9=E3=83=88=E5=8F=82=E5=
+=8A=A0=E8=80=85=E3=81=AE=E6=96=B9=E3=80=85=E3=81=AB=E3=81=AF=E3=80=81=E3=82=
+=B5=E3=82=A4=E3=83=88=E3=81=AE=E3=83=AA=E3=83=8B=E3=83=A5=E3=83=BC=E3=82=A2=
+=E3=83=AB=E3=80=81=E6=96=B0=E3=81=97=E3=81=84=E3=82=B5=E3=83=BC=E3=83=93=E3=
+=82=B9=E3=81=AE=E9=96=8B=E5=A7=8B=E3=80=81=E7=89=B9=E5=88=A5=E6=8F=90=E4=BE=
+=9B=E5=93=81=E3=81=AA=E3=81=A9=E3=81=AE=E6=83=85=E5=A0=B1=E3=82=92E
+
+=E3=83=A1=E3=83=BC=E3=83=AB=E3=81=A7=E3=81=94=E6=A1=88=E5=86=85=E3=81=97=E3=
+=81=A6=E3=81=8A=E3=82=8A=E3=81=BE=E3=81=99=E3=80=82=E3=81=93=E3=81=AE=E3=82=
+=88=E3=81=86=E3=81=AAE=E3=83=A1=E3=83=BC=E3=83=AB=E3=82=92=E5=8F=97=E3=81=
+=91=E5=8F=96=E3=82=8A=E3=81=9F=E3=81=8F=E3=81=AA=E3=81=84=E6=96=B9=E3=81=AF=
+=E3=80=81=E3=81=93=E3=81=A1=E3=82=89=E3=81=8B=E3=82=89=E3=80=81=E8=A8=AD=E5=
+=AE=9A=E3=81=AE=E5=A4=89=E6=9B=B4=E3=82=92=E8=A1=8C=E3=81=A3=E3=81=A6=E3=81=
+=8F=E3=81=A0=E3=81=95=E3=81=84=E3=80=82
+https://www.amazon.co.jp//gp/gss/o/1aldw-3I-uCfVsy6A6FQzXrcQLUeFeL22NqOGtYh=
+cpWt1Iczjzpe7G-ZwCaGQK6mb
+
+
+=E3=82=A2=E3=82=AB=E3=82=A6=E3=83=B3=E3=83=88=E3=82=B5=E3=83=BC=E3=83=93=E3=
+=82=B9=E3=81=AE=E3=80=8C=E3=82=A2=E3=82=AB=E3=82=A6=E3=83=B3=E3=83=88=E8=A8=
+=AD=E5=AE=9A=E3=80=8D=E3=81=AB=E3=81=82=E3=82=8B=E3=80=8C=E7=99=BB=E9=8C=B2=
+=E5=86=85=E5=AE=B9=E3=81=AE=E5=A4=89=E6=9B=B4=E3=80=8D=E3=81=8B=E3=82=89=E3=
+=80=81=E3=80=8CAmazon.co.jp =E6=83=85=E5=A0=B1=E9=85=8D=E4=BF=A1=E3=82=B5=
+=E3=83=BC=E3=83=93=E3=82=B9=E3=81=AE=E5=86=85=E5=AE=B9=E3=82=92=E5=A4=89=E6=
+=9B=B4=E3=81=99=E3=82=8B=E3=80=8D=E3=83=AA=E3=83=B3=E3=82=AF=E3=82=92=E3=82=
+=AF=E3=83=AA=E3=83=83=E3=82=AF=E3=81=97=E3=81=BE=E3=81=99=E3=80=82
+
+=C2=A9 2023 Amazon.com. All rights reserved. Amazon=E3=81=AE=E3=83=AD=E3=82=
+=B4=E3=80=81Amazon.co.jp=E3=81=8A=E3=82=88=E3=81=B3=E3=80=81Amazon.co.jp=E3=
+=81=AE=E3=83=AD=E3=82=B4=E3=81=AF=E3=80=81
+Amazon.com, Inc.=E3=81=BE=E3=81=9F=E3=81=AF=E3=81=9D=E3=81=AE=E9=96=A2=E9=
+=80=A3=E4=BC=9A=E7=A4=BE=E3=81=AE=E5=95=86=E6=A8=99=E3=81=A7=E3=81=99=E3=80=
+=82
+
+=E5=95=86=E5=93=81=E4=BE=A1=E6=A0=BC=E3=80=81=E7=99=BA=E5=A3=B2=E6=97=A5=E3=
+=81=8A=E3=82=88=E3=81=B3=E5=9C=A8=E5=BA=AB=E7=8A=B6=E6=B3=81=E3=81=AA=E3=81=
+=A9=E3=81=AF=E5=A4=89=E6=9B=B4=E3=81=95=E3=82=8C=E3=82=8B=E5=A0=B4=E5=90=88=
+=E3=81=8C=E3=81=82=E3=82=8A=E3=81=BE=E3=81=99=E3=81=AE=E3=81=A7=E3=80=81=E3=
+=81=82=E3=82=89=E3=81=8B=E3=81=98=E3=82=81=E3=81=94=E4=BA=86=E6=89=BF=E3=81=
+=8F=E3=81=A0=E3=81=95=E3=81=84=E3=80=82=E4=BE=A1=E6=A0=BC=E3=80=81=E7=99=BA=
+=E5=A3=B2=E6=97=A5=E3=81=8A=E3=82=88=E3=81=B3=E5=9C=A8=E5=BA=AB=E7=8A=B6=E6=
+=B3=81=E3=81=AA=E3=81=A9=E3=81=AF=E3=80=81=E3=81=93=E3=81=AE=E3=83=8B=E3=83=
+=A5=E3=83=BC=E3=82=B9=E3=83=AC=E3=82=BF=E3=83=BC=E3=81=AE=E9=80=81=E4=BF=A1=
+=E6=99=82=E3=81=AE=E3=83=87=E3=83=BC=E3=82=BF=E3=81=A7=E3=81=99=E3=80=82=E3=
+=81=8A=E5=AE=A2=E6=A7=98=E3=81=8CAmazon.co.jp =E3=82=92=E3=81=94=E5=88=A9=
+=E7=94=A8=E3=81=AB=E3=81=AA=E3=82=8B=E3=82=BF=E3=82=A4=E3=83=9F=E3=83=B3=E3=
+=82=B0=E3=81=AB=E3=82=88=E3=81=A3=E3=81=A6=E3=81=AF=E3=80=81=E7=95=B0=E3=81=
+=AA=E3=82=8B=E5=A0=B4=E5=90=88=E3=81=8C=E3=81=82=E3=82=8A=E3=81=BE=E3=81=99=
+=E3=80=82
+     =20
+=E9=80=81=E4=BF=A1=E8=80=85=EF=BC=9A=E3=82=A2=E3=83=9E=E3=82=BE=E3=83=B3=E3=
+=82=B8=E3=83=A3=E3=83=91=E3=83=B3=E5=90=88=E5=90=8C=E4=BC=9A=E7=A4=BE
+=E4=BD=8F=E6=89=80=E3=83=BB=E5=90=84=E7=A8=AE=E3=81=8A=E5=95=8F=E3=81=84=E5=
+=90=88=E3=82=8F=E3=81=9B=E3=81=AB=E3=81=A4=E3=81=84=E3=81=A6=E3=81=AF=E3=80=
+=81=E4=BB=A5=E4=B8=8B=E3=81=AE=E3=80=8C=E8=B2=A9=E5=A3=B2=E6=A5=AD=E8=80=85=
+=E3=80=8D=E6=AC=84=E3=82=92=E3=81=94=E5=8F=82=E7=85=A7=E3=81=8F=E3=81=A0=E3=
+=81=95=E3=81=84=E3=80=82
+https://www.amazon.co.jp/gp/help/customer/display.html?nodeId=3D202008070=
+=20
+
+Reference: 497645132
+
+=E3=81=93=E3=81=AEE=E3=83=A1=E3=83=BC=E3=83=AB=E3=81=AF=E6=AC=A1=E3=81=AE=
+=E3=82=A2=E3=83=89=E3=83=AC=E3=82=B9=E5=AE=9B=E3=81=AB=E9=80=81=E4=BF=A1=E3=
+=81=95=E3=82=8C=E3=81=BE=E3=81=97=E3=81=9F: jason@lin.gl
+
+------=_Part_375994_2040052076.1694481247599
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   =20
+
+
+   =20
+
+
+
+
+   =20
+
+   =20
+   =20
+
+
+
+   =20
+
+
+
+
+<!DOCTYPE html>
+<html
+    lang=3D"ja_JP"
+    xmlns=3D"http://www.w3.org/1999/xhtml"
+>
+<head>
+    <meta
+        content=3D"text/html; charset=3DUTF-8"
+        http-equiv=3D"Content-Type"
+    />
+    <meta
+        content=3D"telephone=3Dno"
+        name=3D"format-detection"
+    />
+    <meta
+        content=3D"width=3Ddevice-width, initial-scale=3D1.0; user-scalable=
+=3Dno;"
+        name=3D"viewport"
+    />
+    <meta
+        content=3D"IE=3D9; IE=3D8; IE=3D7; IE=3DEDGE"
+        http-equiv=3D"X-UA-Compatible"
+    />
+    <meta name=3D"x-apple-disable-message-reformatting" />
+    <meta
+        content=3D"light dark"
+        name=3D"color-scheme"
+    />
+    <meta
+        content=3D"light dark"
+        name=3D"supported-color-schemes"
+    />
+    <style type=3D"text/css">
+        @font-face {
+            font-family: "Ember";
+            font-weight: 600;
+            src: local("Ember"),
+            url(https://m.media-amazon.com/images/G/01/outbound/AmazonEmber=
+_Bd._CB1515450239_.WOFF) format("woff");
+        }
+
+        @font-face {
+            font-family: "Ember";
+            font-style: normal;
+            font-weight: 400;
+            src: local("Ember"),
+            url(https://m.media-amazon.com/images/G/01/outbound/AmazonEmber=
+_Rg._CB1515450239_.WOFF) format("woff");
+        }
+
+        @font-face {
+            font-family: "Ember";
+            font-weight: 200;
+            src: local("Ember"),
+            url(https://m.media-amazon.com/images/G/01/outbound/AmazonEmber=
+_Lt._CB1515450239_.WOFF) format("woff");
+        }
+
+        @font-face {
+            font-family: "Ember";
+            font-weight: 500;
+            src: local("Ember"),
+            url(https://m.media-amazon.com/images/G/01/outbound/AmazonEmber=
+_Md._CB1515450239_.WOFF) format("woff");
+        }
+
+        /* RESET STYLES */
+        body {
+            background-color: var(--body-bg) !important;
+            color: var(--body-color) !important;
+            margin: 0 !important;
+            padding: 0;
+        }
+
+        table {
+            border-spacing: 0;
+            margin: 0 auto !important;
+        }
+
+        table, table td {
+            border-collapse: collapse !important;
+        }
+
+        table th, h3, h4, h5 {
+            font-weight: normal;
+            margin: 0;
+            padding: 0;
+        }
+
+        td {
+            padding: 0;
+        }
+
+        img {
+            border: 0;
+        }
+
+        td, a, span {
+            word-break: keep-all !important;
+        }
+
+        body, table, td, a {
+            -ms-text-size-adjust: 100%;
+            -webkit-text-size-adjust: 100%;
+        }
+
+        /* PAGE STYLES */
+        .sans {
+            font-family: Ember, Helvetica, Arial, sans-serif;
+        }
+
+        h1 {
+            display: block;
+            font-size: 40px;
+            font-weight: 100;
+            line-height: 46px;
+            text-decoration: none;
+        }
+
+        h2 {
+            display: block;
+            font-size: 24px;
+            font-weight: 400;
+            line-height: 32px;
+            margin: 0;
+            text-decoration: none;
+        }
+
+        h3 {
+            display: block;
+            font-size: 18px;
+            line-height: 24px;
+            text-decoration: none;
+        }
+
+        h4 {
+            display: block;
+            font-size: 18px;
+            line-height: 24px;
+            text-decoration: none;
+        }
+
+        h5 {
+            display: block;
+            font-size: 14px;
+            font-weight: 400;
+            line-height: 20px;
+            text-decoration: none;
+        }
+
+        p {
+            font-size: 14px;
+            font-weight: 400;
+            line-height: 20px;
+            margin: 0;
+            text-decoration: none;
+        }
+
+        div[style*=3D"margin: 16px 0"] {
+            margin: 0 !important;
+        }
+
+        /* default body text colors */
+        h1, h2, h3, h4, h5, p, table, th, td, li, .sans {
+            color: #0f1111;
+        }
+
+        a {
+            color: #007185;
+            text-decoration: none;
+        }
+
+        /* iOS autolinks */
+        .appleBody a, .appleFooter a {
+            color: #007185 !important;
+            text-decoration: none;
+        }
+
+        a[x-apple-data-detectors] {
+            color: #007185 !important;
+            font-family: inherit !important;
+            font-size: inherit !important;
+            font-weight: inherit !important;
+            line-height: inherit !important;
+        }
+
+        /* gmail autolinks */
+        u + #body a {
+            color: #007185 !important;
+            font-family: inherit !important;
+            font-size: inherit !important;
+            font-weight: inherit !important;
+            line-height: inherit !important;
+        }
+
+        .button {
+            background-color: #FFD814 !important;
+            color: #0f1111 !important;
+        }
+
+        /* samsung mail autolinks */
+        #MessageViewBody a {
+            color: #007185 !important;
+            font-family: inherit !important;
+            font-size: inherit !important;
+            font-weight: inherit !important;
+            line-height: inherit !important;
+        }
+
+        /* inline footer autolinks */
+        .footerlinks a, a {
+            color: #007185 !important;
+            text-decoration: none;
+        }
+
+        .product-name, .product-name a, .product-price {
+            color: #0f1111 !important;
+        }
+
+        .zeroBorder {
+            border: 0;
+            border-collapse: collapse;
+            border-spacing: 0;
+        }
+
+        .light-img {
+            background-color: #ffffff;
+            background-image: linear-gradient(#ffffff, #ffffff);
+        }
+
+        .product-image-td {
+            background: linear-gradient(rgba(15, 17, 17, 0.03), rgba(15, 17=
+, 17, 0.03));
+        }
+
+        .product-image {
+            mix-blend-mode: multiply;
+        }
+
+        .product-price sup {
+            line-height: 0px !important;
+        }
+
+
+        /* DESKTOP STYLE */
+        @media screen and (min-width: 600px) {
+
+            .button {
+                padding-top: 6px !important;
+                padding-bottom: 6px !important;
+            }
+
+            .product-name {
+                font-size: 14px !important;
+                line-height: 20px !important;
+            }
+
+            .product-price {
+                font-size: 21px !important;
+                line-height: 22px !important;
+            }
+
+            .mobile-only {
+                display: none !important;
+                mso-hide: all !important;
+            }
+
+            .desktop-only {
+                display: initial !important;
+                mso-hide: none !important;
+            }
+        }
+
+        /* MOBILE STYLE */
+        @media screen and (max-width: 599px) {
+            .mobile {
+                width: 100% !important;
+            }
+
+            .mobInline {
+                display: inline !important;
+            }
+
+            /*widths*/
+            .full {
+                max-width: 100% !important;
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+                width: 100% !important;
+            }
+
+            .mobile-only {
+                display: initial !important;
+                mso-hide: none !important;
+            }
+
+            .desktop-only {
+                display: none !important;
+                mso-hide: all !important;
+            }
+        }
+
+        @media (prefers-color-scheme: light) {
+            :root {
+                --body-bg: #ffffff;
+                --body-color: #000000;
+            }
+
+            .dark-img {
+                display: none !important;
+            }
+
+            .light-img {
+                display: block !important;
+            }
+
+            .footer {
+                background-color: #F0F2F2 !important;
+            }
+        }
+
+        /* dark mode styles */
+        @media (prefers-color-scheme: dark ) {
+            :root {
+                --body-bg: #181A1A;
+                --body-color: #ffffff;
+            }
+           =20
+            body {
+                background-color: #181A1A !important;
+            }
+
+            .dark-img {
+                display: block !important;
+            }
+
+            .light-img {
+                display: none !important;
+            }
+
+            .darkmode {
+                background-color: #181A1A !important;
+            }
+
+            h1, h2, h3, h4, h5, p, li, .sans, .product-name, .product-name =
+a {
+                color: #ffffff !important;
+            }
+
+            a, .footerlinks a {
+                color: #6ED6E6 !important;
+            }
+
+
+            .footer {
+                background-color: #303333 !important;
+            }
+
+            .product-discount {
+                color: #FF8C8C !important;
+            }
+
+            .product-price {
+                color: #FFFFFF !important;
+            }
+
+            .product-list-price {
+                color: #A2A6A6 !important;
+            }
+
+            .product-image-td {
+                background: linear-gradient(rgba(255, 255, 255, 1), rgba(25=
+5,255,255,1));
+            }
+
+            .product-image {
+                mix-blend-mode: initial;
+            }
+        }
+
+        /* dark mode styles for android outlook */
+        [data-ogsc] .dark-img {
+            display: block !important;
+        }
+
+        [data-ogsc] .light-img {
+            display: none !important;
+        }
+
+        [data-ogsc] .darkmode {
+            background-color: #000000 !important;
+        }
+
+        [data-ogsc] h1, [data-ogsc] h2, [data-ogsc] h3, [data-ogsc] h4, [da=
+ta-ogsc] h5, [data-ogsc] p, [data-ogsc] li, [data-ogsc] .sans, [data-ogsc] =
+.product-name, [data-ogsc] .product-name a {
+            color: #ffffff !important;
+        }
+
+        [data-ogsc] a, [data-ogsc] .footerlinks a {
+            color: #6ED6E6 !important;
+        }
+
+
+        [data-ogsc] .product-discount {
+            color: #FF8C8C !important;
+        }
+
+        [data-ogsc] .product-price {
+            color: #FFFFFF !important;
+        }
+
+        [data-ogsc] .product-list-price {
+            color: #A2A6A6 !important;
+        }
+
+        [data-ogsc] .product-image-td {
+            background: linear-gradient(rgba(255, 255, 255, 1), rgba(255,25=
+5,255,1));
+        }
+
+        [data-ogsc] .product-image {
+            mix-blend-mode: initial;
+        }
+
+    </style>
+    <!--[if mso 9]>
+    <style type=3D'text/css'>
+        .product-image-wrapper {
+            width: 156px;
+            height: 156px;
+        }
+    </style>
+    <![endif]-->
+    <!--[if gte mso 9]>
+    <xml>
+        <o:OfficeDocumentSettings>
+            <o:AllowPNG />
+            <o:PixelsPerInch>96</o:PixelsPerInch>
+        </o:OfficeDocumentSettings>
+    </xml>
+    <style>
+        body, h1, h2, h3, h4, table, th, td, p, li, a, .sans {
+            font-family: Helvetica, Arial, sans-serif !important;
+        }
+
+        sup {
+            font-size: .92em !important;
+        }
+    </style>
+    <![endif]-->
+</head>
+<body class=3D'body'><img width=3D"1" height=3D"1" src=3D"https://www.amazo=
+n.co.jp/gp/r.html?C=3D3CTNXOU1LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230=
+912011407f438abdb2bfd42d09817019b49f0p0fe&R=3DFIZE6AGWY92X&T=3DO&U=3Dhttps%=
+3A%2F%2Fimages-fe.ssl-images-amazon.com%2Fimages%2FG%2F01%2Fnav%2Ftransp.gi=
+f&H=3DVGZUQR6POLRDJSLAAIMD6NWN710A&ref_=3Dpe_1103802_497645132_opens" />
+<div itemscope itemtype=3D"http://schema.org/Organization"></div>
+<div itemscope itemtype=3D"http://schema.org/DiscountOffer"></div>
+<!--[if (gte mso 9)|(IE)]>
+<table
+    align=3D'center'
+    class=3D'zeroBorder'
+    width=3D'600'
+    style=3D'margin-left: auto; margin-right: auto; width: 600px;'
+>
+    <tbody width=3D'600'>
+    <tr>
+        <td width=3D'600' style=3D'width: 600px;'>
+<![endif]-->
+<table
+    class=3D"zeroBorder"
+    style=3D"margin-left: auto; margin-right: auto; width:100%;"
+    role=3D"presentation"
+>
+    <tbody>
+    <tr>
+        <td width=3D'600'>
+            <table
+                width=3D'600'
+                role=3D"presentation"
+                class=3D"sans mobile zeroBorder"
+                style=3D"width:100%; max-width:600px; margin: 0 auto;"
+            >
+                <tr>
+                    <td width=3D'568' style=3D"padding: 0 16px;"><!-- LOGO =
+-->
+<table
+    class=3D"full zeroBorder"
+    style=3D"width: 100%; max-width: 568px;"
+    role=3D"presentation"
+>
+    <tbody>
+    <tr>
+        <td style=3D"padding:32px 0 24px 0; text-align:left;">
+            <a
+                href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1LPK4=
+A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d09817019b4=
+9f0p0fe&R=3D3N6YPPQS97M3J&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2F%3Fref=
+_%3Dpe_1103802_497645132&H=3D6SACA91QLARFLDQKNKXIRJBGFT0A&ref_=3Dpe_1103802=
+_497645132"
+                target=3D"_blank"
+            >
+                <img
+                    class=3D"light-img"
+                    height=3D"30"
+                    role=3D"presentation"
+                    src=3D"https://m.media-amazon.com/images/G/01/automated=
+/2022/amazon_co_jp_half_logo_RGB_SQUID.png"
+                    style=3D"width:auto; height:30px; max-width:100%; displ=
+ay:block; border:0; float:left; background-color: #ffffff;"
+                    alt=3D'Amazon.co.jp'
+                />
+                <!--[if !mso]><! -->
+                <img
+                    class=3D"dark-img"
+                    height=3D"30"
+                    role=3D"presentation"
+                    src=3D"https://m.media-amazon.com/images/G/01/automated=
+/2022/amazon_co_jp_half_logo_RGB_WHITE.png"
+                    style=3D"display:none; width:auto; height:30px; max-wid=
+th:100%; border:0; float:left;"
+                    alt=3D'Amazon.co.jp'
+                />
+                <!--<![endif]-->
+            </a>
+        </td>
+    </tr>
+    </tbody>
+</table>
+
+   =20
+   =20
+           =20
+   =20
+       =20
+   =20
+       =20
+
+
+
+
+
+
+
+
+
+       =20
+   =20
+
+   =20
+   =20
+    <div style=3D"display: none;">
+
+   =20
+   =20
+
+   =20
+   =20
+       =20
+   =20
+       =20
+       =20
+           =20
+       =20
+   =20
+       =20
+   =20
+   =20
+   =20
+
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+               =20
+           =20
+       =20
+           =20
+       =20
+   =20
+   =20
+    =20
+   =20
+                           =20
+   =20
+   =20
+       =20
+   =20
+       =20
+       =20
+           =20
+       =20
+   =20
+       =20
+   =20
+   =20
+   =20
+
+       =20
+           =20
+       =20
+           =20
+               =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+   =20
+   =20
+    =20
+   =20
+                           =20
+   =20
+   =20
+       =20
+   =20
+       =20
+       =20
+           =20
+       =20
+   =20
+       =20
+   =20
+   =20
+   =20
+
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+   =20
+   =20
+   =20
+       =20
+   =20
+       =20
+       =20
+           =20
+       =20
+   =20
+       =20
+   =20
+   =20
+   =20
+
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+   =20
+   =20
+   =20
+       =20
+   =20
+       =20
+       =20
+           =20
+       =20
+   =20
+       =20
+   =20
+   =20
+   =20
+
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+   =20
+   =20
+   =20
+       =20
+   =20
+       =20
+       =20
+           =20
+       =20
+   =20
+       =20
+   =20
+   =20
+   =20
+
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+               =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+   =20
+   =20
+    =20
+   =20
+                           =20
+   =20
+   =20
+       =20
+   =20
+       =20
+       =20
+           =20
+       =20
+   =20
+       =20
+   =20
+   =20
+   =20
+
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+   =20
+   =20
+   =20
+       =20
+   =20
+       =20
+       =20
+           =20
+       =20
+   =20
+       =20
+   =20
+   =20
+   =20
+
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+               =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+   =20
+   =20
+    =20
+   =20
+                           =20
+   =20
+   =20
+       =20
+   =20
+       =20
+       =20
+           =20
+       =20
+   =20
+       =20
+   =20
+   =20
+   =20
+
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+   =20
+   =20
+   =20
+       =20
+   =20
+       =20
+       =20
+           =20
+       =20
+   =20
+       =20
+   =20
+   =20
+   =20
+
+       =20
+           =20
+               =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+   =20
+   =20
+    =20
+   =20
+                           =20
+   =20
+   =20
+       =20
+   =20
+       =20
+       =20
+           =20
+       =20
+   =20
+       =20
+   =20
+   =20
+   =20
+
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+   =20
+   =20
+   =20
+       =20
+   =20
+       =20
+       =20
+           =20
+       =20
+   =20
+       =20
+   =20
+   =20
+   =20
+
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+               =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+   =20
+   =20
+    =20
+   =20
+                           =20
+   =20
+   =20
+       =20
+   =20
+       =20
+       =20
+           =20
+       =20
+   =20
+       =20
+   =20
+   =20
+   =20
+
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+               =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+   =20
+   =20
+    =20
+   =20
+                           =20
+   =20
+   =20
+       =20
+   =20
+       =20
+       =20
+           =20
+       =20
+   =20
+       =20
+   =20
+   =20
+   =20
+
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+   =20
+   =20
+   =20
+       =20
+   =20
+       =20
+       =20
+           =20
+       =20
+   =20
+       =20
+   =20
+   =20
+   =20
+
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+               =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+           =20
+       =20
+   =20
+   =20
+    =20
+   =20
+                           =20
+   =20
+    =20
+   =20
+   =20
+   =20
+
+   =20
+    =20
+   =20
+   =20
+   =20
+
+   =20
+    =20
+   =20
+   =20
+    =20
+   =20
+   =20
+    =20
+   =20
+   =20
+    =20
+   =20
+   =20
+   =20
+
+   =20
+    =20
+   =20
+   =20
+    =20
+   =20
+   =20
+   =20
+
+   =20
+    =20
+   =20
+   =20
+    =20
+   =20
+   =20
+   =20
+
+   =20
+    =20
+   =20
+   =20
+    =20
+   =20
+   =20
+   =20
+
+   =20
+    =20
+   =20
+   =20
+   =20
+
+   =20
+    =20
+   =20
+   =20
+    =20
+   =20
+   =20
+   =20
+
+   =20
+    =20
+   =20
+   =20
+    =20
+   =20
+   =20
+    =20
+   =20
+   =20
+    =20
+   =20
+</div>
+
+       =20
+       =20
+       =20
+
+       =20
+<table
+    border=3D"0"
+    class=3D"zeroBorder full"
+   =20
+    align=3D"left"
+    width=3D"568"
+    role=3D"presentation"
+>
+    <tbody>
+    <tr>
+        <td style=3D"vertical-align: top; padding-top: 8px; padding-bottom:=
+ 8px;width:156px;">
+
+
+   =20
+<table style=3D'width: 100%; height: 156px; border-radius: 4px;'>
+    <tbody>
+        <tr>
+            <td class=3D'product-image-td' style=3D'border-radius:4px; posi=
+tion: relative; height: 156px; width: 100%; vertical-align: center; text-al=
+ign: center;'>
+                <a
+                    href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1=
+LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d098170=
+19b49f0p0fe&R=3D3H0VAAI5XK0HB&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp=
+%2Fproduct%2F4041113121%2Fref%3Dpe_1103802_497645132_em_1p_0_lm&H=3DODDNWRF=
+SYCGTVBJUMJAHMXQFZ24A&ref_=3Dpe_1103802_497645132_em_1p_0_lm"
+                    class=3D'product-image-wrapper' style=3D"display: block=
+; padding:8px; position:relative; background-color:transparent; border-radi=
+us: 4px; min-width: 140px;">
+                    <img
+                        class=3D'product-image'
+                        alt=3D"=E4=BA=88=E8=A8=80=E3=81=AE=E5=B3=B6 (=E8=A7=
+=92=E5=B7=9D=E3=83=9B=E3=83=A9=E3=83=BC=E6=96=87=E5=BA=AB)"
+                        height=3D"140"
+                        src=3D"https://m.media-amazon.com/images/I/51wnoQ5H=
+jNS._SR352,500_.jpg"
+                        style=3D"max-height:140px; max-width:140px; height:=
+auto; width:auto; margin:0 auto; display:block; "
+                        width=3D"98.55999999999999"
+                    />
+                </a>
+            </td>
+        </tr>
+    </tbody>
+</table>
+</td>
+   =20
+        <td style=3D"vertical-align: top;padding-top: 8px;padding-bottom: 8=
+px;padding-left: 8px;"><!-- Fix for JP language as japanese title is consid=
+ered as one =E2=80=9Cword=E2=80=9D and Japanese does not have breaks betwee=
+n words (only between sentences) leading to texts becoming small in mobile =
+view SIM - https://sim.amazon.com/issues/OAT-14154--><p class=3D"product-na=
+me" style=3D"margin:0 0 4px 0; font-size: 15px; line-height: 20px;word-brea=
+k:break-word !important">
+    <a
+        href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1LPK4A&K=3D1R=
+3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d09817019b49f0p0fe&=
+R=3D9F9XJRT3A4KG&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp%2Fproduct%2F=
+4041113121%2Fref%3Dpe_1103802_497645132_em_1p_0_lm&H=3DBBDRD0BAXWYQR8QIEN4B=
+KBKNWJOA&ref_=3Dpe_1103802_497645132_em_1p_0_lm"
+        style=3D"text-decoration: none; color:#232F3E;"
+    >
+            =E4=BA=88=E8=A8=80=E3=81=AE=E5=B3=B6 (=E8=A7=92=E5=B7=9D=E3=83=
+=9B=E3=83=A9=E3=83=BC=E6=96=87=E5=BA=AB)
+    </a>
+</p>
+
+        <table width=3D'100%' style=3D'width: 100%'>
+        <tbody>
+        <tr>
+            <td style=3D'padding-bottom: 4px;'><span class=3D'product-price=
+' style=3D"font-size: 22px; font-weight: 400; line-height: 26px;">  <sup
+                        style=3D"font-size: 12px; position: relative; top: =
+2px;">=EF=BF=A5</sup>748
+            </span>
+                </td>
+        </tr><tr>
+            <td height=3D'4px' style=3D'height: 4px;'></td>
+        </tr>
+        </tbody>
+    </table>
+
+
+                <!--[if mso]>
+                <v:roundrect
+                    arcsize=3D'24px'
+                    fillcolor=3D'#FFD814'
+                    href=3D'https://www.amazon.co.jp/gp/product/4041113121/=
+ref=3Dem_1p_0_lm'
+                    stroke=3D'f'
+                    style=3D'border:0;width:120px;height:32px;v-text-anchor=
+:middle;'
+                    xmlns:v=3D'urn:schemas-microsoft-com:vml'
+                    xmlns:w=3D'urn:schemas-microsoft-com:office:word'
+                >
+                    <w:anchorlock/>
+                    <v:textbox inset=3D'0,0,0,0'>
+                        <center>
+                <![endif]-->
+                <a
+                    aria-describedby=3D"=E4=BA=88=E8=A8=80=E3=81=AE=E5=B3=
+=B6 (=E8=A7=92=E5=B7=9D=E3=83=9B=E3=83=A9=E3=83=BC=E6=96=87=E5=BA=AB)"
+                    class=3D"button"
+                    href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1=
+LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d098170=
+19b49f0p0fe&R=3D1BEDNZ3BXIEA0&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp=
+%2Fproduct%2F4041113121%2Fref%3Dpe_1103802_497645132_em_1p_0_lm&H=3DXGZPEDE=
+DYJIF7JVBAAW7AHN6KOAA&ref_=3Dpe_1103802_497645132_em_1p_0_lm"
+                    style=3D"background-color: #FFD814; color: #0f1111 !imp=
+ortant; border-radius: 24px; padding: 8px 12px; display: inline-block; box-=
+shadow: 1px 2px 4px rgba(153, 153, 153, 0.2); font-size: 13px; line-height:=
+ 16px; white-space:nowrap; "
+                >
+                    <span>
+                        =E4=BB=8A=E3=81=99=E3=81=90=E3=83=81=E3=82=A7=E3=83=
+=83=E3=82=AF
+                    </span>
+                </a>
+                <!--[if mso]>
+                </center>
+                </v:textbox>
+                </v:roundrect>
+                <![endif]-->
+            </td>
+    </tr>
+    </tbody>
+</table>
+   =20
+<table
+    border=3D"0"
+    class=3D"zeroBorder full"
+   =20
+    align=3D"left"
+    width=3D"568"
+    role=3D"presentation"
+>
+    <tbody>
+    <tr>
+        <td style=3D"vertical-align: top; padding-top: 8px; padding-bottom:=
+ 8px;width:156px;">
+
+
+   =20
+<table style=3D'width: 100%; height: 156px; border-radius: 4px;'>
+    <tbody>
+        <tr>
+            <td class=3D'product-image-td' style=3D'border-radius:4px; posi=
+tion: relative; height: 156px; width: 100%; vertical-align: center; text-al=
+ign: center;'>
+                <a
+                    href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1=
+LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d098170=
+19b49f0p0fe&R=3D2RTHM7E60TP6K&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp=
+%2Fproduct%2F4041085438%2Fref%3Dpe_1103802_497645132_em_1p_1_lm&H=3DKGTICHI=
+KFTQQZHACV72JACWSSDWA&ref_=3Dpe_1103802_497645132_em_1p_1_lm"
+                    class=3D'product-image-wrapper' style=3D"display: block=
+; padding:8px; position:relative; background-color:transparent; border-radi=
+us: 4px; min-width: 140px;">
+                    <img
+                        class=3D'product-image'
+                        alt=3D"=E3=81=97=E3=81=97=E3=82=8A=E3=81=B0=E3=81=
+=AE=E5=AE=B6 (=E8=A7=92=E5=B7=9D=E3=83=9B=E3=83=A9=E3=83=BC=E6=96=87=E5=BA=
+=AB)"
+                        height=3D"140"
+                        src=3D"https://m.media-amazon.com/images/I/51cO4JPe=
+qzL._SR352,500_.jpg"
+                        style=3D"max-height:140px; max-width:140px; height:=
+auto; width:auto; margin:0 auto; display:block; "
+                        width=3D"98.55999999999999"
+                    />
+                </a>
+            </td>
+        </tr>
+    </tbody>
+</table>
+</td>
+   =20
+        <td style=3D"vertical-align: top;padding-top: 8px;padding-bottom: 8=
+px;padding-left: 8px;"><!-- Fix for JP language as japanese title is consid=
+ered as one =E2=80=9Cword=E2=80=9D and Japanese does not have breaks betwee=
+n words (only between sentences) leading to texts becoming small in mobile =
+view SIM - https://sim.amazon.com/issues/OAT-14154--><p class=3D"product-na=
+me" style=3D"margin:0 0 4px 0; font-size: 15px; line-height: 20px;word-brea=
+k:break-word !important">
+    <a
+        href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1LPK4A&K=3D1R=
+3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d09817019b49f0p0fe&=
+R=3D1PJ81MGFYPCCO&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp%2Fproduct%2=
+F4041085438%2Fref%3Dpe_1103802_497645132_em_1p_1_lm&H=3D5IAZLDQ63J29UMNC5AE=
+ADUPKJMEA&ref_=3Dpe_1103802_497645132_em_1p_1_lm"
+        style=3D"text-decoration: none; color:#232F3E;"
+    >
+            =E3=81=97=E3=81=97=E3=82=8A=E3=81=B0=E3=81=AE=E5=AE=B6 (=E8=A7=
+=92=E5=B7=9D=E3=83=9B=E3=83=A9=E3=83=BC=E6=96=87=E5=BA=AB)
+    </a>
+</p>
+
+        <table width=3D'100%' style=3D'width: 100%'>
+        <tbody>
+        <tr>
+            <td style=3D'padding-bottom: 4px;'><span class=3D'product-price=
+' style=3D"font-size: 22px; font-weight: 400; line-height: 26px;">  <sup
+                        style=3D"font-size: 12px; position: relative; top: =
+2px;">=EF=BF=A5</sup>748
+            </span>
+                </td>
+        </tr><tr>
+            <td height=3D'4px' style=3D'height: 4px;'></td>
+        </tr>
+        </tbody>
+    </table>
+
+
+                <!--[if mso]>
+                <v:roundrect
+                    arcsize=3D'24px'
+                    fillcolor=3D'#FFD814'
+                    href=3D'https://www.amazon.co.jp/gp/product/4041085438/=
+ref=3Dem_1p_1_lm'
+                    stroke=3D'f'
+                    style=3D'border:0;width:120px;height:32px;v-text-anchor=
+:middle;'
+                    xmlns:v=3D'urn:schemas-microsoft-com:vml'
+                    xmlns:w=3D'urn:schemas-microsoft-com:office:word'
+                >
+                    <w:anchorlock/>
+                    <v:textbox inset=3D'0,0,0,0'>
+                        <center>
+                <![endif]-->
+                <a
+                    aria-describedby=3D"=E3=81=97=E3=81=97=E3=82=8A=E3=81=
+=B0=E3=81=AE=E5=AE=B6 (=E8=A7=92=E5=B7=9D=E3=83=9B=E3=83=A9=E3=83=BC=E6=96=
+=87=E5=BA=AB)"
+                    class=3D"button"
+                    href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1=
+LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d098170=
+19b49f0p0fe&R=3DCSFXI3PUBP3E&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp%=
+2Fproduct%2F4041085438%2Fref%3Dpe_1103802_497645132_em_1p_1_lm&H=3D7NFVDEN3=
+YCQ44OC4AWZ8PCMWMUCA&ref_=3Dpe_1103802_497645132_em_1p_1_lm"
+                    style=3D"background-color: #FFD814; color: #0f1111 !imp=
+ortant; border-radius: 24px; padding: 8px 12px; display: inline-block; box-=
+shadow: 1px 2px 4px rgba(153, 153, 153, 0.2); font-size: 13px; line-height:=
+ 16px; white-space:nowrap; "
+                >
+                    <span>
+                        =E4=BB=8A=E3=81=99=E3=81=90=E3=83=81=E3=82=A7=E3=83=
+=83=E3=82=AF
+                    </span>
+                </a>
+                <!--[if mso]>
+                </center>
+                </v:textbox>
+                </v:roundrect>
+                <![endif]-->
+            </td>
+    </tr>
+    </tbody>
+</table>
+   =20
+<table
+    border=3D"0"
+    class=3D"zeroBorder full"
+   =20
+    align=3D"left"
+    width=3D"568"
+    role=3D"presentation"
+>
+    <tbody>
+    <tr>
+        <td style=3D"vertical-align: top; padding-top: 8px; padding-bottom:=
+ 8px;width:156px;">
+
+
+   =20
+<table style=3D'width: 100%; height: 156px; border-radius: 4px;'>
+    <tbody>
+        <tr>
+            <td class=3D'product-image-td' style=3D'border-radius:4px; posi=
+tion: relative; height: 156px; width: 100%; vertical-align: center; text-al=
+ign: center;'>
+                <a
+                    href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1=
+LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d098170=
+19b49f0p0fe&R=3D2Y2KP5QQ3BXNS&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp=
+%2Fproduct%2F4041117364%2Fref%3Dpe_1103802_497645132_em_1p_2_lm&H=3D0ZP7ENF=
+4BQXQZDTU2ALNDPMIZ88A&ref_=3Dpe_1103802_497645132_em_1p_2_lm"
+                    class=3D'product-image-wrapper' style=3D"display: block=
+; padding:8px; position:relative; background-color:transparent; border-radi=
+us: 4px; min-width: 140px;">
+                    <img
+                        class=3D'product-image'
+                        alt=3D"=E3=81=95=E3=81=88=E3=81=A5=E3=81=A1=E3=81=
+=AE=E7=9C=BC (=E8=A7=92=E5=B7=9D=E3=83=9B=E3=83=A9=E3=83=BC=E6=96=87=E5=BA=
+=AB)"
+                        height=3D"140"
+                        src=3D"https://m.media-amazon.com/images/I/51FFA3z-=
+30L._SR352,500_.jpg"
+                        style=3D"max-height:140px; max-width:140px; height:=
+auto; width:auto; margin:0 auto; display:block; "
+                        width=3D"98.55999999999999"
+                    />
+                </a>
+            </td>
+        </tr>
+    </tbody>
+</table>
+</td>
+   =20
+        <td style=3D"vertical-align: top;padding-top: 8px;padding-bottom: 8=
+px;padding-left: 8px;"><!-- Fix for JP language as japanese title is consid=
+ered as one =E2=80=9Cword=E2=80=9D and Japanese does not have breaks betwee=
+n words (only between sentences) leading to texts becoming small in mobile =
+view SIM - https://sim.amazon.com/issues/OAT-14154--><p class=3D"product-na=
+me" style=3D"margin:0 0 4px 0; font-size: 15px; line-height: 20px;word-brea=
+k:break-word !important">
+    <a
+        href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1LPK4A&K=3D1R=
+3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d09817019b49f0p0fe&=
+R=3DFP82PXW8BNWX&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp%2Fproduct%2F=
+4041117364%2Fref%3Dpe_1103802_497645132_em_1p_2_lm&H=3DF6Y6V5DJR1BXUGVBVGXZ=
+AIQ8Y2KA&ref_=3Dpe_1103802_497645132_em_1p_2_lm"
+        style=3D"text-decoration: none; color:#232F3E;"
+    >
+            =E3=81=95=E3=81=88=E3=81=A5=E3=81=A1=E3=81=AE=E7=9C=BC (=E8=A7=
+=92=E5=B7=9D=E3=83=9B=E3=83=A9=E3=83=BC=E6=96=87=E5=BA=AB)
+    </a>
+</p>
+
+        <table width=3D'100%' style=3D'width: 100%'>
+        <tbody>
+        <tr>
+            <td style=3D'padding-bottom: 4px;'><span class=3D'product-price=
+' style=3D"font-size: 22px; font-weight: 400; line-height: 26px;">  <sup
+                        style=3D"font-size: 12px; position: relative; top: =
+2px;">=EF=BF=A5</sup>836
+            </span>
+                </td>
+        </tr><tr>
+            <td height=3D'4px' style=3D'height: 4px;'></td>
+        </tr>
+        </tbody>
+    </table>
+
+
+                <!--[if mso]>
+                <v:roundrect
+                    arcsize=3D'24px'
+                    fillcolor=3D'#FFD814'
+                    href=3D'https://www.amazon.co.jp/gp/product/4041117364/=
+ref=3Dem_1p_2_lm'
+                    stroke=3D'f'
+                    style=3D'border:0;width:120px;height:32px;v-text-anchor=
+:middle;'
+                    xmlns:v=3D'urn:schemas-microsoft-com:vml'
+                    xmlns:w=3D'urn:schemas-microsoft-com:office:word'
+                >
+                    <w:anchorlock/>
+                    <v:textbox inset=3D'0,0,0,0'>
+                        <center>
+                <![endif]-->
+                <a
+                    aria-describedby=3D"=E3=81=95=E3=81=88=E3=81=A5=E3=81=
+=A1=E3=81=AE=E7=9C=BC (=E8=A7=92=E5=B7=9D=E3=83=9B=E3=83=A9=E3=83=BC=E6=96=
+=87=E5=BA=AB)"
+                    class=3D"button"
+                    href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1=
+LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d098170=
+19b49f0p0fe&R=3D2DXCL21MRWSZD&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp=
+%2Fproduct%2F4041117364%2Fref%3Dpe_1103802_497645132_em_1p_2_lm&H=3DPKAJM9T=
+HHFLACKXZHZ22IVADSE8A&ref_=3Dpe_1103802_497645132_em_1p_2_lm"
+                    style=3D"background-color: #FFD814; color: #0f1111 !imp=
+ortant; border-radius: 24px; padding: 8px 12px; display: inline-block; box-=
+shadow: 1px 2px 4px rgba(153, 153, 153, 0.2); font-size: 13px; line-height:=
+ 16px; white-space:nowrap; "
+                >
+                    <span>
+                        =E4=BB=8A=E3=81=99=E3=81=90=E3=83=81=E3=82=A7=E3=83=
+=83=E3=82=AF
+                    </span>
+                </a>
+                <!--[if mso]>
+                </center>
+                </v:textbox>
+                </v:roundrect>
+                <![endif]-->
+            </td>
+    </tr>
+    </tbody>
+</table>
+   =20
+<table
+    border=3D"0"
+    class=3D"zeroBorder full"
+   =20
+    align=3D"left"
+    width=3D"568"
+    role=3D"presentation"
+>
+    <tbody>
+    <tr>
+        <td style=3D"vertical-align: top; padding-top: 8px; padding-bottom:=
+ 8px;width:156px;">
+
+
+   =20
+<table style=3D'width: 100%; height: 156px; border-radius: 4px;'>
+    <tbody>
+        <tr>
+            <td class=3D'product-image-td' style=3D'border-radius:4px; posi=
+tion: relative; height: 156px; width: 100%; vertical-align: center; text-al=
+ign: center;'>
+                <a
+                    href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1=
+LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d098170=
+19b49f0p0fe&R=3DHH1EO5U7C5N8&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp%=
+2Fproduct%2F4041098785%2Fref%3Dpe_1103802_497645132_em_1p_3_lm&H=3DALAZPDR8=
+ND5JGZXIBBYGV9I2JF4A&ref_=3Dpe_1103802_497645132_em_1p_3_lm"
+                    class=3D'product-image-wrapper' style=3D"display: block=
+; padding:8px; position:relative; background-color:transparent; border-radi=
+us: 4px; min-width: 140px;">
+                    <img
+                        class=3D'product-image'
+                        alt=3D"=E3=81=B0=E3=81=8F=E3=81=86=E3=81=A9=E3=81=
+=AE=E6=82=AA=E5=A4=A2"
+                        height=3D"140"
+                        src=3D"https://m.media-amazon.com/images/I/41fnlSqR=
+UwL._SR340,500_.jpg"
+                        style=3D"max-height:140px; max-width:140px; height:=
+auto; width:auto; margin:0 auto; display:block; "
+                        width=3D"95.2"
+                    />
+                </a>
+            </td>
+        </tr>
+    </tbody>
+</table>
+</td>
+   =20
+        <td style=3D"vertical-align: top;padding-top: 8px;padding-bottom: 8=
+px;padding-left: 8px;"><!-- Fix for JP language as japanese title is consid=
+ered as one =E2=80=9Cword=E2=80=9D and Japanese does not have breaks betwee=
+n words (only between sentences) leading to texts becoming small in mobile =
+view SIM - https://sim.amazon.com/issues/OAT-14154--><p class=3D"product-na=
+me" style=3D"margin:0 0 4px 0; font-size: 15px; line-height: 20px;word-brea=
+k:break-word !important">
+    <a
+        href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1LPK4A&K=3D1R=
+3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d09817019b49f0p0fe&=
+R=3D34K9IF7UGR2WS&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp%2Fproduct%2=
+F4041098785%2Fref%3Dpe_1103802_497645132_em_1p_3_lm&H=3DJTJLF5SSO4MMNQ4GFAF=
+G8AK7VYYA&ref_=3Dpe_1103802_497645132_em_1p_3_lm"
+        style=3D"text-decoration: none; color:#232F3E;"
+    >
+            =E3=81=B0=E3=81=8F=E3=81=86=E3=81=A9=E3=81=AE=E6=82=AA=E5=A4=A2
+    </a>
+</p>
+
+        <table width=3D'100%' style=3D'width: 100%'>
+        <tbody>
+        <tr>
+            <td style=3D'padding-bottom: 4px;'><span class=3D'product-price=
+' style=3D"font-size: 22px; font-weight: 400; line-height: 26px;">  <sup
+                        style=3D"font-size: 12px; position: relative; top: =
+2px;">=EF=BF=A5</sup>2,035
+            </span>
+                </td>
+        </tr><tr>
+            <td height=3D'4px' style=3D'height: 4px;'></td>
+        </tr>
+        </tbody>
+    </table>
+
+
+                <!--[if mso]>
+                <v:roundrect
+                    arcsize=3D'24px'
+                    fillcolor=3D'#FFD814'
+                    href=3D'https://www.amazon.co.jp/gp/product/4041098785/=
+ref=3Dem_1p_3_lm'
+                    stroke=3D'f'
+                    style=3D'border:0;width:120px;height:32px;v-text-anchor=
+:middle;'
+                    xmlns:v=3D'urn:schemas-microsoft-com:vml'
+                    xmlns:w=3D'urn:schemas-microsoft-com:office:word'
+                >
+                    <w:anchorlock/>
+                    <v:textbox inset=3D'0,0,0,0'>
+                        <center>
+                <![endif]-->
+                <a
+                    aria-describedby=3D"=E3=81=B0=E3=81=8F=E3=81=86=E3=81=
+=A9=E3=81=AE=E6=82=AA=E5=A4=A2"
+                    class=3D"button"
+                    href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1=
+LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d098170=
+19b49f0p0fe&R=3D1JWW02CIURJCE&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp=
+%2Fproduct%2F4041098785%2Fref%3Dpe_1103802_497645132_em_1p_3_lm&H=3DF6M5DM6=
+ULDITVKAQVMOTIVPEMH8A&ref_=3Dpe_1103802_497645132_em_1p_3_lm"
+                    style=3D"background-color: #FFD814; color: #0f1111 !imp=
+ortant; border-radius: 24px; padding: 8px 12px; display: inline-block; box-=
+shadow: 1px 2px 4px rgba(153, 153, 153, 0.2); font-size: 13px; line-height:=
+ 16px; white-space:nowrap; "
+                >
+                    <span>
+                        =E4=BB=8A=E3=81=99=E3=81=90=E3=83=81=E3=82=A7=E3=83=
+=83=E3=82=AF
+                    </span>
+                </a>
+                <!--[if mso]>
+                </center>
+                </v:textbox>
+                </v:roundrect>
+                <![endif]-->
+            </td>
+    </tr>
+    </tbody>
+</table>
+   =20
+<table
+    border=3D"0"
+    class=3D"zeroBorder full"
+   =20
+    align=3D"left"
+    width=3D"568"
+    role=3D"presentation"
+>
+    <tbody>
+    <tr>
+        <td style=3D"vertical-align: top; padding-top: 8px; padding-bottom:=
+ 8px;width:156px;">
+
+
+   =20
+<table style=3D'width: 100%; height: 156px; border-radius: 4px;'>
+    <tbody>
+        <tr>
+            <td class=3D'product-image-td' style=3D'border-radius:4px; posi=
+tion: relative; height: 156px; width: 100%; vertical-align: center; text-al=
+ign: center;'>
+                <a
+                    href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1=
+LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d098170=
+19b49f0p0fe&R=3D13CJ975CF7QQF&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp=
+%2Fproduct%2F4757586760%2Fref%3Dpe_1103802_497645132_em_1p_4_lm&H=3DTAAGOTW=
+DCSWTCJCXDNUMOR6HA4WA&ref_=3Dpe_1103802_497645132_em_1p_4_lm"
+                    class=3D'product-image-wrapper' style=3D"display: block=
+; padding:8px; position:relative; background-color:transparent; border-radi=
+us: 4px; min-width: 140px;">
+                    <img
+                        class=3D'product-image'
+                        alt=3D"=E8=B3=AD=E3=82=B1=E3=82=B0=E3=83=AB=E3=82=
+=A4(=E4=BB=AE)(10)(=E5=AE=8C) (=E3=82=AC=E3=83=B3=E3=82=AC=E3=83=B3=E3=82=
+=B3=E3=83=9F=E3=83=83=E3=82=AF=E3=82=B9JOKER)"
+                        height=3D"140"
+                        src=3D"https://m.media-amazon.com/images/I/61INpq6o=
+3LL._SR352,500_.jpg"
+                        style=3D"max-height:140px; max-width:140px; height:=
+auto; width:auto; margin:0 auto; display:block; "
+                        width=3D"98.55999999999999"
+                    />
+                </a>
+            </td>
+        </tr>
+    </tbody>
+</table>
+</td>
+   =20
+        <td style=3D"vertical-align: top;padding-top: 8px;padding-bottom: 8=
+px;padding-left: 8px;"><!-- Fix for JP language as japanese title is consid=
+ered as one =E2=80=9Cword=E2=80=9D and Japanese does not have breaks betwee=
+n words (only between sentences) leading to texts becoming small in mobile =
+view SIM - https://sim.amazon.com/issues/OAT-14154--><p class=3D"product-na=
+me" style=3D"margin:0 0 4px 0; font-size: 15px; line-height: 20px;word-brea=
+k:break-word !important">
+    <a
+        href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1LPK4A&K=3D1R=
+3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d09817019b49f0p0fe&=
+R=3D1Q8UAC0WP9QLL&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp%2Fproduct%2=
+F4757586760%2Fref%3Dpe_1103802_497645132_em_1p_4_lm&H=3DYVUNHAGIRY9QIJSMUJ3=
+1WMO6TZYA&ref_=3Dpe_1103802_497645132_em_1p_4_lm"
+        style=3D"text-decoration: none; color:#232F3E;"
+    >
+            =E8=B3=AD=E3=82=B1=E3=82=B0=E3=83=AB=E3=82=A4(=E4=BB=AE)(10)(=
+=E5=AE=8C) (=E3=82=AC=E3=83=B3=E3=82=AC=E3=83=B3=E3=82=B3=E3=83=9F=E3=83=83=
+=E3=82=AF=E3=82=B9JOKER)
+    </a>
+</p>
+
+        <table width=3D'100%' style=3D'width: 100%'>
+        <tbody>
+        <tr>
+            <td style=3D'padding-bottom: 4px;'><span class=3D'product-price=
+' style=3D"font-size: 22px; font-weight: 400; line-height: 26px;">  <sup
+                        style=3D"font-size: 12px; position: relative; top: =
+2px;">=EF=BF=A5</sup>730
+            </span>
+                </td>
+        </tr><tr>
+            <td height=3D'4px' style=3D'height: 4px;'></td>
+        </tr>
+        </tbody>
+    </table>
+
+
+                <!--[if mso]>
+                <v:roundrect
+                    arcsize=3D'24px'
+                    fillcolor=3D'#FFD814'
+                    href=3D'https://www.amazon.co.jp/gp/product/4757586760/=
+ref=3Dem_1p_4_lm'
+                    stroke=3D'f'
+                    style=3D'border:0;width:120px;height:32px;v-text-anchor=
+:middle;'
+                    xmlns:v=3D'urn:schemas-microsoft-com:vml'
+                    xmlns:w=3D'urn:schemas-microsoft-com:office:word'
+                >
+                    <w:anchorlock/>
+                    <v:textbox inset=3D'0,0,0,0'>
+                        <center>
+                <![endif]-->
+                <a
+                    aria-describedby=3D"=E8=B3=AD=E3=82=B1=E3=82=B0=E3=83=
+=AB=E3=82=A4(=E4=BB=AE)(10)(=E5=AE=8C) (=E3=82=AC=E3=83=B3=E3=82=AC=E3=83=
+=B3=E3=82=B3=E3=83=9F=E3=83=83=E3=82=AF=E3=82=B9JOKER)"
+                    class=3D"button"
+                    href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1=
+LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d098170=
+19b49f0p0fe&R=3D1TU45ICM31MVE&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp=
+%2Fproduct%2F4757586760%2Fref%3Dpe_1103802_497645132_em_1p_4_lm&H=3DB884AAJ=
+XKG0CSOETQRXKN9UGVDKA&ref_=3Dpe_1103802_497645132_em_1p_4_lm"
+                    style=3D"background-color: #FFD814; color: #0f1111 !imp=
+ortant; border-radius: 24px; padding: 8px 12px; display: inline-block; box-=
+shadow: 1px 2px 4px rgba(153, 153, 153, 0.2); font-size: 13px; line-height:=
+ 16px; white-space:nowrap; "
+                >
+                    <span>
+                        =E4=BB=8A=E3=81=99=E3=81=90=E3=83=81=E3=82=A7=E3=83=
+=83=E3=82=AF
+                    </span>
+                </a>
+                <!--[if mso]>
+                </center>
+                </v:textbox>
+                </v:roundrect>
+                <![endif]-->
+            </td>
+    </tr>
+    </tbody>
+</table>
+   =20
+<table
+    border=3D"0"
+    class=3D"zeroBorder full"
+   =20
+    align=3D"left"
+    width=3D"568"
+    role=3D"presentation"
+>
+    <tbody>
+    <tr>
+        <td style=3D"vertical-align: top; padding-top: 8px; padding-bottom:=
+ 8px;width:156px;">
+
+
+   =20
+<table style=3D'width: 100%; height: 156px; border-radius: 4px;'>
+    <tbody>
+        <tr>
+            <td class=3D'product-image-td' style=3D'border-radius:4px; posi=
+tion: relative; height: 156px; width: 100%; vertical-align: center; text-al=
+ign: center;'>
+                <a
+                    href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1=
+LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d098170=
+19b49f0p0fe&R=3D3NPVI8LJFWHX4&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp=
+%2Fproduct%2F457552669X%2Fref%3Dpe_1103802_497645132_em_1p_5_lm&H=3DPZDOWTU=
+XPROF7EAEQ0HZ3TI0VESA&ref_=3Dpe_1103802_497645132_em_1p_5_lm"
+                    class=3D'product-image-wrapper' style=3D"display: block=
+; padding:8px; position:relative; background-color:transparent; border-radi=
+us: 4px; min-width: 140px;">
+                    <img
+                        class=3D'product-image'
+                        alt=3D"=E3=82=A2=E3=82=A6=E3=82=BF=E3=83=BCQ =E5=BC=
+=B1=E5=B0=8FWeb=E3=83=9E=E3=82=AC=E3=82=B8=E3=83=B3=E3=81=AE=E4=BA=8B=E4=BB=
+=B6=E7=B0=BF (=E5=8F=8C=E8=91=89=E6=96=87=E5=BA=AB =E3=81=95 50-01)"
+                        height=3D"140"
+                        src=3D"https://m.media-amazon.com/images/I/51ttA0Dj=
+xvL._SR350,500_.jpg"
+                        style=3D"max-height:140px; max-width:140px; height:=
+auto; width:auto; margin:0 auto; display:block; "
+                        width=3D"98"
+                    />
+                </a>
+            </td>
+        </tr>
+    </tbody>
+</table>
+</td>
+   =20
+        <td style=3D"vertical-align: top;padding-top: 8px;padding-bottom: 8=
+px;padding-left: 8px;"><!-- Fix for JP language as japanese title is consid=
+ered as one =E2=80=9Cword=E2=80=9D and Japanese does not have breaks betwee=
+n words (only between sentences) leading to texts becoming small in mobile =
+view SIM - https://sim.amazon.com/issues/OAT-14154--><p class=3D"product-na=
+me" style=3D"margin:0 0 4px 0; font-size: 15px; line-height: 20px;word-brea=
+k:break-word !important">
+    <a
+        href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1LPK4A&K=3D1R=
+3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d09817019b49f0p0fe&=
+R=3D20PV7B5NVCGTW&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp%2Fproduct%2=
+F457552669X%2Fref%3Dpe_1103802_497645132_em_1p_5_lm&H=3DVTM7V4O139H3O0R331P=
+G05ZZA3IA&ref_=3Dpe_1103802_497645132_em_1p_5_lm"
+        style=3D"text-decoration: none; color:#232F3E;"
+    >
+            =E3=82=A2=E3=82=A6=E3=82=BF=E3=83=BCQ =E5=BC=B1=E5=B0=8FWeb=E3=
+=83=9E=E3=82=AC=E3=82=B8=E3=83=B3=E3=81=AE=E4=BA=8B=E4=BB=B6=E7=B0=BF (=E5=
+=8F=8C=E8=91=89=E6=96=87=E5=BA=AB =E3=81=95 50-01)
+    </a>
+</p>
+
+        <table width=3D'100%' style=3D'width: 100%'>
+        <tbody>
+        <tr>
+            <td style=3D'padding-bottom: 4px;'><span class=3D'product-price=
+' style=3D"font-size: 22px; font-weight: 400; line-height: 26px;">  <sup
+                        style=3D"font-size: 12px; position: relative; top: =
+2px;">=EF=BF=A5</sup>825
+            </span>
+                </td>
+        </tr><tr>
+            <td height=3D'4px' style=3D'height: 4px;'></td>
+        </tr>
+        </tbody>
+    </table>
+
+
+                <!--[if mso]>
+                <v:roundrect
+                    arcsize=3D'24px'
+                    fillcolor=3D'#FFD814'
+                    href=3D'https://www.amazon.co.jp/gp/product/457552669X/=
+ref=3Dem_1p_5_lm'
+                    stroke=3D'f'
+                    style=3D'border:0;width:120px;height:32px;v-text-anchor=
+:middle;'
+                    xmlns:v=3D'urn:schemas-microsoft-com:vml'
+                    xmlns:w=3D'urn:schemas-microsoft-com:office:word'
+                >
+                    <w:anchorlock/>
+                    <v:textbox inset=3D'0,0,0,0'>
+                        <center>
+                <![endif]-->
+                <a
+                    aria-describedby=3D"=E3=82=A2=E3=82=A6=E3=82=BF=E3=83=
+=BCQ =E5=BC=B1=E5=B0=8FWeb=E3=83=9E=E3=82=AC=E3=82=B8=E3=83=B3=E3=81=AE=E4=
+=BA=8B=E4=BB=B6=E7=B0=BF (=E5=8F=8C=E8=91=89=E6=96=87=E5=BA=AB =E3=81=95 50=
+-01)"
+                    class=3D"button"
+                    href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1=
+LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d098170=
+19b49f0p0fe&R=3D2NQMDI63XW6K7&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp=
+%2Fproduct%2F457552669X%2Fref%3Dpe_1103802_497645132_em_1p_5_lm&H=3DX5OXMBK=
+8B8L1X55RQHVALZWGCT0A&ref_=3Dpe_1103802_497645132_em_1p_5_lm"
+                    style=3D"background-color: #FFD814; color: #0f1111 !imp=
+ortant; border-radius: 24px; padding: 8px 12px; display: inline-block; box-=
+shadow: 1px 2px 4px rgba(153, 153, 153, 0.2); font-size: 13px; line-height:=
+ 16px; white-space:nowrap; "
+                >
+                    <span>
+                        =E4=BB=8A=E3=81=99=E3=81=90=E3=83=81=E3=82=A7=E3=83=
+=83=E3=82=AF
+                    </span>
+                </a>
+                <!--[if mso]>
+                </center>
+                </v:textbox>
+                </v:roundrect>
+                <![endif]-->
+            </td>
+    </tr>
+    </tbody>
+</table>
+   =20
+<table
+    border=3D"0"
+    class=3D"zeroBorder full"
+   =20
+    align=3D"left"
+    width=3D"568"
+    role=3D"presentation"
+>
+    <tbody>
+    <tr>
+        <td style=3D"vertical-align: top; padding-top: 8px; padding-bottom:=
+ 8px;width:156px;">
+
+
+   =20
+<table style=3D'width: 100%; height: 156px; border-radius: 4px;'>
+    <tbody>
+        <tr>
+            <td class=3D'product-image-td' style=3D'border-radius:4px; posi=
+tion: relative; height: 156px; width: 100%; vertical-align: center; text-al=
+ign: center;'>
+                <a
+                    href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1=
+LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d098170=
+19b49f0p0fe&R=3D28J0G9Y2K8V0R&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp=
+%2Fproduct%2F4041067685%2Fref%3Dpe_1103802_497645132_em_1p_6_lm&H=3DJ2PGNMU=
+UNANJM54GM042JXGV58OA&ref_=3Dpe_1103802_497645132_em_1p_6_lm"
+                    class=3D'product-image-wrapper' style=3D"display: block=
+; padding:8px; position:relative; background-color:transparent; border-radi=
+us: 4px; min-width: 140px;">
+                    <img
+                        class=3D'product-image'
+                        alt=3D"=E3=81=9A=E3=81=86=E3=81=AE=E3=82=81=E4=BA=
+=BA=E5=BD=A2 (=E8=A7=92=E5=B7=9D=E3=83=9B=E3=83=A9=E3=83=BC=E6=96=87=E5=BA=
+=AB)"
+                        height=3D"140"
+                        src=3D"https://m.media-amazon.com/images/I/51mXizNs=
+F6L._SR353,500_.jpg"
+                        style=3D"max-height:140px; max-width:140px; height:=
+auto; width:auto; margin:0 auto; display:block; "
+                        width=3D"98.83999999999999"
+                    />
+                </a>
+            </td>
+        </tr>
+    </tbody>
+</table>
+</td>
+   =20
+        <td style=3D"vertical-align: top;padding-top: 8px;padding-bottom: 8=
+px;padding-left: 8px;"><!-- Fix for JP language as japanese title is consid=
+ered as one =E2=80=9Cword=E2=80=9D and Japanese does not have breaks betwee=
+n words (only between sentences) leading to texts becoming small in mobile =
+view SIM - https://sim.amazon.com/issues/OAT-14154--><p class=3D"product-na=
+me" style=3D"margin:0 0 4px 0; font-size: 15px; line-height: 20px;word-brea=
+k:break-word !important">
+    <a
+        href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1LPK4A&K=3D1R=
+3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d09817019b49f0p0fe&=
+R=3D3R5167MZE8B41&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp%2Fproduct%2=
+F4041067685%2Fref%3Dpe_1103802_497645132_em_1p_6_lm&H=3DE83NUBDDQQWMU7YIACF=
+ASZMJQEWA&ref_=3Dpe_1103802_497645132_em_1p_6_lm"
+        style=3D"text-decoration: none; color:#232F3E;"
+    >
+            =E3=81=9A=E3=81=86=E3=81=AE=E3=82=81=E4=BA=BA=E5=BD=A2 (=E8=A7=
+=92=E5=B7=9D=E3=83=9B=E3=83=A9=E3=83=BC=E6=96=87=E5=BA=AB)
+    </a>
+</p>
+
+        <table width=3D'100%' style=3D'width: 100%'>
+        <tbody>
+        <tr>
+            <td style=3D'padding-bottom: 4px;'><span class=3D'product-price=
+' style=3D"font-size: 22px; font-weight: 400; line-height: 26px;">  <sup
+                        style=3D"font-size: 12px; position: relative; top: =
+2px;">=EF=BF=A5</sup>836
+            </span>
+                </td>
+        </tr><tr>
+            <td height=3D'4px' style=3D'height: 4px;'></td>
+        </tr>
+        </tbody>
+    </table>
+
+
+                <!--[if mso]>
+                <v:roundrect
+                    arcsize=3D'24px'
+                    fillcolor=3D'#FFD814'
+                    href=3D'https://www.amazon.co.jp/gp/product/4041067685/=
+ref=3Dem_1p_6_lm'
+                    stroke=3D'f'
+                    style=3D'border:0;width:120px;height:32px;v-text-anchor=
+:middle;'
+                    xmlns:v=3D'urn:schemas-microsoft-com:vml'
+                    xmlns:w=3D'urn:schemas-microsoft-com:office:word'
+                >
+                    <w:anchorlock/>
+                    <v:textbox inset=3D'0,0,0,0'>
+                        <center>
+                <![endif]-->
+                <a
+                    aria-describedby=3D"=E3=81=9A=E3=81=86=E3=81=AE=E3=82=
+=81=E4=BA=BA=E5=BD=A2 (=E8=A7=92=E5=B7=9D=E3=83=9B=E3=83=A9=E3=83=BC=E6=96=
+=87=E5=BA=AB)"
+                    class=3D"button"
+                    href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1=
+LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d098170=
+19b49f0p0fe&R=3D1PFLHK7B2FURQ&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp=
+%2Fproduct%2F4041067685%2Fref%3Dpe_1103802_497645132_em_1p_6_lm&H=3DGLUQTJ2=
+IZR4XEA2TEYBMD13DPSYA&ref_=3Dpe_1103802_497645132_em_1p_6_lm"
+                    style=3D"background-color: #FFD814; color: #0f1111 !imp=
+ortant; border-radius: 24px; padding: 8px 12px; display: inline-block; box-=
+shadow: 1px 2px 4px rgba(153, 153, 153, 0.2); font-size: 13px; line-height:=
+ 16px; white-space:nowrap; "
+                >
+                    <span>
+                        =E4=BB=8A=E3=81=99=E3=81=90=E3=83=81=E3=82=A7=E3=83=
+=83=E3=82=AF
+                    </span>
+                </a>
+                <!--[if mso]>
+                </center>
+                </v:textbox>
+                </v:roundrect>
+                <![endif]-->
+            </td>
+    </tr>
+    </tbody>
+</table>
+   =20
+<table
+    border=3D"0"
+    class=3D"zeroBorder full"
+   =20
+    align=3D"left"
+    width=3D"568"
+    role=3D"presentation"
+>
+    <tbody>
+    <tr>
+        <td style=3D"vertical-align: top; padding-top: 8px; padding-bottom:=
+ 8px;width:156px;">
+
+
+   =20
+<table style=3D'width: 100%; height: 156px; border-radius: 4px;'>
+    <tbody>
+        <tr>
+            <td class=3D'product-image-td' style=3D'border-radius:4px; posi=
+tion: relative; height: 156px; width: 100%; vertical-align: center; text-al=
+ign: center;'>
+                <a
+                    href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1=
+LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d098170=
+19b49f0p0fe&R=3D3IVTPH28UKJFA&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp=
+%2Fproduct%2F4757586752%2Fref%3Dpe_1103802_497645132_em_1p_7_lm&H=3DAFAYPLJ=
+YS1OSYHY0T6PYHET3VAIA&ref_=3Dpe_1103802_497645132_em_1p_7_lm"
+                    class=3D'product-image-wrapper' style=3D"display: block=
+; padding:8px; position:relative; background-color:transparent; border-radi=
+us: 4px; min-width: 140px;">
+                    <img
+                        class=3D'product-image'
+                        alt=3D"=E8=B3=AD=E3=82=B1=E3=82=B0=E3=83=AB=E3=82=
+=A4=E5=8F=8C(14) (=E3=82=AC=E3=83=B3=E3=82=AC=E3=83=B3=E3=82=B3=E3=83=9F=E3=
+=83=83=E3=82=AF=E3=82=B9JOKER)"
+                        height=3D"140"
+                        src=3D"https://m.media-amazon.com/images/I/51oYK9oV=
+iRL._SR352,500_.jpg"
+                        style=3D"max-height:140px; max-width:140px; height:=
+auto; width:auto; margin:0 auto; display:block; "
+                        width=3D"98.55999999999999"
+                    />
+                </a>
+            </td>
+        </tr>
+    </tbody>
+</table>
+</td>
+   =20
+        <td style=3D"vertical-align: top;padding-top: 8px;padding-bottom: 8=
+px;padding-left: 8px;"><!-- Fix for JP language as japanese title is consid=
+ered as one =E2=80=9Cword=E2=80=9D and Japanese does not have breaks betwee=
+n words (only between sentences) leading to texts becoming small in mobile =
+view SIM - https://sim.amazon.com/issues/OAT-14154--><p class=3D"product-na=
+me" style=3D"margin:0 0 4px 0; font-size: 15px; line-height: 20px;word-brea=
+k:break-word !important">
+    <a
+        href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1LPK4A&K=3D1R=
+3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d09817019b49f0p0fe&=
+R=3D1LO7EF532RQ64&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp%2Fproduct%2=
+F4757586752%2Fref%3Dpe_1103802_497645132_em_1p_7_lm&H=3DQWPTOBJT5LLZBFKYOT3=
+8VISDQPCA&ref_=3Dpe_1103802_497645132_em_1p_7_lm"
+        style=3D"text-decoration: none; color:#232F3E;"
+    >
+            =E8=B3=AD=E3=82=B1=E3=82=B0=E3=83=AB=E3=82=A4=E5=8F=8C(14) (=E3=
+=82=AC=E3=83=B3=E3=82=AC=E3=83=B3=E3=82=B3=E3=83=9F=E3=83=83=E3=82=AF=E3=82=
+=B9JOKER)
+    </a>
+</p>
+
+        <table width=3D'100%' style=3D'width: 100%'>
+        <tbody>
+        <tr>
+            <td style=3D'padding-bottom: 4px;'><span class=3D'product-price=
+' style=3D"font-size: 22px; font-weight: 400; line-height: 26px;">  <sup
+                        style=3D"font-size: 12px; position: relative; top: =
+2px;">=EF=BF=A5</sup>730
+            </span>
+                </td>
+        </tr><tr>
+            <td height=3D'4px' style=3D'height: 4px;'></td>
+        </tr>
+        </tbody>
+    </table>
+
+
+                <!--[if mso]>
+                <v:roundrect
+                    arcsize=3D'24px'
+                    fillcolor=3D'#FFD814'
+                    href=3D'https://www.amazon.co.jp/gp/product/4757586752/=
+ref=3Dem_1p_7_lm'
+                    stroke=3D'f'
+                    style=3D'border:0;width:120px;height:32px;v-text-anchor=
+:middle;'
+                    xmlns:v=3D'urn:schemas-microsoft-com:vml'
+                    xmlns:w=3D'urn:schemas-microsoft-com:office:word'
+                >
+                    <w:anchorlock/>
+                    <v:textbox inset=3D'0,0,0,0'>
+                        <center>
+                <![endif]-->
+                <a
+                    aria-describedby=3D"=E8=B3=AD=E3=82=B1=E3=82=B0=E3=83=
+=AB=E3=82=A4=E5=8F=8C(14) (=E3=82=AC=E3=83=B3=E3=82=AC=E3=83=B3=E3=82=B3=E3=
+=83=9F=E3=83=83=E3=82=AF=E3=82=B9JOKER)"
+                    class=3D"button"
+                    href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1=
+LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d098170=
+19b49f0p0fe&R=3D12Q4GE13CSU5H&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp=
+%2Fproduct%2F4757586752%2Fref%3Dpe_1103802_497645132_em_1p_7_lm&H=3DQBNOZEY=
+NXAM67A1S5IHT3SHY6KQA&ref_=3Dpe_1103802_497645132_em_1p_7_lm"
+                    style=3D"background-color: #FFD814; color: #0f1111 !imp=
+ortant; border-radius: 24px; padding: 8px 12px; display: inline-block; box-=
+shadow: 1px 2px 4px rgba(153, 153, 153, 0.2); font-size: 13px; line-height:=
+ 16px; white-space:nowrap; "
+                >
+                    <span>
+                        =E4=BB=8A=E3=81=99=E3=81=90=E3=83=81=E3=82=A7=E3=83=
+=83=E3=82=AF
+                    </span>
+                </a>
+                <!--[if mso]>
+                </center>
+                </v:textbox>
+                </v:roundrect>
+                <![endif]-->
+            </td>
+    </tr>
+    </tbody>
+</table>
+   =20
+
+    <!-- CTA -->
+    <table
+        class=3D"full zeroBorder"
+        style=3D"width: 100%; max-width: 568px;"
+        role=3D"presentation"
+    >
+        <tbody>
+            <tr>
+                <td style=3D"padding-bottom: 16px; padding-top: 16px; font-=
+size: 15px; line-height: 24px; color: #007185; text-align: left;">
+                    <a
+                        href=3D"https://www.amazon.co.jp/gp/f.html?C=3D3CTN=
+XOU1LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d09=
+817019b49f0p0fe&R=3D6MH3ISAQBYOW&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2=
+Fgp%2Fhistory%2F%3Fref_%3Dpe_1103802_497645132&H=3DPWSMZIXOIAE4WCLRYTMGYGP2=
+KC0A&ref_=3Dpe_1103802_497645132"
+                        target=3D"_blank"
+                    >=E4=BB=96=E3=81=AE=E3=81=8A=E3=81=99=E3=81=99=E3=82=81=
+=E5=95=86=E5=93=81=E3=82=92=E8=A6=8B=E3=82=8B</a>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+    <!-- /CTA -->
+
+
+
+
+
+
+
+
+
+
+           =20
+   =20
+</td>
+                </tr>
+                <tr>
+                    <td width=3D'568' style=3D'height: 8px;'>
+                        <span></span>
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <table class=3D"cs-slot deviceWidth" style=3D'paddi=
+ng: 0 16px; width: 100%; max-width: 568px;'
+                               cellspacing=3D"0" cellpadding=3D"0" border=
+=3D"0" align=3D"center" width=3D"600">
+                            <tr>
+                                <td></td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+                <tr>
+                        <td width=3D'568' style=3D'height: 8px;'>
+                            <span></span>
+                        </td></tr>
+                <tr>
+                    <td
+                        width=3D'568'
+                        class=3D"footer"
+                        style=3D"padding: 0 16px; background-color: #f0f2f2=
+;"
+                    >
+
+
+<!-- FOOTER -->
+<table
+    id=3D"footerId"
+    class=3D"zeroBorder footer"
+    style=3D"margin-left: auto; margin-right: auto; width: 100%; max-width:=
+ 600px;"
+    role=3D"presentation"
+>
+    <tbody>
+        <tr>
+            <td style=3D"padding-top: 32px;">
+                <p
+                    class=3D"sans footerlinks"
+                    style=3D"font-size:14px; line-height: 20px; color: #494=
+d4d;"
+                >
+                    <a
+                        href=3D"https://www.amazon.co.jp/gp/f.html?C=3D3CTN=
+XOU1LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d09=
+817019b49f0p0fe&R=3D1Z2YR0QV9CYJT&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%=
+2F%2Fgp%2Fcpc%2Fhomepage%3Fref_%3Dpe_1103802_497645132_pe_ob_ftr_comm_prfs&=
+H=3D5GWNVCSDFTFQUEEUX2PGUOS6XIAA&ref_=3Dpe_1103802_497645132_pe_ob_ftr_comm=
+_prfs"
+                        style=3D"text-decoration:none;"
+                        target=3D"_blank"
+                    >=E6=83=85=E5=A0=B1=E9=85=8D=E4=BF=A1=E3=82=B5=E3=83=BC=
+=E3=83=93=E3=82=B9=E3=81=AE=E8=A8=AD=E5=AE=9A=E3=82=92=E5=A4=89=E6=9B=B4</a=
+>
+                    <span aria-hidden=3D'true' style=3D'padding:0 8px; colo=
+r:#007185;'>|</span>
+                    <a
+                        href=3D"https://www.amazon.co.jp/gp/f.html?C=3D3CTN=
+XOU1LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d09=
+817019b49f0p0fe&R=3D16LPUEJ12NDSU&T=3DX&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%=
+2F%2Fgp%2Fgss%2Fo%2F1aldw-3I-uCfVsy6A6FQzXrcQLUeFeL22NqOGtYhcpWt1Iczjzpe7G-=
+ZwCaGQK6mb&H=3D8OXDSDSUI4SWXYAFA2ZJ63A44HAA"
+                        style=3D"text-decoration:none;"
+                        target=3D"_blank"
+                    >=E9=85=8D=E4=BF=A1=E5=81=9C=E6=AD=A2</a>
+                </p>
+            </td>
+        </tr>
+        <tr>
+            <td style=3D"padding-top: 20px;">
+                <p class=3D"footerlinks">
+                    =C2=A92023 Amazon.com. All rights reserved. Amazon=E3=
+=81=AE=E3=83=AD=E3=82=B4=E3=80=81Amazon.co.jp=E3=81=8A=E3=82=88=E3=81=B3=E3=
+=80=81<br>Amazon.co.jp=E3=81=AE=E3=83=AD=E3=82=B4=E3=81=AF=E3=80=81 Amazon.=
+com, Inc. =E3=81=BE=E3=81=9F=E3=81=AF=E3=81=9D=E3=81=AE=E9=96=A2=E9=80=A3=
+=E4=BC=9A=E7=A4=BE=E3=81=AE=E5=95=86=E6=A8=99=E3=81=A7=E3=81=99=E3=80=82
+<br><br>
+=E5=95=86=E5=93=81=E4=BE=A1=E6=A0=BC=E3=80=81=E7=99=BA=E5=A3=B2=E6=97=A5=E3=
+=81=8A=E3=82=88=E3=81=B3=E5=9C=A8=E5=BA=AB=E7=8A=B6=E6=B3=81=E3=81=AA=E3=81=
+=A9=E3=81=AF=E3=80=81=E5=A4=89=E6=9B=B4=E3=81=95=E3=82=8C=E3=82=8B=E5=A0=B4=
+=E5=90=88=E3=81=8C=E3=81=82=E3=82=8A=E3=81=BE=E3=81=99=E3=81=AE=E3=81=A7=E3=
+=80=81<br>=E3=81=82=E3=82=89=E3=81=8B=E3=81=98=E3=82=81=E3=81=94=E4=BA=86=
+=E6=89=BF=E3=81=8F=E3=81=A0=E3=81=95=E3=81=84=E3=80=82<br>
+=E4=BE=A1=E6=A0=BC=E3=80=81=E7=99=BA=E5=A3=B2=E6=97=A5=E3=81=8A=E3=82=88=E3=
+=81=B3=E5=9C=A8=E5=BA=AB=E7=8A=B6=E6=B3=81=E3=81=AA=E3=81=A9=E3=81=AF=E3=80=
+=81=E3=81=93=E3=81=AE=E3=83=8B=E3=83=A5=E3=83=BC=E3=82=B9=E3=83=AC=E3=82=BF=
+=E3=83=BC=E3=81=AE=E9=80=81=E4=BF=A1=E6=99=82=E3=81=AE=E3=83=87=E3=83=BC=E3=
+=82=BF=E3=81=A7=E3=81=99=E3=80=82<br>
+=E3=81=8A=E5=AE=A2=E6=A7=98=E3=81=8CAmazon.co.jp=E3=82=92=E3=81=94=E5=88=A9=
+=E7=94=A8=E3=81=AB=E3=81=AA=E3=82=8B=E3=82=BF=E3=82=A4=E3=83=9F=E3=83=B3=E3=
+=82=B0=E3=81=AB=E3=82=88=E3=81=A3=E3=81=A6=E3=81=AF=E3=80=81=E7=95=B0=E3=81=
+=AA=E3=82=8B=E5=A0=B4=E5=90=88=E3=81=8C=E3=81=82=E3=82=8A=E3=81=BE=E3=81=99=
+=E3=80=82
+<br><br>
+=E9=80=81=E4=BF=A1=E8=80=85=EF=BC=9A=E3=82=A2=E3=83=9E=E3=82=BE=E3=83=B3=E3=
+=82=B8=E3=83=A3=E3=83=91=E3=83=B3=E5=90=88=E5=90=8C=E4=BC=9A=E7=A4=BE<br>
+=E4=BD=8F=E6=89=80=E3=83=BB=E5=90=84=E7=A8=AE=E3=81=8A=E5=95=8F=E3=81=84=E5=
+=90=88=E3=82=8F=E3=81=9B=E3=81=AB=E3=81=A4=E3=81=84=E3=81=A6=E3=81=AF=E3=80=
+=81<a href=3D"https://www.amazon.co.jp/gp/r.html?C=3D3CTNXOU1LPK4A&K=3D1R3M=
+4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d09817019b49f0p0fe&R=
+=3D1J0LCYBZBC80&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2Fgp%2Fhelp%2Fcust=
+omer%2Fdisplay.html%3FnodeId%3D202008070%26ref_%3Dpe_1103802_497645132&H=3D=
+9EVMJDFRDMTZZII6AUUJSW9ABKOA&ref_=3Dpe_1103802_497645132" style=3D"font-fam=
+ily: Arial,Helvetica,Sans-Serif; color: #bfbfbf">=E3=81=93=E3=81=A1=E3=82=
+=89</a>=E3=81=AE=E3=80=8C=E8=B2=A9=E5=A3=B2=E6=A5=AD=E8=80=85=E3=80=8D=E6=
+=AC=84=E3=82=92=E3=81=94=E5=8F=82=E7=85=A7=E3=81=8F=E3=81=A0=E3=81=95=E3=81=
+=84=E3=80=82<br>Ref: 497645132.
+                </p>
+            </td>
+        </tr>
+        <tr>
+            <td style=3D"padding-bottom: 36px; padding-top: 20px;">
+                <p>
+                    <a
+                        href=3D"https://www.amazon.co.jp/gp/f.html?C=3D3CTN=
+XOU1LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2bfd42d09=
+817019b49f0p0fe&R=3D9J60QO5OKFIV&T=3DC&U=3Dhttps%3A%2F%2Fwww.amazon.co.jp%2=
+F%2Fgp%2Fhelp%2Fcustomer%2Fdisplay.html%3FnodeId%3D643000%26ref_%3Dpe_11038=
+02_497645132&H=3DTZSEBVACDBCYTPYIBRPSACMTA3MA&ref_=3Dpe_1103802_497645132"
+                        style=3D"text-decoration:none;"
+                        target=3D"_blank"
+                    >Amazon.co.jp=E3=83=97=E3=83=A9=E3=82=A4=E3=83=90=E3=82=
+=B7=E3=83=BC=E8=A6=8F=E7=B4=84</a>
+                </p>
+            </td>
+        </tr>
+        <tr>
+            <td style=3D"padding-bottom: 36px;">
+                <img
+                    class=3D"light-img"
+                    height=3D"12"
+                    role=3D"presentation"
+                    src=3D"https://m.media-amazon.com/images/G/01/automated=
+/2022/Smile_logo_US.png"
+                    style=3D"width:auto; height:12px; max-width:100%; displ=
+ay:block; border:0; float:left; background-color: #F0F2F2; background-image=
+: linear-gradient(#F0F2F2, #F0F2F2)"
+                    alt=3D'Amazon.co.jp'
+                />
+                <!--[if !mso]><! -->
+                <img
+                    class=3D"dark-img"
+                    style=3D"display:none; width:auto; height:12px; max-wid=
+th:100%; border:0; float:left;"
+                    height=3D"12"
+                    role=3D"presentation"
+                    src=3D"https://m.media-amazon.com/images/G/01/automated=
+/2022/Smile_Mark_RGB_WHITE.png"
+                    alt=3D'Amazon.co.jp'
+                />
+                <!--<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table>
+</td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+    </tbody>
+</table>
+<!--[if (gte mso 9)|(IE)]>
+</td>
+</tr>
+</tbody>
+</table>
+<![endif]-->
+<img width=3D"1" height=3D"1" src=3D"https://www.amazon.co.jp/gp/r.html?C=
+=3D3CTNXOU1LPK4A&K=3D1R3M4WZVTVBH7&M=3Durn:rtn:msg:20230912011407f438abdb2b=
+fd42d09817019b49f0p0fe&R=3D19YVID5IEY63C&T=3DE&U=3Dhttps%3A%2F%2Fimages-fe.=
+ssl-images-amazon.com%2Fimages%2FG%2F01%2Fnav%2Ftransp.gif&H=3DKWMTW7DEV0IN=
+AMMWIBWVH6HTY1UA&ref_=3Dpe_1103802_497645132_open" /></body>
+</html>
+
+
+
+
+
+------=_Part_375994_2040052076.1694481247599--

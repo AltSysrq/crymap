@@ -19,12 +19,15 @@
 #![allow(dead_code)] // TODO REMOVE
 
 mod canonicalisation;
+mod error;
+mod hash;
 mod header;
 
 pub use canonicalisation::{
     BodyCanonicalisation, BodyCanonicaliser, Canonicalisation,
     HeaderCanonicalisation,
 };
+pub use error::*;
 pub use header::{
     Algorithm, HashAlgorithm, Header, SignatureAlgorithm, TxtFlags, TxtRecord,
     HEADER_NAME,

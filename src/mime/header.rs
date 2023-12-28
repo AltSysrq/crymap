@@ -40,10 +40,22 @@ use std::fmt;
 use std::str;
 
 use chrono::prelude::*;
+use lazy_static::lazy_static;
 use nom::bytes::complete::{is_a, is_not, tag};
 use nom::*;
 
 use super::encoded_word::ew_decode;
+
+lazy_static! {
+    /// Regex which matches folded header lines in a fully-buffered header
+    /// block. Group 1 is the header line excluding the final line ending;
+    /// group 2 is the header name; group 3 is the header value.
+    pub static ref FULL_HEADER_LINE: regex::bytes::Regex =
+        regex::bytes::Regex::new(
+            "(?ms)^(([^: \t\r\n]+)[ \t]*:[ \t]*\
+             ([^\r\n]*(:?\r?\n[ \t]+[^\r\n]*)*))\r?$",
+        ).unwrap();
+}
 
 /// Parse a MIME-format date, as defined by RFC 5322.
 pub fn parse_datetime(date_str: &str) -> Option<DateTime<FixedOffset>> {

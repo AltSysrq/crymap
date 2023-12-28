@@ -1,0 +1,77 @@
+Received: from localhost (unknown-socket)
+	by tenshi (crymap 1.0.1) via LMTP
+	for <jason>;
+	Thu, 28 Dec 2023 17:31:38 +0000
+Return-Path: <jasonlingle@yahoo.com>
+Delivered-To: jason@lin.gl
+Received: from sonic308-9.consmr.mail.ne1.yahoo.com (sonic308-9.consmr.mail.ne1.yahoo.com [66.163.187.32])
+	by tenshi.cloud.lin.gl (OpenSMTPD) with ESMTPS id 7bcd761b (TLSv1.3:TLS_AES_256_GCM_SHA384:256:NO)
+	for <jason@lin.gl>;
+	Thu, 28 Dec 2023 17:31:38 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=yahoo.com; s=s2048; t=1703784697; bh=yy/t2iYdj9PyabSJF/qM0BxRVdK5T86OYNVBQclV/14=; h=Date:From:To:Subject:References:From:Subject:Reply-To; b=siQ8DINZUl5lK7VMLSTib74dDQHvULXxew9Fx/PARPGCwvK/2nbR7bsXfodvBrw7aPmJ9bOZNhOhIlx767VgQ8Oh6HsYxCSc3ACDv3GdHQfgk2MiZ1ko+ZkjhRo15sg0SRdmvANQWP6Wki1MAKkwDSvlTmZA+YWRsycnFSpfcTaC3rDUBIp2SQLIP4GdJtUQjYSd7dsiO5/8Tuebinb4jzM9UJOqB67AbmL0iX/d4R3MZU/UzscC660bqbfY6ICA0uluMCQBbuwH9oPChPudoQivbkRf6PD173mc6aAZYLmYLrA6DMe6WZPnEaORVkGt6Me1Cqz0nHE71AOnZmKNQA==
+X-SONIC-DKIM-SIGN: v=1; a=rsa-sha256; c=relaxed/relaxed; d=yahoo.com; s=s2048; t=1703784697; bh=+CFS2tGUyHW2Jdselz1AteRC6/C3ZnpHbaVWaMBXKuh=; h=X-Sonic-MF:Date:From:To:Subject:From:Subject; b=R+Z2wqJdbxwfShvGJipUMyhBoqLAAF3I4Q+YI2IyUZoABEYo+k6X94TZB/L7+T6fnfdvhl2Oing766IvQBQPKESmnr2ah1f8ErtrOYUsuYmGVJqc2W2dbw+ZtWhEZeMfvp0m5g6hgX/LdL3LVOBSKXzscJfD1VokPMB1s2ooX7wrSCEb4nO+HGf9ttxnWwC8JA97AATv6tc566NpgELYG+uNvbphn/XFiW6RZnSc1iq0Kb7ti5mSXOJrjRK+zYByRb7iSchCjBBJje8k31wLwCGnCDvPqbITLz7tpzRfkgbgJrE/miJXPyTFARsm1UNGrz5aYS7+f+azRZgOZx7fJg==
+X-YMail-OSG: RpovqKQVM1laQci1BiGQh7nZtFnQvbweipc1o2JaNT_cnLtfjdtJHPsUcGMSc_H
+ rr9jtVjhfB6Fqw1uuStyvhgZCoLQGXFkQVt4R4MUChP49kUjc3iHklXhI6dvU9rGw9g8bHoO9PTK
+ bZf_rpVQVcO8QXR8p9Y.urdr2Fq7TLqdmM2LZ7v2k5gEUjToA0wITsOuRDKqEZ5MwiENnOu_C0NY
+ sPja8dNkUfKkQ7YlpsR.djujrwcqUmFIFmK6AhYCl9gX1LkHP4sjKG.7bzh3onV9iz9vTTJDtZ7E
+ 2_I.z7D1Hy99Xa0bZ6K6h3LmHGI._q8SbgLYK_2yTreRCnePFFz92mnyysAFWBl_TP6V9lf1Y2Up
+ A3unq80.EForWPic54_RxDvDGYqtHcHxvV30klmAlTUcUHUr1jiD_SRhyrxxOrMct5QyHhYMJU1N
+ 5OjxRUwO19srWN9ZO8TfWeEZemLltwVGkRiYBParlssf8_6UyFrCWx7QnZZodvb4CIU23cGjBTFz
+ 9.KIIt1TSbA_DZKqfB5BQJoyGsxVqQJFdT6lIRE4MERxZRysHz1vOxVLotxbC9xo5241CbEUjQO_
+ 6PMff5WWnyjFTTiz2LiYOOQu1WMRdEaEJ6ELpT5koOpg9VVu6tivBNf2Lxg3VilpoP78.d4OTShX
+ .fqGFIv2JkSfQaPZGQ5P9INiQHKBxhXK8vOvRFX3Ur066_DyuMY1vnY1TNNB1VF.eattcpcToRJ1
+ sDBpLuZY.kzSn8ZiZRpBCWtEpoF4TAQ0rrejtvwceOuhfCun.o4S.XW.bLuleQrahOAnZlIQQv1X
+ wD1m3A6DC.nJTXi1F4..hURxykNphX0ItxAcKFPnsVhaJOiOV4.broOL5VhfzTUcRCirrrBdo_5e
+ YQcNR4fjoXqpkbYpNAORJzXfgNSRrnNqXJkfntxEbYnhuKchjinlBRNclR1YE9bp8T04ez1nqDM1
+ j.UJ5Kzx_GpxQEhzOsFt4S1hqU4ZxuPyZ6SyO65lLFYowVuCqbHqeGXP4Wm6Xqgqjcxsp0k6_hDL
+ 684sxbmGn2a7l3cXYu0k5zkof6bdOqzokZt584pmS_GZPkLExxD45boxvIagZg03nfLvpkFOgPkJ
+ r7VxVjbIqKVLTTJnBt09i5NwfCqyGATobBP.0OTMMLK4Zanryr656BEqwrrBk6FNOB3CiQN0Yonb
+ QiJCjkzDQ8U37qMU6UPyKzW4ONee9Zd1XIiGT3JYSwxClwaHv71v1Y84Ue00rAwXij4kbJuJWyjN
+ Lzys2rorxfXLj8v0O.iF4qzE6Cka.L3wlT.DlX4KDy0yIDaGnHfnOHsJg5jTrV.x7UVOxmIv9TuB
+ 36tMWxXIidpo6UTqjEmuugo1puZBP_9aJyQuxCAs39FMW9BGoMxVEKeuiUoyTYIT00oy3ztH_lMY
+ HjxjosBk_BMbcZt9Y0Vd3vnJAuhuJqKXEka1a3DBIC9.9h6E3jNqvymKInu_9fAATtRZBamqFncc
+ .0pcNUnRjRnfKdrsgqDCnGjCs0RwC4xGh0vk4uLLQQVNrXiMH5AXqSpwwMPnU7XWx4468LPYsOyO
+ ew7KfuTMEZCUtAJyGUkrVIkJMXkw9AwbdovVaPAaXRllPGa1_O6gEJOqQbQ.F_kg.ZR8t5WnlWeD
+ iQYs2o_jXjGOILnZT644KvO7FN00NYNouXOV_gX0YSUMaq0TdUgq9CZ5uReV3xpLMAVOzQbU_593
+ E__.UMFKGyEOe5EGiNL7xUIYrmZv04Ar3Rn2dkzQl9iqXjayTpsWxP2Le76S.ofSgsu7_Z6AWygj
+ dN.LHhAFFAhF_.mkGl7HJdfkn.GB_Ay9WdZn4cc5DCvZJKFHiPFuGeULrvTxdiRbtH_W5ajb19Ih
+ fKXxCCM5FIZJb9dpfq7IiVOrrlPVl.LMPpobxYeEeH5QEfjuX7qCF6gbrQgW9RkRJyQg.b034kO9
+ dvWxh0gAcINFGC4WK44cJYXsjlSlBmVxP1mItISNRmymEgtheoiKta5KJhRPw5jAmUXZfr1J.BrH
+ XvqXGd0qa6BdWHHRJ4JOY8v_tKPUZZEvU9aZyKHQGyPARapeMjWprV1R8VH_JO4rkKw1kKZrOCum
+ lqc1hWLbnXzStGfCshJREkA.lPpa091mP65gqsTqglDR_d.R6ZRZ_9T8XGD_SIrJyKJ1v1uw0_W9
+ y3M5LxHUvloiWKjaor2qx6K3koVY85cRmar1Za7LvjWYosrqjtMBrJW3CxyVxq3cLTQ--
+X-Sonic-MF: <jasonlingle@yahoo.com>
+X-Sonic-ID: 1a6dcc81-fba6-4476-bbd9-b9438a549997
+Received: from sonic.gate.mail.ne1.yahoo.com by sonic308.consmr.mail.ne1.yahoo.com with HTTP; Thu, 28 Dec 2023 17:31:37 +0000
+Date: Thu, 28 Dec 2023 17:31:33 +0000 (UTC)
+From: Jason Lingle <jasonlingle@yahoo.com>
+To: jason@lin.gl
+Message-ID: <566159536.6118003.1703784693570@mail.yahoo.com>
+Subject: DKIM   Demo
+MIME-Version: 1.0
+Content-Type: multipart/mixed; 
+	boundary="----=_Part_6118002_1618490404.1703784693569"
+References: <566159536.6118003.1703784693570.ref@mail.yahoo.com>
+X-Mailer: WebService/1.1.21952 YMailNodin
+Content-Length: 515
+
+------=_Part_6118002_1618490404.1703784693569
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+This is a   test   message to
+  get an example of Yahoo!'s   DKIM  
+ output that doesn't include
+personal details.   
+
+
+
+------=_Part_6118002_1618490404.1703784693569
+Content-Type: text/plain
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="foo.txt"
+Content-ID: <uSxSykN6OutWFQJ4pPaC>
+
+Zm9vICAgYmFyICANCiAgYmF6ICANCg0K
+
+------=_Part_6118002_1618490404.1703784693569--

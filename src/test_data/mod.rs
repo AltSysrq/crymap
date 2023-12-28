@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -82,3 +82,19 @@ pub static SINGLE_PART_BASE64: &[u8] = include_bytes!("single-part-base64.eml");
 /// A multi-part message with two base64-encoded parts, one of which contains
 /// an encoded NUL byte.
 pub static MULTI_PART_BASE64: &[u8] = include_bytes!("multi-part-base64.eml");
+
+/// Message sent by lin.gl (using dkim-proxy) with `rsa-sha1` DKIM and
+/// `relaxed/strict` canonicalisation.
+pub static DKIM_LINGL_RSA_SHA1: &[u8] =
+    include_bytes!("dkim-lingl-rsa-sha1.eml");
+
+/// Message sent by Amazon SES with 2 `rsa-sha256` DKIM signatures using
+/// `relaxed/strict` canonicalisation and different headers on each signature.
+pub static DKIM_AMAZONCOJP_RSA_SHA256: &[u8] =
+    include_bytes!("dkim-amazoncojp-2x-rsa-sha256.eml");
+
+/// Message sent by Yahoo! with `rsa-sha256` DKIM and `relaxed/relaxed`
+/// canonicalisation. The main message body includes duplicated and
+/// leading/trailing space which is subject to canonicalisation.
+pub static DKIM_YAHOO_RSA_SHA256: &[u8] =
+    include_bytes!("dkim-yahoo-rsa-sha256.eml");
