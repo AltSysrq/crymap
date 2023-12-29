@@ -22,6 +22,7 @@ mod canonicalisation;
 mod error;
 mod hash;
 mod header;
+mod verify;
 
 #[cfg(test)]
 mod test_domain_keys;
@@ -34,4 +35,7 @@ pub use error::*;
 pub use header::{
     Algorithm, HashAlgorithm, Header, SignatureAlgorithm, TxtFlags, TxtRecord,
     HEADER_NAME,
+};
+pub use verify::{
+    Outcome, OutcomeKind, TxtRecordEntry, VerificationEnvironment, Verifier,
 };

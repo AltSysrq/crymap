@@ -19,7 +19,7 @@
 use thiserror::Error;
 
 /// Reasons a DKIM signature could not be validated.
-#[derive(Error, Debug)]
+#[derive(Error, PartialEq, Debug)]
 pub enum Error {
     /// No pass/fail status could be ascribed to a signature. This includes
     /// transient network errors, signatures with unsupported algorithms, and
@@ -47,11 +47,56 @@ pub enum Ambivalence {
     DnsTxtParse(String, String),
     #[error("can't find TXT record {0}, or it is not DKIM1")]
     DnsTxtNotFound(String),
+    #[error("unsupported DKIM version")]
+    UnsupportedVersion,
+    #[error("RSA key is too big to validate")]
+    RsaKeyTooBig,
+    #[error("valid signature, but hash function is weak")]
+    WeakHashFunction,
+    #[error("valid signature, but signing key is weak")]
+    WeakKey,
     #[error("verification failed, but the selector is in test mode: {0}")]
     TestMode(Failure),
 }
 
-#[derive(Error, Debug)]
+impl std::cmp::PartialEq for Ambivalence {
+    fn eq(&self, rhs: &Self) -> bool {
+        match (self, rhs) {
+            (&Self::Ssl(..) | &Self::Io(..), _) => false,
+
+            (&Self::HeaderParse(ref a), &Self::HeaderParse(ref b)) => a == b,
+            (&Self::HeaderParse(..), _) => false,
+
+            (
+                &Self::DnsTxtParse(ref a, ref b),
+                &Self::DnsTxtParse(ref c, ref d),
+            ) => (a, b) == (c, d),
+            (&Self::DnsTxtParse(..), _) => false,
+
+            (&Self::DnsTxtNotFound(ref a), &Self::DnsTxtNotFound(ref b)) => {
+                a == b
+            },
+            (&Self::DnsTxtNotFound(..), _) => false,
+
+            (&Self::UnsupportedVersion, &Self::UnsupportedVersion) => true,
+            (&Self::UnsupportedVersion, _) => false,
+
+            (&Self::RsaKeyTooBig, &Self::RsaKeyTooBig) => true,
+            (&Self::RsaKeyTooBig, _) => false,
+
+            (&Self::WeakHashFunction, &Self::WeakHashFunction) => true,
+            (&Self::WeakHashFunction, _) => false,
+
+            (&Self::WeakKey, &Self::WeakKey) => true,
+            (&Self::WeakKey, _) => false,
+
+            (&Self::TestMode(ref a), &Self::TestMode(ref b)) => a == b,
+            (&Self::TestMode(..), _) => false,
+        }
+    }
+}
+
+#[derive(Error, PartialEq, Debug)]
 pub enum Failure {
     #[error("body is shorter than the l= tag indicates")]
     BodyTruncated,
@@ -61,4 +106,16 @@ pub enum Failure {
     SignatureMismatch,
     #[error("the public key was revoked")]
     PublicKeyRevoked,
+    #[error("'From' field not signed")]
+    FromFieldUnsigned,
+    #[error("DKIM-Signature hash algorithm not allowed by TXT record")]
+    UnacceptableHashAlgorithm,
+    #[error("DKIM-Signature signature algorithm disagrees with TXT record")]
+    SignatureAlgorithmMismatch,
+    #[error("valid signature, but it has expired")]
+    ExpiredSignature,
+    #[error("valid signature, but the timestamp is in the future")]
+    FutureSignature,
+    #[error("public key is invalid")]
+    InvalidPublicKey,
 }
