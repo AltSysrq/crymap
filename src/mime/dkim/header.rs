@@ -67,7 +67,9 @@ pub struct Header<'a> {
     pub sdid: Cow<'a, str>,
     /// The `h` field, decoded.
     pub signed_headers: Vec<Cow<'a, str>>,
-    // The `i` field. is not used by this implementation.
+    /// The `i` field, still in punycode and its not-quite-email-address
+    /// format.
+    pub auid: Option<Cow<'a, str>>,
     /// The `l` field.
     pub body_length: Option<u64>,
     /// Is `dns/txt` included in the `q` field?
@@ -167,6 +169,15 @@ impl<'a> Header<'a> {
         );
         let mut line_length = text.len();
         append_field(&mut text, &mut line_length, "d", &self.sdid);
+        if let Some(ref auid) = self.auid {
+            // This isn't strictly correct, as auid could contain characters
+            // that need QP encoding. However, production use does not generate
+            // this field, so this is good enough for testing. (And even if the
+            // production use case changes, there's never any actual reason to
+            // put something to the left of the '@', much less anything that
+            // needs QP.)
+            append_field(&mut text, &mut line_length, "i", auid);
+        }
         reserve_space(&mut text, &mut line_length, 2);
         text.push_str("h=");
         for (ix, h) in self.signed_headers.iter().enumerate() {
@@ -249,6 +260,7 @@ impl<'a> Header<'a> {
         let mut body_hash = None::<Vec<u8>>;
         let mut canonicalisation = None::<Canonicalisation>;
         let mut sdid = None::<Cow<'a, str>>;
+        let mut auid = None::<Cow<'a, str>>;
         let mut signed_headers = None::<Vec<Cow<'a, str>>>;
         let mut body_length = None::<u64>;
         let mut dns_txt = None::<bool>;
@@ -287,6 +299,7 @@ impl<'a> Header<'a> {
                         .map(|s| Cow::Borrowed(s.trim_matches(FWS)))
                         .collect(),
                 )?,
+                "i" => set_opt(k, &mut auid, decode_qp(v))?,
                 "l" => {
                     set_opt(
                         k,
@@ -326,6 +339,7 @@ impl<'a> Header<'a> {
             body_hash: body_hash.ok_or("missing bh= tag")?,
             canonicalisation: canonicalisation.unwrap_or_default(),
             sdid: sdid.ok_or("missing d= tag")?,
+            auid,
             signed_headers: signed_headers.ok_or("missing h= tag")?,
             body_length,
             dns_txt: dns_txt.unwrap_or(true),
@@ -517,10 +531,6 @@ fn split_kv_pairs(
 }
 
 /// Decode RFC 6376 DKIM-Quoted-Printable-encoded text.
-///
-/// This is only used by the `z` field, which we currently don't even decode,
-/// but I didn't realise that until after implementing it.
-#[allow(dead_code)]
 fn decode_qp(s: &str) -> Cow<'_, str> {
     // QP decoding essentially works by deleting whitespace characters and
     // decoding =XX codes. We can trim the exterior whitespace away, and if
@@ -677,6 +687,7 @@ mod test {
                     body: BodyCanonicalisation::Simple,
                 },
                 sdid: Cow::Borrowed("amazon.com"),
+                auid: None,
                 signed_headers: signed_headers![
                     "Date",
                     "From",
@@ -722,6 +733,7 @@ DKIM-Signature: v=1; a=rsa-sha256; q=dns/txt; c=relaxed/simple;
                     body: BodyCanonicalisation::Relaxed,
                 },
                 sdid: Cow::Borrowed("gmail.com"),
+                auid: None,
                 signed_headers: signed_headers![
                     "to",
                     "subject",
@@ -777,6 +789,7 @@ DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
                     body: BodyCanonicalisation::Relaxed,
                 },
                 sdid: Cow::Borrowed("yahoo.com"),
+                auid: None,
                 signed_headers: signed_headers![
                     "Date",
                     "From",
@@ -828,6 +841,7 @@ DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
                     body: BodyCanonicalisation::Simple,
                 },
                 sdid: Cow::Borrowed("lin.gl"),
+                auid: None,
                 signed_headers: signed_headers![
                     "message-id",
                     "date",
@@ -882,6 +896,9 @@ DKIM-Signature: v=1; a=rsa-sha1; c=relaxed; d=lin.gl; h=message-id:date
                     body: BodyCanonicalisation::Relaxed,
                 },
                 sdid: Cow::Borrowed("example.com"),
+                auid: Some(Cow::Borrowed(
+                    "\"Jöhn Smïth\"@subdomain.example.com"
+                )),
                 signed_headers: signed_headers!["from", "date"],
                 body_length: Some(400),
                 dns_txt: false,
@@ -892,6 +909,8 @@ DKIM-Signature: v=1; a=rsa-sha1; c=relaxed; d=lin.gl; h=message-id:date
             Header::parse(
                 // Hand-written case to test more exotic options
                 "DKIM-Signature: v = 2; a = ed25519-sha1
+\t; i==22J=C3=B6hn=20Sm=C3=A
+Fth=22@subdomain.example.com;
 \t; b=; bh=; c=simple/relaxed;d=example.com;h=from
 \t:
 \tdate

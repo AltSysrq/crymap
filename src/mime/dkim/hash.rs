@@ -360,11 +360,14 @@ mod test {
                 header: HeaderCanonicalisation::Simple,
             },
             sdid: Cow::Borrowed("example.com"),
+            auid: Some(Cow::Borrowed("@example.com")),
             signed_headers: vec![
                 Cow::Borrowed("From"),
                 Cow::Borrowed("To"),
                 Cow::Borrowed("From"),
                 Cow::Borrowed("Content-Location"),
+                Cow::Borrowed("Content-Transfer-Encoding"),
+                Cow::Borrowed("Subject"),
             ],
             body_length: None,
             dns_txt: true,
@@ -384,8 +387,9 @@ mod test {
             "FROM: third from header\r\n\
              To: to header\r\n\
              from: second from header\r\n\
-             DKIM-Signature: v=1;a=ed25519-sha256;c=simple/simple;d=example.com;h=From:\r\n\
-             \x20To:From:Content-Location;s=selector0;t=42;x=54;bh=bodyhash;b=",
+             DKIM-Signature: v=1;a=ed25519-sha256;c=simple/simple;d=example.com;\r\n\
+             \x20i=@example.com;h=From:To:From:Content-Location:Content-Transfer-Encoding:\r\n\
+             \x20Subject;s=selector0;t=42;x=54;bh=bodyhash;b=",
             String::from_utf8(out).unwrap(),
         );
     }

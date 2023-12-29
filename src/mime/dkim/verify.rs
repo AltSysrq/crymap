@@ -123,9 +123,7 @@ impl<'a> Verifier<'a> {
     /// be found at `${selector}._domainkey.${domain}.` after normalisation.
     /// The verifier does not know about DNS normalisation and expects to
     /// receive these exact strings back in the final step.
-    pub fn want_txt_records<'b>(
-        &'b self,
-    ) -> impl Iterator<Item = (&'b str, &'b str)> + 'b {
+    pub fn want_txt_records(&self) -> impl Iterator<Item = (&str, &str)> + '_ {
         self.subs
             .iter()
             .filter_map(|s| s.as_ref().ok())
@@ -239,8 +237,8 @@ impl SubVerifier<'_> {
         let mut txt_parse_error = None::<String>;
         let mut txt_record = None::<TxtRecord<'_>>;
         for record in &env.txt_records {
-            if record.selector != &*self.header.selector
-                || record.sdid != &*self.header.sdid
+            if record.selector != *self.header.selector
+                || record.sdid != *self.header.sdid
             {
                 continue;
             }
