@@ -49,8 +49,8 @@ mod account;
 mod cli;
 mod crypt;
 mod imap;
-mod lmtp;
 mod mime;
+mod smtp;
 
 #[cfg(test)]
 mod test_data;

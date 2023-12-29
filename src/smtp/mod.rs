@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -19,7 +19,7 @@
 mod codes;
 mod syntax;
 
-pub mod server;
+pub mod inbound;
 
 #[cfg(test)]
 mod integration_tests;

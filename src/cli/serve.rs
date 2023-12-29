@@ -135,7 +135,8 @@ pub async fn lmtp(
             "Failed to put stdio into non-blocking mode: {e:?}",
         )
     });
-    let mut server = crate::lmtp::server::Server::new(
+
+    crate::smtp::inbound::serve_lmtp(
         io,
         Arc::new(system_config),
         log_prefix.clone(),
@@ -143,12 +144,8 @@ pub async fn lmtp(
         users_root,
         host_name,
         peer_name,
-    );
-
-    match server.run().await {
-        Ok(_) => info!("{} Normal client disconnect", log_prefix),
-        Err(e) => warn!("{} Abnormal client disconnect: {}", log_prefix, e),
-    }
+    )
+    .await;
 }
 
 fn create_ssl_acceptor(

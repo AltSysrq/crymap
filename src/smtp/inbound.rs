@@ -25,7 +25,7 @@ use std::str;
 use std::sync::Arc;
 
 use chrono::prelude::*;
-use log::error;
+use log::{error, info, warn};
 use openssl::ssl::SslAcceptor;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufStream};
 
@@ -43,6 +43,30 @@ use crate::support::{
     system_config::{LmtpConfig, SystemConfig},
     unix_privileges,
 };
+
+pub async fn serve_lmtp(
+    io: ServerIo,
+    config: Arc<SystemConfig>,
+    log_prefix: LogPrefix,
+    ssl_acceptor: SslAcceptor,
+    users_dir: PathBuf,
+    host_name: String,
+    peer_name: String,
+) {
+    let mut server = Server::new(
+        io,
+        config,
+        log_prefix.clone(),
+        ssl_acceptor,
+        users_dir,
+        host_name,
+        peer_name,
+    );
+    match server.run().await {
+        Ok(_) => info!("{} Normal client disconnect", log_prefix),
+        Err(e) => warn!("{} Abnormal client disconnect: {}", log_prefix, e),
+    }
+}
 
 macro_rules! require {
     ($this:expr, $($fns:ident = $arg:expr,)* @else $el:block) => {
@@ -69,7 +93,7 @@ static EXTENSIONS: &[&str] = &[
     "SMTPUTF8",
 ];
 
-pub struct Server {
+pub(super) struct Server {
     io: BufStream<ServerIo>,
     config: Arc<SystemConfig>,
     log_prefix: LogPrefix,
@@ -127,7 +151,7 @@ impl ResponseKind {
 use self::ResponseKind::*;
 
 impl Server {
-    pub fn new(
+    pub(super) fn new(
         io: ServerIo,
         config: Arc<SystemConfig>,
         log_prefix: LogPrefix,
@@ -159,7 +183,7 @@ impl Server {
         }
     }
 
-    pub async fn run(&mut self) -> Result<(), Error> {
+    pub(super) async fn run(&mut self) -> Result<(), Error> {
         self.send_greeting().await?;
 
         let mut buffer = Vec::new();

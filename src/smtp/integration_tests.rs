@@ -31,7 +31,6 @@ use openssl::{
 use rayon::prelude::*;
 use tempfile::TempDir;
 
-use super::server::*;
 use crate::account::model::Uid;
 use crate::account::v2::Account;
 use crate::crypt::master_key::MasterKey;
@@ -144,7 +143,7 @@ async fn run_server(data_root: PathBuf, cxn_name: &str, server_io: UnixStream) {
 
     let ssl_acceptor = ssl_acceptor.build();
 
-    let mut server = Server::new(
+    let mut server = super::inbound::Server::new(
         server_io,
         Arc::new(SystemConfig::default()),
         LogPrefix::new(cxn_name.to_owned()),
