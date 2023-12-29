@@ -33,11 +33,14 @@ pub use canonicalisation::{
     HeaderCanonicalisation,
 };
 pub use error::*;
+#[allow(unused_imports)]
 pub use header::{
     Algorithm, HashAlgorithm, Header, SignatureAlgorithm, TxtFlags, TxtRecord,
     HEADER_NAME,
 };
+#[allow(unused_imports)]
 pub use sign::{KeyPair, Signer};
+#[allow(unused_imports)]
 pub use verify::{
     Outcome, OutcomeKind, TxtRecordEntry, VerificationEnvironment, Verifier,
 };

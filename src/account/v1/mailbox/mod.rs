@@ -252,8 +252,11 @@ mod select; // SELECT, EXAMINE, STATUS, also garbage collection
 #[cfg(feature = "dev-tools")]
 mod zstd_train;
 
+#[allow(unused_imports)]
 pub use defs::{StatefulMailbox, StatelessMailbox};
+#[allow(unused_imports)]
 pub use fetch::{FetchReceiver, MailboxMessageAccessor};
+#[allow(unused_imports)]
 pub use idle::{IdleListener, IdleNotifier};
 
 #[cfg(test)]
