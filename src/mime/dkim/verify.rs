@@ -28,7 +28,7 @@ use super::{
 use crate::mime::header::FULL_HEADER_LINE;
 
 const MAX_SIGNATURES: usize = 8;
-const MAX_RSA_BITS: u32 = 16384;
+const MAX_RSA_BITS: u32 = 8192;
 
 /// The final result of DKIM verification.
 ///
@@ -433,15 +433,22 @@ impl From<Result<(), Error>> for OutcomeKind {
 
 #[cfg(test)]
 mod test {
-    use super::super::{split_message, test_domain_keys};
+    use std::borrow::Cow;
+
+    use lazy_static::lazy_static;
+
+    use super::super::{
+        split_message, test_domain_keys, Algorithm, BodyCanonicalisation,
+        Canonicalisation, HeaderCanonicalisation,
+    };
     use super::*;
     use crate::test_data::*;
 
     fn run_verifier(
-        message: &[u8],
-        sender: &str,
         now_unix: i64,
+        sender: &str,
         txt_records: Vec<TxtRecordEntry>,
+        message: &[u8],
     ) -> Vec<Result<(), Error>> {
         let (header_block, body) = split_message(message);
         let mut verifier = Verifier::new(header_block);
@@ -473,22 +480,544 @@ mod test {
         assert_eq!(
             vec![not_found(), Ok(())],
             run_verifier(
-                DKIM_AMAZONCOJP_RSA_SHA256,
-                "amazonses.com",
                 1694481247,
+                "amazonses.com",
                 txt_records.clone(),
+                DKIM_AMAZONCOJP_RSA_SHA256,
             ),
         );
         assert_eq!(
             vec![not_found(), Err(Error::Fail(Failure::FutureSignature))],
             run_verifier(
-                DKIM_AMAZONCOJP_RSA_SHA256,
-                "amazonses.com",
                 1594481246,
+                "amazonses.com",
                 txt_records.clone(),
+                DKIM_AMAZONCOJP_RSA_SHA256,
             ),
         );
     }
 
-    // TODO More tests
+    struct TestKeys {
+        rsa1024: openssl::pkey::PKey<openssl::pkey::Private>,
+        rsa1024_txt: String,
+        rsa512: openssl::pkey::PKey<openssl::pkey::Private>,
+        rsa512_txt: String,
+        ed25519: openssl::pkey::PKey<openssl::pkey::Private>,
+        ed25519_txt: String,
+    }
+
+    lazy_static! {
+        static ref TEST_KEYS: TestKeys = TestKeys::new();
+    }
+
+    impl TestKeys {
+        fn new() -> Self {
+            fn format_txt(algorithm: &str, pub_key: &[u8]) -> String {
+                format!("v=DKIM1;k={algorithm};p={}", base64::encode(pub_key),)
+            }
+
+            let rsa1024 = openssl::rsa::Rsa::generate(1024).unwrap();
+            let rsa1024_txt =
+                format_txt("rsa", &rsa1024.public_key_to_der().unwrap());
+            let rsa1024 = openssl::pkey::PKey::from_rsa(rsa1024).unwrap();
+
+            let rsa512 = openssl::rsa::Rsa::generate(512).unwrap();
+            let rsa512_txt =
+                format_txt("rsa", &rsa512.public_key_to_der().unwrap());
+            let rsa512 = openssl::pkey::PKey::from_rsa(rsa512).unwrap();
+
+            let ed25519 = openssl::pkey::PKey::generate_ed25519().unwrap();
+            let ed25519_txt =
+                format_txt("ed25519", &ed25519.raw_public_key().unwrap());
+
+            Self {
+                rsa1024,
+                rsa1024_txt,
+                rsa512,
+                rsa512_txt,
+                ed25519,
+                ed25519_txt,
+            }
+        }
+    }
+
+    fn sign_message(
+        template: Header<'_>,
+        selector: &str,
+        key: &openssl::pkey::PKey<openssl::pkey::Private>,
+        message: &[u8],
+    ) -> Vec<u8> {
+        use super::super::Signer;
+
+        let keys = [(selector.to_owned(), key.to_owned())];
+        let (headers, body) = split_message(message);
+        let mut signer = Signer::new(&keys, &template);
+        signer.write_all(body).unwrap();
+        let signed_headers = signer.finish(headers);
+
+        let mut out = Vec::<u8>::from(signed_headers);
+        out.extend_from_slice(message);
+        out
+    }
+
+    #[derive(Clone, Copy)]
+    struct V<'a> {
+        now_unix: i64,
+        sender: &'a str,
+        sdid: &'a str,
+        selector: &'a str,
+    }
+
+    const V_DEFAULT: V<'_> = V {
+        now_unix: 0,
+        sender: "example.com",
+        sdid: "example.com",
+        selector: "selector",
+    };
+
+    fn verify_one(v: V<'_>, txt: &str, message: &[u8]) -> Result<(), Error> {
+        run_verifier(
+            v.now_unix,
+            v.sender,
+            vec![TxtRecordEntry {
+                sdid: v.sdid.to_owned(),
+                selector: v.selector.to_owned(),
+                txt: txt.to_owned(),
+            }],
+            message,
+        )
+        .into_iter()
+        .next()
+        .unwrap()
+    }
+
+    #[test]
+    fn verify_unparsable_header() {
+        let mut message = b"DKIM-Signature: v=1;foo=bar\r\n".to_vec();
+        message.extend_from_slice(CHRISTMAS_TREE);
+        assert_matches!(
+            Err(Error::Ambivalent(Ambivalence::HeaderParse(..))),
+            verify_one(V_DEFAULT, "", &message),
+        );
+    }
+
+    fn simple_template() -> Header<'static> {
+        Header {
+            raw: None,
+            version: 1,
+            algorithm: Algorithm {
+                signature: SignatureAlgorithm::Ed25519,
+                hash: HashAlgorithm::Sha256,
+            },
+            signature: Vec::new(),
+            body_hash: Vec::new(),
+            canonicalisation: Canonicalisation {
+                header: HeaderCanonicalisation::Simple,
+                body: BodyCanonicalisation::Simple,
+            },
+            sdid: Cow::Borrowed("example.com"),
+            signed_headers: vec![
+                Cow::Borrowed("From"),
+                Cow::Borrowed("To"),
+                Cow::Borrowed("Subject"),
+            ],
+            auid: None,
+            body_length: None,
+            dns_txt: true,
+            selector: Cow::Borrowed("selector"),
+            signature_timestamp: None,
+            signature_expiration: None,
+        }
+    }
+
+    #[test]
+    fn verify_unparsable_dns_txt() {
+        let message = sign_message(
+            simple_template(),
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Err(Error::Ambivalent(Ambivalence::DnsTxtParse(..))),
+            verify_one(V_DEFAULT, "v=DKIM1", &message),
+        );
+    }
+
+    #[test]
+    fn verify_unsupported_version() {
+        let message = sign_message(
+            Header {
+                version: 2,
+                ..simple_template()
+            },
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Err(Error::Ambivalent(Ambivalence::UnsupportedVersion)),
+            verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_rsa_key_too_big() {
+        let rsa_over_9000 = openssl::rsa::Rsa::generate(9001).unwrap();
+        let rsa_over_9000_txt = format!(
+            "p={}",
+            base64::encode(&rsa_over_9000.public_key_to_der().unwrap())
+        );
+        let rsa_over_9000 =
+            openssl::pkey::PKey::from_rsa(rsa_over_9000).unwrap();
+
+        let message = sign_message(
+            simple_template(),
+            "selector",
+            &rsa_over_9000,
+            CHRISTMAS_TREE,
+        );
+        assert_matches!(
+            Err(Error::Ambivalent(Ambivalence::RsaKeyTooBig)),
+            verify_one(V_DEFAULT, &rsa_over_9000_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_weak_hash_function() {
+        let message = sign_message(
+            Header {
+                algorithm: Algorithm {
+                    signature: SignatureAlgorithm::Rsa,
+                    hash: HashAlgorithm::Sha1,
+                },
+                ..simple_template()
+            },
+            "selector",
+            &TEST_KEYS.rsa1024,
+            CHRISTMAS_TREE,
+        );
+        assert_matches!(
+            Err(Error::Ambivalent(Ambivalence::WeakHashFunction)),
+            verify_one(V_DEFAULT, &TEST_KEYS.rsa1024_txt, &message),
+        );
+
+        assert_matches!(
+            Err(Error::Ambivalent(Ambivalence::WeakHashFunction)),
+            verify_one(
+                V {
+                    now_unix: 0,
+                    sender: "lin.gl",
+                    sdid: "lin.gl",
+                    selector: "selector1",
+                },
+                test_domain_keys::SELECTOR1_LIN_GL,
+                DKIM_LINGL_RSA_SHA1,
+            ),
+        );
+    }
+
+    #[test]
+    fn verify_weak_key() {
+        let message = sign_message(
+            simple_template(),
+            "selector",
+            &TEST_KEYS.rsa512,
+            CHRISTMAS_TREE,
+        );
+        assert_matches!(
+            Err(Error::Ambivalent(Ambivalence::WeakKey)),
+            verify_one(V_DEFAULT, &TEST_KEYS.rsa512_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_body_truncated() {
+        let mut message = sign_message(
+            Header {
+                body_length: Some(65536),
+                ..simple_template()
+            },
+            "selector",
+            &TEST_KEYS.ed25519,
+            TORTURE_TEST,
+        );
+        message.truncate(48000);
+
+        assert_matches!(
+            Err(Error::Fail(Failure::BodyTruncated)),
+            verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_body_corrupted() {
+        let mut message = sign_message(
+            simple_template(),
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+        message.extend_from_slice(b"corruption");
+
+        assert_matches!(
+            Err(Error::Fail(Failure::BodyHashMismatch)),
+            verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_header_corrupted() {
+        let mut message = sign_message(
+            simple_template(),
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        let from = memchr::memmem::find(&message, b"From").unwrap();
+        message[from + 10] = b'X';
+
+        assert_matches!(
+            Err(Error::Fail(Failure::SignatureMismatch)),
+            verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_signature_corrupted_ed25519() {
+        let mut message = sign_message(
+            simple_template(),
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        let b = memchr::memmem::find(&message, b"b=").unwrap();
+        message[b + 2..][..8].copy_from_slice(b"        ");
+
+        assert_matches!(
+            Err(Error::Fail(Failure::SignatureMismatch)),
+            verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_signature_corrupted_rsa() {
+        let mut message = sign_message(
+            simple_template(),
+            "selector",
+            &TEST_KEYS.rsa1024,
+            CHRISTMAS_TREE,
+        );
+
+        let b = memchr::memmem::find(&message, b"b=").unwrap();
+        message[b + 2..][..8].copy_from_slice(b"        ");
+
+        assert_matches!(
+            Err(Error::Fail(Failure::SignatureMismatch)),
+            verify_one(V_DEFAULT, &TEST_KEYS.rsa1024_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_signature_wrong_key() {
+        let message = sign_message(
+            simple_template(),
+            "selector",
+            &TEST_KEYS.rsa512,
+            CHRISTMAS_TREE,
+        );
+        assert_matches!(
+            Err(Error::Fail(Failure::SignatureMismatch)),
+            verify_one(V_DEFAULT, &TEST_KEYS.rsa1024_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_public_key_revoked() {
+        let message = sign_message(
+            simple_template(),
+            "selector",
+            &TEST_KEYS.rsa1024,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Err(Error::Fail(Failure::PublicKeyRevoked)),
+            verify_one(V_DEFAULT, "p=", &message),
+        );
+    }
+
+    #[test]
+    fn verify_from_field_unsigned() {
+        let message = sign_message(
+            Header {
+                signed_headers: vec![
+                    Cow::Borrowed("CC"),
+                    Cow::Borrowed("Subject"),
+                ],
+                ..simple_template()
+            },
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Err(Error::Fail(Failure::FromFieldUnsigned)),
+            verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_unacceptable_hash_algorithm() {
+        let message = sign_message(
+            simple_template(),
+            "selector",
+            &TEST_KEYS.rsa1024,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Err(Error::Fail(Failure::UnacceptableHashAlgorithm)),
+            verify_one(
+                V_DEFAULT,
+                &format!("{};h=sha1:sha3", TEST_KEYS.rsa1024_txt),
+                &message,
+            ),
+        );
+        assert_matches!(
+            Ok(()),
+            verify_one(
+                V_DEFAULT,
+                &format!("{};h=sha1:sha256:sha3", TEST_KEYS.rsa1024_txt),
+                &message,
+            ),
+        );
+    }
+
+    #[test]
+    fn verify_signature_algorithm_mismatch() {
+        let message = sign_message(
+            simple_template(),
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Err(Error::Fail(Failure::SignatureAlgorithmMismatch)),
+            verify_one(V_DEFAULT, &TEST_KEYS.rsa1024_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_timestamps() {
+        let message = sign_message(
+            Header {
+                signature_timestamp: Some(
+                    DateTime::from_timestamp(1_000_000, 0).unwrap(),
+                ),
+                signature_expiration: Some(
+                    DateTime::from_timestamp(2_000_000, 0).unwrap(),
+                ),
+                ..simple_template()
+            },
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Err(Error::Fail(Failure::FutureSignature)),
+            verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt, &message),
+        );
+        assert_matches!(
+            Err(Error::Fail(Failure::ExpiredSignature)),
+            verify_one(
+                V {
+                    now_unix: 3_000_000,
+                    ..V_DEFAULT
+                },
+                &TEST_KEYS.ed25519_txt,
+                &message,
+            ),
+        );
+        assert_matches!(
+            Ok(()),
+            verify_one(
+                V {
+                    now_unix: 1_500_000,
+                    ..V_DEFAULT
+                },
+                &TEST_KEYS.ed25519_txt,
+                &message,
+            ),
+        );
+    }
+
+    #[test]
+    fn verify_invalid_rsa_public_key() {
+        let message = sign_message(
+            simple_template(),
+            "selector",
+            &TEST_KEYS.rsa1024,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Err(Error::Fail(Failure::InvalidPublicKey)),
+            verify_one(
+                V_DEFAULT,
+                &TEST_KEYS.ed25519_txt.replace("ed25519", "rsa"),
+                &message,
+            ),
+        );
+    }
+
+    #[test]
+    fn verify_invalid_ed25519_public_key() {
+        let message = sign_message(
+            simple_template(),
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Err(Error::Fail(Failure::InvalidPublicKey)),
+            verify_one(
+                V_DEFAULT,
+                &TEST_KEYS.rsa1024_txt.replace("rsa", "ed25519"),
+                &message,
+            ),
+        );
+    }
+
+    #[test]
+    fn verify_ed25519_sha1() {
+        // The signer doesn't really produce sensible output in this
+        // configuration, but it does produce *something* which the verifier
+        // needs to reject.
+        let message = sign_message(
+            Header {
+                algorithm: Algorithm {
+                    signature: SignatureAlgorithm::Ed25519,
+                    hash: HashAlgorithm::Sha1,
+                },
+                ..simple_template()
+            },
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Err(Error::Fail(Failure::InvalidHashSignatureCombination)),
+            verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt, &message),
+        );
+    }
 }

@@ -163,7 +163,8 @@ impl<'a> Header<'a> {
         let mut text = String::with_capacity(256);
         let _ = write!(
             text,
-            "{HEADER_NAME}: v=1;a={algorithm};c={canon};",
+            "{HEADER_NAME}: v={version};a={algorithm};c={canon};",
+            version = self.version,
             algorithm = self.algorithm,
             canon = self.canonicalisation,
         );
