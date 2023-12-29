@@ -55,6 +55,8 @@ pub enum Ambivalence {
     WeakHashFunction,
     #[error("valid signature, but signing key is weak")]
     WeakKey,
+    #[error("valid signature, but SDID is unrelated to message sender")]
+    SdidNotSender,
     #[error("verification failed, but the selector is in test mode: {0}")]
     TestMode(Failure),
 }
@@ -90,6 +92,9 @@ impl std::cmp::PartialEq for Ambivalence {
             (&Self::WeakKey, &Self::WeakKey) => true,
             (&Self::WeakKey, _) => false,
 
+            (&Self::SdidNotSender, &Self::SdidNotSender) => true,
+            (&Self::SdidNotSender, _) => false,
+
             (&Self::TestMode(ref a), &Self::TestMode(ref b)) => a == b,
             (&Self::TestMode(..), _) => false,
         }
@@ -120,4 +125,12 @@ pub enum Failure {
     InvalidPublicKey,
     #[error("invalid hash + signature algorithm combination")]
     InvalidHashSignatureCombination,
+    #[error("SDID is not a valid domain")]
+    InvalidSdid,
+    #[error("AUID carries an invalid domain")]
+    InvalidAuid,
+    #[error("AUID is not within SDID zone")]
+    AuidOutsideSdid,
+    #[error("AUID is not the same as SDID, but the strict flag is set")]
+    AuidSdidMismatch,
 }

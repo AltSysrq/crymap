@@ -344,7 +344,6 @@ dependencies = [
  "flate2",
  "futures",
  "hickory-resolver",
- "idna 0.5.0",
  "itertools",
  "lazy_static",
  "libsqlite3-sys",

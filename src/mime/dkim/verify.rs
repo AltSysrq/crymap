@@ -208,11 +208,33 @@ impl SubVerifier<'_> {
     ) -> Result<(), Error> {
         // RFC 6376 § 6
 
-        // TODO Should we also be verifying that `d` has some relationship with
-        // the SMTP sender?
-
         // § 6.1.1
-        // TODO We're required to validate the `i` tag if present.
+
+        let Ok(sdid) = hickory_resolver::Name::from_ascii(&self.header.sdid)
+        else {
+            return Err(Failure::InvalidSdid.into());
+        };
+
+        // We're supposed to validate the SDID/AUID relationship first, but we
+        // can't actually complete this step till we have the TXT record.
+        let auid_matches_sdid =
+            if let Some(mut auid) = self.header.auid.as_deref() {
+                if let Some((_, domain)) = auid.rsplit_once('@') {
+                    auid = domain;
+                }
+
+                let Ok(auid) = hickory_resolver::Name::from_ascii(auid) else {
+                    return Err(Failure::InvalidAuid.into());
+                };
+
+                if !sdid.zone_of(&auid) {
+                    return Err(Failure::AuidOutsideSdid.into());
+                }
+
+                sdid == auid
+            } else {
+                true
+            };
 
         if 1 != self.header.version {
             return Err(Ambivalence::UnsupportedVersion.into());
@@ -268,6 +290,12 @@ impl SubVerifier<'_> {
                 .into());
         };
 
+        // For consistency with the earlier AUID checks, we check AUID/SDID
+        // strictness without considering test_mode.
+        if txt_record.flags.strict && !auid_matches_sdid {
+            return Err(Failure::AuidSdidMismatch.into());
+        }
+
         let is_test = txt_record.flags.test;
         self.finish_with_txt_record(header_block, env, txt_record)
             .map_err(|e| match e {
@@ -275,7 +303,13 @@ impl SubVerifier<'_> {
                     Error::Ambivalent(Ambivalence::TestMode(f))
                 },
                 e => e,
-            })
+            })?;
+
+        if !sdid.zone_of(&env.sender) {
+            return Err(Error::Ambivalent(Ambivalence::SdidNotSender));
+        }
+
+        Ok(())
     }
 
     // This is conceptually a continuation of the above function, but is
@@ -424,6 +458,7 @@ impl From<Result<(), Error>> for OutcomeKind {
                 A::RsaKeyTooBig => Self::Policy,
                 A::WeakHashFunction => Self::Policy,
                 A::WeakKey => Self::Policy,
+                A::SdidNotSender => Self::Policy,
             },
 
             Err(Error::Fail(_)) => Self::Fail,
@@ -504,6 +539,7 @@ mod test {
         rsa512_txt: String,
         ed25519: openssl::pkey::PKey<openssl::pkey::Private>,
         ed25519_txt: String,
+        ed25519_txt_strict: String,
     }
 
     lazy_static! {
@@ -529,6 +565,7 @@ mod test {
             let ed25519 = openssl::pkey::PKey::generate_ed25519().unwrap();
             let ed25519_txt =
                 format_txt("ed25519", &ed25519.raw_public_key().unwrap());
+            let ed25519_txt_strict = format!("{ed25519_txt};t=s");
 
             Self {
                 rsa1024,
@@ -537,6 +574,7 @@ mod test {
                 rsa512_txt,
                 ed25519,
                 ed25519_txt,
+                ed25519_txt_strict,
             }
         }
     }
@@ -1018,6 +1056,211 @@ mod test {
         assert_matches!(
             Err(Error::Fail(Failure::InvalidHashSignatureCombination)),
             verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_test_mode_failure() {
+        let message = sign_message(
+            simple_template(),
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+        assert_matches!(
+            Err(Error::Ambivalent(Ambivalence::TestMode(
+                Failure::SignatureAlgorithmMismatch
+            ))),
+            verify_one(
+                V_DEFAULT,
+                &format!("{};t=y", TEST_KEYS.rsa1024_txt),
+                &message,
+            ),
+        );
+    }
+
+    #[test]
+    fn verify_explicit_auid_nonstrict() {
+        let message = sign_message(
+            Header {
+                auid: Some(Cow::Borrowed("\"John @ Home\"@EXAMPLE.COM.")),
+                ..simple_template()
+            },
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Ok(()),
+            verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_subdomain_auid_nonstrict() {
+        let message = sign_message(
+            Header {
+                auid: Some(Cow::Borrowed("\"John @ Home\"@mail.EXAMPLE.com")),
+                ..simple_template()
+            },
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Ok(()),
+            verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_unrelated_auid_nonstrict() {
+        let message = sign_message(
+            Header {
+                auid: Some(Cow::Borrowed("@mail.example.net")),
+                ..simple_template()
+            },
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Err(Error::Fail(Failure::AuidOutsideSdid)),
+            verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_implicit_auid_strict() {
+        let message = sign_message(
+            simple_template(),
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Ok(()),
+            verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt_strict, &message),
+        );
+    }
+
+    #[test]
+    fn verify_explicit_auid_strict() {
+        let message = sign_message(
+            Header {
+                auid: Some(Cow::Borrowed("@ExAmPlE.CoM")),
+                ..simple_template()
+            },
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Ok(()),
+            verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt_strict, &message),
+        );
+    }
+
+    #[test]
+    fn verify_explicit_subdomain_auid_strict() {
+        let message = sign_message(
+            Header {
+                auid: Some(Cow::Borrowed("@mail.example.com")),
+                ..simple_template()
+            },
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Err(Error::Fail(Failure::AuidSdidMismatch)),
+            verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt_strict, &message),
+        );
+    }
+
+    #[test]
+    fn verify_invalid_sdid() {
+        let message = sign_message(
+            Header {
+                sdid: Cow::Borrowed("not a domain!"),
+                ..simple_template()
+            },
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Err(Error::Fail(Failure::InvalidSdid)),
+            verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_invalid_auid() {
+        let message = sign_message(
+            Header {
+                auid: Some(Cow::Borrowed("@not a domain!")),
+                ..simple_template()
+            },
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Err(Error::Fail(Failure::InvalidAuid)),
+            verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt, &message),
+        );
+    }
+
+    #[test]
+    fn verify_sender_mismatch() {
+        let message = sign_message(
+            simple_template(),
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Err(Error::Ambivalent(Ambivalence::SdidNotSender)),
+            verify_one(
+                V {
+                    sender: "example.net",
+                    ..V_DEFAULT
+                },
+                &TEST_KEYS.ed25519_txt,
+                &message,
+            ),
+        );
+    }
+
+    #[test]
+    fn verify_sender_subdomain() {
+        let message = sign_message(
+            simple_template(),
+            "selector",
+            &TEST_KEYS.ed25519,
+            CHRISTMAS_TREE,
+        );
+
+        assert_matches!(
+            Ok(()),
+            verify_one(
+                V {
+                    sender: "mail.example.com",
+                    ..V_DEFAULT
+                },
+                &TEST_KEYS.ed25519_txt,
+                &message,
+            ),
         );
     }
 }
