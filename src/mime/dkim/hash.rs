@@ -234,18 +234,12 @@ mod test {
     use chrono::prelude::*;
 
     use super::super::{
-        test_domain_keys, Algorithm, BodyCanonicalisation, Canonicalisation,
-        HashAlgorithm, HeaderCanonicalisation, SignatureAlgorithm, TxtRecord,
-        HEADER_NAME,
+        split_message, test_domain_keys, Algorithm, BodyCanonicalisation,
+        Canonicalisation, HashAlgorithm, HeaderCanonicalisation,
+        SignatureAlgorithm, TxtRecord, HEADER_NAME,
     };
     use super::*;
     use crate::test_data::*;
-
-    fn split_message(message: &[u8]) -> (&[u8], &[u8]) {
-        let blank_line = memchr::memmem::find(message, b"\r\n\r\n")
-            .expect("no CRLF-CRLF in message");
-        (&message[..blank_line], &message[blank_line + 4..])
-    }
 
     fn extract_nth_dkim_header(header_block: &[u8], n: usize) -> Header<'_> {
         FULL_HEADER_LINE

@@ -118,4 +118,6 @@ pub enum Failure {
     FutureSignature,
     #[error("public key is invalid")]
     InvalidPublicKey,
+    #[error("invalid hash + signature algorithm combination")]
+    InvalidHashSignatureCombination,
 }

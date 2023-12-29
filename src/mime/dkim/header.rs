@@ -131,14 +131,14 @@ impl<'a> Header<'a> {
             let _ = write!(dst, "{}=", tag);
             let start = dst.len();
             while !data.is_empty() {
-                let mut avail = MAX_LINE.saturating_sub(*line_length) * 3 / 4;
+                let mut avail = MAX_LINE.saturating_sub(*line_length) / 4 * 3;
                 if 0 == avail {
                     dst.push_str("\r\n ");
                     *line_length = 1;
-                    avail = (MAX_LINE - 1) * 3 / 4;
+                    avail = (MAX_LINE - 1) / 4 * 3;
                 }
 
-                let len = (avail * 3).min(data.len());
+                let len = avail.min(data.len());
                 let old_str_len = dst.len();
                 // This only produces padding if len is not a multiple of 3,
                 // which only happens when we hit the end of `data`.

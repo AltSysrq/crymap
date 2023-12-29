@@ -22,6 +22,7 @@ mod canonicalisation;
 mod error;
 mod hash;
 mod header;
+mod sign;
 mod verify;
 
 #[cfg(test)]
@@ -36,6 +37,14 @@ pub use header::{
     Algorithm, HashAlgorithm, Header, SignatureAlgorithm, TxtFlags, TxtRecord,
     HEADER_NAME,
 };
+pub use sign::{KeyPair, Signer};
 pub use verify::{
     Outcome, OutcomeKind, TxtRecordEntry, VerificationEnvironment, Verifier,
 };
+
+#[cfg(test)]
+fn split_message(message: &[u8]) -> (&[u8], &[u8]) {
+    let blank_line = memchr::memmem::find(message, b"\r\n\r\n")
+        .expect("no CRLF-CRLF in message");
+    (&message[..blank_line], &message[blank_line + 4..])
+}

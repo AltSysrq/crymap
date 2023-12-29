@@ -86,7 +86,7 @@ struct SubVerifier<'a> {
     hasher: hash::BodyHasher,
 }
 
-trait Captures<U> {}
+pub(super) trait Captures<U> {}
 impl<T: ?Sized, U> Captures<U> for T {}
 
 impl<'a> Verifier<'a> {
@@ -162,7 +162,7 @@ impl<'a> Verifier<'a> {
         }
     }
 
-    fn finish_raw<'e>(
+    pub(super) fn finish_raw<'e>(
         self,
         env: &'e VerificationEnvironment,
     ) -> impl Iterator<Item = Result<(), Error>> + Captures<(&'a (), &'e ())>
@@ -347,10 +347,20 @@ impl SubVerifier<'_> {
         };
 
         let header_data = hash::header_hash_data(&self.header, header_block);
-        let mut verifier = openssl::sign::Verifier::new(
-            self.header.algorithm.hash.message_digest(),
-            &public_key,
-        )
+        let mut verifier = match self.header.algorithm.signature {
+            SignatureAlgorithm::Rsa => openssl::sign::Verifier::new(
+                self.header.algorithm.hash.message_digest(),
+                &public_key,
+            ),
+            SignatureAlgorithm::Ed25519 => {
+                // Only SHA-256 is possible.
+                if self.header.algorithm.hash != HashAlgorithm::Sha256 {
+                    return Err(Failure::InvalidHashSignatureCombination.into());
+                }
+                // OpenSSL rejects explicit configuration of the digest.
+                openssl::sign::Verifier::new_without_digest(&public_key)
+            },
+        }
         .map_err(Ambivalence::Ssl)?;
         let valid = verifier
             .verify_oneshot(&self.header.signature, &header_data)
@@ -378,7 +388,11 @@ impl SubVerifier<'_> {
             return Err(Failure::ExpiredSignature.into());
         }
 
-        if self.header.signature_timestamp.is_some_and(|x| x > env.now) {
+        if self
+            .header
+            .signature_timestamp
+            .is_some_and(|x| x > env.now + chrono::Duration::days(1))
+        {
             return Err(Failure::FutureSignature.into());
         }
 
@@ -419,15 +433,9 @@ impl From<Result<(), Error>> for OutcomeKind {
 
 #[cfg(test)]
 mod test {
-    use super::super::test_domain_keys;
+    use super::super::{split_message, test_domain_keys};
     use super::*;
     use crate::test_data::*;
-
-    fn split_message(message: &[u8]) -> (&[u8], &[u8]) {
-        let blank_line = memchr::memmem::find(message, b"\r\n\r\n")
-            .expect("no CRLF-CRLF in message");
-        (&message[..blank_line], &message[blank_line + 4..])
-    }
 
     fn run_verifier(
         message: &[u8],
@@ -476,9 +484,11 @@ mod test {
             run_verifier(
                 DKIM_AMAZONCOJP_RSA_SHA256,
                 "amazonses.com",
-                1694481246,
+                1594481246,
                 txt_records.clone(),
             ),
         );
     }
+
+    // TODO More tests
 }
