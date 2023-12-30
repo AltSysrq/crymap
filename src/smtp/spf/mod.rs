@@ -18,4 +18,5 @@
 
 #![allow(dead_code)] // TODO Remove
 
+mod eval;
 mod syntax;

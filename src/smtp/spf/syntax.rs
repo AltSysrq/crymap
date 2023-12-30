@@ -80,6 +80,12 @@ pub enum Modifier<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MacroString<'a>(&'a str);
 
+impl<'a> MacroString<'a> {
+    pub fn new(s: &'a str) -> Self {
+        Self(s)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MacroElement<'a> {
     Literal(&'a str),
@@ -430,7 +436,7 @@ fn parse_macro_expand(mut s: &str) -> Result<MacroElement<'_>, Error> {
         kind,
         keep_parts,
         reverse,
-        delimiters: if s.is_empty() { "." } else { s },
+        delimiters: s,
     }))
 }
 
@@ -682,7 +688,7 @@ mod test {
         assert_eq!(
             Ok(vec![
                 lit("foo"),
-                mac(Macro::Sender, false, None, "."),
+                mac(Macro::Sender, false, None, ""),
                 lit("bar"),
             ]),
             parse("foo%{s}bar"),
@@ -717,15 +723,15 @@ mod test {
         assert_eq!(
             Ok(vec![
                 mac(Macro::SenderLocalPart, false, Some(4), "-"),
-                mac(Macro::SenderDomain, true, None, "."),
-                mac(Macro::Domain, false, None, "."),
-                mac(Macro::Ip, false, None, "."),
-                mac(Macro::Ptr, false, None, "."),
-                mac(Macro::IpVersion, false, None, "."),
-                mac(Macro::HeloDomain, false, None, "."),
-                mac(Macro::SmtpClientIp, false, None, "."),
-                mac(Macro::ReceivingHost, false, None, "."),
-                mac(Macro::CurrentTimestamp, false, None, "."),
+                mac(Macro::SenderDomain, true, None, ""),
+                mac(Macro::Domain, false, None, ""),
+                mac(Macro::Ip, false, None, ""),
+                mac(Macro::Ptr, false, None, ""),
+                mac(Macro::IpVersion, false, None, ""),
+                mac(Macro::HeloDomain, false, None, ""),
+                mac(Macro::SmtpClientIp, false, None, ""),
+                mac(Macro::ReceivingHost, false, None, ""),
+                mac(Macro::CurrentTimestamp, false, None, ""),
             ]),
             parse("%{l4-}%{or}%{d}%{i}%{p}%{v}%{h}%{c}%{r}%{t}"),
         );
