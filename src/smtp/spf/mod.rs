@@ -18,5 +18,11 @@
 
 #![allow(dead_code)] // TODO Remove
 
+mod driver;
 mod eval;
 mod syntax;
+
+#[allow(unused_imports)]
+pub use driver::run;
+#[allow(unused_imports)]
+pub use eval::{Context, DnsCache, DnsEntry, Explanation, SpfResult};

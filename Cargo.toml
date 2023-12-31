@@ -111,4 +111,8 @@ opt-level = 3
 panic = "abort"
 
 [features]
+# Enable tooling which is mainly useful for the development of Crymap.
 dev-tools = []
+# Build and run tests that require a live network. This does not change the
+# non-test build.
+live-network-tests = []

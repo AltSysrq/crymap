@@ -157,7 +157,7 @@ pub struct DnsCache {
 
 // These are association lists instead of hash maps because <DnsName as Hash>
 // allocates like there's no tomorrow, and ultimately these won't be very big.
-type DnsCacheMap<T> = Vec<(Rc<DnsName>, DnsEntry<T>)>;
+pub(super) type DnsCacheMap<T> = Vec<(Rc<DnsName>, DnsEntry<T>)>;
 
 /// An entry in the DNS cache passed to the SPF evaluator.
 pub enum DnsEntry<T> {
@@ -1656,6 +1656,21 @@ mod test {
                 &mut dns_cache! {
                     "s.com" => {
                         txt: ["v=spf1 -all"],
+                    },
+                },
+            ),
+        );
+    }
+
+    #[test]
+    fn eval_empty() {
+        assert_eq!(
+            Some((SpfResult::Neutral, Explanation::None)),
+            eval(
+                &simple_context("s.com", "1.2.3.4"),
+                &mut dns_cache! {
+                    "s.com" => {
+                        txt: ["v=spf1"],
                     },
                 },
             ),
