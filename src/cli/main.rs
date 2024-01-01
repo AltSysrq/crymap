@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2022, Jason Lingle
+// Copyright (c) 2020, 2022, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -56,6 +56,15 @@ enum DevSubcommand {
     ///
     /// There is no way to configure this.
     ImapTest,
+    /// Compile the Mozilla Public Suffix List.
+    CompilePsl(CompilePslCommand),
+}
+
+#[cfg(feature = "dev-tools")]
+#[derive(StructOpt)]
+struct CompilePslCommand {
+    infile: PathBuf,
+    outfile: PathBuf,
 }
 
 #[derive(StructOpt, Default)]
@@ -294,6 +303,10 @@ pub fn main() {
     match cmd {
         #[cfg(feature = "dev-tools")]
         Command::Dev(DevSubcommand::ImapTest) => super::imap_test::imap_test(),
+        #[cfg(feature = "dev-tools")]
+        Command::Dev(DevSubcommand::CompilePsl(cmd)) => {
+            crate::smtp::compile_psl(&cmd.infile, &cmd.outfile);
+        },
         Command::Remote(cmd) => super::remote::main(cmd),
         Command::Server(cmd) => server(cmd),
     }

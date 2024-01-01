@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -18,4 +18,8 @@
 
 #![allow(dead_code)] // TODO Remove
 
+mod psl;
 mod syntax;
+
+#[cfg(feature = "dev-tools")]
+pub use psl::cli::compile_psl;

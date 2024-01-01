@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -25,3 +25,6 @@ pub mod inbound;
 
 #[cfg(test)]
 mod integration_tests;
+
+#[cfg(feature = "dev-tools")]
+pub use dmarc::compile_psl;
