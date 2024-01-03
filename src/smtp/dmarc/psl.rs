@@ -54,7 +54,7 @@
 //! considered strictly a suffix, but it will be identified as the authority of
 //! `foo.hokkaido.jp` due to the `*.jp` rule.
 
-use hickory_resolver::Name as DnsName;
+use crate::support::dns;
 
 #[cfg(any(test, feature = "dev-tools"))]
 mod compile {
@@ -106,7 +106,7 @@ mod compile {
                 (line, LineKind::Normal)
             };
 
-            let domain = DnsName::from_utf8(unicode_name)
+            let domain = dns::Name::from_utf8(unicode_name)
                 .unwrap()
                 .to_ascii()
                 .to_lowercase();
@@ -217,13 +217,13 @@ static PSL_DATA: &str = include_str!("psl.txt");
 
 /// Returns the "organisational domain" of `domain`, or a best guess if no data
 /// is available.
-pub fn organisational_domain(domain: &DnsName) -> DnsName {
+pub fn organisational_domain(domain: &dns::Name) -> dns::Name {
     eval(PSL_DATA, domain)
 }
 
-fn eval(mut psl_data: &str, domain: &DnsName) -> DnsName {
+fn eval(mut psl_data: &str, domain: &dns::Name) -> dns::Name {
     let domain_str = domain.to_ascii().to_lowercase();
-    let mut best_match = None::<DnsName>;
+    let mut best_match = None::<dns::Name>;
 
     while psl_data.starts_with('#') {
         psl_data = psl_data.split_once('\n').unwrap().1;
@@ -299,8 +299,8 @@ fn eval(mut psl_data: &str, domain: &DnsName) -> DnsName {
 mod test {
     use super::*;
 
-    fn dn(s: &str) -> DnsName {
-        DnsName::from_ascii(s).unwrap()
+    fn dn(s: &str) -> dns::Name {
+        dns::Name::from_ascii(s).unwrap()
     }
 
     #[test]
@@ -362,9 +362,9 @@ mod test {
             organisational_domain(&dn("mail.foo.xii.jp")),
         );
         assert_eq!(
-            DnsName::from_utf8("foo.京都.jp").unwrap(),
+            dns::Name::from_utf8("foo.京都.jp").unwrap(),
             organisational_domain(
-                &DnsName::from_utf8("mail.foo.京都.jp").unwrap()
+                &dns::Name::from_utf8("mail.foo.京都.jp").unwrap()
             ),
         );
     }

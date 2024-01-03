@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -25,15 +25,14 @@
 //! `%{d}`.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::rc::Rc;
 
 use chrono::prelude::*;
-use hickory_resolver::Name as DnsName;
 use itertools::Itertools;
 
 use super::syntax as s;
+use crate::support::dns;
 
 // RFC 7208 § 4.6.4
 /// The maximum number of directives which trigger DNS queries which may be
@@ -82,7 +81,7 @@ struct ResultInfo {
     result: SpfResult,
 
     /// The `spf_domain` where the conclusion was reached.
-    spf_domain: Rc<DnsName>,
+    spf_domain: Rc<dns::Name>,
     /// The TXT record where the conclusion was reached. This can later be used
     /// to generate an explanation.
     spf_txt: Option<Rc<str>>,
@@ -103,7 +102,7 @@ pub struct Context<'a> {
     /// The `HELO` domain or domain part of the `MAIL FROM`.
     pub sender_domain: Cow<'a, str>,
     /// The parsed representation of `sender_domain`.
-    pub sender_domain_parsed: Rc<DnsName>,
+    pub sender_domain_parsed: Rc<dns::Name>,
     /// The `HELO` domain.
     pub helo_domain: Cow<'a, str>,
     /// The sender IP address.
@@ -140,46 +139,6 @@ struct EvaluatorState {
     skipped_directive: bool,
 }
 
-/// A cache of DNS records used by SPF evaluation.
-///
-/// The evaluator creates entries with status `New` as it discovers them. The
-/// driver is responsible for actually fetching them and updating their status
-/// as they become available.
-#[derive(Default)]
-pub struct DnsCache {
-    pub name_intern: HashMap<String, Rc<DnsName>>,
-    pub a: DnsCacheMap<Vec<Ipv4Addr>>,
-    pub aaaa: DnsCacheMap<Vec<Ipv6Addr>>,
-    pub txt: DnsCacheMap<Vec<Rc<str>>>,
-    pub mx: DnsCacheMap<Vec<Rc<DnsName>>>,
-    pub ptr: HashMap<IpAddr, DnsEntry<Vec<Rc<DnsName>>>>,
-}
-
-// These are association lists instead of hash maps because <DnsName as Hash>
-// allocates like there's no tomorrow, and ultimately these won't be very big.
-pub(super) type DnsCacheMap<T> = Vec<(Rc<DnsName>, DnsEntry<T>)>;
-
-/// An entry in the DNS cache passed to the SPF evaluator.
-pub enum DnsEntry<T> {
-    /// The query succeeded, and these are its results.
-    Ok(T),
-    /// The query succeeded and returned no results.
-    NotFound,
-    /// The query failed.
-    Error,
-    /// The query is in-flight.
-    Pending,
-    /// The evaluator newly discovered the need for this query.
-    New,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DnsCacheError {
-    NotFound,
-    Error,
-    NotReady,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DirectiveError {
     TempFail,
@@ -195,12 +154,12 @@ enum DirectiveError {
 /// `Explanation` is `NotReady`, more DNS information is needed to generate the
 /// explanation.
 ///
-/// If this returns `None`, `New` entries may be added to `DnsCache`. The
+/// If this returns `None`, `New` entries may be added to `dns::Cache`. The
 /// driver must arrange to perform these queries (changing them to `NotReady`)
 /// and re-run `eval` when more data is available.
 pub fn eval(
     ctx: &Context<'_>,
-    dns_cache: &mut DnsCache,
+    dns_cache: &mut dns::Cache,
 ) -> Option<(SpfResult, Explanation)> {
     let mut evaluator = EvaluatorState::default();
     let result = evaluator
@@ -239,8 +198,8 @@ impl EvaluatorState {
     fn eval_spf_chain(
         &mut self,
         ctx: &Context<'_>,
-        dns_cache: &mut DnsCache,
-        mut spf_domain: Rc<DnsName>,
+        dns_cache: &mut dns::Cache,
+        mut spf_domain: Rc<dns::Name>,
     ) -> Option<ResultInfo> {
         for i in 0.. {
             match self.eval_one_spf(ctx, dns_cache, Rc::clone(&spf_domain)) {
@@ -322,26 +281,26 @@ impl EvaluatorState {
     fn eval_one_spf(
         &mut self,
         ctx: &Context<'_>,
-        dns_cache: &mut DnsCache,
-        spf_domain: Rc<DnsName>,
+        dns_cache: &mut dns::Cache,
+        spf_domain: Rc<dns::Name>,
     ) -> Result<ResultInfo, Option<Rc<str>>> {
-        let txt_records = match dns(&mut dns_cache.txt, &spf_domain) {
+        let txt_records = match dns::look_up(&mut dns_cache.txt, &spf_domain) {
             Ok(records) => records,
-            Err(DnsCacheError::NotFound) => {
+            Err(dns::CacheError::NotFound) => {
                 return Ok(ResultInfo {
                     result: SpfResult::None,
                     spf_domain,
                     spf_txt: None,
                 })
             },
-            Err(DnsCacheError::Error) => {
+            Err(dns::CacheError::Error) => {
                 return Ok(ResultInfo {
                     result: SpfResult::TempError,
                     spf_domain,
                     spf_txt: None,
                 })
             },
-            Err(DnsCacheError::NotReady) => {
+            Err(dns::CacheError::NotReady) => {
                 self.skipped_directive = true;
                 return Err(None);
             },
@@ -432,8 +391,8 @@ impl EvaluatorState {
     fn eval_directive(
         &mut self,
         ctx: &Context<'_>,
-        dns_cache: &mut DnsCache,
-        spf_domain: &Rc<DnsName>,
+        dns_cache: &mut dns::Cache,
+        spf_domain: &Rc<dns::Name>,
         directive: s::Directive,
     ) -> Result<Option<s::Qualifier>, DirectiveError> {
         if self.eval_mechanism(
@@ -451,8 +410,8 @@ impl EvaluatorState {
     fn eval_mechanism(
         &mut self,
         ctx: &Context<'_>,
-        dns_cache: &mut DnsCache,
-        spf_domain: &Rc<DnsName>,
+        dns_cache: &mut dns::Cache,
+        spf_domain: &Rc<dns::Name>,
         mechanism: s::Mechanism,
     ) -> Result<bool, DirectiveError> {
         use super::syntax::Mechanism as M;
@@ -490,8 +449,8 @@ impl EvaluatorState {
     fn eval_a(
         &mut self,
         ctx: &Context<'_>,
-        dns_cache: &mut DnsCache,
-        spf_domain: &Rc<DnsName>,
+        dns_cache: &mut dns::Cache,
+        spf_domain: &Rc<dns::Name>,
         domain: Option<s::MacroString<'_>>,
         ipv4_cidr_len: Option<u32>,
         ipv6_cidr_len: Option<u32>,
@@ -513,8 +472,8 @@ impl EvaluatorState {
     fn eval_mx(
         &mut self,
         ctx: &Context<'_>,
-        dns_cache: &mut DnsCache,
-        spf_domain: &Rc<DnsName>,
+        dns_cache: &mut dns::Cache,
+        spf_domain: &Rc<dns::Name>,
         domain: Option<s::MacroString<'_>>,
         ipv4_cidr_len: Option<u32>,
         ipv6_cidr_len: Option<u32>,
@@ -523,9 +482,10 @@ impl EvaluatorState {
         let domain =
             self.expand_and_parse_domain(ctx, dns_cache, spf_domain, domain)?;
 
-        let mx_records = top_level_error_map(dns(&mut dns_cache.mx, domain))?
-            .map(|v| v.as_slice())
-            .unwrap_or_default();
+        let mx_records =
+            top_level_error_map(dns::look_up(&mut dns_cache.mx, domain))?
+                .map(|v| v.as_slice())
+                .unwrap_or_default();
 
         if mx_records.len() >= MAX_MX_SIZE {
             return Err(DirectiveError::PermFail);
@@ -568,32 +528,36 @@ impl EvaluatorState {
     fn eval_a_or_mx_domain(
         &self,
         ctx: &Context<'_>,
-        dns_cache_a: &mut DnsCacheMap<Vec<Ipv4Addr>>,
-        dns_cache_aaaa: &mut DnsCacheMap<Vec<Ipv6Addr>>,
-        domain: Rc<DnsName>,
+        dns_cache_a: &mut dns::CacheMap<Vec<Ipv4Addr>>,
+        dns_cache_aaaa: &mut dns::CacheMap<Vec<Ipv6Addr>>,
+        domain: Rc<dns::Name>,
         ipv4_cidr_len: Option<u32>,
         ipv6_cidr_len: Option<u32>,
     ) -> Result<bool, DirectiveError> {
         Ok(match ctx.ip {
-            IpAddr::V4(ip) => top_level_error_map(dns(dns_cache_a, domain))?
-                .map(|v| v.as_slice())
-                .unwrap_or_default()
-                .iter()
-                .any(|&a| ipv4_addr_matches(ip, a, ipv4_cidr_len)),
+            IpAddr::V4(ip) => {
+                top_level_error_map(dns::look_up(dns_cache_a, domain))?
+                    .map(|v| v.as_slice())
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|&a| ipv4_addr_matches(ip, a, ipv4_cidr_len))
+            },
 
-            IpAddr::V6(ip) => top_level_error_map(dns(dns_cache_aaaa, domain))?
-                .map(|v| v.as_slice())
-                .unwrap_or_default()
-                .iter()
-                .any(|&a| ipv6_addr_matches(ip, a, ipv6_cidr_len)),
+            IpAddr::V6(ip) => {
+                top_level_error_map(dns::look_up(dns_cache_aaaa, domain))?
+                    .map(|v| v.as_slice())
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|&a| ipv6_addr_matches(ip, a, ipv6_cidr_len))
+            },
         })
     }
 
     fn eval_ptr(
         &mut self,
         ctx: &Context<'_>,
-        dns_cache: &mut DnsCache,
-        spf_domain: &Rc<DnsName>,
+        dns_cache: &mut dns::Cache,
+        spf_domain: &Rc<dns::Name>,
         domain: Option<s::MacroString<'_>>,
     ) -> Result<bool, DirectiveError> {
         self.incr_dns_directive()?;
@@ -630,8 +594,8 @@ impl EvaluatorState {
     fn eval_exists(
         &mut self,
         ctx: &Context<'_>,
-        dns_cache: &mut DnsCache,
-        spf_domain: &Rc<DnsName>,
+        dns_cache: &mut dns::Cache,
+        spf_domain: &Rc<dns::Name>,
         domain: s::MacroString<'_>,
     ) -> Result<bool, DirectiveError> {
         self.incr_dns_directive()?;
@@ -641,7 +605,7 @@ impl EvaluatorState {
             spf_domain,
             Some(domain),
         )?;
-        Ok(top_level_error_map(dns(&mut dns_cache.a, domain))?
+        Ok(top_level_error_map(dns::look_up(&mut dns_cache.a, domain))?
             .map(|v| !v.is_empty())
             .unwrap_or_default())
     }
@@ -649,8 +613,8 @@ impl EvaluatorState {
     fn eval_include(
         &mut self,
         ctx: &Context<'_>,
-        dns_cache: &mut DnsCache,
-        spf_domain: &Rc<DnsName>,
+        dns_cache: &mut dns::Cache,
+        spf_domain: &Rc<dns::Name>,
         domain: s::MacroString<'_>,
     ) -> Result<bool, DirectiveError> {
         // This is the only thing enforcing any kind of recursion limit.
@@ -691,17 +655,19 @@ impl EvaluatorState {
     fn expand_and_parse_domain(
         &self,
         ctx: &Context<'_>,
-        dns_cache: &mut DnsCache,
-        spf_domain: &Rc<DnsName>,
+        dns_cache: &mut dns::Cache,
+        spf_domain: &Rc<dns::Name>,
         domain: Option<s::MacroString<'_>>,
-    ) -> Result<Rc<DnsName>, DirectiveError> {
+    ) -> Result<Rc<dns::Name>, DirectiveError> {
         match domain {
             None => Ok(Rc::clone(spf_domain)),
             Some(domain) => {
                 let domain = self.expand_macro_string(
                     ctx, dns_cache, spf_domain, false, domain,
                 )?;
-                dns_cache.intern_domain(domain)
+                dns_cache
+                    .intern_domain(domain)
+                    .map_err(|_| DirectiveError::PermFail)
             },
         }
     }
@@ -710,8 +676,8 @@ impl EvaluatorState {
     fn explain(
         &self,
         ctx: &Context<'_>,
-        dns_cache: &mut DnsCache,
-        spf_domain: &DnsName,
+        dns_cache: &mut dns::Cache,
+        spf_domain: &dns::Name,
         spf_txt: &str,
     ) -> Explanation {
         let Some(explain_domain) =
@@ -737,13 +703,14 @@ impl EvaluatorState {
             return Explanation::None;
         };
 
-        let txt_records = match dns(&mut dns_cache.txt, &explain_domain) {
-            Ok(r) => r,
-            Err(DnsCacheError::NotFound | DnsCacheError::Error) => {
-                return Explanation::None
-            },
-            Err(DnsCacheError::NotReady) => return Explanation::NotReady,
-        };
+        let txt_records =
+            match dns::look_up(&mut dns_cache.txt, &explain_domain) {
+                Ok(r) => r,
+                Err(dns::CacheError::NotFound | dns::CacheError::Error) => {
+                    return Explanation::None
+                },
+                Err(dns::CacheError::NotReady) => return Explanation::NotReady,
+            };
 
         let Some(txt_record) = txt_records.first() else {
             return Explanation::None;
@@ -770,8 +737,8 @@ impl EvaluatorState {
     fn expand_macro_string<'s>(
         &self,
         ctx: &'s Context<'s>,
-        dns_cache: &mut DnsCache,
-        spf_domain: &DnsName,
+        dns_cache: &mut dns::Cache,
+        spf_domain: &dns::Name,
         in_exp: bool,
         ms: s::MacroString<'s>,
     ) -> Result<Cow<'s, str>, DirectiveError> {
@@ -835,8 +802,8 @@ impl EvaluatorState {
     fn basic_macro_expansion<'s>(
         &self,
         ctx: &'s Context<'s>,
-        dns_cache: &mut DnsCache,
-        spf_domain: &DnsName,
+        dns_cache: &mut dns::Cache,
+        spf_domain: &dns::Name,
         kind: s::Macro,
     ) -> Result<Cow<'s, str>, DirectiveError> {
         // RFC 7208 § 7.2, 7.3
@@ -910,17 +877,17 @@ impl EvaluatorState {
 ///
 /// This is the process described in RFC 7208 § 5.5
 fn find_validated_name<'d>(
-    dns_cache: &'d mut DnsCache,
+    dns_cache: &'d mut dns::Cache,
     ctx: &Context<'_>,
-    target_domain: &DnsName,
-) -> Result<Option<&'d Rc<DnsName>>, DirectiveError> {
-    let ptr = match dns_ptr(&mut dns_cache.ptr, ctx.ip) {
+    target_domain: &dns::Name,
+) -> Result<Option<&'d Rc<dns::Name>>, DirectiveError> {
+    let ptr = match dns::ptr(&mut dns_cache.ptr, ctx.ip) {
         Ok(ptr) => ptr,
-        Err(DnsCacheError::NotFound) => return Ok(None),
+        Err(dns::CacheError::NotFound) => return Ok(None),
         // > If a DNS error occurs while doing the PTR RR lookup, then [ptr]
         // > fails to match.
-        Err(DnsCacheError::Error) => return Ok(None),
-        Err(DnsCacheError::NotReady) => return Err(DirectiveError::NotReady),
+        Err(dns::CacheError::Error) => return Ok(None),
+        Err(dns::CacheError::NotReady) => return Err(DirectiveError::NotReady),
     };
 
     // Prefer an exact match on the sender domain, then look at subdomains. If
@@ -937,10 +904,10 @@ fn find_validated_name<'d>(
 
     for candidate in candidates {
         let matches = match ctx.ip {
-            IpAddr::V4(ip) => dns(&mut dns_cache.a, candidate)
+            IpAddr::V4(ip) => dns::look_up(&mut dns_cache.a, candidate)
                 .map(|records| records.iter().any(|&r| r == ip)),
 
-            IpAddr::V6(ip) => dns(&mut dns_cache.aaaa, candidate)
+            IpAddr::V6(ip) => dns::look_up(&mut dns_cache.aaaa, candidate)
                 .map(|records| records.iter().any(|&r| r == ip)),
         };
 
@@ -949,8 +916,8 @@ fn find_validated_name<'d>(
             Ok(true) => return Ok(Some(candidate)),
             // > If a DNS error occurs while doing an A RR lookup, then that
             // > domain name is skipped and the search continues.
-            Err(DnsCacheError::NotFound | DnsCacheError::Error) => {},
-            Err(DnsCacheError::NotReady) => {
+            Err(dns::CacheError::NotFound | dns::CacheError::Error) => {},
+            Err(dns::CacheError::NotReady) => {
                 // In order to be fully deterministic, we stop looking at
                 // entries once we find one still in flight. This does make
                 // this part of the process effectively sequential, but that's
@@ -963,122 +930,17 @@ fn find_validated_name<'d>(
     Ok(None)
 }
 
-trait MaybeBorrowedName {
-    fn as_dns_name_ref(&self) -> &DnsName;
-    fn into_rc_dns_name(self) -> Rc<DnsName>;
-}
-
-impl MaybeBorrowedName for DnsName {
-    fn as_dns_name_ref(&self) -> &DnsName {
-        self
-    }
-
-    fn into_rc_dns_name(self) -> Rc<DnsName> {
-        Rc::new(self)
-    }
-}
-
-impl MaybeBorrowedName for &DnsName {
-    fn as_dns_name_ref(&self) -> &DnsName {
-        self
-    }
-
-    fn into_rc_dns_name(self) -> Rc<DnsName> {
-        Rc::new(self.clone())
-    }
-}
-
-impl MaybeBorrowedName for Rc<DnsName> {
-    fn as_dns_name_ref(&self) -> &DnsName {
-        self
-    }
-
-    fn into_rc_dns_name(self) -> Rc<DnsName> {
-        self
-    }
-}
-
-impl MaybeBorrowedName for &Rc<DnsName> {
-    fn as_dns_name_ref(&self) -> &DnsName {
-        self
-    }
-
-    fn into_rc_dns_name(self) -> Rc<DnsName> {
-        Rc::clone(self)
-    }
-}
-
-/// Look `name` up in `cache`.
-///
-/// If `name` is not in the cache, put it into the `New` status and return
-/// `NotReady`.
-fn dns<T>(
-    cache: &mut DnsCacheMap<T>,
-    name: impl MaybeBorrowedName,
-) -> Result<&T, DnsCacheError> {
-    // Work around https://github.com/rust-lang/rust/issues/54663
-    let position = cache.iter().position(|e| &*e.0 == name.as_dns_name_ref());
-    if let Some(position) = position {
-        match cache[position].1 {
-            DnsEntry::Ok(ref v) => Ok(v),
-            DnsEntry::NotFound => Err(DnsCacheError::NotFound),
-            DnsEntry::Error => Err(DnsCacheError::Error),
-            DnsEntry::Pending | DnsEntry::New => Err(DnsCacheError::NotReady),
-        }
-    } else {
-        cache.push((name.into_rc_dns_name(), DnsEntry::New));
-        Err(DnsCacheError::NotReady)
-    }
-}
-
-fn dns_ptr(
-    cache: &mut HashMap<IpAddr, DnsEntry<Vec<Rc<DnsName>>>>,
-    ip: IpAddr,
-) -> Result<&'_ [Rc<DnsName>], DnsCacheError> {
-    match *cache.entry(ip).or_insert(DnsEntry::New) {
-        DnsEntry::Ok(ref v) => Ok(v),
-        DnsEntry::NotFound => Err(DnsCacheError::NotFound),
-        DnsEntry::Error => Err(DnsCacheError::Error),
-        DnsEntry::Pending | DnsEntry::New => Err(DnsCacheError::NotReady),
-    }
-}
-
-fn intern_domain(
-    cache: &mut HashMap<String, Rc<DnsName>>,
-    s: Cow<'_, str>,
-) -> Result<Rc<DnsName>, DirectiveError> {
-    // Work around https://github.com/rust-lang/rust/issues/54663
-    if cache.contains_key(&*s) {
-        return Ok(Rc::clone(cache.get(&*s).unwrap()));
-    }
-
-    let name = DnsName::from_ascii(&s)
-        .map(Rc::new)
-        .map_err(|_| DirectiveError::PermFail)?;
-    cache.insert(s.into_owned(), Rc::clone(&name));
-    Ok(name)
-}
-
-impl DnsCache {
-    fn intern_domain(
-        &mut self,
-        s: Cow<'_, str>,
-    ) -> Result<Rc<DnsName>, DirectiveError> {
-        intern_domain(&mut self.name_intern, s)
-    }
-}
-
 /// Performs the error mapping used for top-level DNS queries.
 ///
 /// Defined by RFC 7208 § 5
 fn top_level_error_map<T>(
-    r: Result<T, DnsCacheError>,
+    r: Result<T, dns::CacheError>,
 ) -> Result<Option<T>, DirectiveError> {
     match r {
         Ok(t) => Ok(Some(t)),
-        Err(DnsCacheError::NotReady) => Err(DirectiveError::NotReady),
-        Err(DnsCacheError::Error) => Err(DirectiveError::TempFail),
-        Err(DnsCacheError::NotFound) => Ok(None),
+        Err(dns::CacheError::NotReady) => Err(DirectiveError::NotReady),
+        Err(dns::CacheError::Error) => Err(DirectiveError::TempFail),
+        Err(dns::CacheError::NotFound) => Ok(None),
     }
 }
 
@@ -1121,15 +983,15 @@ mod test {
         }
     }
 
-    fn dn(s: &str) -> DnsName {
-        DnsName::from_ascii(s).unwrap()
+    fn dn(s: &str) -> dns::Name {
+        dns::Name::from_ascii(s).unwrap()
     }
 
-    fn rdn(s: &str) -> Rc<DnsName> {
+    fn rdn(s: &str) -> Rc<dns::Name> {
         Rc::new(dn(s))
     }
 
-    fn put_dns<T>(cache: &mut DnsCacheMap<T>, k: &str, v: DnsEntry<T>) {
+    fn put_dns<T>(cache: &mut dns::CacheMap<T>, k: &str, v: dns::Entry<T>) {
         let k = rdn(k);
         if let Some(existing) = cache.iter_mut().find(|e| k == e.0) {
             existing.1 = v;
@@ -1141,7 +1003,7 @@ mod test {
     #[test]
     fn test_find_validated_name() {
         let ctx = example_context();
-        let mut dns_cache = DnsCache::default();
+        let mut dns_cache = dns::Cache::default();
 
         assert_matches!(
             Err(DirectiveError::NotReady),
@@ -1151,7 +1013,7 @@ mod test {
                 &ctx.sender_domain_parsed
             ),
         );
-        dns_cache.ptr.insert(ctx.ip, DnsEntry::NotFound);
+        dns_cache.ptr.insert(ctx.ip, dns::Entry::NotFound);
         assert_matches!(
             Ok(None),
             find_validated_name(
@@ -1160,7 +1022,7 @@ mod test {
                 &ctx.sender_domain_parsed
             ),
         );
-        dns_cache.ptr.insert(ctx.ip, DnsEntry::Error);
+        dns_cache.ptr.insert(ctx.ip, dns::Entry::Error);
         assert_matches!(
             Ok(None),
             find_validated_name(
@@ -1172,7 +1034,7 @@ mod test {
 
         dns_cache.ptr.insert(
             ctx.ip,
-            DnsEntry::Ok(vec![
+            dns::Entry::Ok(vec![
                 rdn("unrelated.site"),
                 rdn("sub.email.example.com"),
                 rdn("email.example.com"),
@@ -1192,7 +1054,7 @@ mod test {
         put_dns(
             &mut dns_cache.a,
             "sub.email.example.com",
-            DnsEntry::Ok(vec![Ipv4Addr::new(192, 0, 2, 3)]),
+            dns::Entry::Ok(vec![Ipv4Addr::new(192, 0, 2, 3)]),
         );
         assert_matches!(
             Err(DirectiveError::NotReady),
@@ -1204,7 +1066,7 @@ mod test {
         );
 
         // Failure => fall through
-        put_dns(&mut dns_cache.a, "email.example.com", DnsEntry::NotFound);
+        put_dns(&mut dns_cache.a, "email.example.com", dns::Entry::NotFound);
         assert_eq!(
             Some(&rdn("sub.email.example.com")),
             find_validated_name(
@@ -1214,7 +1076,7 @@ mod test {
             )
             .unwrap(),
         );
-        put_dns(&mut dns_cache.a, "email.example.com", DnsEntry::Error);
+        put_dns(&mut dns_cache.a, "email.example.com", dns::Entry::Error);
         assert_eq!(
             Some(&rdn("sub.email.example.com")),
             find_validated_name(
@@ -1228,7 +1090,7 @@ mod test {
         put_dns(
             &mut dns_cache.a,
             "email.example.com",
-            DnsEntry::Ok(vec![Ipv4Addr::new(192, 1, 1, 1)]),
+            dns::Entry::Ok(vec![Ipv4Addr::new(192, 1, 1, 1)]),
         );
         assert_eq!(
             Some(&rdn("sub.email.example.com")),
@@ -1243,7 +1105,7 @@ mod test {
         put_dns(
             &mut dns_cache.a,
             "email.example.com",
-            DnsEntry::Ok(vec![Ipv4Addr::new(192, 0, 2, 3)]),
+            dns::Entry::Ok(vec![Ipv4Addr::new(192, 0, 2, 3)]),
         );
         assert_eq!(
             Some(&rdn("email.example.com")),
@@ -1259,12 +1121,12 @@ mod test {
         put_dns(
             &mut dns_cache.a,
             "email.example.com",
-            DnsEntry::Ok(vec![Ipv4Addr::new(192, 1, 1, 1)]),
+            dns::Entry::Ok(vec![Ipv4Addr::new(192, 1, 1, 1)]),
         );
         put_dns(
             &mut dns_cache.a,
             "sub.email.example.com",
-            DnsEntry::Ok(vec![Ipv4Addr::new(192, 1, 1, 1)]),
+            dns::Entry::Ok(vec![Ipv4Addr::new(192, 1, 1, 1)]),
         );
         assert_matches!(
             Ok(None),
@@ -1280,7 +1142,7 @@ mod test {
     fn macro_expand_rfc7208_74_examples() {
         let ctx = RefCell::new(example_context());
         let eval = EvaluatorState::default();
-        let mut dns_cache = DnsCache::default();
+        let mut dns_cache = dns::Cache::default();
 
         let mut expand = |ms: &str| {
             eval.expand_macro_string(
@@ -1343,7 +1205,7 @@ mod test {
         let ms = s::MacroString::new("%{p}");
         let ctx = example_context();
         let mut eval = EvaluatorState::default();
-        let mut dns_cache = DnsCache::default();
+        let mut dns_cache = dns::Cache::default();
 
         // With having seen a `ptr` directive, we don't even try.
         assert_eq!(
@@ -1370,7 +1232,7 @@ mod test {
             ),
         );
         // Failure => unknown
-        dns_cache.ptr.insert(ctx.ip, DnsEntry::NotFound);
+        dns_cache.ptr.insert(ctx.ip, dns::Entry::NotFound);
         assert_eq!(
             Ok(Cow::Borrowed("unknown")),
             eval.expand_macro_string(
@@ -1384,11 +1246,11 @@ mod test {
         // Success => expansion
         dns_cache
             .ptr
-            .insert(ctx.ip, DnsEntry::Ok(vec![rdn("sub.email.example.com")]));
+            .insert(ctx.ip, dns::Entry::Ok(vec![rdn("sub.email.example.com")]));
         put_dns(
             &mut dns_cache.a,
             "sub.email.example.com",
-            DnsEntry::Ok(vec![Ipv4Addr::new(192, 0, 2, 3)]),
+            dns::Entry::Ok(vec![Ipv4Addr::new(192, 0, 2, 3)]),
         );
         assert_eq!(
             Ok(Cow::Borrowed("sub.email.example.com")),
@@ -1426,7 +1288,7 @@ mod test {
             receiver_host: Cow::Borrowed("receiver.example.net"),
             now: DateTime::from_timestamp(42, 0).unwrap(),
         });
-        let mut dns_cache = DnsCache::default();
+        let mut dns_cache = dns::Cache::default();
         let eval = EvaluatorState::default();
 
         let mut expand = |ms: &str| {
@@ -1476,7 +1338,7 @@ mod test {
             .collect()
     }
 
-    fn parse_names(names: &[&str]) -> Vec<Rc<DnsName>> {
+    fn parse_names(names: &[&str]) -> Vec<Rc<dns::Name>> {
         names.iter().map(|s| rdn(s)).collect()
     }
 
@@ -1488,7 +1350,7 @@ mod test {
         ($($domain:expr => {
             $($field:ident : $value:tt,)*
         },)*) => {{
-            let mut dns_cache = DnsCache::default();
+            let mut dns_cache = dns::Cache::default();
             $(
                 let domain = rdn($domain);
                 $(
@@ -1499,49 +1361,49 @@ mod test {
         }};
 
         (@a, $dns_cache:ident, $domain:ident, NotFound) => {
-            $dns_cache.a.push((Rc::clone(&$domain), DnsEntry::NotFound));
+            $dns_cache.a.push((Rc::clone(&$domain), dns::Entry::NotFound));
         };
         (@a, $dns_cache:ident, $domain:ident, Error) => {
-            $dns_cache.a.push((Rc::clone(&$domain), DnsEntry::Error));
+            $dns_cache.a.push((Rc::clone(&$domain), dns::Entry::Error));
         };
         (@a, $dns_cache:ident, $domain:ident, $addrs:expr) => {
-            $dns_cache.a.push((Rc::clone(&$domain), DnsEntry::Ok(
+            $dns_cache.a.push((Rc::clone(&$domain), dns::Entry::Ok(
                 parse_a_addrs(&$addrs),
             )));
         };
 
         (@aaaa, $dns_cache:ident, $domain:ident, NotFound) => {
-            $dns_cache.aaaa.push((Rc::clone(&$domain), DnsEntry::NotFound));
+            $dns_cache.aaaa.push((Rc::clone(&$domain), dns::Entry::NotFound));
         };
         (@aaaa, $dns_cache:ident, $domain:ident, Error) => {
-            $dns_cache.aaaa.push((Rc::clone(&$domain), DnsEntry::Error));
+            $dns_cache.aaaa.push((Rc::clone(&$domain), dns::Entry::Error));
         };
         (@aaaa, $dns_cache:ident, $domain:ident, $addrs:expr) => {
-            $dns_cache.aaaa.push((Rc::clone(&$domain), DnsEntry::Ok(
+            $dns_cache.aaaa.push((Rc::clone(&$domain), dns::Entry::Ok(
                 parse_aaaa_addrs(&$addrs),
             )));
         };
 
         (@mx, $dns_cache:ident, $domain:ident, NotFound) => {
-            $dns_cache.mx.push((Rc::clone(&$domain), DnsEntry::NotFound));
+            $dns_cache.mx.push((Rc::clone(&$domain), dns::Entry::NotFound));
         };
         (@mx, $dns_cache:ident, $domain:ident, Error) => {
-            $dns_cache.mx.push((Rc::clone(&$domain), DnsEntry::Error));
+            $dns_cache.mx.push((Rc::clone(&$domain), dns::Entry::Error));
         };
         (@mx, $dns_cache:ident, $domain:ident, $addrs:expr) => {
-            $dns_cache.mx.push((Rc::clone(&$domain), DnsEntry::Ok(
+            $dns_cache.mx.push((Rc::clone(&$domain), dns::Entry::Ok(
                 parse_names(&$addrs),
             )));
         };
 
         (@txt, $dns_cache:ident, $domain:ident, NotFound) => {
-            $dns_cache.txt.push((Rc::clone(&$domain), DnsEntry::NotFound));
+            $dns_cache.txt.push((Rc::clone(&$domain), dns::Entry::NotFound));
         };
         (@txt, $dns_cache:ident, $domain:ident, Error) => {
-            $dns_cache.txt.push((Rc::clone(&$domain), DnsEntry::Error));
+            $dns_cache.txt.push((Rc::clone(&$domain), dns::Entry::Error));
         };
         (@txt, $dns_cache:ident, $domain:ident, $txts:expr) => {
-            $dns_cache.txt.push((Rc::clone(&$domain), DnsEntry::Ok(
+            $dns_cache.txt.push((Rc::clone(&$domain), dns::Entry::Ok(
                 make_txts(&$txts),
             )));
         };
@@ -1553,7 +1415,7 @@ mod test {
             sender_local: None,
             sender_domain: Cow::Owned(sender_domain.to_owned()),
             sender_domain_parsed: Rc::new(
-                DnsName::from_ascii(sender_domain).unwrap(),
+                dns::Name::from_ascii(sender_domain).unwrap(),
             ),
             helo_domain: Cow::Owned(sender_domain.to_owned()),
             ip: ip.parse().unwrap(),
@@ -1568,7 +1430,7 @@ mod test {
             None,
             eval(
                 &simple_context("s.com", "1.2.3.4"),
-                &mut DnsCache::default(),
+                &mut dns::Cache::default(),
             ),
         );
         assert_eq!(
@@ -2048,11 +1910,11 @@ mod test {
         };
         dns_cache.ptr.insert(
             "1.2.3.4".parse::<IpAddr>().unwrap(),
-            DnsEntry::Ok(vec![rdn("s.com")]),
+            dns::Entry::Ok(vec![rdn("s.com")]),
         );
         dns_cache.ptr.insert(
             "dead::beef".parse::<IpAddr>().unwrap(),
-            DnsEntry::Ok(vec![rdn("s.com")]),
+            dns::Entry::Ok(vec![rdn("s.com")]),
         );
 
         assert_eq!(
@@ -2075,11 +1937,11 @@ mod test {
 
         dns_cache.ptr.insert(
             "5.2.3.4".parse::<IpAddr>().unwrap(),
-            DnsEntry::Ok(vec![rdn("other.com")]),
+            dns::Entry::Ok(vec![rdn("other.com")]),
         );
         dns_cache.ptr.insert(
             "baad::beef".parse::<IpAddr>().unwrap(),
-            DnsEntry::NotFound,
+            dns::Entry::NotFound,
         );
         assert_eq!(
             Some((SpfResult::Fail, Explanation::None)),

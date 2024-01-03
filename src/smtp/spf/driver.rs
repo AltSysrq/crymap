@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -20,17 +20,10 @@ use std::cell::RefCell;
 use std::future::Future;
 use std::rc::Rc;
 
-use hickory_resolver::Name as DnsName;
-
+use crate::support::dns;
 use super::eval::{
-    eval, Context, DnsCache, DnsCacheMap, DnsEntry, Explanation, SpfResult,
+    eval, Context, Explanation, SpfResult,
 };
-
-pub type DnsResolver = hickory_resolver::AsyncResolver<
-    hickory_resolver::name_server::GenericConnector<
-        hickory_resolver::name_server::TokioRuntimeProvider,
-    >,
->;
 
 /// Runs SPF validation against the given context.
 ///
@@ -43,9 +36,9 @@ pub type DnsResolver = hickory_resolver::AsyncResolver<
 /// DNS lookups are spawned as tasks in the contextual `LocalSet`.
 pub async fn run(
     ctx: &Context<'_>,
-    dns_cache: Rc<RefCell<DnsCache>>,
+    dns_cache: Rc<RefCell<dns::Cache>>,
     dns_notify: Rc<tokio::sync::Notify>,
-    resolver: Rc<DnsResolver>,
+    resolver: Rc<dns::Resolver>,
     deadline: tokio::time::Instant,
 ) -> (SpfResult, Explanation) {
     let mut result = (SpfResult::TempError, Explanation::None);
@@ -86,10 +79,10 @@ pub async fn run(
 }
 
 fn spawn_dns_lookups(
-    dns_cache_mut: &mut DnsCache,
-    dns_cache: &Rc<RefCell<DnsCache>>,
+    dns_cache_mut: &mut dns::Cache,
+    dns_cache: &Rc<RefCell<dns::Cache>>,
     dns_notify: &Rc<tokio::sync::Notify>,
-    resolver: &Rc<DnsResolver>,
+    resolver: &Rc<dns::Resolver>,
 ) {
     spawn_dns_name_lookups(
         &mut dns_cache_mut.a,
@@ -160,11 +153,11 @@ fn spawn_dns_lookups(
     );
 
     for (&ip, entry) in &mut dns_cache_mut.ptr {
-        if !matches!(*entry, DnsEntry::New) {
+        if !matches!(*entry, dns::Entry::New) {
             continue;
         }
 
-        *entry = DnsEntry::Pending;
+        *entry = dns::Entry::Pending;
 
         let dns_cache = Rc::clone(dns_cache);
         let dns_notify = Rc::clone(dns_notify);
@@ -182,24 +175,24 @@ fn spawn_dns_lookups(
 }
 
 fn spawn_dns_name_lookups<T, R, F, A>(
-    dns_map: &mut DnsCacheMap<T>,
-    dns_cache: &Rc<RefCell<DnsCache>>,
+    dns_map: &mut dns::CacheMap<T>,
+    dns_cache: &Rc<RefCell<dns::Cache>>,
     dns_notify: &Rc<tokio::sync::Notify>,
-    resolver: &Rc<DnsResolver>,
+    resolver: &Rc<dns::Resolver>,
     run: F,
     access: A,
 ) where
     R: Future<Output = Result<T, hickory_resolver::error::ResolveError>>
         + 'static,
-    F: FnOnce(Rc<DnsResolver>, DnsName) -> R + Clone + 'static,
-    A: FnOnce(&mut DnsCache) -> &mut DnsCacheMap<T> + Clone + 'static,
+    F: FnOnce(Rc<dns::Resolver>, dns::Name) -> R + Clone + 'static,
+    A: FnOnce(&mut dns::Cache) -> &mut dns::CacheMap<T> + Clone + 'static,
 {
     for entry in dns_map {
-        if !matches!(entry.1, DnsEntry::New) {
+        if !matches!(entry.1, dns::Entry::New) {
             continue;
         }
 
-        entry.1 = DnsEntry::Pending;
+        entry.1 = dns::Entry::Pending;
 
         let run = run.clone();
         let access = access.clone();
@@ -225,14 +218,14 @@ fn spawn_dns_name_lookups<T, R, F, A>(
 
 fn to_dns_entry<T>(
     r: Result<T, hickory_resolver::error::ResolveError>,
-) -> DnsEntry<T> {
+) -> dns::Entry<T> {
     use hickory_resolver::error::ResolveErrorKind as Rek;
 
     match r {
-        Ok(v) => DnsEntry::Ok(v),
+        Ok(v) => dns::Entry::Ok(v),
         Err(e) => match *e.kind() {
-            Rek::NoRecordsFound { .. } => DnsEntry::NotFound,
-            _ => DnsEntry::Error,
+            Rek::NoRecordsFound { .. } => dns::Entry::NotFound,
+            _ => dns::Entry::Error,
         },
     }
 }
@@ -248,7 +241,7 @@ mod test {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async move {
-                let dns_cache = Rc::new(RefCell::new(DnsCache::default()));
+                let dns_cache = Rc::new(RefCell::new(dns::Cache::default()));
                 let dns_notify = Rc::new(tokio::sync::Notify::new());
                 let resolver = Rc::new(
                     hickory_resolver::AsyncResolver::tokio_from_system_conf()
@@ -259,7 +252,7 @@ mod test {
                     sender_local: None,
                     sender_domain: Cow::Borrowed(domain),
                     sender_domain_parsed: Rc::new(
-                        DnsName::from_ascii(domain).unwrap(),
+                        dns::Name::from_ascii(domain).unwrap(),
                     ),
                     helo_domain: Cow::Borrowed(domain),
                     ip: ip.parse().unwrap(),

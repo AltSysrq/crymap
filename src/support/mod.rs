@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2022, 2023, Jason Lingle
+// Copyright (c) 2020, 2022, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -23,6 +23,7 @@ pub mod buffer;
 pub mod chronox;
 pub mod compression;
 pub mod diagnostic;
+pub mod dns;
 pub mod error;
 pub mod file_ops;
 pub mod log_prefix;

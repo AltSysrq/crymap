@@ -25,4 +25,4 @@ mod syntax;
 #[allow(unused_imports)]
 pub use driver::run;
 #[allow(unused_imports)]
-pub use eval::{Context, DnsCache, DnsEntry, Explanation, SpfResult};
+pub use eval::{Context, Explanation, SpfResult};
