@@ -17,19 +17,15 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::cell::RefCell;
-use std::future::Future;
 use std::rc::Rc;
 
+use super::eval::{eval, Context, Explanation, SpfResult};
 use crate::support::dns;
-use super::eval::{
-    eval, Context, Explanation, SpfResult,
-};
 
 /// Runs SPF validation against the given context.
 ///
 /// `dns_cache` will be populated as the function runs. It may be shared with
-/// other invocations of `run`, but such concurrent invocations must share the
-/// same `dns_notify` handle.
+/// other invocations of `run`.
 ///
 /// `run` will exit early at `deadline`.
 ///
@@ -37,7 +33,6 @@ use super::eval::{
 pub async fn run(
     ctx: &Context<'_>,
     dns_cache: Rc<RefCell<dns::Cache>>,
-    dns_notify: Rc<tokio::sync::Notify>,
     resolver: Rc<dns::Resolver>,
     deadline: tokio::time::Instant,
 ) -> (SpfResult, Explanation) {
@@ -55,19 +50,13 @@ pub async fn run(
                     break;
                 }
             }
-
-            spawn_dns_lookups(
-                &mut dns_cache_mut,
-                &dns_cache,
-                &dns_notify,
-                &resolver,
-            );
         }
+        dns::spawn_lookups(&dns_cache, &resolver);
 
         // Wait until the deadline or until we get new DNS information.
         // Critically, there are no await points between the call to eval() and
         // this await, so we know we haven't missed any notifications.
-        if tokio::time::timeout_at(deadline, dns_notify.notified())
+        if tokio::time::timeout_at(deadline, dns::wait_for_progress(&dns_cache))
             .await
             .is_err()
         {
@@ -76,158 +65,6 @@ pub async fn run(
     }
 
     result
-}
-
-fn spawn_dns_lookups(
-    dns_cache_mut: &mut dns::Cache,
-    dns_cache: &Rc<RefCell<dns::Cache>>,
-    dns_notify: &Rc<tokio::sync::Notify>,
-    resolver: &Rc<dns::Resolver>,
-) {
-    spawn_dns_name_lookups(
-        &mut dns_cache_mut.a,
-        dns_cache,
-        dns_notify,
-        resolver,
-        |resolver, name| async move {
-            resolver
-                .ipv4_lookup(name)
-                .await
-                .map(|r| r.iter().map(|a| a.0).collect::<Vec<_>>())
-        },
-        |d| &mut d.a,
-    );
-    spawn_dns_name_lookups(
-        &mut dns_cache_mut.aaaa,
-        dns_cache,
-        dns_notify,
-        resolver,
-        |resolver, name| async move {
-            resolver
-                .ipv6_lookup(name)
-                .await
-                .map(|r| r.iter().map(|a| a.0).collect::<Vec<_>>())
-        },
-        |d| &mut d.aaaa,
-    );
-    spawn_dns_name_lookups(
-        &mut dns_cache_mut.mx,
-        dns_cache,
-        dns_notify,
-        resolver,
-        |resolver, name| async move {
-            resolver.mx_lookup(name).await.map(|r| {
-                r.iter()
-                    .map(|n| Rc::new(n.exchange().clone()))
-                    .collect::<Vec<_>>()
-            })
-        },
-        |d| &mut d.mx,
-    );
-    spawn_dns_name_lookups(
-        &mut dns_cache_mut.txt,
-        dns_cache,
-        dns_notify,
-        resolver,
-        |resolver, name| async move {
-            resolver.txt_lookup(name).await.map(|r| {
-                r.iter()
-                    .map(|parts| {
-                        let len = parts.iter().map(|p| p.len()).sum();
-                        let mut combined = Vec::with_capacity(len);
-                        for part in parts.iter() {
-                            combined.extend_from_slice(part);
-                        }
-
-                        match String::from_utf8(combined) {
-                            Ok(s) => s,
-                            Err(e) => String::from_utf8_lossy(e.as_bytes())
-                                .into_owned(),
-                        }
-                        .into()
-                    })
-                    .collect::<Vec<_>>()
-            })
-        },
-        |d| &mut d.txt,
-    );
-
-    for (&ip, entry) in &mut dns_cache_mut.ptr {
-        if !matches!(*entry, dns::Entry::New) {
-            continue;
-        }
-
-        *entry = dns::Entry::Pending;
-
-        let dns_cache = Rc::clone(dns_cache);
-        let dns_notify = Rc::clone(dns_notify);
-        let resolver = Rc::clone(resolver);
-        tokio::task::spawn_local(async move {
-            let new_entry =
-                to_dns_entry(resolver.reverse_lookup(ip).await.map(|rev| {
-                    rev.iter().map(|n| Rc::new(n.0.clone())).collect::<Vec<_>>()
-                }));
-
-            dns_cache.borrow_mut().ptr.insert(ip, new_entry);
-            dns_notify.notify_waiters();
-        });
-    }
-}
-
-fn spawn_dns_name_lookups<T, R, F, A>(
-    dns_map: &mut dns::CacheMap<T>,
-    dns_cache: &Rc<RefCell<dns::Cache>>,
-    dns_notify: &Rc<tokio::sync::Notify>,
-    resolver: &Rc<dns::Resolver>,
-    run: F,
-    access: A,
-) where
-    R: Future<Output = Result<T, hickory_resolver::error::ResolveError>>
-        + 'static,
-    F: FnOnce(Rc<dns::Resolver>, dns::Name) -> R + Clone + 'static,
-    A: FnOnce(&mut dns::Cache) -> &mut dns::CacheMap<T> + Clone + 'static,
-{
-    for entry in dns_map {
-        if !matches!(entry.1, dns::Entry::New) {
-            continue;
-        }
-
-        entry.1 = dns::Entry::Pending;
-
-        let run = run.clone();
-        let access = access.clone();
-        let dns_cache = Rc::clone(dns_cache);
-        let dns_notify = Rc::clone(dns_notify);
-        let resolver = Rc::clone(resolver);
-        let name = Rc::clone(&entry.0);
-        tokio::task::spawn_local(async move {
-            let mut name_clone = (*name).clone();
-            name_clone.set_fqdn(true);
-            let new_entry = to_dns_entry(run(resolver, name_clone).await);
-            let mut dns_cache = dns_cache.borrow_mut();
-            for entry in access(&mut dns_cache) {
-                if name == entry.0 {
-                    entry.1 = new_entry;
-                    break;
-                }
-            }
-            dns_notify.notify_waiters();
-        });
-    }
-}
-
-fn to_dns_entry<T>(
-    r: Result<T, hickory_resolver::error::ResolveError>,
-) -> dns::Entry<T> {
-    use hickory_resolver::error::ResolveErrorKind as Rek;
-
-    match r {
-        Ok(v) => dns::Entry::Ok(v),
-        Err(e) => match *e.kind() {
-            Rek::NoRecordsFound { .. } => dns::Entry::NotFound,
-            _ => dns::Entry::Error,
-        },
-    }
 }
 
 #[cfg(all(test, feature = "live-network-tests"))]
@@ -242,7 +79,6 @@ mod test {
         local
             .run_until(async move {
                 let dns_cache = Rc::new(RefCell::new(dns::Cache::default()));
-                let dns_notify = Rc::new(tokio::sync::Notify::new());
                 let resolver = Rc::new(
                     hickory_resolver::AsyncResolver::tokio_from_system_conf()
                         .unwrap(),
@@ -262,7 +98,6 @@ mod test {
                 run(
                     &ctx,
                     dns_cache,
-                    dns_notify,
                     resolver,
                     tokio::time::Instant::now()
                         + std::time::Duration::from_secs(20),
