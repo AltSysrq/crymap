@@ -135,6 +135,26 @@ impl ServerIo {
         })
     }
 
+    pub fn is_ssl(&self) -> bool {
+        matches!(*self.mode.borrow(), Mode::Ssl(_))
+    }
+
+    pub fn ssl_string(&self) -> Option<String> {
+        match *self.mode.borrow() {
+            Mode::Cleartext(..) => None,
+            Mode::Ssl(ref stream) => {
+                let ssl = stream.ssl();
+                let cipher = ssl.current_cipher();
+                Some(format!(
+                    "{tls_version}:{cipher}:{strength}",
+                    tls_version = ssl.version_str(),
+                    cipher = cipher.map_or("NONE", |c| c.name()),
+                    strength = cipher.map_or(0, |c| c.bits().algorithm),
+                ))
+            },
+        }
+    }
+
     /// Performs server-side SSL setup with the given acceptor.
     ///
     /// During the accept flow, concurrent calls to other methods will panic.

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -143,7 +143,7 @@ async fn run_server(data_root: PathBuf, cxn_name: &str, server_io: UnixStream) {
 
     let ssl_acceptor = ssl_acceptor.build();
 
-    let mut server = super::inbound::Server::new(
+    let result = super::serve_lmtp(
         server_io,
         Arc::new(SystemConfig::default()),
         LogPrefix::new(cxn_name.to_owned()),
@@ -151,9 +151,10 @@ async fn run_server(data_root: PathBuf, cxn_name: &str, server_io: UnixStream) {
         data_root,
         "localhost".to_owned(),
         cxn_name.to_owned(),
-    );
+    )
+    .await;
 
-    match server.run().await {
+    match result {
         Ok(()) => (),
         Err(crate::support::error::Error::Io(e))
             if io::ErrorKind::UnexpectedEof == e.kind()

@@ -16,12 +16,12 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-mod codes;
-mod dmarc;
-mod spf;
-mod syntax;
+mod bridge;
+mod delivery;
+mod lmtp;
+mod server;
 
-pub mod inbound;
+#[cfg(test)]
+mod lmtp_integration_tests;
 
-#[cfg(feature = "dev-tools")]
-pub use dmarc::compile_psl;
+pub use lmtp::serve_lmtp;

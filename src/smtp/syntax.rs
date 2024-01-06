@@ -23,8 +23,8 @@ use regex::Regex;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
-    /// LHLO origin-host ignored...
-    Lhlo(String),
+    /// (HELO|EHLO|LHLO) origin-host ignored...
+    Helo(String, String),
     /// MAIL FROM:<return-path> [SIZE=sz]
     MailFrom(String, Option<u64>),
     /// RCPT TO:<ignored...:email>
@@ -61,7 +61,8 @@ static SIMPLE_COMMANDS: &[(&str, Command, bool)] = &[
 ];
 
 lazy_static! {
-    static ref RX_LHLO: Regex = Regex::new("^(?i)LHLO ([^ ]*)").unwrap();
+    static ref RX_HELO: Regex =
+        Regex::new("^(?i)(HELO|EHLO|LHLO) ([^ ]*)").unwrap();
     static ref RX_MAIL: Regex = Regex::new(
         "^(?i)MAIL FROM:<([^>]*)>\
          (?: BODY=(?:7BIT|8BIT|BINARYMIME)\
@@ -74,19 +75,13 @@ lazy_static! {
         Regex::new("^(?i)BDAT ([0-9]+)( LAST)?$").unwrap();
     static ref RX_KNOWN_COMMANDS: Regex = Regex::new(
         "^(?i)(DATA|RSET|VRFY|EXPN|HELP|NOOP|QUIT|\
-                    STARTTLS|LHLO|MAIL|RCPT|BDAT)( .*)?$"
+                    STARTTLS|LHLO|MAIL|RCPT|BDAT|HELO|EHLO)( .*)?$"
     )
     .unwrap();
-    static ref RX_HELO_EHLO: Regex =
-        Regex::new("^(?i)(HELO|EHLO)( .*)?$").unwrap();
 }
 
 pub fn looks_like_known_command(s: &str) -> bool {
     RX_KNOWN_COMMANDS.is_match(s)
-}
-
-pub fn looks_like_smtp_helo(s: &str) -> bool {
-    RX_HELO_EHLO.is_match(s)
 }
 
 impl FromStr for Command {
@@ -103,8 +98,11 @@ impl FromStr for Command {
             }
         }
 
-        if let Some(cap) = RX_LHLO.captures(s) {
-            Ok(Command::Lhlo(cap.get(1).unwrap().as_str().to_owned()))
+        if let Some(cap) = RX_HELO.captures(s) {
+            Ok(Command::Helo(
+                cap.get(1).unwrap().as_str().to_owned(),
+                cap.get(2).unwrap().as_str().to_owned(),
+            ))
         } else if let Some(cap) = RX_MAIL.captures(s) {
             let size = match cap.get(2).map(|s| s.as_str().parse::<u64>()) {
                 None => None,
@@ -138,12 +136,48 @@ mod test {
     #[test]
     fn command_parsing() {
         assert_eq!(
-            Ok(Command::Lhlo("foo.example.com".to_owned())),
+            Ok(Command::Helo(
+                "LHLO".to_owned(),
+                "foo.example.com".to_owned()
+            )),
             "LHLO foo.example.com".parse()
         );
         assert_eq!(
-            Ok(Command::Lhlo("foo.example.com".to_owned())),
+            Ok(Command::Helo(
+                "lhlo".to_owned(),
+                "foo.example.com".to_owned()
+            )),
             "lhlo foo.example.com some client implementation".parse()
+        );
+
+        assert_eq!(
+            Ok(Command::Helo(
+                "HELO".to_owned(),
+                "foo.example.com".to_owned()
+            )),
+            "HELO foo.example.com".parse()
+        );
+        assert_eq!(
+            Ok(Command::Helo(
+                "helo".to_owned(),
+                "foo.example.com".to_owned()
+            )),
+            "helo foo.example.com some client implementation".parse()
+        );
+
+        assert_eq!(
+            Ok(Command::Helo(
+                "EHLO".to_owned(),
+                "foo.example.com".to_owned()
+            )),
+            "EHLO foo.example.com".parse()
+        );
+        assert_eq!(
+            Ok(Command::Helo(
+                "ehlo".to_owned(),
+                "foo.example.com".to_owned()
+            )),
+            "ehlo foo.example.com some client implementation".parse()
         );
 
         assert_eq!(

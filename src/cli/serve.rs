@@ -136,7 +136,7 @@ pub async fn lmtp(
         )
     });
 
-    crate::smtp::inbound::serve_lmtp(
+    let result = crate::smtp::inbound::serve_lmtp(
         io,
         Arc::new(system_config),
         log_prefix.clone(),
@@ -146,6 +146,11 @@ pub async fn lmtp(
         peer_name,
     )
     .await;
+
+    match result {
+        Ok(()) => info!("{} Normal client disconnect", log_prefix),
+        Err(e) => warn!("{} Abnormal client disconnect: {}", log_prefix, e),
+    }
 }
 
 fn create_ssl_acceptor(
