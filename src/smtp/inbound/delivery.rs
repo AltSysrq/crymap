@@ -33,7 +33,7 @@ use crate::{
         buffer::BufferReader,
         log_prefix::LogPrefix,
         safe_name::is_safe_name,
-        system_config::{LmtpConfig, SystemConfig},
+        system_config::{SmtpConfig, SystemConfig},
         unix_privileges,
     },
 };
@@ -45,7 +45,7 @@ pub struct Recipient {
 }
 
 impl Recipient {
-    pub fn normalise(config: &LmtpConfig, smtp: String) -> Option<Self> {
+    pub fn normalise(config: &SmtpConfig, smtp: String) -> Option<Self> {
         let mut split = smtp.split('@');
         let (mut local, domain) =
             match (split.next(), split.next(), split.next()) {
@@ -55,6 +55,8 @@ impl Recipient {
                 },
                 _ => return None,
             };
+
+        // TODO Ensure domain is Punycode
 
         if !config.verbatim_user_names {
             local = local.to_lowercase();
@@ -82,7 +84,7 @@ impl Recipient {
     ///
     /// On failure, returns the appropriate SMTP response.
     pub fn normalise_and_validate(
-        config: &LmtpConfig,
+        config: &SmtpConfig,
         users_dir: &Path,
         smtp: &str,
     ) -> Result<Self, SmtpResponse<'static>> {
@@ -201,10 +203,10 @@ mod test {
     fn user_normalisation() {
         fn normalise(smtp: &str, keep_domain: bool, verbatim: bool) -> String {
             Recipient::normalise(
-                &LmtpConfig {
+                &SmtpConfig {
                     keep_recipient_domain: keep_domain,
                     verbatim_user_names: verbatim,
-                    ..LmtpConfig::default()
+                    ..SmtpConfig::default()
                 },
                 smtp.to_owned(),
             )

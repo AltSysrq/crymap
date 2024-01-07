@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2022, Jason Lingle
+// Copyright (c) 2020, 2022, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -19,13 +19,13 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 /// The system-wide configuration for Crymap.
 ///
 /// This is stored in a file named `crymap.toml` under the Crymap system root,
 /// which is typically `/usr/local/etc/crymap` or `/etc/crymap`.
-#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, Deserialize, Default)]
 pub struct SystemConfig {
     /// Options relating to operational security of Crymap.
     #[serde(default)]
@@ -39,18 +39,22 @@ pub struct SystemConfig {
     #[serde(default)]
     pub identification: BTreeMap<String, String>,
 
-    /// Configuration for the LMTP server.
+    /// Configuration for the SMTP/LMTP servers.
     ///
-    /// The defaults are reasonable for most installations.
-    #[serde(default)]
-    pub lmtp: LmtpConfig,
+    /// For LMTP, the defaults are reasonable for most installations. SMTP
+    /// requires manual configuration of the SMTP domains.
+    ///
+    /// This field can be named `lmtp` for backwards-compatibility with Crymap
+    /// 1.0.
+    #[serde(default, alias = "lmtp")]
+    pub smtp: SmtpConfig,
 
     /// Configuration for server diagnostics.
     #[serde(default)]
     pub diagnostic: DiagnosticConfig,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct SecurityConfig {
     /// If true, chroot into the system data directory before communicating
     /// with the client.
@@ -90,7 +94,7 @@ pub struct SecurityConfig {
 
 // The Default implementation of TlsConfig is not useful in the real world, but
 // is helpful for tests.
-#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, Deserialize, Default)]
 pub struct TlsConfig {
     /// The path to the TLS private key, which must be in PEM format.
     pub private_key: PathBuf,
@@ -98,9 +102,9 @@ pub struct TlsConfig {
     pub certificate_chain: PathBuf,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
-pub struct LmtpConfig {
+pub struct SmtpConfig {
     /// The host name to report as.
     ///
     /// If unset, the system host name is used.
@@ -123,12 +127,52 @@ pub struct LmtpConfig {
     /// the user `foobar`. When true, all are distinct users.
     ///
     /// When `keep_recipient_domain` is true, this option does not interact
-    /// with the domain part of the email, which is always lower-cased and
-    /// retains its periods.
+    /// with the domain part of the email, which is always converted to
+    /// Punycode, lower-cased, and retains its periods.
     pub verbatim_user_names: bool,
+
+    /// The domains governed by this server.
+    ///
+    /// Each entry describes a single domain. Domains may be named either in
+    /// Unicode or in Punycode; the two configuration styles are equivalent.
+    ///
+    /// Inbound SMTP will reject mail addressed to any domain not in this
+    /// table, regardless of the configuration of `keep_recipient_domain`. This
+    /// is necessary to prevent the server appearing as an open relay.
+    ///
+    /// Outbound SMTP will reject mail sent from any domain not in this table.
+    /// If the matching domain specifies DKIM private keys, they will be used
+    /// to sign outgoing mail.
+    ///
+    /// The LMTP server does not use this configuration. If
+    /// `keep_recipient_domain` is false, LMTP will accept mail for any domain.
+    /// It is up to the upstream SMTP server to perform filtering.
+    pub domains: BTreeMap<DomainName, SmtpDomain>,
+
+    /// Whether inbound SMTP will reject messages that have a hard failure.
+    ///
+    /// Inbound SMTP always evaluates SPF, DKIM, and DMARC and attaches their
+    /// results to the message. If this is true, and the DMARC configuration
+    /// indicates that hard failures should be rejected, inbound SMTP will fail
+    /// the mail transaction of hard failures. Otherwise, hard failures are
+    /// delivered normally.
+    pub reject_dmarc_failures: bool,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct SmtpDomain {
+    /// DKIM keys to use to sign outgoing mail for this domain.
+    ///
+    /// The key of this map is the selector. The value is one of the following:
+    /// - The string "rsa:" followed by the RSA private key in DER format,
+    ///   encoded in base64.
+    /// - The string "ed25519:" followed by the ED25519 private key in raw
+    ///   format, encoded in base64.
+    pub dkim: BTreeMap<String, DkimKey>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct DiagnosticConfig {
     /// On startup, redirect standard error to this file.
@@ -141,4 +185,83 @@ pub struct DiagnosticConfig {
     /// host. If anything actually ends up in this file, it represents a bug in
     /// Crymap, as actual errors should go through the logging system.
     pub stderr: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DomainName(pub hickory_resolver::Name);
+
+impl<'de> serde::Deserialize<'de> for DomainName {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        de: D,
+    ) -> Result<Self, D::Error> {
+        let s = <String as serde::Deserialize<'de>>::deserialize(de)?;
+        hickory_resolver::Name::from_str_relaxed(&s)
+            .map(|name| Self(name.to_lowercase()))
+            .map_err(|_| {
+                serde::de::Error::custom(format!("invalid domain: {s}"))
+            })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DkimKey(pub openssl::pkey::PKey<openssl::pkey::Private>);
+
+impl<'de> serde::Deserialize<'de> for DkimKey {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        de: D,
+    ) -> Result<Self, D::Error> {
+        let s = <String as serde::Deserialize<'de>>::deserialize(de)?;
+        let Some((kind, data)) = s.split_once(':') else {
+            return Err(serde::de::Error::custom("missing ':' in DKIM key"));
+        };
+
+        let Ok(data) = base64::decode(data.as_bytes()) else {
+            return Err(serde::de::Error::custom("bad base64 in DKIM key"));
+        };
+
+        let inner = match kind {
+            "rsa" => {
+                let rsa_key =
+                    match openssl::rsa::Rsa::private_key_from_der(&data) {
+                        Ok(k) => k,
+                        Err(e) => {
+                            return Err(serde::de::Error::custom(format!(
+                                "invalid DER-format RSA private key: {e}",
+                            )));
+                        },
+                    };
+
+                match openssl::pkey::PKey::from_rsa(rsa_key) {
+                    Ok(k) => k,
+                    Err(e) => {
+                        return Err(serde::de::Error::custom(format!(
+                            "unexpected error converting DKIM key: {e}",
+                        )));
+                    },
+                }
+            },
+
+            "ed25519" => {
+                match openssl::pkey::PKey::private_key_from_raw_bytes(
+                    &data,
+                    openssl::pkey::Id::ED25519,
+                ) {
+                    Ok(k) => k,
+                    Err(e) => {
+                        return Err(serde::de::Error::custom(format!(
+                            "invalid raw ED25519 private key: {e}",
+                        )));
+                    },
+                }
+            },
+
+            _ => {
+                return Err(serde::de::Error::custom(format!(
+                    "unknown DKIM key type: '{kind}'",
+                )))
+            },
+        };
+
+        Ok(Self(inner))
+    }
 }

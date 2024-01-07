@@ -159,7 +159,7 @@ impl LmtpService {
 
                 RequestPayload::Recipient(recipient) => {
                     let result = match Recipient::normalise_and_validate(
-                        &self.config.lmtp,
+                        &self.config.smtp,
                         &self.users_dir,
                         &recipient.to,
                     ) {

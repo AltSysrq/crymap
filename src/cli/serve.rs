@@ -103,7 +103,7 @@ pub async fn lmtp(
     system_root: PathBuf,
     mut users_root: PathBuf,
 ) {
-    let host_name = if system_config.lmtp.host_name.is_empty() {
+    let host_name = if system_config.smtp.host_name.is_empty() {
         let host_name_cstr = nix::unistd::gethostname().unwrap_or_else(|e| {
             fatal!(
                 EX_OSERR,
@@ -119,7 +119,7 @@ pub async fn lmtp(
             })
             .to_owned()
     } else {
-        system_config.lmtp.host_name.clone()
+        system_config.smtp.host_name.clone()
     };
 
     let ssl_acceptor = create_ssl_acceptor(&system_config, &system_root);
