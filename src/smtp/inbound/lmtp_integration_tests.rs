@@ -210,6 +210,18 @@ fn simple_command(cxn: &mut (impl Read + Write), command: &str, prefix: &str) {
     assert!(responses[0].starts_with(prefix));
 }
 
+/// Like `simple_command`, but omits the CR before the line ending.
+fn unix_simple_command(
+    cxn: &mut (impl Read + Write),
+    command: &str,
+    prefix: &str,
+) {
+    writeln!(cxn, "{}", command).unwrap();
+    let responses = read_responses(cxn);
+    assert_eq!(1, responses.len());
+    assert!(responses[0].starts_with(prefix));
+}
+
 /// Return whether the given account received the specified email.
 fn received_email(setup: &Setup, account_name: &str, email: &str) -> bool {
     let mut account = Account::new(
@@ -340,6 +352,50 @@ fn data_delivery() {
     assert!(!received_email(&setup, "gäz", email_b));
     assert!(!received_email(&setup, "zim", email_a));
     assert!(received_email(&setup, "zim", email_b));
+}
+
+#[test]
+fn data_delivery_from_unix_client() {
+    let setup = set_up();
+    let mut cxn = setup.connect("unix_unix_data_delivery");
+    skip_pleasantries(&mut cxn, "unix_unix_data_delivery");
+
+    let email_a = "Subject: Unix email from Unix client\r\n\r\nContent A\r\n";
+    unix_simple_command(&mut cxn, "MAIL FROM:<tallest@irk>", "250 2.0.0");
+    unix_simple_command(&mut cxn, "RCPT TO:<dib@localhost>", "250 2.1.5");
+    unix_simple_command(&mut cxn, "DATA", "354 ");
+    writeln!(cxn, "{}.", &email_a.replace("\r\n", "\n")).unwrap();
+    let responses = read_responses(&mut cxn);
+    assert_eq!(1, responses.len());
+
+    let email_b = "Subject: DOS email from UNIX client\r\n\r\nContent B\r\n";
+    unix_simple_command(&mut cxn, "MAIL FROM:<tallest@irk>", "250 2.0.0");
+    unix_simple_command(&mut cxn, "RCPT TO:<dib@localhost>", "250 2.1.5");
+    unix_simple_command(&mut cxn, "DATA", "354 ");
+    writeln!(cxn, "{}.", &email_b).unwrap();
+    let responses = read_responses(&mut cxn);
+    assert_eq!(1, responses.len());
+
+    assert!(received_email(&setup, "dib", email_a));
+    assert!(received_email(&setup, "dib", email_b));
+}
+
+#[test]
+fn unix_data_delivery_from_dos_client() {
+    let setup = set_up();
+    let mut cxn = setup.connect("unix_dos_data_delivery");
+    skip_pleasantries(&mut cxn, "unix_dos_data_delivery");
+
+    let email_a = "Subject: Unix message from DOS client\r\n\r\nContent A\r\n";
+    simple_command(&mut cxn, "MAIL FROM:<tallest@irk>", "250 2.0.0");
+    simple_command(&mut cxn, "RCPT TO:<dib@localhost>", "250 2.1.5");
+    simple_command(&mut cxn, "DATA", "354 ");
+
+    writeln!(cxn, "{}.\r", &email_a.replace("\r\n", "\n")).unwrap();
+    let responses = read_responses(&mut cxn);
+    assert_eq!(1, responses.len());
+
+    assert!(received_email(&setup, "dib", email_a));
 }
 
 #[test]

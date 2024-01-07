@@ -64,6 +64,9 @@ struct Server {
     has_mail_from: bool,
     recipients: u32,
     sending_data: Option<SendData>,
+
+    /// Whether any UNIX newlines have been seen in commands.
+    unix_newlines: bool,
 }
 
 pub(super) async fn run(
@@ -86,6 +89,7 @@ pub(super) async fn run(
         has_mail_from: false,
         recipients: 0,
         sending_data: None,
+        unix_newlines: false,
     };
     server.run().await
 }
@@ -146,8 +150,8 @@ static EXTENSIONS: &[&str] = &[
     "CHUNKING",
     "ENHANCEDSTATUSCODES",
     "PIPELINING",
-    "SMTPUTF8",
     concat_appendlimit!("SIZE="),
+    "SMTPUTF8",
     "STARTTLS",
     "HELP", // The final item must be unconditional
 ];
@@ -223,30 +227,27 @@ impl Server {
             return Ok(());
         }
 
-        if !buffer.ends_with(b"\r\n") {
-            self.send_response(
-                Final,
-                pc::CommandSyntaxError,
-                Some((cc::PermFail, sc::SyntaxError)),
-                Cow::Borrowed("Sadly we cannot allow UNIX newlines here"),
-            )
-            .await?;
-            return Ok(());
-        }
-
-        let command_line = match str::from_utf8(&buffer[..buffer.len() - 2]) {
-            Ok(s) => s,
-            Err(_) => {
-                self.send_response(
-                    Final,
-                    pc::CommandSyntaxError,
-                    Some((cc::PermFail, sc::OtherProtocolStatus)),
-                    Cow::Borrowed("Malformed UTF-8"),
-                )
-                .await?;
-                return Ok(());
-            },
+        let line_ending_len = if buffer.ends_with(b"\r\n") {
+            2
+        } else {
+            self.unix_newlines = true;
+            1
         };
+
+        let command_line =
+            match str::from_utf8(&buffer[..buffer.len() - line_ending_len]) {
+                Ok(s) => s,
+                Err(_) => {
+                    self.send_response(
+                        Final,
+                        pc::CommandSyntaxError,
+                        Some((cc::PermFail, sc::OtherProtocolStatus)),
+                        Cow::Borrowed("Malformed UTF-8"),
+                    )
+                    .await?;
+                    return Ok(());
+                },
+            };
 
         let command = match command_line.parse::<Command>() {
             Ok(c) => c,
@@ -316,7 +317,7 @@ impl Server {
         }
 
         self.send_response(
-            if extended { Delayable } else { Final },
+            Delayable.or_final(!extended),
             pc::Ok,
             None,
             Cow::Owned(format!(
@@ -531,6 +532,12 @@ impl Server {
             copy_with_dot_stuffing(
                 Pin::new(&mut DiscardOnError(&mut sending_data.stream)),
                 Pin::new(&mut self.io),
+                // If we've seen the client speaking SMTP with UNIX newlines,
+                // assume the message may be UNIX, or may at least be
+                // terminated with a UNIX-delimited '.'.
+                self.unix_newlines,
+                // Automatically detect line endings.
+                true,
             )
             .await?;
         }
@@ -943,10 +950,51 @@ impl tokio::io::AsyncWrite for DiscardOnError<'_> {
     }
 }
 
+/// Copies `src` to `dst`, stripping dot stuffing, consuming up to and
+/// including the line with just `.`.
+///
+/// UNIX line endings will be understood by default and converted to DOS
+/// newlines if `unix_lines` is `true`. `unix_lines` will be forced to true if
+/// an LF is encountered before a CR unless `detect_line_endings` is false.
+///
+/// As long as `unix_lines` is false, this implementation requires strict
+/// conformance to the use of DOS newlines in exchange for being able to
+/// preserve arbitrary binary content exactly.
 async fn copy_with_dot_stuffing(
     mut dst: Pin<&mut impl AsyncWriteExt>,
     mut src: Pin<&mut impl AsyncBufReadExt>,
+    mut unix_lines: bool,
+    mut detect_line_endings: bool,
 ) -> io::Result<()> {
+    /// Write `data` to `dst`, possibly performing line-ending conversion.
+    ///
+    /// `data` must either be a partial line or the end of a line, including
+    /// the input that was read.
+    ///
+    /// `has_trailing_cr` is set to whether the previous write ended with a
+    /// bare CR. `unix_lines` indicates whether conversion is enabled.
+    async fn write_with_line_conversion(
+        mut dst: Pin<&mut impl AsyncWriteExt>,
+        data: &[u8],
+        has_trailing_cr: bool,
+        unix_lines: bool,
+    ) -> io::Result<()> {
+        if unix_lines
+            && data.ends_with(b"\n")
+            && !data.ends_with(b"\r\n")
+            && (!has_trailing_cr || b"\n" != data)
+        {
+            dst.as_mut().write_all(&data[..data.len() - 1]).await?;
+            dst.as_mut().write_all(b"\r\n").await?;
+        } else {
+            // No conversion, no line ending, or it already ends with a DOS
+            // line ending.
+            dst.write_all(data).await?;
+        }
+
+        Ok(())
+    }
+
     // Copy src to dst until a line which is just ".\r\n" is encountered. If a
     // line which is not ".\r\n" is found which begins with '.', the first '.'
     // on the line is removed. The "\r\n" before ".\r\n" is part of the
@@ -963,11 +1011,9 @@ async fn copy_with_dot_stuffing(
     // just \n, we still treat it as a line ending.
     let mut has_trailing_cr = false;
 
-    let mut buffer = Vec::new();
-
     loop {
-        buffer.clear();
-        src.read_until(b'\n', &mut buffer).await?;
+        let mut src_buffer = src.as_mut();
+        let mut buffer = src_buffer.fill_buf().await?;
 
         if buffer.is_empty() {
             return Err(io::Error::new(
@@ -976,22 +1022,111 @@ async fn copy_with_dot_stuffing(
             ));
         }
 
-        if b".\r\n" == &buffer[..] && start_of_line {
-            // End of content
-            break;
+        if let Some(eol) = memchr::memchr(b'\n', buffer) {
+            buffer = &buffer[..=eol];
+
+            if detect_line_endings {
+                // This is our first line-ending. If it's not a DOS newline,
+                // perform conversion for the rest of the message.
+                if !buffer.ends_with(b"\r\n") && !has_trailing_cr {
+                    unix_lines = true;
+                }
+
+                detect_line_endings = false;
+            }
+        }
+
+        let buffer_len = buffer.len();
+
+        if start_of_line {
+            // The case of ".\n" at the start of a line is illegal when
+            // `!unix_lines`. Assume it's supposed to be the end of the text.
+            // In the case of `unix_lines`, it *is* the normal end of text.
+            if b".\r\n" == buffer || b".\n" == buffer {
+                // End of content
+                src.as_mut().consume(buffer_len);
+                break;
+            }
+
+            if b".\r" == buffer {
+                // Maybe end of content, if we can get a \n next.
+                src.as_mut().consume(buffer_len);
+
+                let mut extra = [0u8; 1];
+                src.as_mut().read_exact(&mut extra).await?;
+                if b'\n' == extra[0] {
+                    // End of content
+                    break;
+                }
+
+                // Nope, keep going. The isolated . at the start of the line is
+                // illegal, so whether or not we include it is moot.
+                dst.write_all(b"\r").await?;
+                dst.write_all(&extra).await?;
+                has_trailing_cr = b'\r' == extra[0];
+                start_of_line = false;
+                continue;
+            }
+
+            if b"." == buffer {
+                // Could be end of content or a stuffed dot.
+                src.as_mut().consume(buffer_len);
+
+                let mut extra = [0u8; 2];
+                src.as_mut().read_exact(&mut extra[..1]).await?;
+
+                if b'\n' == extra[0] {
+                    // ".\n" is illegal with !unix_lines, but is the end of
+                    // content with unix_lines, so this is the end of content.
+                    break;
+                }
+
+                src.as_mut().read_exact(&mut extra[1..]).await?;
+
+                if b"\r\n" == &extra {
+                    // End of content
+                    break;
+                }
+
+                // Nope, keep going. The isolated '.' at the start of the line
+                // either is part of dot-stuffing (if extra[0] is '.') or
+                // illegal, so just drop it.
+                //
+                // We know that extra[0] is not '\n', so the only possible line
+                // ending is at the end of `extra`.
+                write_with_line_conversion(
+                    dst.as_mut(),
+                    &extra,
+                    false, // There was a '.' since the last has_trailing_cr write
+                    unix_lines,
+                )
+                .await?;
+                has_trailing_cr = extra.ends_with(b"\r");
+                start_of_line = unix_lines && extra.ends_with(b"\n");
+                continue;
+            }
         }
 
         // Else, everything inside buffer is content, except possibly a leading
         // '.'.
-        if b'.' == buffer[0] && start_of_line {
-            dst.write_all(&buffer[1..]).await?;
+        let line_contents = if b'.' == buffer[0] && start_of_line {
+            &buffer[1..]
         } else {
-            dst.write_all(&buffer).await?;
-        }
+            buffer
+        };
+        write_with_line_conversion(
+            dst.as_mut(),
+            line_contents,
+            has_trailing_cr,
+            unix_lines,
+        )
+        .await?;
 
         start_of_line = buffer.ends_with(b"\r\n")
-            || (b"\n" == &buffer[..] && has_trailing_cr);
+            || (b"\n" == buffer && has_trailing_cr)
+            || (unix_lines && buffer.ends_with(b"\n"));
         has_trailing_cr = buffer.ends_with(b"\r");
+        src.as_mut().consume(buffer_len);
     }
 
     Ok(())
@@ -1003,6 +1138,26 @@ mod test {
 
     use super::*;
 
+    fn copy_with_dot_stuffing_sync(
+        stuffed: &[u8],
+        buffer_size: usize,
+        unix_lines: bool,
+        detect_line_endings: bool,
+    ) -> Vec<u8> {
+        let mut decoded_bytes = Vec::<u8>::new();
+        let mut reader =
+            tokio::io::BufReader::with_capacity(buffer_size, stuffed);
+        futures::executor::block_on(copy_with_dot_stuffing(
+            Pin::new(&mut decoded_bytes),
+            Pin::new(&mut reader),
+            unix_lines,
+            detect_line_endings,
+        ))
+        .unwrap();
+
+        decoded_bytes
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig {
             cases: 4096,
@@ -1010,7 +1165,7 @@ mod test {
         })]
 
         #[test]
-        fn dot_stuffing_decodes_properly(
+        fn binary_dot_stuffing_decodes_properly(
             content in "[x.\r\n]{0,100}\r\n",
             buffer_size in 1usize..=32,
         ) {
@@ -1020,14 +1175,64 @@ mod test {
             }
             stuffed.push_str(".\r\n");
 
-            let mut decoded_bytes = Vec::<u8>::new();
-            let mut reader = tokio::io::BufReader::with_capacity(
-                buffer_size, stuffed.as_bytes());
-            futures::executor::block_on(copy_with_dot_stuffing(
-                Pin::new(&mut decoded_bytes),
-                Pin::new(&mut reader))).unwrap();
+            let decoded_bytes = copy_with_dot_stuffing_sync(
+                stuffed.as_bytes(),
+                buffer_size,
+                // For this test, never do line ending conversion.
+                false,
+                false,
+            );
 
             assert_eq!(content, str::from_utf8(&decoded_bytes).unwrap());
         }
+
+        #[test]
+        fn text_dot_stuffing_decodes_properly(
+            content in "[x.\r\n]{0,100}\r\n",
+            buffer_size in 1usize..=32,
+        ) {
+            let mut stuffed = content.replace("\n.", "\n..");
+            if stuffed.starts_with(".") {
+                stuffed = format!(".{}", stuffed);
+            }
+            stuffed.push_str(".\n");
+
+            let decoded_bytes = copy_with_dot_stuffing_sync(
+                stuffed.as_bytes(),
+                buffer_size,
+                // For this test, always do line ending conversion.
+                true,
+                false,
+            );
+
+            let converted_content = content.replace("\r\n", "\n")
+                .replace("\n", "\r\n");
+            assert_eq!(
+                converted_content,
+                str::from_utf8(&decoded_bytes).unwrap(),
+            );
+        }
+    }
+
+    #[test]
+    fn dot_stuffing_line_ending_detection() {
+        assert_eq!(
+            b"foo\r\nbar\n.\r\n".to_vec(),
+            copy_with_dot_stuffing_sync(
+                b"foo\r\nbar\n.\r\n.\r\n",
+                64,
+                false,
+                true,
+            ),
+        );
+        assert_eq!(
+            b"foo\r\nbar\r\nbaz\r\n".to_vec(),
+            copy_with_dot_stuffing_sync(
+                b"foo\nbar\r\nbaz\n.\n",
+                64,
+                false,
+                true,
+            ),
+        );
     }
 }

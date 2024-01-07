@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 6b77151c030c61fa30b4f99838663579dace0fee7247d08c9495713d05b0e57d # shrinks to content = ".\r.\rxx\n\n\nx..\n.\nx\rx\r\n\n\r.\r\rx.\r\n\nx..x\r\nx\n..\r\n..\nx\n\n\nxx\n\rx.\r..x\r\n", buffer_size = 13
+cc 8f1deb527176c546b2a6f04235d93bfa8b89a62ef5840ebe82bb832d66aa608b # shrinks to content = "\n\r\r\r.x.\rx\rx\r\n.\r\r\r\n...\r\n", buffer_size = 4
+cc 813059613f949109b5b5186fe2522c540ccb0f3347b99991907eb6a5b7d7ff1b # shrinks to content = ".\n.\r\n", buffer_size = 1
+cc df807c014f6697efa26665a94bb21e2777e338958348bf21802fb15b5314f023 # shrinks to content = "\r\n\rx\r\n.\n\n\n\n\n....\r\r\n.\n.\r\n", buffer_size = 3
