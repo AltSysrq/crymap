@@ -656,7 +656,7 @@ impl Server {
             Delayable,
             pc::HelpMessage,
             Some((cc::Success, sc::Undefined)),
-            Cow::Borrowed("You have asked me for help"),
+            Cow::Borrowed("You asked me for help"),
         )
         .await?;
         self.send_response(
