@@ -306,24 +306,23 @@ impl Server {
         // The various DNS processes have all been queued and will execute as
         // we process the rest of the message.
         let mut data_buffer = BufferWriter::new(Arc::clone(&self.common_paths));
-        #[allow(clippy::never_loop)] // This `loop` is a stable-man's-`try`.
-        let io_result = 'trie: loop {
+        let io_result = 'yeet: {
             macro_rules! try_or_yeet {
                 ($e:expr $(,)*) => {
                     match $e {
                         Ok(v) => v,
-                        Err(e) => break 'trie Err(e), // yeet
+                        Err(e) => break 'yeet Err(e),
                     }
                 };
             }
 
             try_or_yeet!(
-                data_buffer.write_all(&header_buffer[..header_buffer_len])
+                data_buffer.write_all(&header_buffer[..header_buffer_len]),
             );
             // The part of header_buffer which is beyond headers_end is part of
             // the body that needs to be verified.
             try_or_yeet!(dkim_verifier
-                .write_all(&header_buffer[headers_end..header_buffer_len],));
+                .write_all(&header_buffer[headers_end..header_buffer_len]));
 
             let mut buffer = [0u8; 1024];
             loop {
@@ -338,7 +337,7 @@ impl Server {
                 }
             }
 
-            break Ok(());
+            Ok(())
         };
 
         if let Err(e) = io_result {
