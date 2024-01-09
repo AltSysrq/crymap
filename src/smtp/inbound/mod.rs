@@ -20,6 +20,7 @@ mod bridge;
 mod delivery;
 mod lmtp;
 mod server;
+mod smtpin;
 
 #[cfg(test)]
 mod lmtp_integration_tests;

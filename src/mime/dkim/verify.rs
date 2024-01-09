@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -18,6 +18,7 @@
 
 use std::fmt::Write as _;
 use std::io::{self, Write};
+use std::rc::Rc;
 
 use chrono::prelude::*;
 
@@ -61,8 +62,12 @@ pub struct Outcome {
 pub struct VerificationEnvironment {
     /// The current time.
     pub now: DateTime<Utc>,
-    /// The claimed host name of the sender.
-    pub sender: hickory_resolver::Name,
+    /// The claimed host name of the sender, if any.
+    pub sender: Option<Rc<hickory_resolver::Name>>,
+    // TODO We need to know whether subdomains of sender are considered
+    // relevant. Or, better, just lift `sender` out of here and have `Outcome`
+    // carry a table of SDIDs and kinds, instead of trying to roll it all up
+    // here.
     /// The TXT records that were actually fetched.
     pub txt_records: Vec<TxtRecordEntry>,
 }
@@ -72,7 +77,10 @@ pub struct VerificationEnvironment {
 pub struct TxtRecordEntry {
     pub selector: String,
     pub sdid: String,
-    pub txt: String,
+    // TODO We need a way to indicate that fetching the record failed so we can
+    // return an ambivalent status (where as if the record is missing entirely,
+    // we should treat it as a failure).
+    pub txt: Rc<str>,
 }
 
 /// Processes DKIM verification on an inbound message.
@@ -100,7 +108,7 @@ impl<'a> Verifier<'a> {
             .filter(|m| {
                 std::str::from_utf8(m.get(2).unwrap().as_bytes())
                     .ok()
-                    .is_some_and(|n| HEADER_NAME == n)
+                    .is_some_and(|n| HEADER_NAME.eq_ignore_ascii_case(n))
             })
             .filter_map(|m| {
                 std::str::from_utf8(m.get(1).unwrap().as_bytes()).ok()
@@ -305,7 +313,11 @@ impl SubVerifier<'_> {
                 e => e,
             })?;
 
-        if !sdid.zone_of(&env.sender) {
+        if !env
+            .sender
+            .as_ref()
+            .is_some_and(|sender| sdid.zone_of(sender))
+        {
             return Err(Error::Ambivalent(Ambivalence::SdidNotSender));
         }
 
@@ -490,7 +502,9 @@ mod test {
         verifier.write_all(body).unwrap();
 
         let env = VerificationEnvironment {
-            sender: hickory_resolver::Name::from_str_relaxed(sender).unwrap(),
+            sender: Some(Rc::new(
+                hickory_resolver::Name::from_str_relaxed(sender).unwrap(),
+            )),
             now: DateTime::from_timestamp(now_unix, 0).unwrap(),
             txt_records,
         };
@@ -502,7 +516,7 @@ mod test {
         let txt_records = vec![TxtRecordEntry {
             selector: "hsbnp7p3ensaochzwyq5wwmceodymuwv".to_owned(),
             sdid: "amazonses.com".to_owned(),
-            txt: test_domain_keys::HSG_AMAZONSES_COM.to_owned(),
+            txt: test_domain_keys::HSG_AMAZONSES_COM.to_owned().into(),
         }];
 
         let not_found = || {
@@ -620,7 +634,7 @@ mod test {
             vec![TxtRecordEntry {
                 sdid: v.sdid.to_owned(),
                 selector: v.selector.to_owned(),
-                txt: txt.to_owned(),
+                txt: txt.to_owned().into(),
             }],
             message,
         )

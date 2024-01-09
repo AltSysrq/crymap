@@ -193,6 +193,8 @@ impl SubSigner<'_> {
 
 #[cfg(test)]
 mod test {
+    use std::rc::Rc;
+
     use super::super::{
         split_message, TxtRecordEntry, VerificationEnvironment, Verifier,
     };
@@ -224,7 +226,9 @@ mod test {
 
         let ver_env = VerificationEnvironment {
             now: Utc::now(),
-            sender: hickory_resolver::Name::from_ascii("example.com").unwrap(),
+            sender: Some(Rc::new(
+                hickory_resolver::Name::from_ascii("example.com").unwrap(),
+            )),
             txt_records: vec![
                 TxtRecordEntry {
                     sdid: "example.com".to_owned(),
@@ -232,7 +236,8 @@ mod test {
                     txt: format!(
                         "k=ed25519;p={}",
                         base64::encode(&keys[0].1.raw_public_key().unwrap()),
-                    ),
+                    )
+                    .into(),
                 },
                 TxtRecordEntry {
                     sdid: "example.com".to_owned(),
@@ -240,7 +245,8 @@ mod test {
                     txt: format!(
                         "k=rsa;p={}",
                         base64::encode(&keys[1].1.public_key_to_der().unwrap()),
-                    ),
+                    )
+                    .into(),
                 },
             ],
         };

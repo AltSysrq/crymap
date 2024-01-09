@@ -21,5 +21,10 @@
 mod psl;
 mod syntax;
 
+#[allow(unused_imports)]
+pub use psl::organisational_domain;
+#[allow(unused_imports)]
+pub use syntax::*;
+
 #[cfg(feature = "dev-tools")]
 pub use psl::cli::compile_psl;

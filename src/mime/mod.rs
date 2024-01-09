@@ -21,6 +21,6 @@ pub mod dkim;
 pub mod encoded_word;
 pub mod fetch;
 pub mod grovel;
-mod header;
+pub mod header;
 mod quoted_printable;
 pub mod utf7;

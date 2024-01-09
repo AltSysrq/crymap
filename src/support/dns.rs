@@ -169,6 +169,22 @@ pub fn look_up<T>(
     }
 }
 
+pub async fn wait_for<T, F: FnMut(&mut Cache) -> Result<T, CacheError>>(
+    cache: &Rc<RefCell<Cache>>,
+    resolver: &Rc<Resolver>,
+    mut look_up: F,
+) -> Result<T, CacheError> {
+    loop {
+        let result = look_up(&mut cache.borrow_mut());
+        if !matches!(result, Err(CacheError::NotReady)) {
+            return result;
+        }
+
+        spawn_lookups(cache, resolver);
+        wait_for_progress(cache).await;
+    }
+}
+
 pub fn ptr(
     cache: &mut HashMap<IpAddr, Entry<Vec<Rc<Name>>>>,
     ip: IpAddr,
