@@ -47,6 +47,8 @@ pub enum Ambivalence {
     DnsTxtParse(String, String),
     #[error("can't find TXT record {0}, or it is not DKIM1")]
     DnsTxtNotFound(String),
+    #[error("DNS error fetching TXT record {0}")]
+    DnsTxtError(String),
     #[error("unsupported DKIM version")]
     UnsupportedVersion,
     #[error("RSA key is too big to validate")]
@@ -77,6 +79,9 @@ impl std::cmp::PartialEq for Ambivalence {
                 a == b
             },
             (&Self::DnsTxtNotFound(..), _) => false,
+
+            (&Self::DnsTxtError(ref a), &Self::DnsTxtError(ref b)) => a == b,
+            (&Self::DnsTxtError(..), _) => false,
 
             (&Self::UnsupportedVersion, &Self::UnsupportedVersion) => true,
             (&Self::UnsupportedVersion, _) => false,

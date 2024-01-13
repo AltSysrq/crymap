@@ -228,20 +228,20 @@ mod test {
                 TxtRecordEntry {
                     sdid: "example.com".to_owned(),
                     selector: "ed".to_owned(),
-                    txt: format!(
+                    txt: Ok(format!(
                         "k=ed25519;p={}",
                         base64::encode(&keys[0].1.raw_public_key().unwrap()),
                     )
-                    .into(),
+                    .into()),
                 },
                 TxtRecordEntry {
                     sdid: "example.com".to_owned(),
                     selector: "rsa".to_owned(),
-                    txt: format!(
+                    txt: Ok(format!(
                         "k=rsa;p={}",
                         base64::encode(&keys[1].1.public_key_to_der().unwrap()),
                     )
-                    .into(),
+                    .into()),
                 },
             ],
         };

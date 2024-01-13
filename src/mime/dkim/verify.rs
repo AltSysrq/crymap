@@ -63,6 +63,10 @@ pub struct VerificationEnvironment {
     /// The current time.
     pub now: DateTime<Utc>,
     /// The TXT records that were actually fetched.
+    ///
+    /// If a record was not found, it shall not be present in this list. If an
+    /// error occurred while fetching a record, it shall be present with a
+    /// `Err` `txt`.
     pub txt_records: Vec<TxtRecordEntry>,
 }
 
@@ -71,10 +75,10 @@ pub struct VerificationEnvironment {
 pub struct TxtRecordEntry {
     pub selector: String,
     pub sdid: String,
-    // TODO We need a way to indicate that fetching the record failed so we can
-    // return an ambivalent status (where as if the record is missing entirely,
-    // we should treat it as a failure).
-    pub txt: Rc<str>,
+    /// The TXT record itself.
+    ///
+    /// `Err(())` indicates that an error occurred while fetching the record.
+    pub txt: Result<Rc<str>, ()>,
 }
 
 /// Processes DKIM verification on an inbound message.
@@ -267,7 +271,13 @@ impl SubVerifier<'_> {
                 continue;
             }
 
-            match TxtRecord::parse(&record.txt) {
+            let Ok(ref txt) = record.txt else {
+                return Err(
+                    Ambivalence::DnsTxtError(self.format_selector()).into()
+                );
+            };
+
+            match TxtRecord::parse(txt) {
                 Ok(r) => {
                     if "DKIM1" == r.version {
                         txt_record = Some(r);
@@ -449,6 +459,7 @@ impl From<Result<(), Error>> for OutcomeKind {
                 A::Ssl(..) => Self::PermError,
                 A::Io(..) => Self::TempError,
                 A::HeaderParse(..) => Self::Neutral,
+                A::DnsTxtError(..) => Self::TempError,
                 A::DnsTxtParse(..) => Self::Neutral,
                 A::DnsTxtNotFound(..) => Self::TempError,
                 A::TestMode(..) => Self::Neutral,
@@ -497,7 +508,7 @@ mod test {
         let txt_records = vec![TxtRecordEntry {
             selector: "hsbnp7p3ensaochzwyq5wwmceodymuwv".to_owned(),
             sdid: "amazonses.com".to_owned(),
-            txt: test_domain_keys::HSG_AMAZONSES_COM.to_owned().into(),
+            txt: Ok(test_domain_keys::HSG_AMAZONSES_COM.to_owned().into()),
         }];
 
         let not_found = || {
@@ -519,6 +530,33 @@ mod test {
             vec![not_found(), Err(Error::Fail(Failure::FutureSignature))],
             run_verifier(
                 1594481246,
+                txt_records.clone(),
+                DKIM_AMAZONCOJP_RSA_SHA256,
+            ),
+        );
+    }
+
+    #[test]
+    fn verify_dns_error() {
+        let txt_records = vec![TxtRecordEntry {
+            selector: "hsbnp7p3ensaochzwyq5wwmceodymuwv".to_owned(),
+            sdid: "amazonses.com".to_owned(),
+            txt: Err(()),
+        }];
+
+        assert_eq!(
+            vec![
+                Err::<(), _>(Error::Ambivalent(Ambivalence::DnsTxtNotFound(
+                    "55v6dsnbko3asrylf5mgtqv5mgll5any._domainkey.amazon.co.jp"
+                        .to_owned(),
+                ))),
+                Err::<(), _>(Error::Ambivalent(Ambivalence::DnsTxtError(
+                    "hsbnp7p3ensaochzwyq5wwmceodymuwv._domainkey.amazonses.com"
+                        .to_owned(),
+                ))),
+            ],
+            run_verifier(
+                1694481247,
                 txt_records.clone(),
                 DKIM_AMAZONCOJP_RSA_SHA256,
             ),
@@ -610,7 +648,7 @@ mod test {
             vec![TxtRecordEntry {
                 sdid: v.sdid.to_owned(),
                 selector: v.selector.to_owned(),
-                txt: txt.to_owned().into(),
+                txt: Ok(txt.to_owned().into()),
             }],
             message,
         )

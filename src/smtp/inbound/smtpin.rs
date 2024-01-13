@@ -587,22 +587,30 @@ impl Server {
                 let dns_cache = &self.dns_cache;
                 let dns_resolver = &self.dns_resolver;
                 Some(async move {
-                    tokio::time::timeout_at(
+                    let result = tokio::time::timeout_at(
                         dns_deadline.into(),
                         dns::wait_for(dns_cache, dns_resolver, |cache| {
                             dns::look_up(&mut cache.txt, &name).cloned()
                         }),
                     )
                     .await
-                    .unwrap_or(Err(dns::CacheError::Error))
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|txt| dkim::TxtRecordEntry {
-                        selector: selector.clone(),
-                        sdid: sdid.clone(),
-                        txt,
-                    })
-                    .collect::<Vec<_>>()
+                    .unwrap_or(Err(dns::CacheError::Error));
+
+                    match result {
+                        Ok(results) => results
+                            .into_iter()
+                            .map(|txt| dkim::TxtRecordEntry {
+                                selector: selector.clone(),
+                                sdid: sdid.clone(),
+                                txt: Ok(txt),
+                            })
+                            .collect::<Vec<_>>(),
+                        Err(_) => vec![dkim::TxtRecordEntry {
+                            selector,
+                            sdid,
+                            txt: Err(()),
+                        }],
+                    }
                 })
             })
             .collect::<futures::stream::FuturesUnordered<_>>()
