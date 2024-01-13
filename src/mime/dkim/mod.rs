@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -41,9 +41,7 @@ pub use header::{
 #[allow(unused_imports)]
 pub use sign::{KeyPair, Signer};
 #[allow(unused_imports)]
-pub use verify::{
-    Outcome, OutcomeKind, TxtRecordEntry, VerificationEnvironment, Verifier,
-};
+pub use verify::{Outcome, TxtRecordEntry, VerificationEnvironment, Verifier};
 
 #[cfg(test)]
 fn split_message(message: &[u8]) -> (&[u8], &[u8]) {

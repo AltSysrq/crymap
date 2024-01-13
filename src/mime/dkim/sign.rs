@@ -22,8 +22,8 @@ use std::io::{self, Write};
 use chrono::prelude::*;
 
 use super::{
-    hash, Algorithm, Ambivalence, BodyCanonicalisation, Canonicalisation,
-    Error, HashAlgorithm, Header, HeaderCanonicalisation, SignatureAlgorithm,
+    hash, Algorithm, BodyCanonicalisation, Canonicalisation, Error,
+    HashAlgorithm, Header, HeaderCanonicalisation, SignatureAlgorithm,
 };
 
 pub type KeyPair = openssl::pkey::PKey<openssl::pkey::Private>;
@@ -182,10 +182,9 @@ impl SubSigner<'_> {
                 openssl::sign::Signer::new_without_digest(self.key)
             },
         }
-        .map_err(Ambivalence::Ssl)?;
-        self.header.signature = signer
-            .sign_oneshot_to_vec(&hash_data)
-            .map_err(Ambivalence::Ssl)?;
+        .map_err(Error::Ssl)?;
+        self.header.signature =
+            signer.sign_oneshot_to_vec(&hash_data).map_err(Error::Ssl)?;
 
         Ok(self.header.raw().into_owned().text.into_owned())
     }
@@ -194,10 +193,11 @@ impl SubSigner<'_> {
 #[cfg(test)]
 mod test {
     use super::super::{
-        split_message, TxtRecordEntry, VerificationEnvironment, Verifier,
+        split_message, Outcome, TxtRecordEntry, VerificationEnvironment,
+        Verifier,
     };
     use super::*;
-    use crate::test_data::*;
+    use crate::{support::dns, test_data::*};
 
     #[test]
     fn test_sign_and_verify() {
@@ -251,7 +251,19 @@ mod test {
 
         let mut verifier = Verifier::new(&combined_headers);
         verifier.write_all(body).unwrap();
-        let results = verifier.finish_raw(&ver_env).collect::<Vec<_>>();
-        assert_eq!(vec![Ok::<_, Error>(()), Ok(())], results);
+        let results = verifier.finish(&ver_env).collect::<Vec<_>>();
+        assert_eq!(
+            vec![
+                Outcome {
+                    sdid: Some(dns::Name::from_ascii("example.com").unwrap()),
+                    error: None,
+                },
+                Outcome {
+                    sdid: Some(dns::Name::from_ascii("example.com").unwrap()),
+                    error: None,
+                },
+            ],
+            results,
+        );
     }
 }

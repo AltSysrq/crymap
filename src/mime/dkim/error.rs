@@ -19,28 +19,28 @@
 use thiserror::Error;
 
 /// Reasons a DKIM signature could not be validated.
-#[derive(Error, PartialEq, Debug)]
-pub enum Error {
-    /// No pass/fail status could be ascribed to a signature. This includes
-    /// transient network errors, signatures with unsupported algorithms, and
-    /// unexpected errors.
-    ///
-    /// This does not correspond to "TEMPFAIL" from RFC 6376. While it includes
-    /// all temporary failures, it also includes permanent failures which don't
-    /// indicate a problem with the message.
-    #[error(transparent)]
-    Ambivalent(#[from] Ambivalence),
-    /// The signature is objectively invalid.
-    #[error(transparent)]
-    Fail(#[from] Failure),
-}
-
 #[derive(Error, Debug)]
-pub enum Ambivalence {
+pub enum Error {
     #[error("unexpected OpenSSL error: {0}")]
     Ssl(openssl::error::ErrorStack),
     #[error("unexpected I/O error: {0}")]
     Io(std::io::Error),
+    #[error(transparent)]
+    Fail(#[from] Failure),
+}
+
+impl std::cmp::PartialEq for Error {
+    fn eq(&self, rhs: &Self) -> bool {
+        match (self, rhs) {
+            (&Self::Ssl(..) | &Self::Io(..), _) => false,
+            (&Self::Fail(ref l), &Self::Fail(ref r)) => l == r,
+            (&Self::Fail(..), _) => false,
+        }
+    }
+}
+
+#[derive(Error, PartialEq, Debug)]
+pub enum Failure {
     #[error("can't parse DKIM-Signature header: {0}")]
     HeaderParse(String),
     #[error("can't parse TXT record {0}: {1}")]
@@ -58,51 +58,7 @@ pub enum Ambivalence {
     #[error("valid signature, but signing key is weak")]
     WeakKey,
     #[error("verification failed, but the selector is in test mode: {0}")]
-    TestMode(Failure),
-}
-
-impl std::cmp::PartialEq for Ambivalence {
-    fn eq(&self, rhs: &Self) -> bool {
-        match (self, rhs) {
-            (&Self::Ssl(..) | &Self::Io(..), _) => false,
-
-            (&Self::HeaderParse(ref a), &Self::HeaderParse(ref b)) => a == b,
-            (&Self::HeaderParse(..), _) => false,
-
-            (
-                &Self::DnsTxtParse(ref a, ref b),
-                &Self::DnsTxtParse(ref c, ref d),
-            ) => (a, b) == (c, d),
-            (&Self::DnsTxtParse(..), _) => false,
-
-            (&Self::DnsTxtNotFound(ref a), &Self::DnsTxtNotFound(ref b)) => {
-                a == b
-            },
-            (&Self::DnsTxtNotFound(..), _) => false,
-
-            (&Self::DnsTxtError(ref a), &Self::DnsTxtError(ref b)) => a == b,
-            (&Self::DnsTxtError(..), _) => false,
-
-            (&Self::UnsupportedVersion, &Self::UnsupportedVersion) => true,
-            (&Self::UnsupportedVersion, _) => false,
-
-            (&Self::RsaKeyTooBig, &Self::RsaKeyTooBig) => true,
-            (&Self::RsaKeyTooBig, _) => false,
-
-            (&Self::WeakHashFunction, &Self::WeakHashFunction) => true,
-            (&Self::WeakHashFunction, _) => false,
-
-            (&Self::WeakKey, &Self::WeakKey) => true,
-            (&Self::WeakKey, _) => false,
-
-            (&Self::TestMode(ref a), &Self::TestMode(ref b)) => a == b,
-            (&Self::TestMode(..), _) => false,
-        }
-    }
-}
-
-#[derive(Error, PartialEq, Debug)]
-pub enum Failure {
+    TestMode(Box<Failure>),
     #[error("body is shorter than the l= tag indicates")]
     BodyTruncated,
     #[error("the computed body hash does not match the bh= tag")]

@@ -19,7 +19,7 @@
 use std::io::{self, Write};
 use std::mem;
 
-use super::{Ambivalence, BodyCanonicaliser, Error, Failure, Header};
+use super::{BodyCanonicaliser, Error, Failure, Header};
 use crate::mime::header::FULL_HEADER_LINE;
 
 /// Generates the header hash data into a byte vec.
@@ -154,13 +154,13 @@ impl BodyHasher {
             .body_hash
             .finish()
             // Should never fail
-            .map_err(Ambivalence::Io)?;
+            .map_err(Error::Io)?;
 
         let hash = body_hash
             .digest
             .and_then(|mut h| h.finish())
             // We don't expect hashing to ever fail
-            .map_err(Ambivalence::Ssl)?
+            .map_err(Error::Ssl)?
             .to_vec();
 
         // We don't strictly need to validate that body_hash.bytes_written ==

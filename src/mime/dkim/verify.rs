@@ -16,46 +16,19 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::rc::Rc;
 
 use chrono::prelude::*;
 
 use super::{
-    hash, Ambivalence, Error, Failure, HashAlgorithm, Header,
-    SignatureAlgorithm, TxtRecord, HEADER_NAME,
+    hash, Error, Failure, HashAlgorithm, Header, SignatureAlgorithm, TxtRecord,
+    HEADER_NAME,
 };
-use crate::mime::header::FULL_HEADER_LINE;
+use crate::{mime::header::FULL_HEADER_LINE, support::dns};
 
 const MAX_SIGNATURES: usize = 8;
 const MAX_RSA_BITS: u32 = 8192;
-
-/// The final result of DKIM verification.
-///
-/// This is ordered such that a lesser outcome of a sub-verification takes
-/// priority over a greater one.
-///
-/// RFC 5451 § 2.4.1
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum OutcomeKind {
-    Pass,
-    Fail,
-    Policy,
-    Neutral,
-    TempError,
-    PermError,
-    None,
-}
-
-#[derive(Clone, Debug)]
-pub struct Outcome {
-    /// The summary of the outcome.
-    pub kind: OutcomeKind,
-    /// Human-readable text describing the results of each key, or otherwise
-    /// explaining the outcome.
-    pub comment: String,
-}
 
 /// Environmental information passed in to the verifier.
 #[derive(Clone, Debug)]
@@ -68,6 +41,13 @@ pub struct VerificationEnvironment {
     /// error occurred while fetching a record, it shall be present with a
     /// `Err` `txt`.
     pub txt_records: Vec<TxtRecordEntry>,
+}
+
+/// The outcome for a single DKIM signature.
+#[derive(Debug, PartialEq)]
+pub struct Outcome {
+    pub sdid: Option<dns::Name>,
+    pub error: Option<Error>,
 }
 
 /// Raw results for TXT entries fetched from DNS.
@@ -92,7 +72,7 @@ struct SubVerifier<'a> {
     hasher: hash::BodyHasher,
 }
 
-pub(super) trait Captures<U> {}
+pub trait Captures<U> {}
 impl<T: ?Sized, U> Captures<U> for T {}
 
 impl<'a> Verifier<'a> {
@@ -137,45 +117,14 @@ impl<'a> Verifier<'a> {
     }
 
     /// Completes the verification process.
-    pub fn finish(self, env: &VerificationEnvironment) -> Outcome {
-        let mut outcome = OutcomeKind::None;
-        let mut comment = String::new();
-
-        for sub_result in self.finish_raw(env) {
-            if !comment.is_empty() {
-                comment.push_str("; ");
-            }
-            match sub_result {
-                Ok(()) => comment.push_str("pass"),
-                Err(ref e) => {
-                    let _ = write!(comment, "{e}");
-                },
-            }
-
-            let sub_outcome = OutcomeKind::from(sub_result);
-            if sub_outcome < outcome {
-                outcome = sub_outcome;
-            }
-        }
-
-        if comment.is_empty() {
-            comment.push_str("no DKIM signatures");
-        }
-
-        Outcome {
-            kind: outcome,
-            comment,
-        }
-    }
-
-    pub(super) fn finish_raw<'e>(
+    pub fn finish<'e>(
         self,
         env: &'e VerificationEnvironment,
-    ) -> impl Iterator<Item = Result<(), Error>> + Captures<(&'a (), &'e ())>
-    {
+    ) -> impl Iterator<Item = Outcome> + Captures<(&'a (), &'e ())> {
         self.subs.into_iter().map(move |sub| match sub {
-            Err(syntax_error) => {
-                Err(Error::Ambivalent(Ambivalence::HeaderParse(syntax_error)))
+            Err(syntax_error) => Outcome {
+                sdid: None,
+                error: Some(Error::Fail(Failure::HeaderParse(syntax_error))),
             },
 
             Ok(sub) => sub.finish(self.header_block, env),
@@ -211,15 +160,31 @@ impl SubVerifier<'_> {
         self,
         header_block: &[u8],
         env: &VerificationEnvironment,
+    ) -> Outcome {
+        let Ok(sdid) = dns::Name::from_ascii(&self.header.sdid) else {
+            return Outcome {
+                sdid: None,
+                error: Some(Failure::InvalidSdid.into()),
+            };
+        };
+
+        let result = self.finish_impl(header_block, env, &sdid);
+
+        Outcome {
+            sdid: Some(sdid),
+            error: result.err(),
+        }
+    }
+
+    fn finish_impl(
+        self,
+        header_block: &[u8],
+        env: &VerificationEnvironment,
+        sdid: &dns::Name,
     ) -> Result<(), Error> {
         // RFC 6376 § 6
 
         // § 6.1.1
-
-        let Ok(sdid) = hickory_resolver::Name::from_ascii(&self.header.sdid)
-        else {
-            return Err(Failure::InvalidSdid.into());
-        };
 
         // We're supposed to validate the SDID/AUID relationship first, but we
         // can't actually complete this step till we have the TXT record.
@@ -229,7 +194,7 @@ impl SubVerifier<'_> {
                     auid = domain;
                 }
 
-                let Ok(auid) = hickory_resolver::Name::from_ascii(auid) else {
+                let Ok(auid) = dns::Name::from_ascii(auid) else {
                     return Err(Failure::InvalidAuid.into());
                 };
 
@@ -237,13 +202,13 @@ impl SubVerifier<'_> {
                     return Err(Failure::AuidOutsideSdid.into());
                 }
 
-                sdid == auid
+                *sdid == auid
             } else {
                 true
             };
 
         if 1 != self.header.version {
-            return Err(Ambivalence::UnsupportedVersion.into());
+            return Err(Failure::UnsupportedVersion.into());
         }
 
         if !self
@@ -272,9 +237,7 @@ impl SubVerifier<'_> {
             }
 
             let Ok(ref txt) = record.txt else {
-                return Err(
-                    Ambivalence::DnsTxtError(self.format_selector()).into()
-                );
+                return Err(Failure::DnsTxtError(self.format_selector()).into());
             };
 
             match TxtRecord::parse(txt) {
@@ -295,9 +258,9 @@ impl SubVerifier<'_> {
 
         let Some(txt_record) = txt_record else {
             return Err(txt_parse_error
-                .map(|e| Ambivalence::DnsTxtParse(self.format_selector(), e))
+                .map(|e| Failure::DnsTxtParse(self.format_selector(), e))
                 .unwrap_or_else(|| {
-                    Ambivalence::DnsTxtNotFound(self.format_selector())
+                    Failure::DnsTxtNotFound(self.format_selector())
                 })
                 .into());
         };
@@ -312,7 +275,7 @@ impl SubVerifier<'_> {
         self.finish_with_txt_record(header_block, env, txt_record)
             .map_err(|e| match e {
                 Error::Fail(f) if is_test => {
-                    Error::Ambivalent(Ambivalence::TestMode(f))
+                    Error::Fail(Failure::TestMode(Box::new(f)))
                 },
                 e => e,
             })?;
@@ -369,7 +332,7 @@ impl SubVerifier<'_> {
                 // RFC 8301
                 let acceptable_strength = pk.bits() >= 1024;
                 if pk.bits() > MAX_RSA_BITS {
-                    return Err(Ambivalence::RsaKeyTooBig.into());
+                    return Err(Failure::RsaKeyTooBig.into());
                 }
                 (pk, acceptable_strength)
             },
@@ -403,21 +366,21 @@ impl SubVerifier<'_> {
                 openssl::sign::Verifier::new_without_digest(&public_key)
             },
         }
-        .map_err(Ambivalence::Ssl)?;
+        .map_err(Error::Ssl)?;
         let valid = verifier
             .verify_oneshot(&self.header.signature, &header_data)
-            .map_err(Ambivalence::Ssl)?;
+            .map_err(Error::Ssl)?;
         if !valid {
             return Err(Failure::SignatureMismatch.into());
         }
 
         // RFC 8301
         if HashAlgorithm::Sha1 == self.header.algorithm.hash {
-            return Err(Ambivalence::WeakHashFunction.into());
+            return Err(Failure::WeakHashFunction.into());
         }
 
         if !acceptable_strength {
-            return Err(Ambivalence::WeakKey.into());
+            return Err(Failure::WeakKey.into());
         }
 
         // RFC 6376 forgets to talk about timestamps in its verification
@@ -443,34 +406,6 @@ impl SubVerifier<'_> {
 
     fn format_selector(&self) -> String {
         format!("{}._domainkey.{}", self.header.selector, self.header.sdid)
-    }
-}
-
-impl From<Result<(), Error>> for OutcomeKind {
-    fn from(r: Result<(), Error>) -> Self {
-        use super::error::Ambivalence as A;
-
-        match r {
-            Ok(()) => Self::Pass,
-
-            // NB "PERMFAIL" in RFC 6376 is entirely different from "PERMERROR"
-            // in RFC 5451; this is the latter.
-            Err(Error::Ambivalent(e)) => match e {
-                A::Ssl(..) => Self::PermError,
-                A::Io(..) => Self::TempError,
-                A::HeaderParse(..) => Self::Neutral,
-                A::DnsTxtError(..) => Self::TempError,
-                A::DnsTxtParse(..) => Self::Neutral,
-                A::DnsTxtNotFound(..) => Self::TempError,
-                A::TestMode(..) => Self::Neutral,
-                A::UnsupportedVersion => Self::Neutral,
-                A::RsaKeyTooBig => Self::Policy,
-                A::WeakHashFunction => Self::Policy,
-                A::WeakKey => Self::Policy,
-            },
-
-            Err(Error::Fail(_)) => Self::Fail,
-        }
     }
 }
 
@@ -500,7 +435,13 @@ mod test {
             now: DateTime::from_timestamp(now_unix, 0).unwrap(),
             txt_records,
         };
-        verifier.finish_raw(&env).collect()
+        verifier
+            .finish(&env)
+            .map(|outcome| match outcome.error {
+                None => Ok(()),
+                Some(e) => Err(e),
+            })
+            .collect()
     }
 
     #[test]
@@ -512,7 +453,7 @@ mod test {
         }];
 
         let not_found = || {
-            Err::<(), _>(Error::Ambivalent(Ambivalence::DnsTxtNotFound(
+            Err::<(), _>(Error::Fail(Failure::DnsTxtNotFound(
                 "55v6dsnbko3asrylf5mgtqv5mgll5any._domainkey.amazon.co.jp"
                     .to_owned(),
             )))
@@ -546,11 +487,11 @@ mod test {
 
         assert_eq!(
             vec![
-                Err::<(), _>(Error::Ambivalent(Ambivalence::DnsTxtNotFound(
+                Err::<(), _>(Error::Fail(Failure::DnsTxtNotFound(
                     "55v6dsnbko3asrylf5mgtqv5mgll5any._domainkey.amazon.co.jp"
                         .to_owned(),
                 ))),
-                Err::<(), _>(Error::Ambivalent(Ambivalence::DnsTxtError(
+                Err::<(), _>(Error::Fail(Failure::DnsTxtError(
                     "hsbnp7p3ensaochzwyq5wwmceodymuwv._domainkey.amazonses.com"
                         .to_owned(),
                 ))),
@@ -662,7 +603,7 @@ mod test {
         let mut message = b"DKIM-Signature: v=1;foo=bar\r\n".to_vec();
         message.extend_from_slice(CHRISTMAS_TREE);
         assert_matches!(
-            Err(Error::Ambivalent(Ambivalence::HeaderParse(..))),
+            Err(Error::Fail(Failure::HeaderParse(..))),
             verify_one(V_DEFAULT, "", &message),
         );
     }
@@ -706,7 +647,7 @@ mod test {
         );
 
         assert_matches!(
-            Err(Error::Ambivalent(Ambivalence::DnsTxtParse(..))),
+            Err(Error::Fail(Failure::DnsTxtParse(..))),
             verify_one(V_DEFAULT, "v=DKIM1", &message),
         );
     }
@@ -724,7 +665,7 @@ mod test {
         );
 
         assert_matches!(
-            Err(Error::Ambivalent(Ambivalence::UnsupportedVersion)),
+            Err(Error::Fail(Failure::UnsupportedVersion)),
             verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt, &message),
         );
     }
@@ -746,7 +687,7 @@ mod test {
             CHRISTMAS_TREE,
         );
         assert_matches!(
-            Err(Error::Ambivalent(Ambivalence::RsaKeyTooBig)),
+            Err(Error::Fail(Failure::RsaKeyTooBig)),
             verify_one(V_DEFAULT, &rsa_over_9000_txt, &message),
         );
     }
@@ -766,12 +707,12 @@ mod test {
             CHRISTMAS_TREE,
         );
         assert_matches!(
-            Err(Error::Ambivalent(Ambivalence::WeakHashFunction)),
+            Err(Error::Fail(Failure::WeakHashFunction)),
             verify_one(V_DEFAULT, &TEST_KEYS.rsa1024_txt, &message),
         );
 
         assert_matches!(
-            Err(Error::Ambivalent(Ambivalence::WeakHashFunction)),
+            Err(Error::Fail(Failure::WeakHashFunction)),
             verify_one(
                 V {
                     now_unix: 0,
@@ -793,7 +734,7 @@ mod test {
             CHRISTMAS_TREE,
         );
         assert_matches!(
-            Err(Error::Ambivalent(Ambivalence::WeakKey)),
+            Err(Error::Fail(Failure::WeakKey)),
             verify_one(V_DEFAULT, &TEST_KEYS.rsa512_txt, &message),
         );
     }
@@ -1094,16 +1035,17 @@ mod test {
             &TEST_KEYS.ed25519,
             CHRISTMAS_TREE,
         );
-        assert_matches!(
-            Err(Error::Ambivalent(Ambivalence::TestMode(
-                Failure::SignatureAlgorithmMismatch
-            ))),
-            verify_one(
-                V_DEFAULT,
-                &format!("{};t=y", TEST_KEYS.rsa1024_txt),
-                &message,
-            ),
-        );
+        match verify_one(
+            V_DEFAULT,
+            &format!("{};t=y", TEST_KEYS.rsa1024_txt),
+            &message,
+        ) {
+            Err(Error::Fail(Failure::TestMode(inner))) => {
+                assert_eq!(Failure::SignatureAlgorithmMismatch, *inner,);
+            },
+
+            r => panic!("unexpected result: {r:?}"),
+        }
     }
 
     #[test]
