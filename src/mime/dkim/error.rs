@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -55,8 +55,6 @@ pub enum Ambivalence {
     WeakHashFunction,
     #[error("valid signature, but signing key is weak")]
     WeakKey,
-    #[error("valid signature, but SDID is unrelated to message sender")]
-    SdidNotSender,
     #[error("verification failed, but the selector is in test mode: {0}")]
     TestMode(Failure),
 }
@@ -91,9 +89,6 @@ impl std::cmp::PartialEq for Ambivalence {
 
             (&Self::WeakKey, &Self::WeakKey) => true,
             (&Self::WeakKey, _) => false,
-
-            (&Self::SdidNotSender, &Self::SdidNotSender) => true,
-            (&Self::SdidNotSender, _) => false,
 
             (&Self::TestMode(ref a), &Self::TestMode(ref b)) => a == b,
             (&Self::TestMode(..), _) => false,

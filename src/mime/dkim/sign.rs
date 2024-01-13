@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -193,8 +193,6 @@ impl SubSigner<'_> {
 
 #[cfg(test)]
 mod test {
-    use std::rc::Rc;
-
     use super::super::{
         split_message, TxtRecordEntry, VerificationEnvironment, Verifier,
     };
@@ -226,9 +224,6 @@ mod test {
 
         let ver_env = VerificationEnvironment {
             now: Utc::now(),
-            sender: Some(Rc::new(
-                hickory_resolver::Name::from_ascii("example.com").unwrap(),
-            )),
             txt_records: vec![
                 TxtRecordEntry {
                     sdid: "example.com".to_owned(),

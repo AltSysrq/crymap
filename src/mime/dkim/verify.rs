@@ -62,12 +62,6 @@ pub struct Outcome {
 pub struct VerificationEnvironment {
     /// The current time.
     pub now: DateTime<Utc>,
-    /// The claimed host name of the sender, if any.
-    pub sender: Option<Rc<hickory_resolver::Name>>,
-    // TODO We need to know whether subdomains of sender are considered
-    // relevant. Or, better, just lift `sender` out of here and have `Outcome`
-    // carry a table of SDIDs and kinds, instead of trying to roll it all up
-    // here.
     /// The TXT records that were actually fetched.
     pub txt_records: Vec<TxtRecordEntry>,
 }
@@ -313,14 +307,6 @@ impl SubVerifier<'_> {
                 e => e,
             })?;
 
-        if !env
-            .sender
-            .as_ref()
-            .is_some_and(|sender| sdid.zone_of(sender))
-        {
-            return Err(Error::Ambivalent(Ambivalence::SdidNotSender));
-        }
-
         Ok(())
     }
 
@@ -470,7 +456,6 @@ impl From<Result<(), Error>> for OutcomeKind {
                 A::RsaKeyTooBig => Self::Policy,
                 A::WeakHashFunction => Self::Policy,
                 A::WeakKey => Self::Policy,
-                A::SdidNotSender => Self::Policy,
             },
 
             Err(Error::Fail(_)) => Self::Fail,
@@ -493,7 +478,6 @@ mod test {
 
     fn run_verifier(
         now_unix: i64,
-        sender: &str,
         txt_records: Vec<TxtRecordEntry>,
         message: &[u8],
     ) -> Vec<Result<(), Error>> {
@@ -502,9 +486,6 @@ mod test {
         verifier.write_all(body).unwrap();
 
         let env = VerificationEnvironment {
-            sender: Some(Rc::new(
-                hickory_resolver::Name::from_str_relaxed(sender).unwrap(),
-            )),
             now: DateTime::from_timestamp(now_unix, 0).unwrap(),
             txt_records,
         };
@@ -530,7 +511,6 @@ mod test {
             vec![not_found(), Ok(())],
             run_verifier(
                 1694481247,
-                "amazonses.com",
                 txt_records.clone(),
                 DKIM_AMAZONCOJP_RSA_SHA256,
             ),
@@ -539,7 +519,6 @@ mod test {
             vec![not_found(), Err(Error::Fail(Failure::FutureSignature))],
             run_verifier(
                 1594481246,
-                "amazonses.com",
                 txt_records.clone(),
                 DKIM_AMAZONCOJP_RSA_SHA256,
             ),
@@ -615,14 +594,12 @@ mod test {
     #[derive(Clone, Copy)]
     struct V<'a> {
         now_unix: i64,
-        sender: &'a str,
         sdid: &'a str,
         selector: &'a str,
     }
 
     const V_DEFAULT: V<'_> = V {
         now_unix: 0,
-        sender: "example.com",
         sdid: "example.com",
         selector: "selector",
     };
@@ -630,7 +607,6 @@ mod test {
     fn verify_one(v: V<'_>, txt: &str, message: &[u8]) -> Result<(), Error> {
         run_verifier(
             v.now_unix,
-            v.sender,
             vec![TxtRecordEntry {
                 sdid: v.sdid.to_owned(),
                 selector: v.selector.to_owned(),
@@ -761,7 +737,6 @@ mod test {
             verify_one(
                 V {
                     now_unix: 0,
-                    sender: "lin.gl",
                     sdid: "lin.gl",
                     selector: "selector1",
                 },
@@ -1231,50 +1206,6 @@ mod test {
         assert_matches!(
             Err(Error::Fail(Failure::InvalidAuid)),
             verify_one(V_DEFAULT, &TEST_KEYS.ed25519_txt, &message),
-        );
-    }
-
-    #[test]
-    fn verify_sender_mismatch() {
-        let message = sign_message(
-            simple_template(),
-            "selector",
-            &TEST_KEYS.ed25519,
-            CHRISTMAS_TREE,
-        );
-
-        assert_matches!(
-            Err(Error::Ambivalent(Ambivalence::SdidNotSender)),
-            verify_one(
-                V {
-                    sender: "example.net",
-                    ..V_DEFAULT
-                },
-                &TEST_KEYS.ed25519_txt,
-                &message,
-            ),
-        );
-    }
-
-    #[test]
-    fn verify_sender_subdomain() {
-        let message = sign_message(
-            simple_template(),
-            "selector",
-            &TEST_KEYS.ed25519,
-            CHRISTMAS_TREE,
-        );
-
-        assert_matches!(
-            Ok(()),
-            verify_one(
-                V {
-                    sender: "mail.example.com",
-                    ..V_DEFAULT
-                },
-                &TEST_KEYS.ed25519_txt,
-                &message,
-            ),
         );
     }
 }
