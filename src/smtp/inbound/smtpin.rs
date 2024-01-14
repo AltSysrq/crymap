@@ -61,7 +61,7 @@ struct Server {
     common_paths: Arc<CommonPaths>,
     users_dir: PathBuf,
     request_in: mpsc::Receiver<Request>,
-    dns_resolver: Rc<dns::Resolver>,
+    dns_resolver: Option<Rc<dns::Resolver>>,
     dns_cache: Rc<RefCell<dns::Cache>>,
 
     local_host_name: String,
@@ -312,7 +312,7 @@ impl Server {
                 let _ = dns::look_up(&mut dns_cache.txt, name);
             }
         }
-        dns::spawn_lookups(&self.dns_cache, &self.dns_resolver);
+        dns::spawn_lookups(&self.dns_cache, self.dns_resolver.as_ref());
 
         // The various DNS processes have all been queued and will execute as
         // we process the rest of the message.
@@ -464,7 +464,7 @@ impl Server {
         let ip = self.peer_ip;
         let receiver_host = self.local_host_name.clone();
         let dns_cache = Rc::clone(&self.dns_cache);
-        let dns_resolver = Rc::clone(&self.dns_resolver);
+        let dns_resolver = self.dns_resolver.clone();
         let spf_task = if run_spf {
             Some(tokio::task::spawn_local(async move {
                 let s_split = s.rsplit_once('@');
@@ -507,7 +507,7 @@ impl Server {
                 &mut self.dns_cache.borrow_mut().txt,
                 dmarc_domain,
             );
-            dns::spawn_lookups(&self.dns_cache, &self.dns_resolver);
+            dns::spawn_lookups(&self.dns_cache, self.dns_resolver.as_ref());
         }
 
         Some(DomainInfo {
@@ -632,7 +632,7 @@ impl Server {
                     )))
                     .ok()?;
                 let dns_cache = &self.dns_cache;
-                let dns_resolver = &self.dns_resolver;
+                let dns_resolver = self.dns_resolver.as_ref();
                 Some(async move {
                     let result = tokio::time::timeout_at(
                         dns_deadline.into(),
@@ -672,7 +672,7 @@ impl Server {
                 {
                     dns::wait_for(
                         &self.dns_cache,
-                        &self.dns_resolver,
+                        self.dns_resolver.as_ref(),
                         |cache| {
                             dns::look_up(&mut cache.txt, dmarc_domain).cloned()
                         },

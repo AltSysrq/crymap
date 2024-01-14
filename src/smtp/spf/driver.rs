@@ -33,7 +33,7 @@ use crate::support::dns;
 pub async fn run(
     ctx: &Context<'_>,
     dns_cache: Rc<RefCell<dns::Cache>>,
-    resolver: Rc<dns::Resolver>,
+    resolver: Option<Rc<dns::Resolver>>,
     deadline: tokio::time::Instant,
 ) -> (SpfResult, Explanation) {
     let mut result = (SpfResult::TempError, Explanation::None);
@@ -51,7 +51,7 @@ pub async fn run(
                 }
             }
         }
-        dns::spawn_lookups(&dns_cache, &resolver);
+        dns::spawn_lookups(&dns_cache, resolver.as_ref());
 
         // Wait until the deadline or until we get new DNS information.
         // Critically, there are no await points between the call to eval() and

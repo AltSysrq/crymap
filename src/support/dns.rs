@@ -171,7 +171,7 @@ pub fn look_up<T>(
 
 pub async fn wait_for<T, F: FnMut(&mut Cache) -> Result<T, CacheError>>(
     cache: &Rc<RefCell<Cache>>,
-    resolver: &Rc<Resolver>,
+    resolver: Option<&Rc<Resolver>>,
     mut look_up: F,
 ) -> Result<T, CacheError> {
     loop {
@@ -229,7 +229,13 @@ pub async fn wait_for_progress(cache: &RefCell<Cache>) {
 /// Start any DNS lookups for `New` entries in the given task.
 ///
 /// Entries are spawned in the contextual `LocalSet`.
-pub fn spawn_lookups(cache: &Rc<RefCell<Cache>>, resolver: &Rc<Resolver>) {
+///
+/// If `resolver` is `None`, all new entries are immediately resolved to
+/// `Error`.
+pub fn spawn_lookups(
+    cache: &Rc<RefCell<Cache>>,
+    resolver: Option<&Rc<Resolver>>,
+) {
     let mut cache_mut = cache.borrow_mut();
     let cache_mut = &mut *cache_mut;
 
@@ -308,6 +314,11 @@ pub fn spawn_lookups(cache: &Rc<RefCell<Cache>>, resolver: &Rc<Resolver>) {
             continue;
         }
 
+        let Some(resolver) = resolver else {
+            *entry = Entry::Error;
+            continue;
+        };
+
         *entry = Entry::Pending;
 
         let cache = Rc::downgrade(cache);
@@ -337,7 +348,7 @@ fn spawn_name_lookups<T, R, F, A>(
     map: &mut CacheMap<T>,
     tasks: &mut Vec<tokio::task::JoinHandle<()>>,
     cache: &Rc<RefCell<Cache>>,
-    resolver: &Rc<Resolver>,
+    resolver: Option<&Rc<Resolver>>,
     run: F,
     access: A,
 ) where
@@ -350,6 +361,11 @@ fn spawn_name_lookups<T, R, F, A>(
         if !matches!(entry.1, Entry::New) {
             continue;
         }
+
+        let Some(resolver) = resolver else {
+            entry.1 = Entry::Error;
+            continue;
+        };
 
         entry.1 = Entry::Pending;
 
