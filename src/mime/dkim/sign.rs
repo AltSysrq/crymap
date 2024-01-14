@@ -256,10 +256,12 @@ mod test {
             vec![
                 Outcome {
                     sdid: Some(dns::Name::from_ascii("example.com").unwrap()),
+                    selector: Some("ed".to_owned()),
                     error: None,
                 },
                 Outcome {
                     sdid: Some(dns::Name::from_ascii("example.com").unwrap()),
+                    selector: Some("rsa".to_owned()),
                     error: None,
                 },
             ],

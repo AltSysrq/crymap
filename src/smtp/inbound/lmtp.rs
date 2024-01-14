@@ -266,7 +266,7 @@ impl LmtpService {
                     Some(ref tls) => format!("LMTP+TLS ({tls})"),
                 },
                 recipient.smtp,
-                smtp_date
+                smtp_date,
             );
 
             let _ = recipient_responses

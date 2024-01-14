@@ -47,6 +47,7 @@ pub struct VerificationEnvironment {
 #[derive(Debug, PartialEq)]
 pub struct Outcome {
     pub sdid: Option<dns::Name>,
+    pub selector: Option<String>,
     pub error: Option<Error>,
 }
 
@@ -124,6 +125,7 @@ impl<'a> Verifier<'a> {
         self.subs.into_iter().map(move |sub| match sub {
             Err(syntax_error) => Outcome {
                 sdid: None,
+                selector: None,
                 error: Some(Error::Fail(Failure::HeaderParse(syntax_error))),
             },
 
@@ -161,9 +163,11 @@ impl SubVerifier<'_> {
         header_block: &[u8],
         env: &VerificationEnvironment,
     ) -> Outcome {
+        let selector = self.header.selector.clone().into_owned();
         let Ok(sdid) = dns::Name::from_ascii(&self.header.sdid) else {
             return Outcome {
                 sdid: None,
+                selector: Some(selector),
                 error: Some(Failure::InvalidSdid.into()),
             };
         };
@@ -172,6 +176,7 @@ impl SubVerifier<'_> {
 
         Outcome {
             sdid: Some(sdid),
+            selector: Some(selector),
             error: result.err(),
         }
     }

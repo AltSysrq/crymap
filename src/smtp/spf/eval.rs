@@ -25,6 +25,7 @@
 //! `%{d}`.
 
 use std::borrow::Cow;
+use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::rc::Rc;
 
@@ -59,6 +60,21 @@ pub enum SpfResult {
     SoftFail,
     TempError,
     PermError,
+}
+
+impl fmt::Display for SpfResult {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = match *self {
+            Self::None => "none",
+            Self::Neutral => "neutral",
+            Self::Pass => "pass",
+            Self::Fail => "fail",
+            Self::SoftFail => "softfail",
+            Self::TempError => "temperror",
+            Self::PermError => "permerror",
+        };
+        write!(f, "{s}")
+    }
 }
 
 /// The "explanation" string which can be produced on failure.

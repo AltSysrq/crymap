@@ -20,6 +20,7 @@
 
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::fmt::Write as _;
 use std::io::Write;
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -33,6 +34,7 @@ use futures::{future::FutureExt, stream::StreamExt};
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use log::{error, warn};
+use rand::Rng;
 use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 
@@ -140,7 +142,7 @@ impl Server {
 
         // Set helo_host first because domain_info() reads it.
         self.helo_host = req.host.clone();
-        self.helo_domain = self.domain_info(req.host);
+        self.helo_domain = self.domain_info(req.host, true);
 
         Ok(())
     }
@@ -157,7 +159,7 @@ impl Server {
             ));
         }
 
-        self.mail_from_domain = self.domain_info(req.from.clone());
+        self.mail_from_domain = self.domain_info(req.from.clone(), true);
         if self.mail_from_domain.is_none() {
             return Err(SmtpResponse(
                 pc::ActionNotTakenPermanent,
@@ -222,18 +224,27 @@ impl Server {
             }
         };
 
-        let _data_result = self.consume_data(data.data).await;
-        let Ok(_recipient_responses) = data.recipient_responses.await else {
+        let data_result = self.consume_data(data.data).await;
+        let Ok(recipient_responses) = data.recipient_responses.await else {
             return;
         };
 
-        todo!()
+        let deliverable_message = match data_result {
+            Ok(dm) => dm,
+            Err(response) => {
+                let _ = recipient_responses.send(Err(response)).await;
+                return;
+            },
+        };
+
+        let response = self.deliver_message(recipients, deliverable_message);
+        let _ = recipient_responses.send(response).await;
     }
 
     async fn consume_data(
-        &self,
+        &mut self,
         mut data: tokio::io::DuplexStream,
-    ) -> Result<DeliverableMessage, SmtpResponse> {
+    ) -> Result<DeliverableMessage, SmtpResponse<'static>> {
         lazy_static! {
             static ref END_OF_HEADERS: regex::bytes::Regex =
                 regex::bytes::Regex::new("\r?\n\r?\n").unwrap();
@@ -360,11 +371,38 @@ impl Server {
             ));
         }
 
-        let (_dmarc_txt_records, _dkim_txt_records) = self
+        let (dmarc_txt_records, dkim_txt_records) = self
             .fetch_dmarc_dkim_records(&from_header_domain, &dkim_verifier)
             .await;
 
-        todo!()
+        let auth_headers = self
+            .authenticate_message(
+                from_header_domain,
+                dkim_verifier,
+                dmarc_txt_records,
+                dkim_txt_records,
+            )
+            .await
+            .map_err(|_| {
+                SmtpResponse(
+                    pc::ActionAborted,
+                    Some((cc::PermFail, sc::DeliveryNotAuthorised)),
+                    Cow::Borrowed("Message rejected by DMARC policy"),
+                )
+            })?;
+
+        let data_buffer = data_buffer.flip().map_err(|_| {
+            SmtpResponse(
+                pc::TransactionFailed,
+                Some((cc::TempFail, sc::OtherMailSystem)),
+                Cow::Borrowed("Internal I/O error"),
+            )
+        })?;
+
+        Ok(DeliverableMessage {
+            auth_headers,
+            data_buffer,
+        })
     }
 
     fn accept_recipient(
@@ -415,7 +453,7 @@ impl Server {
         )
     }
 
-    fn domain_info(&self, s: String) -> Option<DomainInfo> {
+    fn domain_info(&self, s: String, run_spf: bool) -> Option<DomainInfo> {
         let domain_str = s.rsplit_once('@').map_or(s.as_str(), |rs| rs.1);
         let subdomain = Rc::new(dns::Name::from_str_relaxed(domain_str).ok()?);
         let org_domain = Rc::new(dmarc::organisational_domain(&subdomain));
@@ -427,28 +465,35 @@ impl Server {
         let receiver_host = self.local_host_name.clone();
         let dns_cache = Rc::clone(&self.dns_cache);
         let dns_resolver = Rc::clone(&self.dns_resolver);
-        let spf_task = tokio::task::spawn_local(async move {
-            let s_split = s.rsplit_once('@');
-            let ctx = spf::Context {
-                sender: if s_split.is_some() {
-                    Some(Cow::Borrowed(&s))
-                } else {
-                    None
-                },
-                sender_local: s.rsplit_once('@').map(|rs| Cow::Borrowed(rs.0)),
-                sender_domain: Cow::Borrowed(
-                    s_split.map_or(s.as_str(), |rs| rs.1),
-                ),
-                sender_domain_parsed,
+        let spf_task = if run_spf {
+            Some(tokio::task::spawn_local(async move {
+                let s_split = s.rsplit_once('@');
+                let ctx = spf::Context {
+                    sender: if s_split.is_some() {
+                        Some(Cow::Borrowed(&s))
+                    } else {
+                        None
+                    },
+                    sender_local: s
+                        .rsplit_once('@')
+                        .map(|rs| Cow::Borrowed(rs.0)),
+                    sender_domain: Cow::Borrowed(
+                        s_split.map_or(s.as_str(), |rs| rs.1),
+                    ),
+                    sender_domain_parsed,
 
-                helo_domain: Cow::Owned(helo_domain),
-                ip,
-                receiver_host: Cow::Owned(receiver_host),
-                now: Utc::now(),
-            };
+                    helo_domain: Cow::Owned(helo_domain),
+                    ip,
+                    receiver_host: Cow::Owned(receiver_host),
+                    now: Utc::now(),
+                };
 
-            spf::run(&ctx, dns_cache, dns_resolver, spf_deadline.into()).await
-        });
+                spf::run(&ctx, dns_cache, dns_resolver, spf_deadline.into())
+                    .await
+            }))
+        } else {
+            None
+        };
 
         // Speculatively prepare to fetch the DMARC record for the
         // organisational domain.
@@ -469,7 +514,9 @@ impl Server {
             subdomain,
             org_domain,
             dmarc_domain,
-            spf: spf_task.into(),
+            spf: spf_task.map(Into::into).unwrap_or_else(|| {
+                (spf::SpfResult::None, spf::Explanation::None).into()
+            }),
         })
     }
 
@@ -552,7 +599,7 @@ impl Server {
         }
 
         let sender = format!("{local}@{domain}");
-        let Some(domain_info) = self.domain_info(sender) else {
+        let Some(domain_info) = self.domain_info(sender, false) else {
             return Err(SmtpResponse(
                 pc::TransactionFailed,
                 Some((cc::PermFail, sc::OtherMediaError)),
@@ -639,6 +686,254 @@ impl Server {
 
         tokio::join!(dmarc_txt_record, dkim_txt_records)
     }
+
+    async fn authenticate_message(
+        &mut self,
+        from_header_domain: Option<DomainInfo>,
+        dkim_verifier: dkim::Verifier<'_>,
+        dmarc_records: Result<Vec<Rc<str>>, dns::CacheError>,
+        dkim_records: Vec<dkim::TxtRecordEntry>,
+    ) -> Result<String, ()> {
+        let mut headers = String::new();
+
+        let spf_result = if let Some(ref mut domain) = self.mail_from_domain {
+            Some((
+                "envelope-from",
+                Rc::clone(&domain.subdomain),
+                domain.spf.get().await,
+            ))
+        } else if let Some(ref mut domain) = self.helo_domain {
+            Some(("helo", Rc::clone(&domain.subdomain), domain.spf.get().await))
+        } else {
+            None
+        };
+
+        let dmarc_record = dmarc_records.as_ref().and_then(|txts| {
+            txts.first()
+                .ok_or(&dns::CacheError::NotFound)
+                .map(|t| dmarc::Record::parse(t))
+        });
+        let fallback_dmarc_record = dmarc::Record {
+            version: "DMARC1",
+            dkim: Default::default(),
+            spf: Default::default(),
+            failure_reporting: Default::default(),
+            requested_receiver_policy: Default::default(),
+            subdomain_receiver_policy: Default::default(),
+            percent: 0,
+            report_format: "",
+            report_interval: 0,
+            aggregate_report_addresses: None,
+            message_report_addresses: None,
+        };
+        let effective_dmarc_policy = match dmarc_record {
+            Ok(Ok(ref record)) => record,
+            _ => &fallback_dmarc_record,
+        };
+
+        // RFC 7001
+        let mut reject = if let Some(ref domain) = from_header_domain {
+            let _ = write!(
+                headers,
+                "Authentication-Results: {receiver};\r\n",
+                receiver = self.local_host_name,
+            );
+
+            let effective_dmarc_spf_result = match spf_result {
+                None => {
+                    let _ = write!(
+                        headers,
+                        "\tspf=none reason=\"no domain in HELO or \
+                         MAIL FROM\";\r\n",
+                    );
+                    spf::SpfResult::None
+                },
+                Some((_, ref spf_domain, (mut r, _))) => {
+                    let _ = write!(headers, "\tspf={r}");
+                    if !domain.org_domain.zone_of(spf_domain) {
+                        let _ =
+                            write!(headers, " (but from an unrelated domain)");
+                        r = spf::SpfResult::Fail;
+                    } else if dmarc::AlignmentMode::Strict
+                        == effective_dmarc_policy.spf
+                    {
+                        let _ = write!(
+                            headers,
+                            " (from a subdomain, but DMARC has aspf=strict)",
+                        );
+                        r = spf::SpfResult::Fail;
+                    }
+                    let _ = write!(headers, ";\r\n");
+                    r
+                },
+            };
+
+            let dkim_venv = dkim::VerificationEnvironment {
+                now: Utc::now(),
+                txt_records: dkim_records,
+            };
+            let dkim_result = consolidate_dkim_results(
+                &domain.org_domain,
+                dmarc::AlignmentMode::Relaxed == effective_dmarc_policy.dkim,
+                dkim_verifier.finish(&dkim_venv),
+            );
+
+            let _ = write!(
+                headers,
+                "\tdkim={} (\r\n{}\t);\r\n",
+                dkim_result.result, dkim_result.comments,
+            );
+
+            let (dmarc_accept, dmarc_result) = match (
+                effective_dmarc_spf_result,
+                dkim_result.pass,
+                dmarc_record,
+            ) {
+                (_, _, Err(&dns::CacheError::NotFound)) => (true, "none"),
+
+                (
+                    _,
+                    _,
+                    Err(&dns::CacheError::NotReady | &dns::CacheError::Error),
+                ) => (true, "temperror"),
+
+                (_, _, Ok(Err(_))) => (true, "permerror"),
+
+                (spf::SpfResult::Fail | spf::SpfResult::None, _, _)
+                | (_, Some(false), _) => (false, "fail"),
+
+                (spf::SpfResult::TempError, _, _) | (_, None, _) => {
+                    (true, "temperror")
+                },
+
+                (spf::SpfResult::Pass, Some(true), _) => (true, "pass"),
+
+                _ => (true, "neutral"),
+            };
+
+            let _ = write!(
+                headers,
+                "\tdmarc={dmarc_result} header.from={hf}\r\n",
+                hf = domain.subdomain,
+            );
+
+            let receiver_policy = if domain.org_domain == domain.subdomain {
+                effective_dmarc_policy.requested_receiver_policy
+            } else {
+                effective_dmarc_policy.subdomain_receiver_policy
+            };
+
+            !dmarc_accept && dmarc::ReceiverPolicy::Reject == receiver_policy
+        } else {
+            let _ = write!(
+                headers,
+                "Authentication-Results: {receiver}; none\r\n\
+                 \t(no single organisational domain is responsible \
+                 for this message)\r\n",
+                receiver = self.local_host_name,
+            );
+            false
+        };
+
+        if let Some((identifier, domain, result)) = spf_result {
+            format_spf_header(
+                &mut headers,
+                &self.local_host_name,
+                self.peer_ip,
+                identifier,
+                &domain,
+                result,
+            );
+        }
+
+        reject &= rand::rngs::OsRng.gen_range(0u32..99)
+            < effective_dmarc_policy.percent;
+        reject &= self.config.smtp.reject_dmarc_failures;
+
+        if reject {
+            Err(())
+        } else {
+            Ok(headers)
+        }
+    }
+
+    fn deliver_message(
+        &mut self,
+        recipients: Vec<Recipient>,
+        mut message: DeliverableMessage,
+    ) -> Result<(), SmtpResponse<'static>> {
+        let now = Utc::now();
+        let smtp_date = now.to_rfc2822();
+        let mut message_prefix = message.auth_headers;
+        let _ = write!(message_prefix, "Return-Path: {}\r\n", self.return_path);
+        let message_prefix_base = message_prefix.len();
+
+        // We don't have anywhere to hold partially-failed transactions, nor do
+        // we have the ability to indicate partially-failed transactions to the
+        // other side. However, partial failures here are also quite
+        // exceptional. We thus use this system:
+        // - We return success if any recipient succeeds.
+        // - If all recipients fail, we return the first failure. In most
+        //   cases, if all recipients fail, they failed for the same reason.
+        // - If some fail, we log the partial failures and drop those messages
+        //   on the floor.
+        let mut has_success = false;
+        let mut error = None::<(Recipient, SmtpResponse<'static>)>;
+
+        for recipient in recipients {
+            message_prefix.truncate(message_prefix_base);
+            format_received_header(
+                &mut message_prefix,
+                &self.local_host_name,
+                self.tls.as_deref(),
+                self.helo_domain.as_ref().map(|di| &*di.subdomain),
+                self.peer_ip,
+                &recipient,
+                &smtp_date,
+            );
+
+            let result = deliver_local(
+                &self.log_prefix,
+                &self.config,
+                &self.users_dir,
+                &recipient,
+                &mut message.data_buffer,
+                &message_prefix,
+            );
+
+            match result {
+                Ok(()) => {
+                    has_success = true;
+                    if let Some((failed_recipient, failed_response)) =
+                        error.take()
+                    {
+                        error!(
+                            "{} Dropped inbound message for <{}>: {:?}",
+                            self.log_prefix,
+                            failed_recipient.normalised,
+                            failed_response,
+                        );
+                    }
+                },
+
+                Err(response) => {
+                    if has_success {
+                        error!(
+                            "{} Dropped inbound message for <{}>: {:?}",
+                            self.log_prefix, recipient.normalised, response,
+                        );
+                    } else if error.is_none() {
+                        error = Some((recipient, response));
+                    }
+                },
+            }
+        }
+
+        match error {
+            None => Ok(()),
+            Some((_, response)) => Err(response),
+        }
+    }
 }
 
 enum AsyncValue<T> {
@@ -682,4 +977,238 @@ impl<T: Clone> AsyncValue<T> {
 struct DeliverableMessage {
     data_buffer: BufferReader,
     auth_headers: String,
+}
+
+fn format_spf_header(
+    s: &mut String,
+    receiver: &str,
+    client_ip: IpAddr,
+    identity: &str,
+    domain: &dns::Name,
+    result: (spf::SpfResult, spf::Explanation),
+) {
+    // RFC 7208 § 9.1
+    let _ = write!(
+        s,
+        // We don't add the "SHOULD" boilerplate comment as it's entirely
+        // redundant with the structured results.
+        "Received-SPF: {result_str} {explanation}\r\n\
+         \tidentity={identity}; client-ip={client_ip};\r\n\
+         \treceiver=\"{receiver}\"; {identity}=\"{domain}\"\r\n",
+        result_str = result.0,
+        explanation = if let spf::Explanation::Some(ref explanation) = result.1
+        {
+            format!(
+                "(foreign explanation: {})",
+                make_header_comment_safe(explanation)
+            )
+        } else {
+            String::new()
+        },
+    );
+}
+
+fn format_received_header(
+    s: &mut String,
+    local_host_name: &str,
+    tls: Option<&str>,
+    helo_domain: Option<&dns::Name>,
+    peer_ip: IpAddr,
+    recipient: &Recipient,
+    smtp_date: &str,
+) {
+    // RFC 5321 § 4.4
+    let _ = write!(s, "Received: from ");
+    if let Some(helo_domain) = helo_domain {
+        let _ = write!(s, "{} ({})", helo_domain.to_ascii(), peer_ip);
+    } else {
+        let _ = write!(s, "{peer_ip}");
+    }
+    let _ = write!(
+        s,
+        "\r\n\tby {local_host_name} ({svc} {vmaj}.{vmin}.{vpat})\r\n\
+         \tvia TCP with {protocol}\r\n\
+         \tfor <{recipient}>;\r\n\
+         \t{smtp_date}\r\n",
+        svc = env!("CARGO_PKG_NAME"),
+        vmaj = env!("CARGO_PKG_VERSION_MAJOR"),
+        vmin = env!("CARGO_PKG_VERSION_MINOR"),
+        vpat = env!("CARGO_PKG_VERSION_PATCH"),
+        protocol = if let Some(tls) = tls {
+            format!("ESMTPS ({tls})")
+        } else {
+            "ESMTP".to_owned()
+        },
+        recipient = recipient.smtp,
+    );
+}
+
+fn make_header_comment_safe(s: &str) -> Cow<'_, str> {
+    const MAX_LEN: usize = 200;
+
+    fn acceptable_char(c: char) -> bool {
+        matches!(
+            c, 'A'..='Z' | 'a'..='z' | '0'..='9' | ' '..='\'' | '*'..='/' |
+            ':'..='?' | '_' | '@')
+    }
+
+    if s.len() <= MAX_LEN && s.chars().all(acceptable_char) {
+        Cow::Borrowed(s)
+    } else {
+        let mut s = s.to_owned();
+        s.retain(acceptable_char);
+        if s.len() > MAX_LEN {
+            // Won't panic since we've already filtered to ASCII
+            s.truncate(MAX_LEN);
+        }
+
+        Cow::Owned(s)
+    }
+}
+
+struct DkimResult {
+    comments: String,
+    result: &'static str,
+    pass: Option<bool>,
+}
+
+fn consolidate_dkim_results(
+    org_domain: &dns::Name,
+    allow_subdomains: bool,
+    dkim_results: impl Iterator<Item = dkim::Outcome>,
+) -> DkimResult {
+    let mut has_relevant_temperror = false;
+    let mut has_relevant_permerror = false;
+    let mut has_relevant_neutral = false;
+    let mut has_relevant_pass = false;
+    let mut has_relevant_fail = false;
+    let mut has_relevant_policy = false;
+
+    let mut comments = String::new();
+    for outcome in dkim_results {
+        let _ = write!(
+            comments,
+            "\t\t{domain}/{selector}: ",
+            domain = outcome
+                .sdid
+                .as_ref()
+                .map(|d| d.to_string())
+                .unwrap_or("?".to_owned()),
+            selector = make_header_comment_safe(
+                outcome.selector.as_deref().unwrap_or("?")
+            ),
+        );
+
+        let Some(sdid) = outcome.sdid else {
+            match outcome.error {
+                None => {
+                    // Should never happen
+                    let _ = write!(comments, "unknown");
+                },
+
+                Some(e) => {
+                    let _ = write!(
+                        comments,
+                        "{}",
+                        make_header_comment_safe(&e.to_string()),
+                    );
+                },
+            }
+            let _ = write!(comments, "\r\n");
+
+            continue;
+        };
+
+        let relevant = if allow_subdomains {
+            org_domain.zone_of(&sdid)
+        } else {
+            *org_domain == sdid
+        };
+
+        if let Some(e) = outcome.error {
+            use crate::mime::dkim::Failure as F;
+
+            let _ = write!(
+                comments,
+                "{}\r\n",
+                make_header_comment_safe(&e.to_string()),
+            );
+
+            match e {
+                dkim::Error::Io(_) | dkim::Error::Ssl(_) => {
+                    has_relevant_temperror |= relevant
+                },
+
+                dkim::Error::Fail(f) => match f {
+                    F::HeaderParse(..)
+                    | F::DnsTxtParse(..)
+                    | F::DnsTxtNotFound(..)
+                    | F::UnsupportedVersion
+                    | F::InvalidPublicKey
+                    | F::InvalidSdid
+                    | F::InvalidAuid => {
+                        has_relevant_permerror |= relevant;
+                    },
+
+                    F::DnsTxtError(..) => has_relevant_temperror |= relevant,
+
+                    F::RsaKeyTooBig => has_relevant_policy |= relevant,
+
+                    F::TestMode(..) => has_relevant_neutral |= relevant,
+
+                    F::WeakHashFunction
+                    | F::WeakKey
+                    | F::BodyTruncated
+                    | F::BodyHashMismatch
+                    | F::SignatureMismatch
+                    | F::PublicKeyRevoked
+                    | F::FromFieldUnsigned
+                    | F::UnacceptableHashAlgorithm
+                    | F::SignatureAlgorithmMismatch
+                    | F::InvalidHashSignatureCombination
+                    | F::ExpiredSignature
+                    | F::FutureSignature
+                    | F::AuidOutsideSdid
+                    | F::AuidSdidMismatch => {
+                        has_relevant_fail |= relevant;
+                    },
+                },
+            }
+
+            continue;
+        }
+
+        if !relevant {
+            let _ = write!(comments, "valid signature, but irrelevant\r\n");
+        } else {
+            has_relevant_pass = true;
+            let _ = write!(comments, "pass\r\n");
+        }
+    }
+
+    if comments.is_empty() {
+        comments.push_str("\t\tno DKIM signatures found\r\n");
+    }
+
+    let (pass, result) = if has_relevant_pass {
+        (Some(true), "pass")
+    } else if has_relevant_temperror {
+        (None, "temperror")
+    } else if has_relevant_neutral {
+        (None, "neutral")
+    } else if has_relevant_fail {
+        (Some(false), "fail")
+    } else if has_relevant_policy {
+        (Some(false), "policy")
+    } else if has_relevant_permerror {
+        (Some(false), "permerror")
+    } else {
+        (Some(false), "none")
+    };
+
+    DkimResult {
+        comments,
+        pass,
+        result,
+    }
 }

@@ -71,8 +71,9 @@ impl Default for FailureReportingOptions {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ReceiverPolicy {
+    #[default]
     None,
     Quarantine,
     Reject,
