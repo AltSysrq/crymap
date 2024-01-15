@@ -694,8 +694,6 @@ impl Server {
         dmarc_records: Result<Vec<Rc<str>>, dns::CacheError>,
         dkim_records: Vec<dkim::TxtRecordEntry>,
     ) -> Result<String, ()> {
-        let mut headers = String::new();
-
         let spf_result = if let Some(ref mut domain) = self.mail_from_domain {
             Some((
                 "envelope-from",
@@ -708,153 +706,21 @@ impl Server {
             None
         };
 
-        let dmarc_record = dmarc_records.as_ref().and_then(|txts| {
-            txts.first()
-                .ok_or(&dns::CacheError::NotFound)
-                .map(|t| dmarc::Record::parse(t))
-        });
-        let fallback_dmarc_record = dmarc::Record {
-            version: "DMARC1",
-            dkim: Default::default(),
-            spf: Default::default(),
-            failure_reporting: Default::default(),
-            requested_receiver_policy: Default::default(),
-            subdomain_receiver_policy: Default::default(),
-            percent: 0,
-            report_format: "",
-            report_interval: 0,
-            aggregate_report_addresses: None,
-            message_report_addresses: None,
+        let dkim_venv = dkim::VerificationEnvironment {
+            now: Utc::now(),
+            txt_records: dkim_records,
         };
-        let effective_dmarc_policy = match dmarc_record {
-            Ok(Ok(ref record)) => record,
-            _ => &fallback_dmarc_record,
-        };
+        let dkim_results = dkim_verifier.finish(&dkim_venv);
 
-        // RFC 7001
-        let mut reject = if let Some(ref domain) = from_header_domain {
-            let _ = write!(
-                headers,
-                "Authentication-Results: {receiver};\r\n",
-                receiver = self.local_host_name,
-            );
-
-            let effective_dmarc_spf_result = match spf_result {
-                None => {
-                    let _ = write!(
-                        headers,
-                        "\tspf=none reason=\"no domain in HELO or \
-                         MAIL FROM\";\r\n",
-                    );
-                    spf::SpfResult::None
-                },
-                Some((_, ref spf_domain, (mut r, _))) => {
-                    let _ = write!(headers, "\tspf={r}");
-                    if !domain.org_domain.zone_of(spf_domain) {
-                        let _ =
-                            write!(headers, " (but from an unrelated domain)");
-                        r = spf::SpfResult::Fail;
-                    } else if dmarc::AlignmentMode::Strict
-                        == effective_dmarc_policy.spf
-                    {
-                        let _ = write!(
-                            headers,
-                            " (from a subdomain, but DMARC has aspf=strict)",
-                        );
-                        r = spf::SpfResult::Fail;
-                    }
-                    let _ = write!(headers, ";\r\n");
-                    r
-                },
-            };
-
-            let dkim_venv = dkim::VerificationEnvironment {
-                now: Utc::now(),
-                txt_records: dkim_records,
-            };
-            let dkim_result = consolidate_dkim_results(
-                &domain.org_domain,
-                dmarc::AlignmentMode::Relaxed == effective_dmarc_policy.dkim,
-                dkim_verifier.finish(&dkim_venv),
-            );
-
-            let _ = write!(
-                headers,
-                "\tdkim={} (\r\n{}\t);\r\n",
-                dkim_result.result, dkim_result.comments,
-            );
-
-            let (dmarc_accept, dmarc_result) = match (
-                effective_dmarc_spf_result,
-                dkim_result.pass,
-                dmarc_record,
-            ) {
-                (_, _, Err(&dns::CacheError::NotFound)) => (true, "none"),
-
-                (
-                    _,
-                    _,
-                    Err(&dns::CacheError::NotReady | &dns::CacheError::Error),
-                ) => (true, "temperror"),
-
-                (_, _, Ok(Err(_))) => (true, "permerror"),
-
-                (spf::SpfResult::Fail | spf::SpfResult::None, _, _)
-                | (_, Some(false), _) => (false, "fail"),
-
-                (spf::SpfResult::TempError, _, _) | (_, None, _) => {
-                    (true, "temperror")
-                },
-
-                (spf::SpfResult::Pass, Some(true), _) => (true, "pass"),
-
-                _ => (true, "neutral"),
-            };
-
-            let _ = write!(
-                headers,
-                "\tdmarc={dmarc_result} header.from={hf}\r\n",
-                hf = domain.subdomain,
-            );
-
-            let receiver_policy = if domain.org_domain == domain.subdomain {
-                effective_dmarc_policy.requested_receiver_policy
-            } else {
-                effective_dmarc_policy.subdomain_receiver_policy
-            };
-
-            !dmarc_accept && dmarc::ReceiverPolicy::Reject == receiver_policy
-        } else {
-            let _ = write!(
-                headers,
-                "Authentication-Results: {receiver}; none\r\n\
-                 \t(no single organisational domain is responsible \
-                 for this message)\r\n",
-                receiver = self.local_host_name,
-            );
-            false
-        };
-
-        if let Some((identifier, domain, result)) = spf_result {
-            format_spf_header(
-                &mut headers,
-                &self.local_host_name,
-                self.peer_ip,
-                identifier,
-                &domain,
-                result,
-            );
-        }
-
-        reject &= rand::rngs::OsRng.gen_range(0u32..99)
-            < effective_dmarc_policy.percent;
-        reject &= self.config.smtp.reject_dmarc_failures;
-
-        if reject {
-            Err(())
-        } else {
-            Ok(headers)
-        }
+        authenticate_message_impl(
+            &self.local_host_name,
+            self.peer_ip,
+            self.config.smtp.reject_dmarc_failures,
+            spf_result,
+            from_header_domain.as_ref(),
+            dmarc_records,
+            dkim_results,
+        )
     }
 
     fn deliver_message(
@@ -992,14 +858,14 @@ fn format_spf_header(
         s,
         // We don't add the "SHOULD" boilerplate comment as it's entirely
         // redundant with the structured results.
-        "Received-SPF: {result_str} {explanation}\r\n\
+        "Received-SPF: {result_str}{explanation}\r\n\
          \tidentity={identity}; client-ip={client_ip};\r\n\
          \treceiver=\"{receiver}\"; {identity}=\"{domain}\"\r\n",
         result_str = result.0,
         explanation = if let spf::Explanation::Some(ref explanation) = result.1
         {
             format!(
-                "(foreign explanation: {})",
+                " (foreign explanation: {})",
                 make_header_comment_safe(explanation)
             )
         } else {
@@ -1069,7 +935,15 @@ fn make_header_comment_safe(s: &str) -> Cow<'_, str> {
 struct DkimResult {
     comments: String,
     result: &'static str,
-    pass: Option<bool>,
+    pass: DkimStatus,
+}
+
+#[derive(Clone, Copy)]
+enum DkimStatus {
+    Pass,
+    TempError,
+    Neutral,
+    Fail,
 }
 
 fn consolidate_dkim_results(
@@ -1082,7 +956,6 @@ fn consolidate_dkim_results(
     let mut has_relevant_neutral = false;
     let mut has_relevant_pass = false;
     let mut has_relevant_fail = false;
-    let mut has_relevant_policy = false;
 
     let mut comments = String::new();
     for outcome in dkim_results {
@@ -1152,9 +1025,9 @@ fn consolidate_dkim_results(
 
                     F::DnsTxtError(..) => has_relevant_temperror |= relevant,
 
-                    F::RsaKeyTooBig => has_relevant_policy |= relevant,
-
-                    F::TestMode(..) => has_relevant_neutral |= relevant,
+                    F::RsaKeyTooBig | F::TestMode(..) => {
+                        has_relevant_neutral |= relevant
+                    },
 
                     F::WeakHashFunction
                     | F::WeakKey
@@ -1191,24 +1064,773 @@ fn consolidate_dkim_results(
     }
 
     let (pass, result) = if has_relevant_pass {
-        (Some(true), "pass")
+        (DkimStatus::Pass, "pass")
     } else if has_relevant_temperror {
-        (None, "temperror")
+        (DkimStatus::TempError, "temperror")
     } else if has_relevant_neutral {
-        (None, "neutral")
+        (DkimStatus::Neutral, "neutral")
     } else if has_relevant_fail {
-        (Some(false), "fail")
-    } else if has_relevant_policy {
-        (Some(false), "policy")
+        (DkimStatus::Fail, "fail")
     } else if has_relevant_permerror {
-        (Some(false), "permerror")
+        (DkimStatus::Fail, "permerror")
     } else {
-        (Some(false), "none")
+        (DkimStatus::Fail, "none")
     };
 
     DkimResult {
         comments,
         pass,
         result,
+    }
+}
+
+fn authenticate_message_impl(
+    local_host_name: &str,
+    peer_ip: IpAddr,
+    enable_reject: bool,
+    spf_result: Option<(
+        &str,
+        Rc<dns::Name>,
+        (spf::SpfResult, spf::Explanation),
+    )>,
+    from_header_domain: Option<&DomainInfo>,
+    dmarc_records: Result<Vec<Rc<str>>, dns::CacheError>,
+    dkim_results: impl Iterator<Item = dkim::Outcome>,
+) -> Result<String, ()> {
+    let mut headers = String::new();
+
+    let dmarc_record = dmarc_records.as_ref().and_then(|txts| {
+        txts.first()
+            .ok_or(&dns::CacheError::NotFound)
+            .map(|t| dmarc::Record::parse(t))
+    });
+    let fallback_dmarc_record = dmarc::Record {
+        version: "DMARC1",
+        dkim: Default::default(),
+        spf: Default::default(),
+        failure_reporting: Default::default(),
+        requested_receiver_policy: Default::default(),
+        subdomain_receiver_policy: Default::default(),
+        percent: 0,
+        report_format: "",
+        report_interval: 0,
+        aggregate_report_addresses: None,
+        message_report_addresses: None,
+    };
+    let effective_dmarc_policy = match dmarc_record {
+        Ok(Ok(ref record)) => record,
+        _ => &fallback_dmarc_record,
+    };
+
+    // RFC 7001
+    let mut reject = if let Some(domain) = from_header_domain {
+        let _ = write!(
+            headers,
+            "Authentication-Results: {receiver};\r\n",
+            receiver = local_host_name,
+        );
+
+        let effective_dmarc_spf_result = match spf_result {
+            None => {
+                let _ = write!(
+                    headers,
+                    "\tspf=none reason=\"no domain in HELO or \
+                     MAIL FROM\";\r\n",
+                );
+                spf::SpfResult::None
+            },
+            Some((_, ref spf_domain, (mut r, _))) => {
+                let _ = write!(headers, "\tspf={r}");
+                if !domain.org_domain.zone_of(spf_domain) {
+                    let _ = write!(headers, " (but from an unrelated domain)");
+                    r = spf::SpfResult::Fail;
+                } else if dmarc::AlignmentMode::Strict
+                    == effective_dmarc_policy.spf
+                    && domain.org_domain != *spf_domain
+                {
+                    let _ = write!(
+                        headers,
+                        " (from a subdomain, but DMARC has aspf=s)",
+                    );
+                    r = spf::SpfResult::Fail;
+                }
+                let _ = write!(headers, ";\r\n");
+                r
+            },
+        };
+
+        let dkim_result = consolidate_dkim_results(
+            &domain.org_domain,
+            dmarc::AlignmentMode::Relaxed == effective_dmarc_policy.dkim,
+            dkim_results,
+        );
+
+        let _ = write!(
+            headers,
+            "\tdkim={} (\r\n{}\t);\r\n",
+            dkim_result.result, dkim_result.comments,
+        );
+
+        let (dmarc_accept, dmarc_result) = match (
+            effective_dmarc_spf_result,
+            dkim_result.pass,
+            dmarc_record,
+        ) {
+            (_, _, Err(&dns::CacheError::NotFound)) => {
+                (true, "none reason=\"no DMARC record in DNS\"")
+            },
+
+            (
+                _,
+                _,
+                Err(&dns::CacheError::NotReady | &dns::CacheError::Error),
+            ) => (true, "temperror reason=\"DNS error fetching DMARC record\""),
+
+            (_, _, Ok(Err(_))) => {
+                (true, "permerror reason=\"invalid DMARC record\"")
+            },
+
+            (spf::SpfResult::Fail | spf::SpfResult::None, _, _)
+            | (_, DkimStatus::Fail, _) => (false, "fail"),
+
+            (spf::SpfResult::TempError, _, _)
+            | (_, DkimStatus::TempError, _) => (true, "temperror"),
+
+            (spf::SpfResult::Pass, DkimStatus::Pass, _) => (true, "pass"),
+
+            _ => (true, "neutral"),
+        };
+
+        let _ = write!(
+            headers,
+            "\tdmarc={dmarc_result} header.from={hf}\r\n",
+            hf = domain.subdomain,
+        );
+
+        let receiver_policy = if domain.org_domain == domain.subdomain {
+            effective_dmarc_policy.requested_receiver_policy
+        } else {
+            effective_dmarc_policy.subdomain_receiver_policy
+        };
+
+        !dmarc_accept && dmarc::ReceiverPolicy::Reject == receiver_policy
+    } else {
+        let _ = write!(
+            headers,
+            "Authentication-Results: {receiver}; none\r\n\
+             \t(no single organisational domain is responsible \
+             for this message)\r\n",
+            receiver = local_host_name,
+        );
+        false
+    };
+
+    if let Some((identifier, domain, result)) = spf_result {
+        format_spf_header(
+            &mut headers,
+            local_host_name,
+            peer_ip,
+            identifier,
+            &domain,
+            result,
+        );
+    }
+
+    reject &=
+        rand::rngs::OsRng.gen_range(0u32..99) < effective_dmarc_policy.percent;
+    reject &= enable_reject;
+
+    if reject {
+        Err(())
+    } else {
+        Ok(headers)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    struct AuthMessageTest {
+        spf_result: Option<(
+            &'static str,
+            Rc<dns::Name>,
+            (spf::SpfResult, spf::Explanation),
+        )>,
+        from_header_domain: Option<DomainInfo>,
+        dmarc_records: Result<Vec<Rc<str>>, dns::CacheError>,
+        dkim_results: Vec<dkim::Outcome>,
+    }
+
+    impl AuthMessageTest {
+        fn new() -> Self {
+            Self {
+                spf_result: None,
+                from_header_domain: None,
+                dmarc_records: Err(dns::CacheError::NotFound),
+                dkim_results: Vec::new(),
+            }
+        }
+
+        fn spf_result(
+            mut self,
+            identity: &'static str,
+            domain: &str,
+            result: spf::SpfResult,
+            explanation: spf::Explanation,
+        ) -> Self {
+            self.spf_result = Some((
+                identity,
+                Rc::new(dns::Name::from_ascii(domain).unwrap()),
+                (result, explanation),
+            ));
+            self
+        }
+
+        fn spf_pass(self, domain: &str) -> Self {
+            self.spf_result(
+                "envelope-from",
+                domain,
+                spf::SpfResult::Pass,
+                spf::Explanation::None,
+            )
+        }
+
+        #[allow(clippy::wrong_self_convention)] // not that sort of "from"
+        fn from(mut self, org_domain: &str, subdomain: &str) -> Self {
+            self.from_header_domain = Some(DomainInfo {
+                subdomain: Rc::new(dns::Name::from_ascii(subdomain).unwrap()),
+                org_domain: Rc::new(dns::Name::from_ascii(org_domain).unwrap()),
+                dmarc_domain: None, // unused
+                // unused
+                spf: (spf::SpfResult::None, spf::Explanation::None).into(),
+            });
+            self
+        }
+
+        #[allow(clippy::wrong_self_convention)]
+        fn from_same(self, org_domain: &str) -> Self {
+            self.from(org_domain, org_domain)
+        }
+
+        fn dkim(
+            mut self,
+            sdid: Option<&str>,
+            selector: Option<&str>,
+            error: Option<dkim::Failure>,
+        ) -> Self {
+            self.dkim_results.push(dkim::Outcome {
+                sdid: sdid.map(|s| dns::Name::from_ascii(s).unwrap()),
+                selector: selector.map(|s| s.to_owned()),
+                error: error.map(Into::into),
+            });
+            self
+        }
+
+        fn dmarc(mut self, dmarc: &str) -> Self {
+            self.dmarc_records = Ok(vec![dmarc.to_owned().into()]);
+            self
+        }
+
+        fn dmarc_error(mut self, error: dns::CacheError) -> Self {
+            self.dmarc_records = Err(error);
+            self
+        }
+
+        fn run(self) -> (String, bool) {
+            let local_host_name = "localhost";
+            let peer_ip = "192.0.2.3".parse::<IpAddr>().unwrap();
+            let headers = authenticate_message_impl(
+                local_host_name,
+                peer_ip,
+                false,
+                self.spf_result.clone(),
+                self.from_header_domain.as_ref(),
+                self.dmarc_records.clone(),
+                self.dkim_results.iter().map(|r| dkim::Outcome {
+                    sdid: r.sdid.clone(),
+                    selector: r.selector.clone(),
+                    error: match r.error {
+                        None => None,
+                        Some(dkim::Error::Fail(ref f)) => {
+                            Some(dkim::Error::Fail(f.clone()))
+                        },
+                        _ => panic!("clone Io and Ssl somehow if needed"),
+                    },
+                }),
+            )
+            .unwrap();
+
+            let rejected = match authenticate_message_impl(
+                local_host_name,
+                peer_ip,
+                true,
+                self.spf_result,
+                self.from_header_domain.as_ref(),
+                self.dmarc_records,
+                self.dkim_results.into_iter(),
+            ) {
+                Ok(h) => {
+                    assert_eq!(headers, h);
+                    false
+                },
+
+                Err(()) => true,
+            };
+
+            (headers, rejected)
+        }
+    }
+
+    #[test]
+    fn authenticate_message_nothing() {
+        let (headers, reject) = AuthMessageTest::new().run();
+        assert!(!reject);
+        assert_eq!(
+            "Authentication-Results: localhost; none\r\n\
+             \t(no single organisational domain is responsible for this message)\r\n",
+            headers,
+        );
+    }
+
+    #[test]
+    fn authenticate_message_all_pass() {
+        let (headers, reject) = AuthMessageTest::new()
+            .spf_pass("example.com")
+            .from_same("example.com")
+            .dkim(Some("example.com"), Some("selector"), None)
+            .dmarc("v=DMARC1 p=reject aspf=s adkim=s")
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=pass;\r\n\
+             \tdkim=pass (\r\n\
+             \t\texample.com/selector: pass\r\n\
+             \t);\r\n\
+             \tdmarc=pass header.from=example.com\r\n\
+             Received-SPF: pass\r\n\
+             \tidentity=envelope-from; client-ip=192.0.2.3;\r\n\
+             \treceiver=\"localhost\"; envelope-from=\"example.com\"\r\n",
+            headers,
+        );
+        assert!(!reject);
+    }
+
+    #[test]
+    fn authenticate_message_strict_but_subdomain() {
+        let (headers, reject) = AuthMessageTest::new()
+            .spf_pass("subdomain.example.com")
+            .from_same("example.com")
+            .dkim(Some("example.com"), Some("selector"), None)
+            .dmarc("v=DMARC1 p=reject aspf=s adkim=r")
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=pass (from a subdomain, but DMARC has aspf=s);\r\n\
+             \tdkim=pass (\r\n\
+             \t\texample.com/selector: pass\r\n\
+             \t);\r\n\
+             \tdmarc=fail header.from=example.com\r\n\
+             Received-SPF: pass\r\n\
+             \tidentity=envelope-from; client-ip=192.0.2.3;\r\n\
+             \treceiver=\"localhost\"; envelope-from=\"subdomain.example.com\"\r\n",
+            headers,
+        );
+        assert!(reject);
+
+        let (headers, reject) = AuthMessageTest::new()
+            .spf_pass("example.com")
+            .from_same("example.com")
+            .dkim(Some("subdomain.example.com"), Some("selector"), None)
+            .dmarc("v=DMARC1 p=reject aspf=r adkim=s")
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=pass;\r\n\
+             \tdkim=none (\r\n\
+             \t\tsubdomain.example.com/selector: valid signature, but irrelevant\r\n\
+             \t);\r\n\
+             \tdmarc=fail header.from=example.com\r\n\
+             Received-SPF: pass\r\n\
+             \tidentity=envelope-from; client-ip=192.0.2.3;\r\n\
+             \treceiver=\"localhost\"; envelope-from=\"example.com\"\r\n",
+            headers,
+        );
+        assert!(reject);
+    }
+
+    #[test]
+    fn authenticate_message_relaxed_with_subdomain() {
+        let (headers, reject) = AuthMessageTest::new()
+            .spf_pass("subdomain.example.com")
+            .from_same("example.com")
+            .dkim(Some("example.com"), Some("selector"), None)
+            .dmarc("v=DMARC1 p=reject aspf=r adkim=s")
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=pass;\r\n\
+             \tdkim=pass (\r\n\
+             \t\texample.com/selector: pass\r\n\
+             \t);\r\n\
+             \tdmarc=pass header.from=example.com\r\n\
+             Received-SPF: pass\r\n\
+             \tidentity=envelope-from; client-ip=192.0.2.3;\r\n\
+             \treceiver=\"localhost\"; envelope-from=\"subdomain.example.com\"\r\n",
+            headers,
+        );
+        assert!(!reject);
+
+        let (headers, reject) = AuthMessageTest::new()
+            .spf_pass("example.com")
+            .from_same("example.com")
+            .dkim(Some("subdomain.example.com"), Some("selector"), None)
+            .dmarc("v=DMARC1 p=reject aspf=s adkim=r")
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=pass;\r\n\
+             \tdkim=pass (\r\n\
+             \t\tsubdomain.example.com/selector: pass\r\n\
+             \t);\r\n\
+             \tdmarc=pass header.from=example.com\r\n\
+             Received-SPF: pass\r\n\
+             \tidentity=envelope-from; client-ip=192.0.2.3;\r\n\
+             \treceiver=\"localhost\"; envelope-from=\"example.com\"\r\n",
+            headers,
+        );
+        assert!(!reject);
+    }
+
+    #[test]
+    fn authenticate_message_dmarc_errors() {
+        let (headers, reject) = AuthMessageTest::new()
+            .from_same("example.com")
+            .dmarc_error(dns::CacheError::NotFound)
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=none reason=\"no domain in HELO or MAIL FROM\";\r\n\
+             \tdkim=none (\r\n\
+             \t\tno DKIM signatures found\r\n\
+             \t);\r\n\
+             \tdmarc=none reason=\"no DMARC record in DNS\" header.from=example.com\r\n",
+            headers,
+        );
+        assert!(!reject);
+
+        let (headers, reject) = AuthMessageTest::new()
+            .from_same("example.com")
+            .dmarc_error(dns::CacheError::Error)
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=none reason=\"no domain in HELO or MAIL FROM\";\r\n\
+             \tdkim=none (\r\n\
+             \t\tno DKIM signatures found\r\n\
+             \t);\r\n\
+             \tdmarc=temperror reason=\"DNS error fetching DMARC record\" header.from=example.com\r\n",
+            headers,
+        );
+        assert!(!reject);
+
+        let (headers, reject) = AuthMessageTest::new()
+            .from_same("example.com")
+            .dmarc("v=DMARC2")
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=none reason=\"no domain in HELO or MAIL FROM\";\r\n\
+             \tdkim=none (\r\n\
+             \t\tno DKIM signatures found\r\n\
+             \t);\r\n\
+             \tdmarc=permerror reason=\"invalid DMARC record\" header.from=example.com\r\n",
+            headers,
+        );
+        assert!(!reject);
+    }
+
+    #[test]
+    fn authenticate_message_spf_errors() {
+        let (headers, reject) = AuthMessageTest::new()
+            .from_same("example.com")
+            .dmarc("v=DMARC1 p=reject")
+            .dkim(Some("example.com"), Some("selector"), None)
+            .spf_result(
+                "helo",
+                "example.com",
+                spf::SpfResult::None,
+                spf::Explanation::None,
+            )
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=none;\r\n\
+             \tdkim=pass (\r\n\
+             \t\texample.com/selector: pass\r\n\
+             \t);\r\n\
+             \tdmarc=fail header.from=example.com\r\n\
+             Received-SPF: none\r\n\
+             \tidentity=helo; client-ip=192.0.2.3;\r\n\
+             \treceiver=\"localhost\"; helo=\"example.com\"\r\n",
+            headers,
+        );
+        assert!(reject);
+
+        let (headers, reject) = AuthMessageTest::new()
+            .from_same("example.com")
+            .dmarc("v=DMARC1 p=reject")
+            .dkim(Some("example.com"), Some("selector"), None)
+            .spf_result(
+                "helo",
+                "example.com",
+                spf::SpfResult::Fail,
+                spf::Explanation::Some("rejected! (╯°□°）╯︵ ┻━┻".to_owned()),
+            )
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=fail;\r\n\
+             \tdkim=pass (\r\n\
+             \t\texample.com/selector: pass\r\n\
+             \t);\r\n\
+             \tdmarc=fail header.from=example.com\r\n\
+             Received-SPF: fail (foreign explanation: rejected!  )\r\n\
+             \tidentity=helo; client-ip=192.0.2.3;\r\n\
+             \treceiver=\"localhost\"; helo=\"example.com\"\r\n",
+            headers,
+        );
+        assert!(reject);
+
+        let (headers, reject) = AuthMessageTest::new()
+            .from_same("example.com")
+            .dmarc("v=DMARC1 p=reject")
+            .dkim(Some("example.com"), Some("selector"), None)
+            .spf_result(
+                "helo",
+                "example.com",
+                spf::SpfResult::SoftFail,
+                spf::Explanation::None,
+            )
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=softfail;\r\n\
+             \tdkim=pass (\r\n\
+             \t\texample.com/selector: pass\r\n\
+             \t);\r\n\
+             \tdmarc=neutral header.from=example.com\r\n\
+             Received-SPF: softfail\r\n\
+             \tidentity=helo; client-ip=192.0.2.3;\r\n\
+             \treceiver=\"localhost\"; helo=\"example.com\"\r\n",
+            headers,
+        );
+        assert!(!reject);
+
+        let (headers, reject) = AuthMessageTest::new()
+            .from_same("example.com")
+            .dmarc("v=DMARC1 p=reject")
+            .dkim(Some("example.com"), Some("selector"), None)
+            .spf_result(
+                "helo",
+                "example.com",
+                spf::SpfResult::Neutral,
+                spf::Explanation::None,
+            )
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=neutral;\r\n\
+             \tdkim=pass (\r\n\
+             \t\texample.com/selector: pass\r\n\
+             \t);\r\n\
+             \tdmarc=neutral header.from=example.com\r\n\
+             Received-SPF: neutral\r\n\
+             \tidentity=helo; client-ip=192.0.2.3;\r\n\
+             \treceiver=\"localhost\"; helo=\"example.com\"\r\n",
+            headers,
+        );
+        assert!(!reject);
+
+        let (headers, reject) = AuthMessageTest::new()
+            .from_same("example.com")
+            .dmarc("v=DMARC1 p=reject")
+            .dkim(Some("example.com"), Some("selector"), None)
+            .spf_result(
+                "helo",
+                "example.com",
+                spf::SpfResult::TempError,
+                spf::Explanation::None,
+            )
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=temperror;\r\n\
+             \tdkim=pass (\r\n\
+             \t\texample.com/selector: pass\r\n\
+             \t);\r\n\
+             \tdmarc=temperror header.from=example.com\r\n\
+             Received-SPF: temperror\r\n\
+             \tidentity=helo; client-ip=192.0.2.3;\r\n\
+             \treceiver=\"localhost\"; helo=\"example.com\"\r\n",
+            headers,
+        );
+        assert!(!reject);
+
+        let (headers, reject) = AuthMessageTest::new()
+            .from_same("example.com")
+            .dmarc("v=DMARC1 p=reject")
+            .dkim(Some("example.com"), Some("selector"), None)
+            .spf_result(
+                "helo",
+                "example.com",
+                spf::SpfResult::PermError,
+                spf::Explanation::None,
+            )
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=permerror;\r\n\
+             \tdkim=pass (\r\n\
+             \t\texample.com/selector: pass\r\n\
+             \t);\r\n\
+             \tdmarc=neutral header.from=example.com\r\n\
+             Received-SPF: permerror\r\n\
+             \tidentity=helo; client-ip=192.0.2.3;\r\n\
+             \treceiver=\"localhost\"; helo=\"example.com\"\r\n",
+            headers,
+        );
+        assert!(!reject);
+    }
+
+    #[test]
+    fn authenticate_message_dkim_errors() {
+        let (headers, reject) = AuthMessageTest::new()
+            .from_same("example.com")
+            .dmarc("v=DMARC1 p=reject")
+            .spf_pass("example.com")
+            .dkim(
+                None,
+                None,
+                Some(dkim::Failure::HeaderParse("error message".to_owned())),
+            )
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=pass;\r\n\
+             \tdkim=none (\r\n\
+             \t\t?/?: can't parse DKIM-Signature header: error message\r\n\
+             \t);\r\n\
+             \tdmarc=fail header.from=example.com\r\n\
+             Received-SPF: pass\r\n\
+             \tidentity=envelope-from; client-ip=192.0.2.3;\r\n\
+             \treceiver=\"localhost\"; envelope-from=\"example.com\"\r\n",
+            headers,
+        );
+        assert!(reject);
+
+        let (headers, reject) = AuthMessageTest::new()
+            .from_same("example.com")
+            .dmarc("v=DMARC1 p=reject")
+            .spf_pass("example.com")
+            .dkim(
+                Some("example.com"),
+                Some("selector"),
+                Some(dkim::Failure::DnsTxtNotFound(
+                    "selector._domainkey.example.com".to_owned(),
+                )),
+            )
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=pass;\r\n\
+             \tdkim=permerror (\r\n\
+             \t\texample.com/selector: can't find TXT record \
+             selector._domainkey.example.com, or it is not DKIM1\r\n\
+             \t);\r\n\
+             \tdmarc=fail header.from=example.com\r\n\
+             Received-SPF: pass\r\n\
+             \tidentity=envelope-from; client-ip=192.0.2.3;\r\n\
+             \treceiver=\"localhost\"; envelope-from=\"example.com\"\r\n",
+            headers,
+        );
+        assert!(reject);
+
+        let (headers, reject) = AuthMessageTest::new()
+            .from_same("example.com")
+            .dmarc("v=DMARC1 p=reject")
+            .spf_pass("example.com")
+            .dkim(
+                Some("example.com"),
+                Some("selector"),
+                Some(dkim::Failure::DnsTxtError(
+                    "selector._domainkey.example.com".to_owned(),
+                )),
+            )
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=pass;\r\n\
+             \tdkim=temperror (\r\n\
+             \t\texample.com/selector: DNS error fetching TXT record \
+             selector._domainkey.example.com\r\n\
+             \t);\r\n\
+             \tdmarc=temperror header.from=example.com\r\n\
+             Received-SPF: pass\r\n\
+             \tidentity=envelope-from; client-ip=192.0.2.3;\r\n\
+             \treceiver=\"localhost\"; envelope-from=\"example.com\"\r\n",
+            headers,
+        );
+        assert!(!reject);
+
+        let (headers, reject) = AuthMessageTest::new()
+            .from_same("example.com")
+            .dmarc("v=DMARC1 p=reject")
+            .spf_pass("example.com")
+            .dkim(
+                Some("example.com"),
+                Some("selector"),
+                Some(dkim::Failure::RsaKeyTooBig),
+            )
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=pass;\r\n\
+             \tdkim=neutral (\r\n\
+             \t\texample.com/selector: RSA key is too big to validate\r\n\
+             \t);\r\n\
+             \tdmarc=neutral header.from=example.com\r\n\
+             Received-SPF: pass\r\n\
+             \tidentity=envelope-from; client-ip=192.0.2.3;\r\n\
+             \treceiver=\"localhost\"; envelope-from=\"example.com\"\r\n",
+            headers,
+        );
+        assert!(!reject);
+
+        let (headers, reject) = AuthMessageTest::new()
+            .from_same("example.com")
+            .dmarc("v=DMARC1 p=reject")
+            .spf_pass("example.com")
+            .dkim(
+                Some("example.com"),
+                Some("weak"),
+                Some(dkim::Failure::WeakKey),
+            )
+            .dkim(Some("example.com"), Some("strong"), None)
+            .run();
+        assert_eq!(
+            "Authentication-Results: localhost;\r\n\
+             \tspf=pass;\r\n\
+             \tdkim=pass (\r\n\
+             \t\texample.com/weak: valid signature, but signing key is weak\r\n\
+             \t\texample.com/strong: pass\r\n\
+             \t);\r\n\
+             \tdmarc=pass header.from=example.com\r\n\
+             Received-SPF: pass\r\n\
+             \tidentity=envelope-from; client-ip=192.0.2.3;\r\n\
+             \treceiver=\"localhost\"; envelope-from=\"example.com\"\r\n",
+            headers,
+        );
+        assert!(!reject);
     }
 }

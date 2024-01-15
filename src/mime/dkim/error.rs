@@ -39,7 +39,7 @@ impl std::cmp::PartialEq for Error {
     }
 }
 
-#[derive(Error, PartialEq, Debug)]
+#[derive(Clone, Debug, Error, PartialEq)]
 pub enum Failure {
     #[error("can't parse DKIM-Signature header: {0}")]
     HeaderParse(String),
