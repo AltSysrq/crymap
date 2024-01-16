@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -16,9 +16,12 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+use std::cell::RefCell;
 use std::io::{self, Read, Write};
+use std::net::IpAddr;
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -30,8 +33,8 @@ use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
 use crate::{
     imap::command_processor::CommandProcessor,
     support::{
-        async_io::ServerIo, log_prefix::LogPrefix, system_config::SystemConfig,
-        unix_privileges,
+        async_io::ServerIo, dns, log_prefix::LogPrefix,
+        system_config::SystemConfig, unix_privileges,
     },
 };
 
@@ -103,25 +106,7 @@ pub async fn lmtp(
     system_root: PathBuf,
     mut users_root: PathBuf,
 ) {
-    let host_name = if system_config.smtp.host_name.is_empty() {
-        let host_name_cstr = nix::unistd::gethostname().unwrap_or_else(|e| {
-            fatal!(
-                EX_OSERR,
-                "Failed to determine host name; you may \
-                     need to explicitly configure it: {}",
-                e
-            )
-        });
-        host_name_cstr
-            .to_str()
-            .unwrap_or_else(|| {
-                fatal!(EX_OSERR, "System host name is not UTF-8")
-            })
-            .to_owned()
-    } else {
-        system_config.smtp.host_name.clone()
-    };
-
+    let host_name = smtp_host_name(&system_config);
     let ssl_acceptor = create_ssl_acceptor(&system_config, &system_root);
 
     // We've opened access to everything on the main system we need; now we can
@@ -150,6 +135,92 @@ pub async fn lmtp(
     match result {
         Ok(()) => info!("{} Normal client disconnect", log_prefix),
         Err(e) => warn!("{} Abnormal client disconnect: {}", log_prefix, e),
+    }
+}
+
+#[tokio::main(flavor = "current_thread")]
+pub async fn smtpin(
+    system_config: SystemConfig,
+    system_root: PathBuf,
+    mut users_root: PathBuf,
+) {
+    let host_name = smtp_host_name(&system_config);
+    let ssl_acceptor = create_ssl_acceptor(&system_config, &system_root);
+
+    // We've opened access to everything on the main system we need; now we can
+    // apply chroot and privilege deescalation.
+    let (log_prefix, _peer_name) =
+        configure_system("smtpin", &system_config, &mut users_root);
+
+    let peer_ip = if let Ok(addr) =
+        nix::sys::socket::getpeername::<nix::sys::socket::SockaddrIn>(STDIN)
+    {
+        IpAddr::V4(*std::net::SocketAddrV4::from(addr).ip())
+    } else if let Ok(addr) =
+        nix::sys::socket::getpeername::<nix::sys::socket::SockaddrIn6>(STDIN)
+    {
+        let addr = *std::net::SocketAddrV6::from(addr).ip();
+        if let Some(v4) = addr.to_ipv4_mapped() {
+            IpAddr::V4(v4)
+        } else {
+            IpAddr::V6(addr)
+        }
+    } else {
+        fatal!(EX_OSERR, "stdin does not seem to be a TCP connection",);
+    };
+
+    let resolver =
+        match hickory_resolver::AsyncResolver::tokio_from_system_conf() {
+            Ok(r) => r,
+            Err(e) => {
+                fatal!(EX_OSERR, "Failed to initialise DNS resolver: {e}",)
+            },
+        };
+
+    let io = ServerIo::new_stdio().unwrap_or_else(|e| {
+        fatal!(
+            EX_OSERR,
+            "Failed to put stdio into non-blocking mode: {e:?}",
+        )
+    });
+
+    let result = crate::smtp::inbound::serve_smtpin(
+        io,
+        Some(Rc::new(resolver)),
+        Rc::new(RefCell::new(dns::Cache::default())),
+        Arc::new(system_config),
+        log_prefix.clone(),
+        ssl_acceptor,
+        users_root,
+        host_name,
+        peer_ip,
+    )
+    .await;
+
+    match result {
+        Ok(()) => info!("{} Normal client disconnect", log_prefix),
+        Err(e) => warn!("{} Abnormal client disconnect: {}", log_prefix, e),
+    }
+}
+
+fn smtp_host_name(system_config: &SystemConfig) -> String {
+    if system_config.smtp.host_name.is_empty() {
+        let host_name_cstr = nix::unistd::gethostname().unwrap_or_else(|e| {
+            fatal!(
+                EX_OSERR,
+                "Failed to determine host name; you may \
+                 need to explicitly configure it: {}",
+                e
+            )
+        });
+        host_name_cstr
+            .to_str()
+            .unwrap_or_else(|| {
+                fatal!(EX_OSERR, "System host name is not UTF-8")
+            })
+            .to_owned()
+    } else {
+        system_config.smtp.host_name.clone()
     }
 }
 

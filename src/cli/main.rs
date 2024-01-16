@@ -89,6 +89,10 @@ enum ServerSubcommand {
     ///
     /// This is intended to be used with inetd, xinetd, etc.
     ServeLmtp(ServerCommonOptions),
+    /// Serve a single SMTP inbound session over standard IO.
+    ///
+    /// This is intended to be used with inetd, xinetd, etc.
+    ServeSmtpin(ServerCommonOptions),
 }
 
 impl ServerSubcommand {
@@ -100,6 +104,7 @@ impl ServerSubcommand {
             },
             ServerSubcommand::ServeImaps(ref mut c) => mem::take(c),
             ServerSubcommand::ServeLmtp(ref mut c) => mem::take(c),
+            ServerSubcommand::ServeSmtpin(ref mut c) => mem::take(c),
         }
     }
 }
@@ -358,7 +363,8 @@ fn server(mut cmd: ServerSubcommand) {
             cmd,
             ServerSubcommand::Deliver(..)
                 | ServerSubcommand::ServeLmtp(..)
-                | ServerSubcommand::ServeImaps(..),
+                | ServerSubcommand::ServeImaps(..)
+                | ServerSubcommand::ServeSmtpin(..),
         )
     {
         if let Err(exit) =
@@ -431,6 +437,9 @@ fn server(mut cmd: ServerSubcommand) {
         },
         ServerSubcommand::ServeLmtp(_) => {
             super::serve::lmtp(system_config, root, users_root);
+        },
+        ServerSubcommand::ServeSmtpin(_) => {
+            super::serve::smtpin(system_config, root, users_root);
         },
     }
 }
