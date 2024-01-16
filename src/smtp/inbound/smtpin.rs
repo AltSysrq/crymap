@@ -16,8 +16,6 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-#![allow(dead_code)] // TODO Remove
-
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::fmt::Write as _;
@@ -245,7 +243,7 @@ impl SmtpinService {
                 },
 
                 RequestPayload::Recipient(recipient) => {
-                    if recipients.len() >= 50 {
+                    if recipients.len() >= MAX_RECIPIENTS {
                         let _ = request.respond.send(Err(SmtpResponse(
                             pc::InsufficientStorage,
                             Some((cc::PermFail, sc::TooManyRecipients)),

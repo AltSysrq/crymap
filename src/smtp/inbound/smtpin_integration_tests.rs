@@ -55,7 +55,7 @@ use crate::{
 lazy_static! {
     static ref SYSTEM_DIR: Mutex<Weak<Setup>> = Mutex::new(Weak::new());
     static ref DKIM_KEY: openssl::pkey::PKey<openssl::pkey::Private> =
-        { openssl::pkey::PKey::generate_ed25519().unwrap() };
+        openssl::pkey::PKey::generate_ed25519().unwrap();
 }
 
 struct Setup {
