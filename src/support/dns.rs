@@ -40,6 +40,7 @@ pub type Resolver = hickory_resolver::AsyncResolver<
 /// The cache maintains an internal list of tasks which have not yet completed.
 /// When the `Cache` is dropped, all tasks are cancelled. The tasks themselves
 /// do not keep the `Rc` alive.
+#[derive(Debug)]
 pub struct Cache {
     pub name_intern: HashMap<String, Rc<Name>>,
     pub a: CacheMap<Vec<Ipv4Addr>>,
@@ -81,6 +82,7 @@ impl Drop for Cache {
 pub type CacheMap<T> = Vec<(Rc<Name>, Entry<T>)>;
 
 /// An entry in the DNS cache passed to the SPF evaluator.
+#[derive(Debug)]
 pub enum Entry<T> {
     /// The query succeeded, and these are its results.
     Ok(T),
@@ -178,6 +180,10 @@ pub async fn wait_for<T, F: FnMut(&mut Cache) -> Result<T, CacheError>>(
         let result = look_up(&mut cache.borrow_mut());
         if !matches!(result, Err(CacheError::NotReady)) {
             return result;
+        }
+
+        if resolver.is_none() {
+            return Err(CacheError::Error);
         }
 
         spawn_lookups(cache, resolver);

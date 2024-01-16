@@ -22,7 +22,7 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::fmt::Write as _;
 use std::io::Write;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -55,7 +55,62 @@ use crate::{
 const MAX_RECIPIENTS: usize = 50;
 const MAX_HEADER_BLOCK_SIZE: usize = 1 << 18;
 
-struct Server {
+pub async fn serve_smtpin(
+    io: crate::support::async_io::ServerIo,
+    dns_resolver: Option<Rc<dns::Resolver>>,
+    dns_cache: Rc<RefCell<dns::Cache>>,
+    config: Arc<SystemConfig>,
+    log_prefix: LogPrefix,
+    ssl_acceptor: openssl::ssl::SslAcceptor,
+    users_dir: PathBuf,
+    local_host_name: String,
+    peer_ip: IpAddr,
+) -> Result<(), crate::support::error::Error> {
+    let common_paths = Arc::new(CommonPaths {
+        tmp: std::env::temp_dir(),
+        garbage: std::env::temp_dir(),
+    });
+
+    let (request_tx, request_rx) = mpsc::channel(1);
+    let server_service = super::server::Service {
+        lmtp: false,
+        offer_binarymime: true,
+        send_request: request_tx,
+    };
+
+    let mut service = SmtpinService {
+        log_prefix: log_prefix.clone(),
+        config,
+        common_paths,
+        users_dir,
+        local_host_name: local_host_name.clone(),
+        peer_ip,
+        request_in: request_rx,
+
+        dns_cache,
+        dns_resolver,
+
+        tls: None,
+        helo_domain: None,
+        helo_host: String::new(),
+        return_path: String::new(),
+        mail_from_domain: None,
+    };
+
+    tokio::join![
+        super::server::run(
+            io,
+            log_prefix,
+            ssl_acceptor,
+            server_service,
+            local_host_name
+        ),
+        service.run(),
+    ]
+    .0
+}
+
+struct SmtpinService {
     log_prefix: LogPrefix,
     config: Arc<SystemConfig>,
     common_paths: Arc<CommonPaths>,
@@ -81,7 +136,7 @@ struct DomainInfo {
     spf: AsyncValue<(spf::SpfResult, spf::Explanation)>,
 }
 
-impl Server {
+impl SmtpinService {
     async fn run(&mut self) {
         loop {
             let Some(request) = self.request_in.recv().await else {
@@ -140,6 +195,8 @@ impl Server {
             ));
         }
 
+        self.tls = req.tls;
+
         // Set helo_host first because domain_info() reads it.
         self.helo_host = req.host.clone();
         self.helo_domain = self.domain_info(req.host, true);
@@ -151,7 +208,7 @@ impl Server {
         &mut self,
         req: MailRequest,
     ) -> Result<(), SmtpResponse<'static>> {
-        if !req.from.contains('@') {
+        if !req.from.is_empty() && !req.from.contains('@') {
             return Err(SmtpResponse(
                 pc::ActionNotTakenPermanent,
                 Some((cc::PermFail, sc::BadSenderMailboxAddressSyntax)),
@@ -160,7 +217,7 @@ impl Server {
         }
 
         self.mail_from_domain = self.domain_info(req.from.clone(), true);
-        if self.mail_from_domain.is_none() {
+        if self.mail_from_domain.is_none() && !req.from.is_empty() {
             return Err(SmtpResponse(
                 pc::ActionNotTakenPermanent,
                 Some((cc::PermFail, sc::BadSenderMailboxAddressSyntax)),
@@ -306,9 +363,9 @@ impl Server {
 
         for (selector, sdid) in dkim_verifier.want_txt_records() {
             let mut dns_cache = self.dns_cache.borrow_mut();
-            if let Ok(name) = dns_cache
-                .intern_domain(Cow::Owned(format!("{selector}._dkim.{sdid}")))
-            {
+            if let Ok(name) = dns_cache.intern_domain(Cow::Owned(format!(
+                "{selector}._domainkey.{sdid}"
+            ))) {
                 let _ = dns::look_up(&mut dns_cache.txt, name);
             }
         }
@@ -385,7 +442,7 @@ impl Server {
             .await
             .map_err(|_| {
                 SmtpResponse(
-                    pc::ActionAborted,
+                    pc::TransactionFailed,
                     Some((cc::PermFail, sc::DeliveryNotAuthorised)),
                     Cow::Borrowed("Message rejected by DMARC policy"),
                 )
@@ -454,8 +511,17 @@ impl Server {
     }
 
     fn domain_info(&self, s: String, run_spf: bool) -> Option<DomainInfo> {
-        let domain_str = s.rsplit_once('@').map_or(s.as_str(), |rs| rs.1);
+        let domain_str =
+            s.rsplit_once('@').map_or(s.as_str(), |rs| rs.1).trim();
+        if domain_str.parse::<Ipv4Addr>().is_ok() {
+            return None;
+        }
+
         let subdomain = Rc::new(dns::Name::from_str_relaxed(domain_str).ok()?);
+        if 0 == subdomain.num_labels() {
+            return None;
+        }
+
         let org_domain = Rc::new(dmarc::organisational_domain(&subdomain));
         let spf_deadline = Instant::now() + Duration::from_secs(20);
 
@@ -628,7 +694,7 @@ impl Server {
                     .dns_cache
                     .borrow_mut()
                     .intern_domain(Cow::Owned(format!(
-                        "{selector}._dkim.{sdid}"
+                        "{selector}._domainkey.{sdid}"
                     )))
                     .ok()?;
                 let dns_cache = &self.dns_cache;

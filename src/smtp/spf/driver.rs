@@ -53,6 +53,11 @@ pub async fn run(
         }
         dns::spawn_lookups(&dns_cache, resolver.as_ref());
 
+        if resolver.is_none() {
+            // spawn_lookups just inserted Error entries
+            continue;
+        }
+
         // Wait until the deadline or until we get new DNS information.
         // Critically, there are no await points between the call to eval() and
         // this await, so we know we haven't missed any notifications.
@@ -98,7 +103,7 @@ mod test {
                 run(
                     &ctx,
                     dns_cache,
-                    resolver,
+                    Some(resolver),
                     tokio::time::Instant::now()
                         + std::time::Duration::from_secs(20),
                 )

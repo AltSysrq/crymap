@@ -223,6 +223,16 @@ pub fn organisational_domain(domain: &dns::Name) -> dns::Name {
 
 fn eval(mut psl_data: &str, domain: &dns::Name) -> dns::Name {
     let domain_str = domain.to_ascii().to_lowercase();
+
+    // We have a special case for this domain in the test build for the sake of
+    // the live tests.
+    #[cfg(test)]
+    {
+        if "smtpin.sptest.lin.gl" == domain_str {
+            return domain.clone();
+        }
+    }
+
     let mut best_match = None::<dns::Name>;
 
     while psl_data.starts_with('#') {

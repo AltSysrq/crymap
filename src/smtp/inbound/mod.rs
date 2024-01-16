@@ -26,5 +26,8 @@ mod smtpin;
 mod integration_test_common;
 #[cfg(test)]
 mod lmtp_integration_tests;
+#[cfg(test)]
+mod smtpin_integration_tests;
 
 pub use lmtp::serve_lmtp;
+pub use smtpin::serve_smtpin;
