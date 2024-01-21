@@ -1,5 +1,5 @@
 ---
--- Copyright (c) 2023, Jason Lingle
+-- Copyright (c) 2023, 2024, Jason Lingle
 --
 -- This file is part of Crymap.
 --
@@ -151,14 +151,14 @@ CREATE TABLE `mailbox_message` (
 
 CREATE INDEX `mailbox_message_message_id` ON `mailbox_message` (`message_id`);
 
-CREATE TRIGGER `message_refcount_incr`
+CREATE TRIGGER `mailbox_message_refcount_incr`
 AFTER INSERT ON `mailbox_message`
 FOR EACH ROW BEGIN
   UPDATE `message` SET `refcount` = `refcount` + 1
   WHERE `message`.`id` = NEW.`message_id`;
 END;
 
-CREATE TRIGGER `message_refcount_decr`
+CREATE TRIGGER `mailbox_message_refcount_decr`
 AFTER DELETE ON `mailbox_message`
 FOR EACH ROW BEGIN
   UPDATE `message`
@@ -207,4 +207,61 @@ CREATE TABLE `maintenance` (
   -- The datetime (UNIX, seconds) at which a process last started this kind of
   -- maintenance.
   `last_started` INTEGER NOT NULL DEFAULT (unixepoch())
+) STRICT;
+
+-- Tracks outbound messages that have not yet been completed.
+CREATE TABLE `message_spool` (
+  -- The message to be delivered.
+  `message_id` INTEGER NOT NULL PRIMARY KEY,
+  -- The MAIL FROM email address.
+  `mail_from` TEXT NOT NULL,
+  -- The UNIX timestamp at which this entry will be forgotten.
+  `expires` INTEGER NOT NULL,
+  FOREIGN KEY (`message_id`) REFERENCES `message` (`id`)
+    ON DELETE RESTRICT
+) STRICT;
+
+CREATE INDEX `message_spool_message_id`
+ON `message_spool` (`message_id`);
+
+CREATE TRIGGER `message_spool_refcount_incr`
+AFTER INSERT ON `message_spool`
+FOR EACH ROW BEGIN
+  UPDATE `message` SET `refcount` = `refcount` + 1
+  WHERE `message`.`id` = NEW.`message_id`;
+END;
+
+CREATE TRIGGER `message_spool_refcount_decr`
+BEFORE DELETE ON `message_spool`
+FOR EACH ROW BEGIN
+  -- No need to update last_activity because spooled messages don't need to
+  -- linger.
+  UPDATE `message` set `refcount` = `refcount` - 1
+  WHERE `message`.`id` = OLD.`message_id`;
+END;
+
+-- Tracks the outstanding destinations for each `message_spool` row.
+CREATE TABLE `message_spool_destination` (
+  `message_id` INTEGER NOT NULL,
+  -- The destination email address.
+  `destination` TEXT NOT NULL,
+  PRIMARY KEY (`message_id`, `destination`),
+  FOREIGN KEY (`message_id`)
+    REFERENCES `message_spool` (`message_id`)
+    ON DELETE CASCADE
+) STRICT;
+
+-- Tracks the TLS support that has been seen on destination domains.
+CREATE TABLE `foreign_smtp_tls_status` (
+  -- The domain (Punycode) in question.
+  `domain` TEXT NOT NULL PRIMARY KEY,
+  -- Whether the STARTTLS extension is present and usable. Once a delivery has
+  -- been made to a destination using STARTTLS, cleartext deliveries will fail.
+  `starttls` INTEGER NOT NULL,
+  -- Whether the site actually uses valid certificates. On the first use of
+  -- TLS, literally any certificate will do, but once a fully valid certificate
+  -- is seen, certificates are required to be valid.
+  `valid_certificate` INTEGER NOT NULL,
+  -- The maximum TLS version that has been negotiated.
+  `tls_version` TEXT
 ) STRICT;

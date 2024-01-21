@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -497,6 +497,88 @@ pub enum V1MigrationEvent<'a> {
     },
     /// Migrates a subscription.
     Subscription { path: &'a str },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum TlsVersion {
+    #[default]
+    Ssl3,
+    Tls10,
+    Tls11,
+    Tls12,
+    Tls13,
+}
+
+impl ToSql for TlsVersion {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        let s = match *self {
+            Self::Ssl3 => "ssl3",
+            Self::Tls10 => "tls1.0",
+            Self::Tls11 => "tls1.1",
+            Self::Tls12 => "tls1.2",
+            Self::Tls13 => "tls1.3",
+        };
+
+        Ok(ToSqlOutput::Borrowed(ValueRef::Text(s.as_bytes())))
+    }
+}
+
+impl FromSql for TlsVersion {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        let ValueRef::Text(value) = value else {
+            return Err(FromSqlError::InvalidType);
+        };
+
+        match value {
+            b"ssl3" => Ok(Self::Ssl3),
+            b"tls1.0" => Ok(Self::Tls10),
+            b"tls1.1" => Ok(Self::Tls11),
+            b"tls1.2" => Ok(Self::Tls12),
+            b"tls1.3" => Ok(Self::Tls13),
+            _ => Err(FromSqlError::Other(Box::from(format!(
+                "invalid TlsVersion: {}",
+                String::from_utf8_lossy(value),
+            )))),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct ForeignSmtpTlsStatus {
+    pub domain: String,
+    pub starttls: bool,
+    pub valid_certificate: bool,
+    pub tls_version: Option<TlsVersion>,
+}
+
+impl FromRow for ForeignSmtpTlsStatus {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            domain: row.get("domain")?,
+            starttls: row.get("starttls")?,
+            valid_certificate: row.get("valid_certificate")?,
+            tls_version: row.get("tls_version")?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MessageSpool {
+    pub message_id: MessageId,
+    pub mail_from: String,
+    pub expires: UnixTimestamp,
+    pub destinations: Vec<String>,
+}
+
+impl FromRow for MessageSpool {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            message_id: row.get("message_id")?,
+            mail_from: row.get("mail_from")?,
+            expires: row.get("expires")?,
+            destinations: Vec::new(),
+        })
+    }
 }
 
 pub fn from_row<T: FromRow>(row: &rusqlite::Row<'_>) -> rusqlite::Result<T> {

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -1551,6 +1551,174 @@ impl Connection {
         // Explicitly ensure that the transaction is carried to here.
         let _ = txn.rollback();
 
+        Ok(())
+    }
+
+    /// Fetches the message spool information for the given message, if any.
+    pub fn fetch_message_spool(
+        &mut self,
+        id: MessageId,
+    ) -> Result<Option<MessageSpool>, Error> {
+        let txn = self.cxn.read_tx()?;
+
+        let message_spool = txn
+            .query_row(
+                "SELECT * FROM `message_spool` WHERE `message_id` = ?",
+                (id,),
+                from_row::<MessageSpool>,
+            )
+            .optional()?;
+
+        let Some(mut message_spool) = message_spool else {
+            return Ok(None);
+        };
+
+        message_spool.destinations = txn
+            .prepare(
+                "SELECT `destination` FROM `message_spool_destination` \
+                 WHERE `message_id` = ?",
+            )?
+            .query_map((id,), from_single::<String>)?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Some(message_spool))
+    }
+
+    /// Inserts the given message spool entry.
+    pub fn insert_message_spool(
+        &mut self,
+        spool: &MessageSpool,
+    ) -> Result<(), Error> {
+        let txn = self.cxn.write_tx()?;
+
+        txn.execute(
+            "INSERT INTO `message_spool` \
+             (`message_id`, `mail_from`, `expires`) \
+             VALUES (?, ?, ?)",
+            (spool.message_id, &spool.mail_from, spool.expires),
+        )?;
+
+        let mut insert_destination = txn.prepare(
+            "INSERT INTO `message_spool_destination` \
+             (`message_id`, `destination`) \
+             VALUES (?, ?)",
+        )?;
+
+        for destination in &spool.destinations {
+            insert_destination.execute((spool.message_id, destination))?;
+        }
+
+        drop(insert_destination);
+
+        txn.commit()?;
+
+        Ok(())
+    }
+
+    /// Removes any message spool entries which expired before the given
+    /// timestamp.
+    pub fn delete_expired_message_spools(
+        &mut self,
+        now: UnixTimestamp,
+    ) -> Result<(), Error> {
+        self.cxn.enable_write(true)?;
+        self.cxn.execute(
+            "DELETE FROM `message_spool` WHERE `expires` <= ?",
+            (now,),
+        )?;
+        Ok(())
+    }
+
+    /// Removes all the listed destinations from the mail spool entry for the
+    /// given message.
+    ///
+    /// If there are no remaining destinations after this operation, the mail
+    /// spool entry is removed entirely.
+    pub fn delete_message_spool_destinations(
+        &mut self,
+        message_id: MessageId,
+        destinations: &mut dyn Iterator<Item = &str>,
+    ) -> Result<(), Error> {
+        let txn = self.cxn.write_tx()?;
+
+        let mut delete_destination = txn.prepare(
+            "DELETE FROM `message_spool_destination` \
+             WHERE `message_id` = ? AND `destination` = ?",
+        )?;
+
+        for destination in destinations {
+            delete_destination.execute((message_id, destination))?;
+        }
+
+        drop(delete_destination);
+
+        if !txn
+            .prepare(
+                "SELECT 1 FROM `message_spool_destination` \
+                 WHERE `message_id` = ?",
+            )?
+            .exists((message_id,))?
+        {
+            txn.execute(
+                "DELETE FROM `message_spool` \
+                 WHERE `message_id` = ?",
+                (message_id,),
+            )?;
+        }
+
+        txn.commit()?;
+        Ok(())
+    }
+
+    /// Fetches the current foreign SMTP TLS status for the given domain, if
+    /// any.
+    pub fn fetch_foreign_smtp_tls_status(
+        &mut self,
+        domain: &str,
+    ) -> Result<Option<ForeignSmtpTlsStatus>, Error> {
+        self.cxn.enable_write(false)?;
+        self.cxn
+            .query_row(
+                "SELECT * FROM `foreign_smtp_tls_status` \
+                 WHERE `domain` = ?",
+                (domain,),
+                from_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Inserts or updates the foreign SMTP TLS status for `status.domain`.
+    pub fn put_foreign_smtp_tls_status(
+        &mut self,
+        status: &ForeignSmtpTlsStatus,
+    ) -> Result<(), Error> {
+        self.cxn.enable_write(true)?;
+        self.cxn.execute(
+            "INSERT OR REPLACE INTO `foreign_smtp_tls_status` \
+             (`domain`, `starttls`, `valid_certificate`, `tls_version`) \
+             VALUES (?, ?, ?, ?)",
+            (
+                &status.domain,
+                status.starttls,
+                status.valid_certificate,
+                status.tls_version,
+            ),
+        )?;
+        Ok(())
+    }
+
+    /// Deletes the foreign SMTP TLS status for the given domain.
+    pub fn delete_foreign_smtp_tls_status(
+        &mut self,
+        domain: &str,
+    ) -> Result<(), Error> {
+        self.cxn.enable_write(true)?;
+        self.cxn.execute(
+            "DELETE FROM `foreign_smtp_tls_status` \
+             WHERE `domain` = ?",
+            (domain,),
+        )?;
         Ok(())
     }
 
@@ -4366,6 +4534,211 @@ mod test {
                 Modseq::MIN,
                 Modseq::MIN,
             ),
+        );
+    }
+
+    #[test]
+    fn message_spool_crud() {
+        let mut fixture = Fixture::new();
+
+        let message_id = fixture
+            .cxn
+            .intern_messages_as_orphans(&mut ["foo"].iter().copied())
+            .unwrap()[0];
+
+        let orphaned_thresh =
+            UnixTimestamp(Utc::now() + Duration::from_secs(60));
+
+        // Initially orphaned
+        assert!(!fixture
+            .cxn
+            .fetch_orphaned_messages(orphaned_thresh)
+            .unwrap()
+            .is_empty());
+
+        assert_eq!(None, fixture.cxn.fetch_message_spool(message_id).unwrap());
+
+        let mut message_spool = MessageSpool {
+            message_id,
+            expires: UnixTimestamp(DateTime::from_timestamp(42, 0).unwrap()),
+            mail_from: "foo@example.com".to_owned(),
+            destinations: vec![
+                "bar@example.net".to_owned(),
+                "baz@example.net".to_owned(),
+            ],
+        };
+        fixture.cxn.insert_message_spool(&message_spool).unwrap();
+        // Being in the spool prevents it from being classified as an orphan.
+        assert!(fixture
+            .cxn
+            .fetch_orphaned_messages(orphaned_thresh)
+            .unwrap()
+            .is_empty());
+
+        assert_eq!(
+            message_spool,
+            fixture
+                .cxn
+                .fetch_message_spool(message_id)
+                .unwrap()
+                .unwrap(),
+        );
+
+        fixture
+            .cxn
+            .delete_message_spool_destinations(
+                message_id,
+                &mut std::iter::once("baz@example.net"),
+            )
+            .unwrap();
+        message_spool.destinations.remove(1);
+        assert_eq!(
+            message_spool,
+            fixture
+                .cxn
+                .fetch_message_spool(message_id)
+                .unwrap()
+                .unwrap(),
+        );
+
+        fixture
+            .cxn
+            .delete_message_spool_destinations(
+                message_id,
+                &mut std::iter::once("bar@example.net"),
+            )
+            .unwrap();
+        assert_eq!(None, fixture.cxn.fetch_message_spool(message_id).unwrap(),);
+
+        // Now the message is an orphan since the message spool was deleted.
+        assert!(!fixture
+            .cxn
+            .fetch_orphaned_messages(orphaned_thresh)
+            .unwrap()
+            .is_empty());
+
+        fixture.cxn.insert_message_spool(&message_spool).unwrap();
+        assert_eq!(
+            message_spool,
+            fixture
+                .cxn
+                .fetch_message_spool(message_id)
+                .unwrap()
+                .unwrap(),
+        );
+        fixture
+            .cxn
+            .delete_expired_message_spools(UnixTimestamp(
+                DateTime::from_timestamp(1, 0).unwrap(),
+            ))
+            .unwrap();
+        assert_eq!(
+            message_spool,
+            fixture
+                .cxn
+                .fetch_message_spool(message_id)
+                .unwrap()
+                .unwrap(),
+        );
+        fixture
+            .cxn
+            .delete_expired_message_spools(UnixTimestamp(
+                DateTime::from_timestamp(100, 0).unwrap(),
+            ))
+            .unwrap();
+        assert_eq!(None, fixture.cxn.fetch_message_spool(message_id).unwrap(),);
+    }
+
+    #[test]
+    fn tls_status_crud() {
+        let mut fixture = Fixture::new();
+
+        assert_eq!(
+            None,
+            fixture
+                .cxn
+                .fetch_foreign_smtp_tls_status("example.com")
+                .unwrap()
+        );
+
+        let mut example_com = ForeignSmtpTlsStatus {
+            domain: "example.com".to_owned(),
+            starttls: false,
+            valid_certificate: false,
+            tls_version: None,
+        };
+        let example_net = ForeignSmtpTlsStatus {
+            domain: "example.net".to_owned(),
+            starttls: true,
+            valid_certificate: true,
+            tls_version: Some(TlsVersion::Ssl3),
+        };
+        fixture
+            .cxn
+            .put_foreign_smtp_tls_status(&example_com)
+            .unwrap();
+        fixture
+            .cxn
+            .put_foreign_smtp_tls_status(&example_net)
+            .unwrap();
+        assert_eq!(
+            example_com,
+            fixture
+                .cxn
+                .fetch_foreign_smtp_tls_status("example.com")
+                .unwrap()
+                .unwrap(),
+        );
+        assert_eq!(
+            example_net,
+            fixture
+                .cxn
+                .fetch_foreign_smtp_tls_status("example.net")
+                .unwrap()
+                .unwrap(),
+        );
+
+        example_com.starttls = true;
+
+        for tls_version in [
+            TlsVersion::Tls10,
+            TlsVersion::Tls11,
+            TlsVersion::Tls12,
+            TlsVersion::Tls13,
+        ] {
+            example_com.tls_version = Some(tls_version);
+            fixture
+                .cxn
+                .put_foreign_smtp_tls_status(&example_com)
+                .unwrap();
+            assert_eq!(
+                example_com,
+                fixture
+                    .cxn
+                    .fetch_foreign_smtp_tls_status("example.com")
+                    .unwrap()
+                    .unwrap(),
+            );
+        }
+
+        fixture
+            .cxn
+            .delete_foreign_smtp_tls_status("example.com")
+            .unwrap();
+        assert_eq!(
+            None,
+            fixture
+                .cxn
+                .fetch_foreign_smtp_tls_status("example.com")
+                .unwrap(),
+        );
+        assert_eq!(
+            example_net,
+            fixture
+                .cxn
+                .fetch_foreign_smtp_tls_status("example.net")
+                .unwrap()
+                .unwrap(),
         );
     }
 }
