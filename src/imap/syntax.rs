@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -1964,9 +1964,40 @@ syntax_rule! {
         #[prefix(" ") nil]
         #[primitive(datetime, datetime)]
         password_changed: Option<DateTime<FixedOffset>>,
+        // Crymap 2.0.0+
         #[0* prefix(" ")]
+        #[delegate(XCry2UserConfigData)]
+        extended: Vec<XCry2UserConfigData<'a>>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    enum XCry2UserConfigData<'a> {
+        #[prefix("SMTP-OUT-SAVE ")]
+        #[primitive(unicode_nstring, nstring)]
+        SmtpOutSave(Option<Cow<'a, str>>),
+        #[prefix("SMTP-OUT-SUCCESS-RECEIPTS ")]
+        #[primitive(unicode_nstring, nstring)]
+        SmtpOutSuccessReceipts(Option<Cow<'a, str>>),
+        #[prefix("SMTP-OUT-FAILURE-RECEIPTS ")]
+        #[primitive(unicode_nstring, nstring)]
+        SmtpOutFailureReceipts(Option<Cow<'a, str>>),
+        #[]
+        #[delegate]
+        Unknown(XCryUnknownUserConfigData<'a>),
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct XCryUnknownUserConfigData<'a> {
+        #[]
         #[primitive(unicode_astring, astring)]
-        extended: Vec<Cow<'a, str>>,
+        key: Cow<'a, str>,
+        #[prefix(" ")]
+        #[primitive(unicode_astring, astring)]
+        value: Cow<'a, str>,
     }
 }
 
@@ -1982,6 +2013,15 @@ syntax_rule! {
         #[prefix("PASSWORD ")]
         #[primitive(unicode_astring, astring)]
         Password(Cow<'a, str>),
+        #[prefix("SMTP-OUT-SAVE ")]
+        #[primitive(unicode_nstring, nstring)]
+        SmtpOutSave(Option<Cow<'a, str>>),
+        #[prefix("SMTP-OUT-SUCCESS-RECEIPTS ")]
+        #[primitive(unicode_nstring, nstring)]
+        SmtpOutSuccessReceipts(Option<Cow<'a, str>>),
+        #[prefix("SMTP-OUT-FAILURE-RECEIPTS ")]
+        #[primitive(unicode_nstring, nstring)]
+        SmtpOutFailureReceipts(Option<Cow<'a, str>>),
     }
 }
 

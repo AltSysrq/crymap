@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -1517,6 +1517,9 @@ pub struct SetUserConfigRequest {
     pub internal_key_pattern: Option<String>,
     pub external_key_pattern: Option<String>,
     pub password: Option<String>,
+    pub smtp_out_save: Option<Option<String>>,
+    pub smtp_out_success_receipts: Option<Option<String>>,
+    pub smtp_out_failure_receipts: Option<Option<String>>,
 }
 
 /// Holder for common paths used pervasively through a process.
@@ -1568,6 +1571,24 @@ impl MessageMetadata {
             base64::encode_config(self.email_id, base64::URL_SAFE)
         )
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum TlsVersion {
+    #[default]
+    Ssl3,
+    Tls10,
+    Tls11,
+    Tls12,
+    Tls13,
+}
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct ForeignSmtpTlsStatus {
+    pub domain: String,
+    pub starttls: bool,
+    pub valid_certificate: bool,
+    pub tls_version: Option<TlsVersion>,
 }
 
 mod email_id_ser {

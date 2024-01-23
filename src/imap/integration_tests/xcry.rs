@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -15,6 +15,8 @@
 //
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
+
+use std::borrow::Cow;
 
 use super::defs::*;
 use crate::support::error::Error;
@@ -96,6 +98,49 @@ fn user_configuration() {
             assert_eq!("ikp%Y", cfg.internal_key_pattern);
             assert_eq!("ekp%d", cfg.external_key_pattern);
             assert!(cfg.password_changed.is_some());
+        }
+    };
+
+    ok_command!(
+        client,
+        c("XCRY SET-USER-CONFIG SMTP-OUT-SAVE \"Sent\" \
+           SMTP-OUT-SUCCESS-RECEIPTS \"Sent/Success\" \
+           SMTP-OUT-FAILURE-RECEIPTS \"Sent/Failure\"")
+    );
+
+    command!(mut responses = client, c("XCRY GET-USER-CONFIG"));
+    assert_tagged_ok(responses.pop().unwrap());
+    has_untagged_response_matching! {
+        s::Response::XCryUserConfig(ref cfg) in responses => {
+            assert!(cfg.extended.contains(
+                &s::XCry2UserConfigData::SmtpOutSave(
+                    Some(Cow::Borrowed("Sent")))));
+            assert!(cfg.extended.contains(
+                &s::XCry2UserConfigData::SmtpOutSuccessReceipts(
+                    Some(Cow::Borrowed("Sent/Success")))));
+            assert!(cfg.extended.contains(
+                &s::XCry2UserConfigData::SmtpOutFailureReceipts(
+                    Some(Cow::Borrowed("Sent/Failure")))));
+        }
+    };
+
+    ok_command!(
+        client,
+        c("XCRY SET-USER-CONFIG SMTP-OUT-SAVE NIL \
+           SMTP-OUT-SUCCESS-RECEIPTS NIL \
+           SMTP-OUT-FAILURE-RECEIPTS NIL")
+    );
+
+    command!(mut responses = client, c("XCRY GET-USER-CONFIG"));
+    assert_tagged_ok(responses.pop().unwrap());
+    has_untagged_response_matching! {
+        s::Response::XCryUserConfig(ref cfg) in responses => {
+            assert!(cfg.extended.contains(
+                &s::XCry2UserConfigData::SmtpOutSave(None)));
+            assert!(cfg.extended.contains(
+                &s::XCry2UserConfigData::SmtpOutSuccessReceipts(None)));
+            assert!(cfg.extended.contains(
+                &s::XCry2UserConfigData::SmtpOutFailureReceipts(None)));
         }
     };
 }

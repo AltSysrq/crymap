@@ -150,6 +150,7 @@ impl Account {
                 .make_config(password)
                 .expect("Password hashing failed"),
             key_store: KeyStoreConfig::default(),
+            smtp_out: Default::default(),
         };
 
         let user_config_toml = toml::to_vec(&user_config)

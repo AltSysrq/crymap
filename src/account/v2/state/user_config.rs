@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -96,6 +96,18 @@ impl Account {
                 .make_config(password.as_bytes())
                 .expect("argon2 hash failed");
             config.master_key.last_changed = Some(now.into());
+        }
+
+        if let Some(save) = request.smtp_out_save {
+            config.smtp_out.save = save;
+        }
+
+        if let Some(success_receipts) = request.smtp_out_success_receipts {
+            config.smtp_out.success_receipts = success_receipts;
+        }
+
+        if let Some(failure_receipts) = request.smtp_out_failure_receipts {
+            config.smtp_out.failure_receipts = failure_receipts;
         }
 
         let config_toml =

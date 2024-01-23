@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -153,6 +153,16 @@ impl<W: LexOutput> LexWriter<W> {
         match s.as_ref() {
             None => self.nil(),
             Some(s) => self.string(&self.encode(s.as_ref())),
+        }
+    }
+
+    pub fn unicode_nstring(
+        &mut self,
+        s: &Option<impl AsRef<str>>,
+    ) -> io::Result<()> {
+        match s.as_ref() {
+            None => self.nil(),
+            Some(s) => self.string(s.as_ref()),
         }
     }
 

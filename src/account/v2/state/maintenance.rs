@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -56,6 +56,7 @@ impl Account {
         self.recover_unaccounted_files(now)?;
         self.make_database_backup(now.date_naive())?;
         self.remove_old_database_backups();
+        self.remove_old_message_spools()?;
         self.clean_tmp();
         self.clean_garbage();
         Ok(())
@@ -226,6 +227,11 @@ impl Account {
         for path in &candidates[..candidates.len() - MAX_BACKUPS] {
             let _ = fs::remove_file(path);
         }
+    }
+
+    fn remove_old_message_spools(&mut self) -> Result<(), Error> {
+        self.metadb
+            .delete_expired_message_spools(storage::UnixTimestamp::now())
     }
 
     fn clean_tmp(&self) {

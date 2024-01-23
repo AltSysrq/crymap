@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -38,6 +38,7 @@ mod migration;
 mod poll;
 mod search;
 mod select;
+mod spool;
 mod user_config;
 
 #[cfg(feature = "dev-tools")]
@@ -46,3 +47,5 @@ mod zstd_train;
 pub use defs::{Account, Mailbox};
 pub use delivery::DeliveryAccount;
 pub use fetch::FetchReceiver;
+#[allow(unused_imports)] // TODO Remove
+pub use spool::{SpooledMessage, SpooledMessageId};

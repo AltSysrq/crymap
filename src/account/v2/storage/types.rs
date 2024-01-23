@@ -499,16 +499,6 @@ pub enum V1MigrationEvent<'a> {
     Subscription { path: &'a str },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub enum TlsVersion {
-    #[default]
-    Ssl3,
-    Tls10,
-    Tls11,
-    Tls12,
-    Tls13,
-}
-
 impl ToSql for TlsVersion {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
         let s = match *self {
@@ -541,14 +531,6 @@ impl FromSql for TlsVersion {
             )))),
         }
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Default)]
-pub struct ForeignSmtpTlsStatus {
-    pub domain: String,
-    pub starttls: bool,
-    pub valid_certificate: bool,
-    pub tls_version: Option<TlsVersion>,
 }
 
 impl FromRow for ForeignSmtpTlsStatus {

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -37,6 +37,7 @@ impl CommandProcessor {
                     Cow::Borrowed("INTERNAL-KEY-PATTERN"),
                     Cow::Borrowed("EXTERNAL-KEY-PATTERN"),
                     Cow::Borrowed("PASSWORD"),
+                    Cow::Borrowed("SMTP-OUT"),
                 ],
                 internal_key_pattern: Cow::Owned(
                     user_config.key_store.internal_key_pattern,
@@ -45,7 +46,25 @@ impl CommandProcessor {
                     user_config.key_store.external_key_pattern,
                 ),
                 password_changed: user_config.master_key.last_changed,
-                extended: vec![],
+                extended: vec![
+                    s::XCry2UserConfigData::SmtpOutSave(
+                        user_config.smtp_out.save.clone().map(Cow::Owned),
+                    ),
+                    s::XCry2UserConfigData::SmtpOutSuccessReceipts(
+                        user_config
+                            .smtp_out
+                            .success_receipts
+                            .clone()
+                            .map(Cow::Owned),
+                    ),
+                    s::XCry2UserConfigData::SmtpOutFailureReceipts(
+                        user_config
+                            .smtp_out
+                            .failure_receipts
+                            .clone()
+                            .map(Cow::Owned),
+                    ),
+                ],
             }),
         )
         .await;
@@ -68,6 +87,17 @@ impl CommandProcessor {
                 },
                 s::XCryUserConfigOption::Password(pw) => {
                     request.password = Some(pw.into_owned());
+                },
+                s::XCryUserConfigOption::SmtpOutSave(s) => {
+                    request.smtp_out_save = Some(s.map(Cow::into_owned));
+                },
+                s::XCryUserConfigOption::SmtpOutSuccessReceipts(s) => {
+                    request.smtp_out_success_receipts =
+                        Some(s.map(Cow::into_owned));
+                },
+                s::XCryUserConfigOption::SmtpOutFailureReceipts(s) => {
+                    request.smtp_out_failure_receipts =
+                        Some(s.map(Cow::into_owned));
                 },
             }
         }
