@@ -724,16 +724,16 @@ fn bad_from_header() {
 }
 
 #[test]
-fn dmarc_accept() {
+fn dmarc_accept_small() {
     let setup = set_up();
-    let mut cxn = setup.connect("dmarc_accept", false);
+    let mut cxn = setup.connect("dmarc_accept_small", false);
     cxn.skip_pleasantries("HELO mail.mars.com");
     cxn.simple_command("MAIL FROM:<martian@mars.com>", "250 2.0.0");
     cxn.simple_command("RCPT TO:<zim@irk.com>", "250 2.1.5");
 
     let unsigned_message_header = "From: martian@mars.com\r\n\
          Subject: Valid message\r\n";
-    let unsigned_message_body = "dmarc_accept\r\n";
+    let unsigned_message_body = "dmarc_accept_small\r\n";
 
     let keys = vec![("selector".to_owned(), DKIM_KEY.clone())];
     let mut signer = dkim::Signer::new(
@@ -754,7 +754,46 @@ fn dmarc_accept() {
     assert_eq!(1, responses.len());
     assert!(responses[0].starts_with("250 2.0.0"));
 
-    let delivered = fetch_email(&setup, "zim", "dmarc_accept").unwrap();
+    let delivered = fetch_email(&setup, "zim", "dmarc_accept_small").unwrap();
+    println!("delivered:\n{delivered}");
+    assert!(delivered.contains("spf=pass"));
+    assert!(delivered.contains("dkim=pass"));
+    assert!(delivered.contains("dmarc=pass"));
+}
+
+#[test]
+fn dmarc_accept_large_body() {
+    let setup = set_up();
+    let mut cxn = setup.connect("dmarc_accept_large_body", false);
+    cxn.skip_pleasantries("HELO mail.mars.com");
+    cxn.simple_command("MAIL FROM:<martian@mars.com>", "250 2.0.0");
+    cxn.simple_command("RCPT TO:<zim@irk.com>", "250 2.1.5");
+
+    let unsigned_message_header = "From: martian@mars.com\r\n\
+         Subject: Valid message\r\n";
+    let unsigned_message_body = "dmarc_accept_large_body\r\n".repeat(65536);
+
+    let keys = vec![("selector".to_owned(), DKIM_KEY.clone())];
+    let mut signer = dkim::Signer::new(
+        &keys,
+        &dkim::Signer::default_template(Utc::now(), Cow::Borrowed("mars.com")),
+    );
+    signer.write_all(unsigned_message_body.as_bytes()).unwrap();
+    let signature = signer.finish(unsigned_message_header.as_bytes());
+
+    cxn.simple_command("DATA", "354 ");
+    cxn.write_line(&signature);
+    cxn.write_line(unsigned_message_header);
+    cxn.write_line("\r\n");
+    cxn.write_line(&unsigned_message_body);
+    cxn.write_line(".\r\n");
+
+    let responses = cxn.read_responses();
+    assert_eq!(1, responses.len());
+    assert!(responses[0].starts_with("250 2.0.0"));
+
+    let delivered =
+        fetch_email(&setup, "zim", "dmarc_accept_large_body").unwrap();
     println!("delivered:\n{delivered}");
     assert!(delivered.contains("spf=pass"));
     assert!(delivered.contains("dkim=pass"));

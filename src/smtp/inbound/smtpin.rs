@@ -347,10 +347,8 @@ impl SmtpinService {
                     break;
                 }
 
-                // TODO Wrong, we need to write to the DKIM signer as well.
-                // Ensure there is a test that signs a large message that
-                // doesn't just end up in header_buffer.
                 try_or_yeet!(data_buffer.write_all(&buffer[..nread]));
+                try_or_yeet!(dkim_verifier.write_all(&buffer[..nread]));
                 if data_buffer.len() > APPEND_SIZE_LIMIT as u64 {
                     break;
                 }
