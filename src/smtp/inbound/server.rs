@@ -48,6 +48,11 @@ pub(super) struct Service {
     /// remain are systems that fail to declare their functional support for
     /// these extensions.)
     pub(super) offer_binarymime: bool,
+    /// Whether authentication is in use.
+    ///
+    /// If true, no mail commands can be issued without authentication. If
+    /// false, authentication is not permitted.
+    pub(super) auth: bool,
     pub(super) send_request: mpsc::Sender<Request>,
 }
 
@@ -62,6 +67,7 @@ struct Server {
     quit: bool,
     has_helo: bool,
     has_mail_from: bool,
+    has_auth: bool,
     recipients: u32,
     sending_data: Option<SendData>,
 
@@ -87,6 +93,7 @@ pub(super) async fn run(
         quit: false,
         has_helo: false,
         has_mail_from: false,
+        has_auth: false,
         recipients: 0,
         sending_data: None,
         unix_newlines: false,
@@ -146,6 +153,7 @@ const MAX_LINE: usize = 1024;
 
 static EXTENSIONS: &[&str] = &[
     "8BITMIME",
+    "AUTH PLAIN",
     "BINARYMIME",
     "CHUNKING",
     "ENHANCEDSTATUSCODES",
@@ -278,6 +286,9 @@ impl Server {
             Command::Helo(command, origin) => {
                 self.cmd_helo(command, origin).await
             },
+            Command::Auth(mechanism, data) => {
+                self.cmd_auth(mechanism, data).await
+            },
             Command::MailFrom(email, size) => {
                 self.cmd_mail_from(email, size).await
             },
@@ -340,6 +351,12 @@ impl Server {
                     continue;
                 }
 
+                if ext.starts_with("AUTH ")
+                    && (!self.service.auth || !self.io.get_ref().is_ssl())
+                {
+                    continue;
+                }
+
                 self.send_response(
                     Delayable.or_final(ix + 1 == EXTENSIONS.len()),
                     pc::Ok,
@@ -353,12 +370,201 @@ impl Server {
         Ok(())
     }
 
+    async fn cmd_auth(
+        &mut self,
+        mechanism: String,
+        data: Option<String>,
+    ) -> Result<(), Error> {
+        require!(self, need_helo = true, need_mail_from = false);
+
+        if !self.io.get_ref().is_ssl() {
+            return self.send_response(
+                Final,
+                pc::EncryptionRequiredForRequestedAuthenticationMechanism,
+                Some((cc::PermFail, sc::EncryptionRequiredForRequestedAuthenticationMechanism)),
+                Cow::Borrowed("Have you no shame?"),
+            ).await;
+        }
+
+        if !self.service.auth {
+            return self
+                .send_response(
+                    Final,
+                    pc::CommandNotImplemented,
+                    Some((cc::PermFail, sc::SecurityFeaturesNotSupported)),
+                    Cow::Borrowed("Authentication is not supported here"),
+                )
+                .await;
+        }
+
+        if self.has_auth {
+            return self
+                .send_response(
+                    Final,
+                    pc::BadSequenceOfCommands,
+                    None,
+                    Cow::Borrowed("Already authenticated"),
+                )
+                .await;
+        }
+
+        if !mechanism.eq_ignore_ascii_case("PLAIN") {
+            return self
+                .send_response(
+                    Final,
+                    pc::CommandParameterNotImplemented,
+                    // The obvious thing is to return SecurityFeaturesNotSupported,
+                    // but RFC 4954 requires InvalidCommandArguments instead.
+                    Some((cc::PermFail, sc::InvalidCommandArguments)),
+                    Cow::Borrowed("Unsupported AUTH mechanism"),
+                )
+                .await;
+        }
+
+        let data = match data {
+            Some(data) if data != "=" => data,
+            _ => {
+                self.send_response(
+                    Final,
+                    pc::ServerChallenge,
+                    None,
+                    Cow::Borrowed(""),
+                )
+                .await?;
+
+                let mut buffer = Vec::new();
+                (&mut self.io)
+                    .take(MAX_LINE as u64)
+                    .read_until(b'\n', &mut buffer)
+                    .await?;
+
+                if !buffer.ends_with(b"\n") {
+                    self.send_response(
+                        Final,
+                        pc::CommandSyntaxError,
+                        Some((
+                            cc::PermFail,
+                            sc::AuthenticationExchangeLineTooLong,
+                        )),
+                        Cow::Borrowed("Line too long"),
+                    )
+                    .await?;
+                    return Err(Error::Io(io::Error::new(
+                        io::ErrorKind::Other,
+                        "Authentication line too long",
+                    )));
+                }
+
+                let _ = buffer.pop();
+                if Some(&b'\r') == buffer.last() {
+                    let _ = buffer.pop();
+                }
+
+                String::from_utf8_lossy(&buffer).into_owned()
+            },
+        };
+
+        if data.is_empty() || data == "=" {
+            return self
+                .send_response(
+                    Final,
+                    pc::ParameterSyntaxError,
+                    Some((cc::PermFail, sc::SyntaxError)),
+                    Cow::Borrowed("The empty string is not valid for PLAIN"),
+                )
+                .await;
+        }
+
+        if data == "*" {
+            return self
+                .send_response(
+                    Final,
+                    pc::ParameterSyntaxError,
+                    None,
+                    Cow::Borrowed("SASL aborted"),
+                )
+                .await;
+        }
+
+        let Some(data) = base64::decode(&data)
+            .ok()
+            .and_then(|d| String::from_utf8(d).ok())
+        else {
+            return self
+                .send_response(
+                    Final,
+                    pc::CommandSyntaxError,
+                    Some((cc::PermFail, sc::SyntaxError)),
+                    Cow::Borrowed("Invalid base64"),
+                )
+                .await;
+        };
+
+        // All we currently support is RFC 2595 PLAIN
+        // Format is <authorise-id>NUL<authenticate-id<NUL>password
+        // <authorise-id> is optional if it is the same as <authenticate-id>.
+        let mut parts = data.split('\x00');
+        let (Some(authorise), Some(authenticate), Some(password), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return self
+                .send_response(
+                    Final,
+                    pc::CommandSyntaxError,
+                    Some((cc::PermFail, sc::SyntaxError)),
+                    Cow::Borrowed("Invalid auth syntax"),
+                )
+                .await;
+        };
+
+        if !authorise.is_empty() && authorise != authenticate {
+            return self
+                .send_response(
+                    Final,
+                    pc::AuthenticationCredentialsInvalid,
+                    Some((cc::PermFail, sc::AuthenticationCredentialsInvalid)),
+                    Cow::Borrowed("authorise-id must match authenticate-id"),
+                )
+                .await;
+        }
+
+        if self
+            .service_request(RequestPayload::Auth(AuthRequest {
+                userid: authenticate.to_owned(),
+                password: password.to_owned(),
+            }))
+            .await?
+        {
+            self.has_auth = true;
+
+            self.send_response(
+                Final,
+                pc::AuthenticationSucceeded,
+                Some((cc::Success, sc::OtherSecurity)),
+                Cow::Borrowed("OK"),
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
     async fn cmd_mail_from(
         &mut self,
         return_path: String,
         approx_size: Option<u64>,
     ) -> Result<(), Error> {
         require!(self, need_helo = true, need_mail_from = false);
+        if self.service.auth && !self.has_auth {
+            return self
+                .send_response(
+                    Final,
+                    pc::AuthenticationRequired,
+                    Some((cc::PermFail, sc::DeliveryNotAuthorised)),
+                    Cow::Borrowed("Authentication required"),
+                )
+                .await;
+        }
 
         if approx_size.unwrap_or(0) > APPEND_SIZE_LIMIT as u64 {
             return self
@@ -848,12 +1054,25 @@ impl Server {
     ) -> Result<(), Error> {
         use std::fmt::Write as _;
 
+        if primary_code == pc::ServiceClosing
+            || primary_code == pc::ServiceNotAvailableClosing
+        {
+            self.quit = true;
+        }
+
         let mut s = String::new();
         let _ = write!(s, "{}{}", primary_code as u16, kind.indicator());
         if let Some((class, subject)) = secondary_code {
-            let subject = subject as u8;
-            let _ =
-                write!(s, "{}.{}.{} ", class as u8, subject / 10, subject % 10);
+            let subject = subject as u16;
+            let split = if subject >= 100 { 100 } else { 10 };
+
+            let _ = write!(
+                s,
+                "{}.{}.{} ",
+                class as u8,
+                subject / split,
+                subject % split
+            );
         }
 
         let _ = write!(s, "{}\r\n", quip);

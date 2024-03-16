@@ -54,6 +54,7 @@ pub async fn serve_lmtp(
     let server_service = super::server::Service {
         lmtp: true,
         offer_binarymime: true,
+        auth: false,
         send_request: request_tx,
     };
 

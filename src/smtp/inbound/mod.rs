@@ -21,6 +21,7 @@ mod delivery;
 mod lmtp;
 mod server;
 mod smtpin;
+mod smtpsub;
 
 #[cfg(test)]
 mod integration_test_common;
@@ -28,6 +29,9 @@ mod integration_test_common;
 mod lmtp_integration_tests;
 #[cfg(test)]
 mod smtpin_integration_tests;
+#[cfg(test)]
+mod smtpsub_integration_tests;
 
 pub use lmtp::serve_lmtp;
 pub use smtpin::serve_smtpin;
+pub use smtpsub::serve_smtpsub;

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -200,6 +200,27 @@ impl<'a> fmt::Debug for AddrSpec<'a> {
             write!(f, "({})", String::from_utf8_lossy(part))?;
         }
         write!(f, ">")?;
+        Ok(())
+    }
+}
+
+impl<'a> fmt::Display for AddrSpec<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (i, part) in self.local.iter().enumerate() {
+            if 0 != i {
+                write!(f, ".")?;
+            }
+            write!(f, "{}", String::from_utf8_lossy(part))?;
+        }
+        if !self.domain.is_empty() {
+            write!(f, "@")?;
+            for (i, part) in self.domain.iter().enumerate() {
+                if 0 != i {
+                    write!(f, ".")?;
+                }
+                write!(f, "{}", String::from_utf8_lossy(part))?;
+            }
+        }
         Ok(())
     }
 }

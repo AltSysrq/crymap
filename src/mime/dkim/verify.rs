@@ -526,7 +526,7 @@ mod test {
     impl TestKeys {
         fn new() -> Self {
             fn format_txt(algorithm: &str, pub_key: &[u8]) -> String {
-                format!("v=DKIM1;k={algorithm};p={}", base64::encode(pub_key),)
+                format!("v=DKIM1;k={algorithm};p={}", base64::encode(pub_key))
             }
 
             let rsa1024 = openssl::rsa::Rsa::generate(1024).unwrap();

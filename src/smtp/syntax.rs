@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020 Jason Lingle
+// Copyright (c) 2020, 2023, 2024 Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -25,6 +25,8 @@ use regex::Regex;
 pub enum Command {
     /// (HELO|EHLO|LHLO) origin-host ignored...
     Helo(String, String),
+    /// AUTH mechanism [base64]
+    Auth(String, Option<String>),
     /// MAIL FROM:<return-path> [SIZE=sz]
     MailFrom(String, Option<u64>),
     /// RCPT TO:<ignored...:email>
@@ -73,9 +75,11 @@ lazy_static! {
         Regex::new("^(?i)RCPT TO:<(?:@[^:]+:)?([^>]+)>$").unwrap();
     static ref RX_BDAT: Regex =
         Regex::new("^(?i)BDAT ([0-9]+)( LAST)?$").unwrap();
+    static ref RX_AUTH: Regex =
+        Regex::new("^(?i)AUTH ([A-Z0-9-]+)(?: ([0-9A-Za-z+/=]+))?$").unwrap();
     static ref RX_KNOWN_COMMANDS: Regex = Regex::new(
         "^(?i)(DATA|RSET|VRFY|EXPN|HELP|NOOP|QUIT|\
-                    STARTTLS|LHLO|MAIL|RCPT|BDAT|HELO|EHLO)( .*)?$"
+         STARTTLS|LHLO|MAIL|RCPT|BDAT|HELO|EHLO|AUTH)( .*)?$"
     )
     .unwrap();
 }
@@ -123,6 +127,10 @@ impl FromStr for Command {
                 .parse::<u64>()
                 .map_err(|_| ())
                 .map(|len| Command::BinaryData(len, cap.get(2).is_some()))
+        } else if let Some(cap) = RX_AUTH.captures(s) {
+            let mechanism = cap.get(1).unwrap().as_str().to_owned();
+            let data = cap.get(2).map(|data| data.as_str().to_owned());
+            Ok(Command::Auth(mechanism, data))
         } else {
             Err(())
         }
@@ -247,7 +255,7 @@ mod test {
 
         assert_eq!(Ok(Command::Expand), "EXPN Smith".parse());
         assert_eq!(Ok(Command::Expand), "EXPN <foo@bar.com>".parse());
-        assert_eq!(Err(()), "VRFY".parse::<Command>());
+        assert_eq!(Err(()), "EXPN".parse::<Command>());
 
         assert_eq!(Ok(Command::Help), "HELP".parse());
         assert_eq!(Ok(Command::Help), "help me".parse());
@@ -260,5 +268,17 @@ mod test {
 
         assert_eq!(Ok(Command::StartTls), "STARTTLS".parse());
         assert_eq!(Err(()), "STARTTLS 1.3".parse::<Command>());
+
+        assert_eq!(
+            Ok(Command::Auth(
+                "PLAIN".to_owned(),
+                Some("AGF6dXJlAGh1bnRlcjI+//=".to_owned()),
+            )),
+            "AUTH PLAIN AGF6dXJlAGh1bnRlcjI+//=".parse::<Command>(),
+        );
+        assert_eq!(
+            Ok(Command::Auth("NTLM".to_owned(), None)),
+            "auth NTLM".parse::<Command>(),
+        );
     }
 }

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -30,7 +30,7 @@ pub enum PrimaryCode {
     ParameterSyntaxError = 501,
     CommandNotImplemented = 502,
     BadSequenceOfCommands = 503,
-    CommandParemeterNotImplemented = 504,
+    CommandParameterNotImplemented = 504,
     SystemStatus = 211,
     HelpMessage = 214,
     ServiceReady = 220,
@@ -51,6 +51,15 @@ pub enum PrimaryCode {
     MailboxNameNotAllowed = 553,
     StartMailInput = 354,
     TransactionFailed = 554,
+    // RFC 4954
+    ServerChallenge = 334,
+    AuthenticationSucceeded = 235,
+    PasswordTransitionNeeded = 432,
+    TemporaryAuthenticationFailure = 454,
+    AuthenticationMechanismWeak = 534,
+    AuthenticationCredentialsInvalid = 535,
+    AuthenticationRequired = 530,
+    EncryptionRequiredForRequestedAuthenticationMechanism = 538,
 }
 
 pub mod pc {
@@ -70,7 +79,7 @@ pub mod cc {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(u8)]
+#[repr(u16)]
 pub enum SubjectCode {
     Undefined = 0,
     OtherAddressStatus = 10,
@@ -113,7 +122,7 @@ pub enum SubjectCode {
     ConversionRequiredButNotSupported = 63,
     ConversionWithLossPerformed = 64,
     ConversionFailed = 65,
-    OtherSecurity = 70,
+    OtherSecurity = 70, // Also AuthenticationRequired
     DeliveryNotAuthorised = 71,
     MailingListExpansionProhibited = 72,
     SecurityConversionRequiredButNotPossible = 73,
@@ -121,6 +130,11 @@ pub enum SubjectCode {
     CryptographicFailure = 75,
     CryptographicAlgorithmNotSupported = 76,
     MessageIntegrityFailure = 77,
+    // RFC 4954
+    AuthenticationExchangeLineTooLong = 56,
+    AuthenticationCredentialsInvalid = 78,
+    AuthenticationMechanismWeak = 79,
+    EncryptionRequiredForRequestedAuthenticationMechanism = 711,
 }
 
 pub mod sc {

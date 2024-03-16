@@ -73,6 +73,7 @@ pub async fn serve_smtpin(
     let server_service = super::server::Service {
         lmtp: false,
         offer_binarymime: true,
+        auth: false,
         send_request: request_tx,
     };
 
@@ -275,6 +276,7 @@ impl SmtpinService {
                     let _ = request
                         .respond
                         .send(Err(SmtpResponse::internal_sequence_error()));
+                    return;
                 },
             }
         };
@@ -300,58 +302,9 @@ impl SmtpinService {
         &mut self,
         mut data: tokio::io::DuplexStream,
     ) -> Result<DeliverableMessage, SmtpResponse<'static>> {
-        lazy_static! {
-            static ref END_OF_HEADERS: regex::bytes::Regex =
-                regex::bytes::Regex::new("\r?\n\r?\n").unwrap();
-        }
-
-        let mut header_buffer_len = 0usize;
-        let mut header_buffer = Vec::<u8>::new();
-
         // We start by collecting data into header_buffer until we find the
         // end of the header block.
-        let headers_end = loop {
-            header_buffer.resize(header_buffer_len + 1024, 0);
-            let nread = match data
-                .read(&mut header_buffer[header_buffer_len..])
-                .await
-            {
-                // Should be unreachable
-                Err(_) => {
-                    return Err(SmtpResponse(
-                        pc::TransactionFailed,
-                        None,
-                        Cow::Borrowed("Internal I/O error"),
-                    ))
-                },
-
-                Ok(0) => {
-                    return Err(SmtpResponse(
-                        pc::TransactionFailed,
-                        Some((cc::PermFail, sc::OtherMediaError)),
-                        Cow::Borrowed("Could not find end of header block"),
-                    ))
-                },
-
-                Ok(n) => n,
-            };
-
-            let search_start = header_buffer_len.saturating_sub(4);
-            header_buffer_len += nread;
-            if let Some(m) = END_OF_HEADERS
-                .find(&header_buffer[search_start..header_buffer_len])
-            {
-                break m.end();
-            }
-
-            if header_buffer_len > MAX_HEADER_BLOCK_SIZE {
-                return Err(SmtpResponse(
-                    pc::TransactionFailed,
-                    Some((cc::PermFail, sc::MessageTooBigForSystem)),
-                    Cow::Borrowed("Message header block too large"),
-                ));
-            }
-        };
+        let (header_buffer, headers_end) = buffer_headers(&mut data).await?;
 
         // We now have the full header block (and possibly a little extra).
         // Start the validation that depends on that.
@@ -382,13 +335,10 @@ impl SmtpinService {
                 };
             }
 
-            try_or_yeet!(
-                data_buffer.write_all(&header_buffer[..header_buffer_len]),
-            );
+            try_or_yeet!(data_buffer.write_all(&header_buffer),);
             // The part of header_buffer which is beyond headers_end is part of
             // the body that needs to be verified.
-            try_or_yeet!(dkim_verifier
-                .write_all(&header_buffer[headers_end..header_buffer_len]));
+            try_or_yeet!(dkim_verifier.write_all(&header_buffer[headers_end..]));
 
             let mut buffer = [0u8; 1024];
             loop {
@@ -397,6 +347,9 @@ impl SmtpinService {
                     break;
                 }
 
+                // TODO Wrong, we need to write to the DKIM signer as well.
+                // Ensure there is a test that signs a large message that
+                // doesn't just end up in header_buffer.
                 try_or_yeet!(data_buffer.write_all(&buffer[..nread]));
                 if data_buffer.len() > APPEND_SIZE_LIMIT as u64 {
                     break;
@@ -642,27 +595,11 @@ impl SmtpinService {
             return Ok(None);
         };
 
-        let mut local = String::new();
-        for part in &mailbox.addr.local {
-            if !local.is_empty() {
-                local.push('.');
-            }
-            local.push_str(&String::from_utf8_lossy(part));
-        }
-
-        let mut domain = String::new();
-        for part in &mailbox.addr.domain {
-            if !domain.is_empty() {
-                domain.push('.');
-            }
-            domain.push_str(&String::from_utf8_lossy(part));
-        }
-
-        if domain.is_empty() {
+        if mailbox.addr.domain.is_empty() {
             return Ok(None);
         }
 
-        let sender = format!("{local}@{domain}");
+        let sender = mailbox.addr.to_string();
         let Some(domain_info) = self.domain_info(sender, false) else {
             return Err(SmtpResponse(
                 pc::TransactionFailed,
@@ -817,8 +754,8 @@ impl SmtpinService {
                 &self.local_host_name,
                 self.tls.as_deref(),
                 self.helo_domain.as_ref().map(|di| &*di.subdomain),
-                self.peer_ip,
-                &recipient,
+                Some(self.peer_ip),
+                Some(&recipient.smtp),
                 &smtp_date,
             );
 
@@ -909,6 +846,67 @@ struct DeliverableMessage {
     auth_headers: String,
 }
 
+/// Buffer data from `data` until the end of the header block is reached or an
+/// error occurs.
+///
+/// On success, return the data buffered so far and the index of the end of the
+/// header block.
+pub(super) async fn buffer_headers(
+    data: &mut tokio::io::DuplexStream,
+) -> Result<(Vec<u8>, usize), SmtpResponse<'static>> {
+    lazy_static! {
+        static ref END_OF_HEADERS: regex::bytes::Regex =
+            regex::bytes::Regex::new("\r?\n\r?\n").unwrap();
+    }
+
+    let mut header_buffer_len = 0usize;
+    let mut header_buffer = Vec::<u8>::new();
+
+    let header_end = loop {
+        header_buffer.resize(header_buffer_len + 1024, 0);
+        let nread =
+            match data.read(&mut header_buffer[header_buffer_len..]).await {
+                // Should be unreachable
+                Err(_) => {
+                    return Err(SmtpResponse(
+                        pc::TransactionFailed,
+                        None,
+                        Cow::Borrowed("Internal I/O error"),
+                    ))
+                },
+
+                Ok(0) => {
+                    return Err(SmtpResponse(
+                        pc::TransactionFailed,
+                        Some((cc::PermFail, sc::OtherMediaError)),
+                        Cow::Borrowed("Could not find end of header block"),
+                    ))
+                },
+
+                Ok(n) => n,
+            };
+
+        let search_start = header_buffer_len.saturating_sub(4);
+        header_buffer_len += nread;
+        if let Some(m) =
+            END_OF_HEADERS.find(&header_buffer[search_start..header_buffer_len])
+        {
+            break m.end();
+        }
+
+        if header_buffer_len > MAX_HEADER_BLOCK_SIZE {
+            return Err(SmtpResponse(
+                pc::TransactionFailed,
+                Some((cc::PermFail, sc::MessageTooBigForSystem)),
+                Cow::Borrowed("Message header block too large"),
+            ));
+        }
+    };
+
+    header_buffer.truncate(header_buffer_len);
+    Ok((header_buffer, header_end))
+}
+
 fn format_spf_header(
     s: &mut String,
     receiver: &str,
@@ -938,28 +936,34 @@ fn format_spf_header(
     );
 }
 
-fn format_received_header(
+pub(super) fn format_received_header(
     s: &mut String,
     local_host_name: &str,
     tls: Option<&str>,
     helo_domain: Option<&dns::Name>,
-    peer_ip: IpAddr,
-    recipient: &Recipient,
+    peer_ip: Option<IpAddr>,
+    recipient: Option<&str>,
     smtp_date: &str,
 ) {
     // RFC 5321 § 4.4
     let _ = write!(s, "Received: from ");
     if let Some(helo_domain) = helo_domain {
-        let _ = write!(s, "{} ({})", helo_domain.to_ascii(), peer_ip);
-    } else {
+        let _ = write!(s, "{}", helo_domain.to_ascii());
+        if let Some(peer_ip) = peer_ip {
+            let _ = write!(s, " ({peer_ip})");
+        }
+    } else if let Some(peer_ip) = peer_ip {
         let _ = write!(s, "{peer_ip}");
+    } else {
+        // Only used in SMTP submission where we don't want to leak the IP
+        // address of the user's device.
+        let _ = write!(s, "redacted.invalid");
     }
+
     let _ = write!(
         s,
         "\r\n\tby {local_host_name} ({svc} {vmaj}.{vmin}.{vpat})\r\n\
-         \tvia TCP with {protocol}\r\n\
-         \tfor <{recipient}>;\r\n\
-         \t{smtp_date}\r\n",
+         \tvia TCP with {protocol}\r\n",
         svc = env!("CARGO_PKG_NAME"),
         vmaj = env!("CARGO_PKG_VERSION_MAJOR"),
         vmin = env!("CARGO_PKG_VERSION_MINOR"),
@@ -969,8 +973,11 @@ fn format_received_header(
         } else {
             "ESMTP".to_owned()
         },
-        recipient = recipient.smtp,
     );
+    if let Some(recipient) = recipient {
+        let _ = write!(s, "\tfor <{recipient}>;\r\n");
+    }
+    let _ = write!(s, "\t{smtp_date}\r\n");
 }
 
 fn make_header_comment_safe(s: &str) -> Cow<'_, str> {

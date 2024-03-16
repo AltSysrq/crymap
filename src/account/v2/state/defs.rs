@@ -116,6 +116,10 @@ impl Account {
     pub fn config_file(&self) -> PathBuf {
         self.root.join("user.toml")
     }
+
+    pub fn common_paths(&self) -> Arc<CommonPaths> {
+        Arc::clone(&self.common_paths)
+    }
 }
 
 impl Mailbox {

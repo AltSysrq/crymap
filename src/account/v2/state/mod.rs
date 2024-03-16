@@ -47,5 +47,6 @@ mod zstd_train;
 pub use defs::{Account, Mailbox};
 pub use delivery::DeliveryAccount;
 pub use fetch::FetchReceiver;
+pub use init::LogInError;
 #[allow(unused_imports)] // TODO Remove
 pub use spool::{SpooledMessage, SpooledMessageId};

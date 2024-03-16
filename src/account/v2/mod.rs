@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -22,4 +22,8 @@ mod state;
 mod storage;
 
 pub use super::v1::account::account_config_file;
-pub use state::{Account, DeliveryAccount, FetchReceiver, Mailbox};
+#[allow(unused_imports)] // TODO Remove
+pub use state::{
+    Account, DeliveryAccount, FetchReceiver, LogInError, Mailbox,
+    SpooledMessage, SpooledMessageId,
+};

@@ -31,7 +31,6 @@ use std::borrow::Cow;
 use tokio::sync::{mpsc, oneshot};
 
 use super::super::codes::*;
-use crate::account::v2::Account;
 
 /// An SMTP response, excluding the continuation/final distinction.
 #[derive(Clone, Debug)]
@@ -84,9 +83,10 @@ pub struct HeloRequest {
     pub tls: Option<String>,
 }
 
-/// A successful AUTH command.
+/// A valid AUTH command.
 pub struct AuthRequest {
-    pub account: Account,
+    pub userid: String,
+    pub password: String,
 }
 
 /// A `MAIL FROM` command.

@@ -162,4 +162,24 @@ impl SmtpClient {
         println!("[{}] <> TLS handshake succeeded", self.name);
         self.io = Box::new(cxn);
     }
+
+    /// Skip the greeting, perform a HELO, STARTTLS, skip the repeated
+    /// greeting, and do the second HELO.
+    pub fn skip_pleasantries_with_tls(&mut self, command: &str) {
+        self.skip_pleasantries(command);
+        self.simple_command("STARTTLS", "220 2.0.0");
+        self.start_tls();
+        self.skip_pleasantries(command);
+    }
+
+    /// Skip the greetings and so forth, enable TLS, and log in with the given
+    /// username and password.
+    pub fn quick_log_in(&mut self, helo: &str, user: &str, password: &str) {
+        self.skip_pleasantries_with_tls(helo);
+        let auth = format!(
+            "AUTH PLAIN {}",
+            base64::encode(format!("{user}\0{user}\0{password}")),
+        );
+        self.simple_command(&auth, "235 ");
+    }
 }

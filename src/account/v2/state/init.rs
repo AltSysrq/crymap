@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -16,13 +16,16 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+use std::collections::HashSet;
 use std::fs;
-use std::io::Write;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-use std::path::PathBuf;
+use std::io::{Read, Write};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::super::storage;
+use log::{error, info, warn};
+
+use super::super::{account_config_file, storage};
 use super::defs::*;
 use crate::{
     account::{
@@ -32,9 +35,25 @@ use crate::{
     crypt::master_key::MasterKey,
     support::{
         error::Error, file_ops::IgnoreKinds, log_prefix::LogPrefix,
+        safe_name::is_safe_name, system_config::SystemConfig, unix_privileges,
         user_config::UserConfig,
     },
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum LogInError {
+    #[error("Illegal user id")]
+    IllegalUserId,
+    #[error("Bad user id or password")]
+    InvalidCredentials,
+    #[error(
+        "Fatal internal error or misconfiguration; refer to \
+             server logs for details"
+    )]
+    ConfigError,
+    #[error("Error setting up account; refer to server logs for details")]
+    SetupError,
+}
 
 impl Account {
     /// Sets up a new `Account` object in the given directory.
@@ -180,5 +199,118 @@ impl Account {
         self.subscribe("Trash")?;
 
         Ok(())
+    }
+
+    /// Attempts to log in to an account identified by `userid` under
+    /// `data_root` with the given password.
+    ///
+    /// On success, this returns the account itself plus the set of user IDs
+    /// that are aliased to the user that logged in. As side-effects, the log
+    /// prefix is updated to reflect the user, and privileges are dropped to
+    /// reflect the user.
+    ///
+    /// On failure, it returns the error to send to the client.
+    pub fn log_in(
+        log_prefix: LogPrefix,
+        system_config: &SystemConfig,
+        data_root: &Path,
+        userid: &str,
+        password: &str,
+    ) -> Result<(Self, HashSet<String>), LogInError> {
+        if !is_safe_name(userid) {
+            return Err(LogInError::IllegalUserId);
+        }
+
+        let mut user_dir = data_root.join(userid);
+
+        let user_data_file = account_config_file(&user_dir);
+        let (user_config, master_key) = fs::File::open(user_data_file)
+            .ok()
+            .and_then(|f| {
+                let mut buf = Vec::<u8>::new();
+                f.take(65536).read_to_end(&mut buf).ok()?;
+                toml::from_slice::<UserConfig>(&buf).ok()
+            })
+            .and_then(|config| {
+                let master_key = MasterKey::from_config(
+                    &config.master_key,
+                    password.as_bytes(),
+                )?;
+                Some((config, master_key))
+            })
+            .ok_or_else(|| {
+                // Only log a warning if a password was actually provided.
+                // Login attempts with no password aren't generally remarkable,
+                // but importantly, they can occur if the user accidentally
+                // inputs their password in the username field. For the same
+                // reason, we're silent if the userid and password are equal.
+                if !password.is_empty() && password != userid {
+                    warn!(
+                        "{} Rejected login for user '{}'",
+                        log_prefix, userid
+                    );
+                }
+
+                LogInError::InvalidCredentials
+            })?;
+
+        let mut aliases = HashSet::<String>::new();
+        aliases.insert(userid.to_owned());
+        if let Ok(this_md) = user_dir.metadata() {
+            if let Ok(readdir) = fs::read_dir(data_root) {
+                for entry in readdir {
+                    let Ok(entry) = entry else {
+                        break;
+                    };
+
+                    // entry.metadata() is actually symlink_metadata, so we
+                    // need the path to get the symlink-following metadata
+                    // instead.
+                    let entry = entry.path();
+
+                    let Ok(that_md) = entry.metadata() else {
+                        continue;
+                    };
+
+                    if this_md.dev() != that_md.dev()
+                        || this_md.ino() != that_md.ino()
+                    {
+                        continue;
+                    }
+
+                    if let Some(name) =
+                        entry.file_name().and_then(|oss| oss.to_str())
+                    {
+                        aliases.insert(name.to_owned());
+                    }
+                }
+            }
+        }
+
+        // Login successful (at least barring further operational issues)
+
+        log_prefix.set_user(userid.to_owned());
+        info!("{} Login successful", log_prefix);
+
+        unix_privileges::assume_user_privileges(
+            &log_prefix.to_string(),
+            system_config.security.chroot_system,
+            &mut user_dir,
+            false,
+        )
+        .map_err(|_| LogInError::ConfigError)?;
+
+        let mut account =
+            Account::new(log_prefix.clone(), user_dir, Arc::new(master_key))
+                .map_err(|e| {
+                    error!("{} Error setting up account: {e}", log_prefix);
+                    LogInError::SetupError
+                })?;
+        account.init(&user_config.key_store).map_err(|e| {
+            error!("{} Error initialising account: {e}", log_prefix);
+            LogInError::SetupError
+        })?;
+
+        Ok((account, aliases))
     }
 }

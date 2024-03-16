@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -17,19 +17,9 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
-use std::fs;
-use std::io::Read;
-use std::path::PathBuf;
-use std::sync::Arc;
-
-use log::{info, warn};
 
 use super::defs::*;
-use crate::account::v2::{account_config_file, Account};
-use crate::crypt::master_key::MasterKey;
-use crate::support::{
-    safe_name::is_safe_name, unix_privileges, user_config::UserConfig,
-};
+use crate::account::v2::{Account, LogInError};
 
 impl CommandProcessor {
     /// Called when a line initiating an `AUTHENTICATE` is received.
@@ -152,101 +142,55 @@ impl CommandProcessor {
             }));
         }
 
-        if !is_safe_name(&cmd.userid) {
-            return Err(s::Response::Cond(s::CondResponse {
-                cond: s::RespCondType::No,
-                code: Some(s::RespTextCode::AuthenticationFailed(())),
-                quip: Some(Cow::Borrowed("Illegal user id")),
-            }));
-        }
+        match Account::log_in(
+            self.log_prefix.clone(),
+            &self.system_config,
+            &self.data_root,
+            &cmd.userid,
+            &cmd.password,
+        ) {
+            Ok((account, _)) => {
+                self.account = Some(account);
+                Ok(s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Ok,
+                    code: Some(s::RespTextCode::Capability(
+                        super::commands::capability_data(),
+                    )),
+                    quip: Some(Cow::Borrowed("User login successful")),
+                }))
+            },
 
-        let mut user_dir = self.data_root.join(&*cmd.userid);
-        let user_data_file = account_config_file(&user_dir);
-        let (user_config, master_key) = fs::File::open(user_data_file)
-            .ok()
-            .and_then(|f| {
-                let mut buf = Vec::<u8>::new();
-                f.take(65536).read_to_end(&mut buf).ok()?;
-                toml::from_slice::<UserConfig>(&buf).ok()
-            })
-            .and_then(|config| {
-                let master_key = MasterKey::from_config(
-                    &config.master_key,
-                    cmd.password.as_bytes(),
-                )?;
-                Some((config, master_key))
-            })
-            .ok_or_else(|| {
-                // Only log a warning if a password was actually provided.
-                // Login attempts with now password aren't generally
-                // remarkable, but importantly, they can occur if the user
-                // accidentally inputs their password in the username field.
-                // For the same reason, we're silent if the userid and password
-                // are equal.
-                if !cmd.password.is_empty() && cmd.password != cmd.userid {
-                    warn!(
-                        "{} Rejected login for user '{}'",
-                        self.log_prefix, cmd.userid
-                    );
-                }
+            Err(LogInError::IllegalUserId) => {
+                Err(s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::No,
+                    code: Some(s::RespTextCode::AuthenticationFailed(())),
+                    quip: Some(Cow::Borrowed("Illegal user id")),
+                }))
+            },
 
-                s::Response::Cond(s::CondResponse {
+            Err(LogInError::InvalidCredentials) => {
+                Err(s::Response::Cond(s::CondResponse {
                     cond: s::RespCondType::No,
                     code: Some(s::RespTextCode::AuthenticationFailed(())),
                     quip: Some(Cow::Borrowed("Bad user id or password")),
-                })
-            })?;
+                }))
+            },
 
-        // Login successful (at least barring further operational issues)
+            Err(e @ LogInError::ConfigError) => {
+                Err(s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Bye,
+                    code: Some(s::RespTextCode::ContactAdmin(())),
+                    quip: Some(Cow::Owned(e.to_string())),
+                }))
+            },
 
-        self.log_prefix.set_user(cmd.userid.into_owned());
-        info!("{} Login successful", self.log_prefix);
-
-        self.drop_privileges(&mut user_dir)?;
-
-        let mut account = Account::new(
-            self.log_prefix.clone(),
-            user_dir,
-            Arc::new(master_key),
-        )
-        .map_err(map_error!(self))?;
-        account
-            .init(&user_config.key_store)
-            .map_err(map_error!(self))?;
-
-        self.account = Some(account);
-        Ok(s::Response::Cond(s::CondResponse {
-            cond: s::RespCondType::Ok,
-            code: Some(s::RespTextCode::Capability(
-                super::commands::capability_data(),
-            )),
-            quip: Some(Cow::Borrowed("User login successful")),
-        }))
-    }
-
-    fn drop_privileges(&mut self, user_dir: &mut PathBuf) -> PartialResult<()> {
-        if unix_privileges::assume_user_privileges(
-            &self.log_prefix.to_string(),
-            self.system_config.security.chroot_system,
-            user_dir,
-            false,
-        )
-        .is_ok()
-        {
-            Ok(())
-        } else {
-            auth_misconfiguration()
+            Err(e @ LogInError::SetupError) => {
+                Err(s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::No,
+                    code: Some(s::RespTextCode::ContactAdmin(())),
+                    quip: Some(Cow::Owned(e.to_string())),
+                }))
+            },
         }
     }
-}
-
-fn auth_misconfiguration() -> PartialResult<()> {
-    Err(s::Response::Cond(s::CondResponse {
-        cond: s::RespCondType::Bye,
-        code: Some(s::RespTextCode::ContactAdmin(())),
-        quip: Some(Cow::Borrowed(
-            "Fatal internal error or misconfiguration; refer to \
-             server logs for details.",
-        )),
-    }))
 }
