@@ -35,6 +35,8 @@ pub struct SpooledMessageId(storage::MessageId);
 pub struct SpooledMessage {
     /// The ID of this message.
     pub id: SpooledMessageId,
+    /// The suggested SMTP transfer type.
+    pub transfer: storage::SmtpTransfer,
     /// The time at which this message may be despooled.
     pub expires: DateTime<Utc>,
     /// The SMTP `MAIL FROM` address.
@@ -56,6 +58,7 @@ impl Account {
     pub fn spool_message(
         &mut self,
         message: BufferedMessage,
+        transfer: storage::SmtpTransfer,
         mail_from: String,
         destinations: Vec<String>,
     ) -> Result<SpooledMessageId, Error> {
@@ -88,6 +91,7 @@ impl Account {
 
         self.metadb.insert_message_spool(&storage::MessageSpool {
             message_id,
+            transfer,
             expires: storage::UnixTimestamp(
                 Utc::now() + chrono::Duration::days(30),
             ),
@@ -110,6 +114,7 @@ impl Account {
         let (metadata, reader) = self.open_message(id.0)?;
         Ok(SpooledMessage {
             id,
+            transfer: spooled.transfer,
             expires: spooled.expires.0,
             mail_from: spooled.mail_from,
             destinations: spooled.destinations,
@@ -166,6 +171,7 @@ mod test {
         let spool_id = fixture
             .spool_message(
                 buffered_message,
+                storage::SmtpTransfer::EightBit,
                 "foo@example.com".to_owned(),
                 vec!["bar@example.net".to_owned()],
             )
@@ -196,6 +202,7 @@ mod test {
         fixture
             .spool_message(
                 buffered_message,
+                storage::SmtpTransfer::Binary,
                 "foo@example.com".to_owned(),
                 vec!["bar@example.net".to_owned()],
             )

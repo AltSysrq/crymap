@@ -27,3 +27,4 @@ pub use state::{
     Account, DeliveryAccount, FetchReceiver, LogInError, Mailbox,
     SpooledMessage, SpooledMessageId,
 };
+pub use storage::SmtpTransfer;

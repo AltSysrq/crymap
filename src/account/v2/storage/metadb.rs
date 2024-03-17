@@ -1593,9 +1593,14 @@ impl Connection {
 
         txn.execute(
             "INSERT INTO `message_spool` \
-             (`message_id`, `mail_from`, `expires`) \
-             VALUES (?, ?, ?)",
-            (spool.message_id, &spool.mail_from, spool.expires),
+             (`message_id`, `transfer`, `mail_from`, `expires`) \
+             VALUES (?, ?, ?, ?)",
+            (
+                spool.message_id,
+                spool.transfer,
+                &spool.mail_from,
+                spool.expires,
+            ),
         )?;
 
         let mut insert_destination = txn.prepare(
@@ -4560,6 +4565,7 @@ mod test {
 
         let mut message_spool = MessageSpool {
             message_id,
+            transfer: SmtpTransfer::SevenBit,
             expires: UnixTimestamp(DateTime::from_timestamp(42, 0).unwrap()),
             mail_from: "foo@example.com".to_owned(),
             destinations: vec![

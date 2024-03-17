@@ -547,6 +547,7 @@ impl FromRow for ForeignSmtpTlsStatus {
 #[derive(Clone, Debug, PartialEq)]
 pub struct MessageSpool {
     pub message_id: MessageId,
+    pub transfer: SmtpTransfer,
     pub mail_from: String,
     pub expires: UnixTimestamp,
     pub destinations: Vec<String>,
@@ -556,10 +557,71 @@ impl FromRow for MessageSpool {
     fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {
             message_id: row.get("message_id")?,
+            transfer: row.get("transfer")?,
             mail_from: row.get("mail_from")?,
             expires: row.get("expires")?,
             destinations: Vec::new(),
         })
+    }
+}
+
+/// A hint of the SMTP transfer to use to send a message.
+///
+/// Ordering of the enum indicates preference, where greater values require
+/// greater levels of server support. The actual transfer to declare is the
+/// minimum of the message's transfer hint and what the server actually
+/// supports.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SmtpTransfer {
+    /// 7-bit. There are no NUL bytes, bytes above 127, or isolated CR or LF
+    /// characters.
+    SevenBit,
+    /// 8-bit. The message contains 8-bit characters. There are no NUL bytes or
+    /// isolated CR or LF characters.
+    ///
+    /// No distinction is made between 8BITMIME and SMTPUTF8 since both are
+    /// transferred with BODY=8BITMIME, and there is (even according to the
+    /// standard) no way to fall back if the destination server does not
+    /// support SMTPUTF8.
+    EightBit,
+    /// Binary MIME. There are NUL bytes or isolated CR or LF characters.
+    Binary,
+}
+
+impl SmtpTransfer {
+    /// Returns the SMTP `BODY` argument for this transfer type.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SevenBit => "7BIT",     // RFC 1652
+            Self::EightBit => "8BITMIME", // RFC 1652
+            Self::Binary => "BINARYMIME", // RFC 3030
+        }
+    }
+}
+
+impl ToSql for SmtpTransfer {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::Borrowed(ValueRef::Text(
+            self.as_str().as_bytes(),
+        )))
+    }
+}
+
+impl FromSql for SmtpTransfer {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        let ValueRef::Text(value) = value else {
+            return Err(FromSqlError::InvalidType);
+        };
+
+        match value {
+            b"7BIT" => Ok(Self::SevenBit),
+            b"8BITMIME" => Ok(Self::EightBit),
+            b"BINARYMIME" => Ok(Self::Binary),
+            _ => Err(FromSqlError::Other(Box::from(format!(
+                "invalid SmtpTransfer: {}",
+                String::from_utf8_lossy(value),
+            )))),
+        }
     }
 }
 

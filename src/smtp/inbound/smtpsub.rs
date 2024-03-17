@@ -33,7 +33,7 @@ use tokio::{io::AsyncReadExt, sync::mpsc};
 use super::super::codes::*;
 use super::{bridge::*, delivery::*};
 use crate::{
-    account::v2::{Account, LogInError, SpooledMessageId},
+    account::v2::{Account, LogInError, SmtpTransfer, SpooledMessageId},
     mime::{dkim, header},
     support::{
         append_limit::APPEND_SIZE_LIMIT,
@@ -341,6 +341,7 @@ impl SmtpsubService {
         let header_block = &header_buffer[..headers_end];
         let now = Utc::now();
         let smtp_date = now.to_rfc2822();
+        let mut transfer_detector = SmtpTransferDetector::new();
 
         // If there's not exactly one From header, the message is invalid and
         // must be rejected.
@@ -438,6 +439,7 @@ impl SmtpsubService {
 
             try_or_yeet!(data_buffer.write_all(&header_buffer));
             try_or_yeet!(dkim_signer.write_all(&header_buffer[headers_end..]));
+            transfer_detector.write(&header_buffer);
 
             let mut buffer = [0u8; 1024];
             loop {
@@ -448,6 +450,7 @@ impl SmtpsubService {
 
                 try_or_yeet!(data_buffer.write_all(&buffer[..nread]));
                 try_or_yeet!(dkim_signer.write_all(&buffer[..nread]));
+                transfer_detector.write(&buffer[..nread]);
                 if data_buffer.len() > APPEND_SIZE_LIMIT as u64 {
                     break;
                 }
@@ -503,9 +506,14 @@ impl SmtpsubService {
             )
         })?;
 
+        // This is out-of-order, but it doesn't matter since the trace headers
+        // will always start with a non-special 7-bit character.
+        transfer_detector.write(trace_headers.as_bytes());
+
         Ok(DeliverableMessage {
             trace_headers,
             data_buffer,
+            transfer: transfer_detector.finish(),
         })
     }
 
@@ -524,6 +532,7 @@ impl SmtpsubService {
         )?;
         let spooled = account.spool_message(
             buffered,
+            message.transfer,
             self.return_path.clone(),
             recipients,
         )?;
@@ -592,4 +601,119 @@ impl SmtpsubService {
 struct DeliverableMessage {
     data_buffer: BufferReader,
     trace_headers: String,
+    transfer: SmtpTransfer,
+}
+
+struct SmtpTransferDetector {
+    transfer: SmtpTransfer,
+    // Whether the last buffer ended with \r
+    has_trailing_cr: bool,
+}
+
+impl SmtpTransferDetector {
+    fn new() -> Self {
+        Self {
+            transfer: SmtpTransfer::SevenBit,
+            has_trailing_cr: false,
+        }
+    }
+
+    fn write(&mut self, mut data: &[u8]) {
+        if self.has_trailing_cr && Some(b'\n') == data.get(0).copied() {
+            self.has_trailing_cr = false;
+            data = &data[1..];
+        }
+
+        if data.is_empty() {
+            return;
+        }
+
+        if self.has_trailing_cr {
+            // \r not followed by \n forces binary
+            self.transfer = SmtpTransfer::Binary;
+            self.has_trailing_cr = false;
+        }
+
+        for triplet in std::iter::once(None::<u8>)
+            .chain(data.iter().copied().map(Some))
+            .chain(std::iter::once(None))
+            .tuple_windows()
+        {
+            match triplet {
+                // NUL forces binary transfer
+                (_, Some(0), _) => self.transfer = SmtpTransfer::Binary,
+
+                // Ignore DOS line endings
+                (Some(b'\r'), Some(b'\n'), _) => {},
+                (_, Some(b'\r'), Some(b'\n')) => {},
+
+                // Isolated CR or LF forces binary transfer
+                (_, Some(b'\n'), _) | (_, Some(b'\r'), Some(_)) => {
+                    self.transfer = SmtpTransfer::Binary;
+                },
+
+                (_, Some(b'\r'), None) => {
+                    self.has_trailing_cr = true;
+                },
+
+                // 8-bit values force at least 8BITMIME
+                (_, Some(v), _) if v >= 128 => {
+                    self.transfer = self.transfer.max(SmtpTransfer::EightBit);
+                },
+
+                // Anything else is uninteresting
+                _ => {},
+            }
+        }
+    }
+
+    fn finish(self) -> SmtpTransfer {
+        if self.has_trailing_cr {
+            // Trailing CR forces binary transfer
+            SmtpTransfer::Binary
+        } else {
+            self.transfer
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn detect_transfer(buffers: &[&[u8]]) -> SmtpTransfer {
+        let mut detector = SmtpTransferDetector::new();
+        for &buffer in buffers {
+            detector.write(buffer);
+        }
+        detector.finish()
+    }
+
+    #[test]
+    fn detect_smtp_transfer() {
+        assert_eq!(SmtpTransfer::SevenBit, detect_transfer(&[b"hello world"]));
+        assert_eq!(
+            SmtpTransfer::SevenBit,
+            detect_transfer(&[b"\r\nhello\r\nworld\r", b"\nfoo\r\n",]),
+        );
+        assert_eq!(
+            SmtpTransfer::SevenBit,
+            detect_transfer(&[b"\r", b"\n", b"foo"]),
+        );
+        assert_eq!(
+            SmtpTransfer::SevenBit,
+            detect_transfer(&[b"\r", b"", b"\n", b"foo"]),
+        );
+        assert_eq!(SmtpTransfer::Binary, detect_transfer(&[b"foo\r"]),);
+        assert_eq!(SmtpTransfer::Binary, detect_transfer(&[b"foo\r", b"bar"]),);
+        assert_eq!(SmtpTransfer::Binary, detect_transfer(&[b"foo\r", b""]),);
+        assert_eq!(
+            SmtpTransfer::Binary,
+            detect_transfer(&[b"foo\r", b"\n", b"\nbar"]),
+        );
+        assert_eq!(SmtpTransfer::Binary, detect_transfer(&[b"foo\0bar"]),);
+        assert_eq!(SmtpTransfer::EightBit, detect_transfer(&[b"f\x80\x80"]));
+        assert_eq!(SmtpTransfer::Binary, detect_transfer(&[b"\nf\x80\x80"]));
+        assert_eq!(SmtpTransfer::Binary, detect_transfer(&[b"f\x80\x80\n"]));
+    }
 }

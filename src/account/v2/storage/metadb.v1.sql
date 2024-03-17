@@ -213,6 +213,8 @@ CREATE TABLE `maintenance` (
 CREATE TABLE `message_spool` (
   -- The message to be delivered.
   `message_id` INTEGER NOT NULL PRIMARY KEY,
+  -- The suggested SMTP transfer.
+  `transfer` TEXT NOT NULL,
   -- The MAIL FROM email address.
   `mail_from` TEXT NOT NULL,
   -- The UNIX timestamp at which this entry will be forgotten.

@@ -30,7 +30,7 @@ use tokio::sync::mpsc;
 
 use super::integration_test_common::*;
 use crate::{
-    account::v2::{Account, SpooledMessageId},
+    account::v2::{Account, SmtpTransfer, SpooledMessageId},
     crypt::master_key::MasterKey,
     mime::dkim,
     support::{
@@ -444,6 +444,7 @@ fn check_message(
     setup: &Setup,
     username: &str,
     id: SpooledMessageId,
+    transfer: SmtpTransfer,
     mail_from: &str,
     destinations: &[&str],
     contains_data: &str,
@@ -455,6 +456,7 @@ fn check_message(
     )
     .unwrap();
     let mut message = account.open_spooled_message(id).unwrap();
+    assert_eq!(transfer, message.transfer);
     assert_eq!(mail_from, message.mail_from);
     assert_eq!(destinations.len(), message.destinations.len());
     assert!(destinations
@@ -514,6 +516,7 @@ simple_message_spooling\r
         &setup,
         "zim",
         spool_rx.try_recv().unwrap(),
+        SmtpTransfer::SevenBit,
         "zim@earth.com",
         &["tallest@irk.com"],
         "simple_message_spooling",
@@ -528,12 +531,14 @@ To: tallest@irk.com\r
 Subject: Very long message\r
 \r
 Ensures that the DKIM signature is produced correctly even if the message does\r
-not end up entirely in the initial header buffer.\r
+not end up entirely in the initial header buffer, and that the message is\r
+detected as binary even though the binary bit is at the very end..\r
 "
     .to_owned();
     for _ in 0..10000 {
         email.push_str("long_message_valid_dkim\r\n");
     }
+    email.push_str("\x00\r\n");
 
     let setup = set_up();
     let (mut cxn, mut spool_rx) = setup.connect2("long_message_valid_dkim");
@@ -551,6 +556,7 @@ not end up entirely in the initial header buffer.\r
         &setup,
         "zim",
         spool_rx.try_recv().unwrap(),
+        SmtpTransfer::Binary,
         "zim@earth.com",
         &["tallest@irk.com"],
         "long_message_valid_dkim",
@@ -585,6 +591,7 @@ header.
         &setup,
         "zim",
         spool_rx.try_recv().unwrap(),
+        SmtpTransfer::SevenBit,
         "zim+implicit_return_path_from_from_header@earth.com",
         &["tallest@irk.com"],
         "Return-Path: <zim+implicit_return_path_from_from_header@earth.com>",
@@ -929,6 +936,7 @@ auth_gaz_send_gäz
         &setup,
         "gaz",
         spool_rx.try_recv().unwrap(),
+        SmtpTransfer::EightBit,
         "gäz@earth.com",
         &["tallest@irk.com"],
         "auth_gaz_send_gäz",
@@ -959,6 +967,7 @@ auth_gäz_send_gaz
         &setup,
         "gaz",
         spool_rx.try_recv().unwrap(),
+        SmtpTransfer::EightBit,
         "gaz@earth.com",
         &["tallest@irk.com"],
         "auth_gäz_send_gaz",
