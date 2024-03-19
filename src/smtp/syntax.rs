@@ -67,7 +67,7 @@ lazy_static! {
         Regex::new("^(?i)(HELO|EHLO|LHLO) ([^ ]*)").unwrap();
     static ref RX_MAIL: Regex = Regex::new(
         "^(?i)MAIL FROM:<([^>]*)>\
-         (?: BODY=(?:7BIT|8BIT|BINARYMIME)\
+         (?: BODY=(?:7BIT|8BITMIME|BINARYMIME)\
          | SIZE=([0-9]+))*$"
     )
     .unwrap();
@@ -198,7 +198,7 @@ mod test {
         );
         assert_eq!(
             Ok(Command::MailFrom("foo@bar.com".to_owned(), None)),
-            "MAIL FROM:<foo@bar.com> body=8bit".parse()
+            "MAIL FROM:<foo@bar.com> body=8bitmime".parse()
         );
         assert_eq!(
             Ok(Command::MailFrom("foo@bar.com".to_owned(), None)),
