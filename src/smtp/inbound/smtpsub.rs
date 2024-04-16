@@ -619,7 +619,7 @@ impl SmtpTransferDetector {
     }
 
     fn write(&mut self, mut data: &[u8]) {
-        if self.has_trailing_cr && Some(b'\n') == data.get(0).copied() {
+        if self.has_trailing_cr && Some(b'\n') == data.first().copied() {
             self.has_trailing_cr = false;
             data = &data[1..];
         }

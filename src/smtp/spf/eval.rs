@@ -329,7 +329,7 @@ impl EvaluatorState {
                 r.get(..PREFIX.len())
                     .is_some_and(|s| s.eq_ignore_ascii_case(PREFIX))
             })
-            .map(Rc::clone)
+            .cloned()
         else {
             return Ok(ResultInfo {
                 result: SpfResult::None,

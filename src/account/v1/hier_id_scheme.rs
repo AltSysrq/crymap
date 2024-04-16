@@ -364,6 +364,7 @@ impl<'a> HierIdScheme<'a> {
     pub fn first_unallocated_id(&self) -> u32 {
         let mut guess_file = fs::OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .mode(0o660)
