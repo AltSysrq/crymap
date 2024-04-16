@@ -19,37 +19,9 @@
 use std::io::{self, BufRead, Read, Write};
 use std::mem;
 
-use openssl::{
-    pkey,
-    ssl::{SslAcceptor, SslConnector, SslMethod, SslVerifyMode},
-    x509,
-};
+use openssl::ssl::{SslAcceptor, SslConnector, SslMethod, SslVerifyMode};
 
-use lazy_static::lazy_static;
-
-lazy_static! {
-    pub static ref CERTIFICATE_PRIVATE_KEY: pkey::PKey<pkey::Private> =
-        pkey::PKey::from_rsa(openssl::rsa::Rsa::generate(2048).unwrap())
-            .unwrap();
-    pub static ref CERTIFICATE: x509::X509 = {
-        let mut builder = x509::X509Builder::new().unwrap();
-        builder.set_pubkey(&CERTIFICATE_PRIVATE_KEY).unwrap();
-        builder
-            .sign(
-                &CERTIFICATE_PRIVATE_KEY,
-                openssl::hash::MessageDigest::sha256(),
-            )
-            .unwrap();
-        builder.set_version(2).unwrap();
-        builder
-            .set_not_before(&openssl::asn1::Asn1Time::from_unix(0).unwrap())
-            .unwrap();
-        builder
-            .set_not_after(&openssl::asn1::Asn1Time::days_from_now(2).unwrap())
-            .unwrap();
-        builder.build()
-    };
-}
+use crate::test_data::{CERTIFICATE, CERTIFICATE_PRIVATE_KEY};
 
 pub fn ssl_acceptor() -> SslAcceptor {
     let mut ssl_acceptor =

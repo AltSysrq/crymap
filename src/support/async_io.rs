@@ -155,6 +155,13 @@ impl ServerIo {
         }
     }
 
+    pub fn ssl_version(&self) -> Option<openssl::ssl::SslVersion> {
+        match *self.mode.borrow() {
+            Mode::Cleartext(..) => None,
+            Mode::Ssl(ref stream) => stream.ssl().version2(),
+        }
+    }
+
     /// Performs server-side SSL setup with the given acceptor.
     ///
     /// During the accept flow, concurrent calls to other methods will panic.
@@ -166,6 +173,22 @@ impl ServerIo {
         #[allow(clippy::await_holding_refcell_ref)] // intentional
         let mode = self.mode.borrow_mut();
         let result = acceptor.accept(FdPairRw(Rc::clone(&self.fd_pair)));
+        self.complete_ssl_handshake(mode, result).await
+    }
+
+    /// Performs client-side SSL setup with the given connector.
+    ///
+    /// During the connect flow, concurrent calls to other methods will panic.
+    pub async fn ssl_connect(
+        &self,
+        host: &str,
+        connector: &openssl::ssl::SslConnector,
+    ) -> Result<(), Error> {
+        // Borrow mode immediately so that concurrent access panics.
+        #[allow(clippy::await_holding_refcell_ref)] // intentional
+        let mode = self.mode.borrow_mut();
+        let result =
+            connector.connect(host, FdPairRw(Rc::clone(&self.fd_pair)));
         self.complete_ssl_handshake(mode, result).await
     }
 

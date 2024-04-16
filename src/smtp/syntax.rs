@@ -27,7 +27,7 @@ pub enum Command {
     Helo(String, String),
     /// AUTH mechanism [base64]
     Auth(String, Option<String>),
-    /// MAIL FROM:<return-path> [SIZE=sz]
+    /// MAIL FROM:<return-path> [SIZE=sz] [BODY=encoding]
     MailFrom(String, Option<u64>),
     /// RCPT TO:<ignored...:email>
     Recipient(String),

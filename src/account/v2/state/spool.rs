@@ -31,6 +31,11 @@ use crate::{account::model::*, support::error::Error};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SpooledMessageId(storage::MessageId);
 
+impl SpooledMessageId {
+    #[cfg(test)]
+    pub const DUMMY: Self = Self(storage::MessageId(0));
+}
+
 /// A message spooled for outbound delivery.
 pub struct SpooledMessage {
     /// The ID of this message.

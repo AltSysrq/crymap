@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, 2024, Jason Lingle
+// Copyright (c) 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -16,13 +16,7 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-mod codes;
-mod dmarc;
-mod spf;
-mod syntax;
+#![allow(dead_code)] // TODO Remove
 
-pub mod inbound;
-mod outbound;
-
-#[cfg(feature = "dev-tools")]
-pub use dmarc::compile_psl;
+mod transact;
+mod transcript;

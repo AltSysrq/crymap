@@ -152,14 +152,14 @@ macro_rules! require {
 const MAX_LINE: usize = 1024;
 
 static EXTENSIONS: &[&str] = &[
-    "8BITMIME",
+    "8BITMIME", // RFC 6152
     "AUTH PLAIN",
-    "BINARYMIME",
-    "CHUNKING",
-    "ENHANCEDSTATUSCODES",
+    "BINARYMIME",          // RFC 3030
+    "CHUNKING",            // RFC 3030
+    "ENHANCEDSTATUSCODES", // RFC 5248
     "PIPELINING",
-    concat_appendlimit!("SIZE="),
-    "SMTPUTF8",
+    concat_appendlimit!("SIZE "),
+    "SMTPUTF8", // RFC 6531
     "STARTTLS",
     "HELP", // The final item must be unconditional
 ];

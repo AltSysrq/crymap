@@ -101,3 +101,27 @@ pub static DKIM_AMAZONCOJP_RSA_SHA256: &[u8] =
 /// leading/trailing space which is subject to canonicalisation.
 pub static DKIM_YAHOO_RSA_SHA256: &[u8] =
     include_bytes!("dkim-yahoo-rsa-sha256.eml");
+
+lazy_static::lazy_static! {
+    pub static ref CERTIFICATE_PRIVATE_KEY: openssl::pkey::PKey<openssl::pkey::Private> =
+        openssl::pkey::PKey::from_rsa(openssl::rsa::Rsa::generate(2048).unwrap())
+            .unwrap();
+    pub static ref CERTIFICATE: openssl::x509::X509 = {
+        let mut builder = openssl::x509::X509Builder::new().unwrap();
+        builder.set_pubkey(&CERTIFICATE_PRIVATE_KEY).unwrap();
+        builder
+            .sign(
+                &CERTIFICATE_PRIVATE_KEY,
+                openssl::hash::MessageDigest::sha256(),
+            )
+            .unwrap();
+        builder.set_version(2).unwrap();
+        builder
+            .set_not_before(&openssl::asn1::Asn1Time::from_unix(0).unwrap())
+            .unwrap();
+        builder
+            .set_not_after(&openssl::asn1::Asn1Time::days_from_now(2).unwrap())
+            .unwrap();
+        builder.build()
+    };
+}
