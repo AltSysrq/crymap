@@ -18,5 +18,6 @@
 
 #![allow(dead_code)] // TODO Remove
 
+mod serverseq;
 mod transact;
 mod transcript;

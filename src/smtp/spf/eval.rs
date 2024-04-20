@@ -509,7 +509,7 @@ impl EvaluatorState {
 
         let mut not_ready = false;
         let mut temp_fail = false;
-        for record in mx_records {
+        for &(ref record, _) in mx_records {
             match self.eval_a_or_mx_domain(
                 ctx,
                 &mut dns_cache.a,
@@ -1408,7 +1408,9 @@ mod test {
         };
         (@mx, $dns_cache:ident, $domain:ident, $addrs:expr) => {
             $dns_cache.mx.push((Rc::clone(&$domain), dns::Entry::Ok(
-                parse_names(&$addrs),
+                parse_names(&$addrs).into_iter()
+                    .map(|name| (name, 0u16))
+                    .collect(),
             )));
         };
 

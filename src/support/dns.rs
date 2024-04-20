@@ -46,7 +46,7 @@ pub struct Cache {
     pub a: CacheMap<Vec<Ipv4Addr>>,
     pub aaaa: CacheMap<Vec<Ipv6Addr>>,
     pub txt: CacheMap<Vec<Rc<str>>>,
-    pub mx: CacheMap<Vec<Rc<Name>>>,
+    pub mx: CacheMap<Vec<(Rc<Name>, u16)>>,
     pub ptr: HashMap<IpAddr, Entry<Vec<Rc<Name>>>>,
 
     notify: Rc<tokio::sync::Notify>,
@@ -281,7 +281,7 @@ pub fn spawn_lookups(
         |resolver, name| async move {
             resolver.mx_lookup(name).await.map(|r| {
                 r.iter()
-                    .map(|n| Rc::new(n.exchange().clone()))
+                    .map(|n| (Rc::new(n.exchange().clone()), n.preference()))
                     .collect::<Vec<_>>()
             })
         },

@@ -109,7 +109,6 @@ impl ServerIo {
     /// the last reference is dropped.
     ///
     /// This only fails if making the socket non-blocking fails.
-    #[allow(dead_code)]
     pub fn new_owned_socket(
         sock: impl AsRawFd + Any,
     ) -> Result<Self, nix::Error> {

@@ -48,7 +48,7 @@ pub enum Error {
     TotalFailure,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Results {
     /// The listed email addresses succeeded.
     pub success: Vec<String>,
