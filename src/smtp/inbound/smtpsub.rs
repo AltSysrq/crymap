@@ -19,10 +19,12 @@
 #![allow(dead_code)] // TODO Remove
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use chrono::prelude::*;
@@ -55,7 +57,7 @@ pub async fn serve_smtpsub(
     ssl_acceptor: openssl::ssl::SslAcceptor,
     data_root: PathBuf,
     local_host_name: String,
-    spool_out: mpsc::Sender<SpooledMessageId>,
+    spool_out: Box<dyn FnMut(Rc<RefCell<Account>>, SpooledMessageId)>,
 ) -> Result<(), crate::support::error::Error> {
     let tls = io.ssl_string();
     let (request_tx, request_rx) = mpsc::channel(1);
@@ -99,9 +101,9 @@ struct SmtpsubService {
     config: Arc<SystemConfig>,
     data_root: PathBuf,
     request_in: mpsc::Receiver<Request>,
-    spool_out: mpsc::Sender<SpooledMessageId>,
+    spool_out: Box<dyn FnMut(Rc<RefCell<Account>>, SpooledMessageId)>,
 
-    account: Option<Account>,
+    account: Option<Rc<RefCell<Account>>>,
     authed_user_names: HashSet<String>,
     local_host_name: String,
 
@@ -201,7 +203,7 @@ impl SmtpsubService {
             ),
         })?;
 
-        self.account = Some(account);
+        self.account = Some(Rc::new(RefCell::new(account)));
         self.authed_user_names = aliases;
         Ok(())
     }
@@ -425,8 +427,9 @@ impl SmtpsubService {
             ),
         );
 
-        let mut data_buffer =
-            BufferWriter::new(self.account.as_ref().unwrap().common_paths());
+        let mut data_buffer = BufferWriter::new(
+            self.account.as_ref().unwrap().borrow().common_paths(),
+        );
         let io_result = 'yeet: {
             macro_rules! try_or_yeet {
                 ($e:expr $(,)*) => {
@@ -522,7 +525,7 @@ impl SmtpsubService {
         recipients: Vec<String>,
         message: DeliverableMessage,
     ) -> Result<(), Error> {
-        let account = self.account.as_mut().unwrap();
+        let mut account = self.account.as_ref().unwrap().borrow_mut();
         let buffered = account.buffer_message(
             Utc::now().into(),
             io::Read::chain(
@@ -536,7 +539,9 @@ impl SmtpsubService {
             self.return_path.clone(),
             recipients,
         )?;
-        let _ = self.spool_out.send(spooled).await;
+        drop(account);
+
+        (self.spool_out)(Rc::clone(self.account.as_ref().unwrap()), spooled);
         Ok(())
     }
 

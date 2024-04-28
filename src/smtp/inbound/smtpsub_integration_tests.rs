@@ -26,7 +26,6 @@ use chrono::prelude::*;
 use lazy_static::lazy_static;
 use rayon::prelude::*;
 use tempfile::TempDir;
-use tokio::sync::mpsc;
 
 use super::integration_test_common::*;
 use crate::{
@@ -112,16 +111,17 @@ impl Setup {
     fn connect2(
         &self,
         cxn_name: &'static str,
-    ) -> (SmtpClient, mpsc::Receiver<SpooledMessageId>) {
+    ) -> (SmtpClient, Arc<Mutex<Vec<SpooledMessageId>>>) {
         let (server_io, client_io) = UnixStream::pair().unwrap();
         // We don't want the server thread to hold on to the TempDir since the
         // test process can exit before the last server thread notices the EOF
         // and terminates.
         let data_root: PathBuf = self.system_dir.path().to_owned();
-        let (spool_tx, spool_rx) = mpsc::channel(100);
+        let spool_rx = Arc::new(Mutex::new(Vec::<SpooledMessageId>::new()));
 
+        let spool_tx = Arc::clone(&spool_rx);
         std::thread::spawn(move || {
-            run_server(data_root, cxn_name, server_io, spool_tx)
+            run_server(data_root, cxn_name, server_io, Arc::clone(&spool_tx))
         });
 
         (SmtpClient::new(cxn_name, client_io), spool_rx)
@@ -133,7 +133,7 @@ async fn run_server(
     data_root: PathBuf,
     cxn_name: &'static str,
     server_io: UnixStream,
-    spool_tx: mpsc::Sender<SpooledMessageId>,
+    spool_tx: Arc<Mutex<Vec<SpooledMessageId>>>,
 ) {
     let system_config = SystemConfig {
         smtp: SmtpConfig {
@@ -177,7 +177,7 @@ async fn run_server(
             ssl_acceptor(),
             data_root,
             "mx.earth.com".to_owned(),
-            spool_tx,
+            Box::new(move |_, id| spool_tx.lock().unwrap().push(id)),
         ))
         .await;
 
@@ -501,7 +501,7 @@ simple_message_spooling\r
 ";
 
     let setup = set_up();
-    let (mut cxn, mut spool_rx) = setup.connect2("simple_message_spooling");
+    let (mut cxn, spool_rx) = setup.connect2("simple_message_spooling");
     cxn.quick_log_in("HELO localhost", "zim", "hunter2");
     cxn.simple_command("MAIL FROM:<zim@earth.com>", "250 2.0.0");
     cxn.simple_command("RCPT TO:<tallest@irk.com>", "250 2.1.5");
@@ -515,7 +515,7 @@ simple_message_spooling\r
     check_message(
         &setup,
         "zim",
-        spool_rx.try_recv().unwrap(),
+        spool_rx.lock().unwrap()[0],
         SmtpTransfer::SevenBit,
         "zim@earth.com",
         &["tallest@irk.com"],
@@ -541,7 +541,7 @@ detected as binary even though the binary bit is at the very end..\r
     email.push_str("\x00\r\n");
 
     let setup = set_up();
-    let (mut cxn, mut spool_rx) = setup.connect2("long_message_valid_dkim");
+    let (mut cxn, spool_rx) = setup.connect2("long_message_valid_dkim");
     cxn.quick_log_in("HELO localhost", "zim", "hunter2");
     cxn.simple_command("MAIL FROM:<zim@earth.com>", "250 2.0.0");
     cxn.simple_command("RCPT TO:<tallest@irk.com>", "250 2.1.5");
@@ -555,7 +555,7 @@ detected as binary even though the binary bit is at the very end..\r
     check_message(
         &setup,
         "zim",
-        spool_rx.try_recv().unwrap(),
+        spool_rx.lock().unwrap()[0],
         SmtpTransfer::Binary,
         "zim@earth.com",
         &["tallest@irk.com"],
@@ -575,7 +575,7 @@ header.
 ";
 
     let setup = set_up();
-    let (mut cxn, mut spool_rx) =
+    let (mut cxn, spool_rx) =
         setup.connect2("implicit_return_path_from_from_header");
     cxn.quick_log_in("HELO localhost", "zim", "hunter2");
     cxn.simple_command("MAIL FROM:<>", "250 2.0.0");
@@ -590,7 +590,7 @@ header.
     check_message(
         &setup,
         "zim",
-        spool_rx.try_recv().unwrap(),
+        spool_rx.lock().unwrap()[0],
         SmtpTransfer::SevenBit,
         "zim+implicit_return_path_from_from_header@earth.com",
         &["tallest@irk.com"],
@@ -601,7 +601,7 @@ header.
 #[test]
 fn huge_headers_via_data() {
     let setup = set_up();
-    let (mut cxn, mut spool_rx) = setup.connect2("huge_headers_via_data");
+    let (mut cxn, spool_rx) = setup.connect2("huge_headers_via_data");
     cxn.quick_log_in("HELO localhost", "zim", "hunter2");
     cxn.simple_command("MAIL FROM:<zim@earth.com>", "250 2.0.0");
     cxn.simple_command("RCPT TO:<tallest@irk.com>", "250 2.1.5");
@@ -618,7 +618,7 @@ fn huge_headers_via_data() {
     assert_eq!(1, responses.len());
     assert!(responses[0].starts_with("554 5.3.4"));
 
-    assert!(spool_rx.try_recv().is_err());
+    assert!(spool_rx.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -655,7 +655,7 @@ fn endless_headers_via_bdat() {
 #[test]
 fn bodiless_message() {
     let setup = set_up();
-    let (mut cxn, mut spool_rx) = setup.connect2("bodiless_message");
+    let (mut cxn, spool_rx) = setup.connect2("bodiless_message");
     cxn.quick_log_in("HELO localhost", "zim", "hunter2");
     cxn.simple_command("MAIL FROM:<zim@earth.com>", "250 2.0.0");
     cxn.simple_command("RCPT TO:<tallest@irk.com>", "250 2.1.5");
@@ -670,13 +670,13 @@ fn bodiless_message() {
     assert_eq!(1, responses.len());
     assert!(responses[0].starts_with("554 5.6.0"));
 
-    assert!(spool_rx.try_recv().is_err());
+    assert!(spool_rx.lock().unwrap().is_empty());
 }
 
 #[test]
 fn oversized_message_via_data() {
     let setup = set_up();
-    let (mut cxn, mut spool_rx) = setup.connect2("oversized_message_via_data");
+    let (mut cxn, spool_rx) = setup.connect2("oversized_message_via_data");
     cxn.quick_log_in("HELO localhost", "zim", "hunter2");
     cxn.simple_command("MAIL FROM:<zim@mars.com>", "250 2.0.0");
     cxn.simple_command("RCPT TO:<tallest@irk.com>", "250 2.1.5");
@@ -697,13 +697,13 @@ fn oversized_message_via_data() {
     assert_eq!(1, responses.len());
     assert!(responses[0].starts_with("554 5.2.3"));
 
-    assert!(spool_rx.try_recv().is_err());
+    assert!(spool_rx.lock().unwrap().is_empty());
 }
 
 #[test]
 fn oversized_message_via_small_bdats() {
     let setup = set_up();
-    let (mut cxn, mut spool_rx) =
+    let (mut cxn, spool_rx) =
         setup.connect2("oversized_message_via_small_bdats");
     cxn.quick_log_in("HELO localhost", "zim", "hunter2");
     cxn.simple_command("MAIL FROM:<zim@mars.com>", "250 2.0.0");
@@ -735,7 +735,7 @@ fn oversized_message_via_small_bdats() {
 
     assert!(rejected);
 
-    assert!(spool_rx.try_recv().is_err());
+    assert!(spool_rx.lock().unwrap().is_empty());
 
     // Ensure the state machine isn't broken
     cxn.simple_command("MAIL FROM:<zim@earth.com>", "250 2.0.0");
@@ -745,8 +745,7 @@ fn oversized_message_via_small_bdats() {
 #[test]
 fn oversized_message_via_huge_bdat() {
     let setup = set_up();
-    let (mut cxn, mut spool_rx) =
-        setup.connect2("oversized_message_via_huge_bdat");
+    let (mut cxn, spool_rx) = setup.connect2("oversized_message_via_huge_bdat");
     cxn.quick_log_in("HELO localhost", "zim", "hunter2");
     cxn.simple_command("MAIL FROM:<zim@mars.com>", "250 2.0.0");
     cxn.simple_command("RCPT TO:<tallest@irk.com>", "250 2.1.5");
@@ -770,7 +769,7 @@ fn oversized_message_via_huge_bdat() {
     assert_eq!(1, responses.len());
     assert!(responses[0].starts_with("554 5.2.3"));
 
-    assert!(spool_rx.try_recv().is_err());
+    assert!(spool_rx.lock().unwrap().is_empty());
 
     // Ensure the state machine isn't broken
     cxn.simple_command("MAIL FROM:<zim@earth.com>", "250 2.0.0");
@@ -780,7 +779,7 @@ fn oversized_message_via_huge_bdat() {
 #[test]
 fn no_from_header() {
     let setup = set_up();
-    let (mut cxn, mut spool_rx) = setup.connect2("no_from_header");
+    let (mut cxn, spool_rx) = setup.connect2("no_from_header");
     cxn.quick_log_in("HELO localhost", "zim", "hunter2");
     cxn.simple_command("MAIL FROM:<zim@earth.com>", "250 2.0.0");
     cxn.simple_command("RCPT TO:<tallest@irk.com>", "250 2.1.5");
@@ -798,13 +797,13 @@ fn no_from_header() {
     assert_eq!(1, responses.len());
     assert!(responses[0].starts_with("554 5.6.0"));
 
-    assert!(spool_rx.try_recv().is_err());
+    assert!(spool_rx.lock().unwrap().is_empty());
 }
 
 #[test]
 fn two_from_headers() {
     let setup = set_up();
-    let (mut cxn, mut spool_rx) = setup.connect2("two_from_headers");
+    let (mut cxn, spool_rx) = setup.connect2("two_from_headers");
     cxn.quick_log_in("HELO localhost", "zim", "hunter2");
     cxn.simple_command("MAIL FROM:<zim@earth.com>", "250 2.0.0");
     cxn.simple_command("RCPT TO:<tallest@irk.com>", "250 2.1.5");
@@ -822,13 +821,13 @@ fn two_from_headers() {
     assert_eq!(1, responses.len());
     assert!(responses[0].starts_with("554 5.6.0"));
 
-    assert!(spool_rx.try_recv().is_err());
+    assert!(spool_rx.lock().unwrap().is_empty());
 }
 
 #[test]
 fn bad_from_header() {
     let setup = set_up();
-    let (mut cxn, mut spool_rx) = setup.connect2("bad_from_header");
+    let (mut cxn, spool_rx) = setup.connect2("bad_from_header");
     cxn.quick_log_in("HELO localhost", "zim", "hunter2");
     cxn.simple_command("MAIL FROM:<zim@earth.com>", "250 2.0.0");
     cxn.simple_command("RCPT TO:<tallest@irk.com>", "250 2.1.5");
@@ -845,7 +844,7 @@ fn bad_from_header() {
     assert_eq!(1, responses.len());
     assert!(responses[0].starts_with("554 5.6.0"));
 
-    assert!(spool_rx.try_recv().is_err());
+    assert!(spool_rx.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -867,7 +866,7 @@ fn return_path_wrong_user() {
 #[test]
 fn from_header_wrong_domain() {
     let setup = set_up();
-    let (mut cxn, mut spool_rx) = setup.connect2("from_header_wrong_domain");
+    let (mut cxn, spool_rx) = setup.connect2("from_header_wrong_domain");
     cxn.quick_log_in("HELO localhost", "zim", "hunter2");
     cxn.simple_command("MAIL FROM:<zim@earth.com>", "250 2.0.0");
     cxn.simple_command("RCPT TO:<tallest@irk.com>", "250 2.1.5");
@@ -885,13 +884,13 @@ from_header_wrong_domain
     assert_eq!(1, responses.len());
     assert!(responses[0].starts_with("551 5.7.1"));
 
-    assert!(spool_rx.try_recv().is_err());
+    assert!(spool_rx.lock().unwrap().is_empty());
 }
 
 #[test]
 fn from_header_wrong_user() {
     let setup = set_up();
-    let (mut cxn, mut spool_rx) = setup.connect2("from_header_wrong_user");
+    let (mut cxn, spool_rx) = setup.connect2("from_header_wrong_user");
     cxn.quick_log_in("HELO localhost", "zim", "hunter2");
     cxn.simple_command("MAIL FROM:<zim@earth.com>", "250 2.0.0");
     cxn.simple_command("RCPT TO:<tallest@irk.com>", "250 2.1.5");
@@ -909,7 +908,7 @@ from_header_wrong_user
     assert_eq!(1, responses.len());
     assert!(responses[0].starts_with("550 5.7.1"));
 
-    assert!(spool_rx.try_recv().is_err());
+    assert!(spool_rx.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -921,7 +920,7 @@ auth_gaz_send_gäz
 ";
 
     let setup = set_up();
-    let (mut cxn, mut spool_rx) = setup.connect2("auth_gaz_send_gäz");
+    let (mut cxn, spool_rx) = setup.connect2("auth_gaz_send_gäz");
     cxn.quick_log_in("HELO localhost", "gaz", "hunter2");
     cxn.simple_command("MAIL FROM:<gäz@earth.com>", "250 2.0.0");
     cxn.simple_command("RCPT TO:<tallest@irk.com>", "250 2.1.5");
@@ -935,7 +934,7 @@ auth_gaz_send_gäz
     check_message(
         &setup,
         "gaz",
-        spool_rx.try_recv().unwrap(),
+        spool_rx.lock().unwrap()[0],
         SmtpTransfer::EightBit,
         "gäz@earth.com",
         &["tallest@irk.com"],
@@ -952,7 +951,7 @@ auth_gäz_send_gaz
 ";
 
     let setup = set_up();
-    let (mut cxn, mut spool_rx) = setup.connect2("auth_gäz_send_gaz");
+    let (mut cxn, spool_rx) = setup.connect2("auth_gäz_send_gaz");
     cxn.quick_log_in("HELO localhost", "gäz", "hunter2");
     cxn.simple_command("MAIL FROM:<gaz@earth.com>", "250 2.0.0");
     cxn.simple_command("RCPT TO:<tallest@irk.com>", "250 2.1.5");
@@ -966,7 +965,7 @@ auth_gäz_send_gaz
     check_message(
         &setup,
         "gaz",
-        spool_rx.try_recv().unwrap(),
+        spool_rx.lock().unwrap()[0],
         SmtpTransfer::EightBit,
         "gaz@earth.com",
         &["tallest@irk.com"],
