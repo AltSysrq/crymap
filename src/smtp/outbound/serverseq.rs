@@ -20,14 +20,13 @@ use std::cell::RefCell;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use rand::seq::SliceRandom;
 
 use super::{transact, transcript::Transcript};
 use crate::{
     account::{
-        model::{CommonPaths, ForeignSmtpTlsStatus},
+        model::ForeignSmtpTlsStatus,
         v2::{Account, SpooledMessageId},
     },
     support::{async_io::ServerIo, buffer::BufferReader, dns},
@@ -53,7 +52,6 @@ pub type MockConnect<'a> = &'a dyn Fn(IpAddr) -> TransactResult;
 /// for delivery instead of actually connecting to anything. This is used for
 /// testing.
 pub async fn execute(
-    common_paths: Arc<CommonPaths>,
     dns_cache: Rc<RefCell<dns::Cache>>,
     dns_resolver: Option<Rc<dns::Resolver>>,
     account: Rc<RefCell<Account>>,
@@ -63,7 +61,7 @@ pub async fn execute(
     local_host_name: String,
     mock_connect: Option<MockConnect<'_>>,
 ) -> Results {
-    let mut transcript = Transcript::new(common_paths);
+    let mut transcript = Transcript::new(account.borrow().common_paths());
     transcript.line(format_args!("Transcript for messages sent to {domain}"));
 
     let domain_key = domain.to_ascii();
@@ -332,8 +330,7 @@ mod test {
     use std::fs;
     use std::io::Read;
     use std::net::{Ipv4Addr, Ipv6Addr};
-    use std::sync::Mutex;
-    use std::sync::Weak;
+    use std::sync::{Arc, Mutex, Weak};
 
     use chrono::prelude::*;
     use lazy_static::lazy_static;
@@ -473,15 +470,8 @@ mod test {
             panic!("unexpected attempt to connect to {actual_ipaddr}")
         };
 
-        let common_paths = Arc::new(CommonPaths {
-            tmp: std::env::temp_dir(),
-            garbage: std::env::temp_dir(),
-        });
-
         let account = Rc::new(RefCell::new(account));
-
         let actual_result = execute(
-            common_paths,
             Rc::new(RefCell::new(dns_cache)),
             None,
             Rc::clone(&account),

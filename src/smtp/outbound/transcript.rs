@@ -46,9 +46,9 @@ impl Transcript {
         if let Some(last_entry) = self.last_entry {
             let delta =
                 now.signed_duration_since(last_entry).num_milliseconds();
-            let _ = writeln!(self.buffer, "{now_fmt} ({delta:+5}ms) {args}");
+            let _ = writeln!(self.buffer, "{now_fmt} ({delta:+5}ms) {args}\r");
         } else {
-            let _ = writeln!(self.buffer, "{now_fmt} {args}");
+            let _ = writeln!(self.buffer, "{now_fmt} {args}\r");
         }
 
         self.last_entry = Some(now);

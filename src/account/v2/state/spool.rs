@@ -18,6 +18,7 @@
 
 #![allow(dead_code)] // TODO Remove
 
+use std::fmt;
 use std::fs;
 use std::io;
 
@@ -30,6 +31,12 @@ use crate::{account::model::*, support::error::Error};
 /// Identifies a message spooled for outbound delivery.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SpooledMessageId(storage::MessageId);
+
+impl fmt::Display for SpooledMessageId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(&(self.0).0, f)
+    }
+}
 
 impl SpooledMessageId {
     #[cfg(test)]
