@@ -109,6 +109,14 @@ impl CommandProcessor {
             }));
         };
 
+        if self.system_config.smtp.host_name.is_empty() {
+            return Err(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::No,
+                code: Some(s::RespTextCode::Cannot(())),
+                quip: Some(Cow::Borrowed("SMTP host name not configured")),
+            }));
+        }
+
         let dns_cache = Rc::new(RefCell::new(dns::Cache::default()));
 
         let Some(account) = self.account.take() else {

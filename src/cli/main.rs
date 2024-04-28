@@ -252,15 +252,24 @@ pub(super) enum RemoteSubcommand {
     /// forever.
     Chpw(RemoteCommonOptions),
     Config(RemoteConfigSubcommand),
+    ForeignSmtpTls(ForeignSmtpTlsCommand),
+    RetryEmail(RetryEmailCommand),
 }
 
 impl RemoteSubcommand {
     pub(super) fn common_options(&mut self) -> RemoteCommonOptions {
         match *self {
             RemoteSubcommand::Test(ref mut c)
-            | RemoteSubcommand::Chpw(ref mut c) => mem::take(c),
+            | RemoteSubcommand::Chpw(ref mut c)
+            | RemoteSubcommand::ForeignSmtpTls(ForeignSmtpTlsCommand::List(
+                ref mut c,
+            )) => mem::take(c),
 
             RemoteSubcommand::Config(ref mut c) => mem::take(&mut c.common),
+            RemoteSubcommand::ForeignSmtpTls(
+                ForeignSmtpTlsCommand::Delete(ref mut c),
+            ) => mem::take(&mut c.common),
+            RemoteSubcommand::RetryEmail(ref mut c) => mem::take(&mut c.common),
         }
     }
 }
@@ -325,6 +334,36 @@ pub(super) struct RemoteConfigSubcommand {
     /// mail submission.
     #[structopt(long)]
     pub(super) smtp_out_failure_receipts: Option<String>,
+}
+
+/// Inspect or modify the TLS status recorded for foreign SMTP domains.
+#[derive(StructOpt)]
+pub(super) enum ForeignSmtpTlsCommand {
+    /// List every TLS status currently recorder for foreign SMTP domains.
+    List(RemoteCommonOptions),
+    Delete(DeleteForeignSmtpTlsCommand),
+}
+
+/// Deletes the stored TLS status for one or more foreign SMTP domains.
+///
+/// Deleting the status causes the next attempt of any mail delivery to that
+/// domain to run without any expectations of security level. You can use this
+/// to recover from administrators downgrading their site's TLS, for example.
+#[derive(StructOpt)]
+pub(super) struct DeleteForeignSmtpTlsCommand {
+    #[structopt(flatten)]
+    pub(super) common: RemoteCommonOptions,
+    /// The domain(s) whose status is to be deleted.
+    pub(super) domains: Vec<String>,
+}
+
+/// Reattempts to send an email which had previously failed temporarily.
+#[derive(StructOpt)]
+pub(super) struct RetryEmailCommand {
+    #[structopt(flatten)]
+    pub(super) common: RemoteCommonOptions,
+    /// The message ID to retry.
+    pub(super) message_id: String,
 }
 
 pub fn main() {

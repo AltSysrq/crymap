@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -119,6 +119,10 @@ impl Account {
 
     pub fn common_paths(&self) -> Arc<CommonPaths> {
         Arc::clone(&self.common_paths)
+    }
+
+    pub fn user_name(&self) -> Option<&str> {
+        self.root.file_name().and_then(|name| name.to_str())
     }
 }
 

@@ -187,6 +187,7 @@ pub async fn send_message(
 
     match generate_receipt(
         common_paths,
+        account.user_name().unwrap_or("<your-username>"),
         &local_host_name,
         &subject,
         message_id,
@@ -255,6 +256,7 @@ fn extract_raw_subject(reader: impl io::BufRead) -> io::Result<String> {
 
 fn generate_receipt(
     common_paths: Arc<CommonPaths>,
+    user_name: &str,
     local_host_name: &str,
     raw_subject: &str,
     message_id: SpooledMessageId,
@@ -293,13 +295,12 @@ must be done MANUALLY.\r
         for email in &results.tempfail {
             writeln!(writer, "\t{email}\r")?;
         }
-        // TODO Implement this CLI command and verify it has this syntax.
         writeln!(
             writer,
             "\
 \r
 To trigger a retry, run the following command:\r
-\tcrymap remote retry-email {local_host_name} {message_id}\r
+\tcrymap remote retry-email -h{local_host_name} -u{user_name} {message_id}\r
 \r",
         )?;
     }

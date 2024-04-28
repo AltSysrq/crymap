@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -113,7 +113,13 @@ async fn run_imap_server(
 ) {
     let processor = CommandProcessor::new(
         LogPrefix::new(name.to_owned()),
-        Arc::new(SystemConfig::default()),
+        Arc::new(SystemConfig {
+            smtp: SmtpConfig {
+                host_name: "mx.example.com".to_owned(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
         data_root,
         None,
     );

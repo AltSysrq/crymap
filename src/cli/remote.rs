@@ -24,9 +24,10 @@ use openssl::ssl::{HandshakeError, SslConnector, SslMethod, SslVerifyMode};
 use thiserror::Error;
 
 use super::main::*;
-use crate::imap::client::Client;
-use crate::imap::syntax as s;
-use crate::support::rcio::*;
+use crate::{
+    imap::{client::Client, syntax as s},
+    support::rcio::*,
+};
 
 type RemoteClient = Client<Box<dyn BufRead>, Box<dyn Write>>;
 
@@ -60,6 +61,17 @@ fn main_impl(mut cmd: RemoteSubcommand) -> Result<(), Error> {
         },
         RemoteSubcommand::Config(cmd) => {
             config(&mut client, cmd)?;
+        },
+        RemoteSubcommand::ForeignSmtpTls(ForeignSmtpTlsCommand::List(_)) => {
+            list_foreign_smtp_tls(&mut client)?;
+        },
+        RemoteSubcommand::ForeignSmtpTls(ForeignSmtpTlsCommand::Delete(
+            cmd,
+        )) => {
+            delete_foreign_smtp_tls(&mut client, cmd.domains)?;
+        },
+        RemoteSubcommand::RetryEmail(cmd) => {
+            retry_email(&mut client, cmd.message_id)?;
         },
     }
 
@@ -380,4 +392,108 @@ fn require_configurable(
         "{} is not configurable on this server",
         required,
     );
+}
+
+fn list_foreign_smtp_tls(client: &mut RemoteClient) -> Result<(), Error> {
+    require_smtp_out_support(client)?;
+
+    let mut buffer = Vec::new();
+    let mut responses = client.command(
+        s::Command::XCryForeignSmtpTls(s::XCryForeignSmtpTlsCommand::List(())),
+        &mut buffer,
+    )?;
+    die_if_not_success("FOREIGN-TLS LIST", responses.pop().unwrap());
+
+    if responses.is_empty() {
+        println!("no foreign SMTP TLS stati in database");
+    } else {
+        for line in responses {
+            if let s::Response::XCryForeignSmtpTls(data) = line.response {
+                if !data.starttls {
+                    println!(
+                        "{domain}: TLS not required",
+                        domain = data.domain
+                    );
+                } else {
+                    println!(
+                        "{domain}: TLS required, at least {version}; \
+                         valid certificate {certreq}",
+                        domain = data.domain,
+                        version = data
+                            .tls_version
+                            .unwrap_or(Cow::Borrowed("any version")),
+                        certreq = if data.valid_certificate {
+                            "is required"
+                        } else {
+                            "is NOT required"
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn delete_foreign_smtp_tls(
+    client: &mut RemoteClient,
+    domains: Vec<String>,
+) -> Result<(), Error> {
+    require_smtp_out_support(client)?;
+
+    if domains.is_empty() {
+        die!(EX_USAGE, "At least one domain must be specified");
+    }
+
+    let mut buffer = Vec::new();
+    let mut responses = client.command(
+        s::Command::XCryForeignSmtpTls(s::XCryForeignSmtpTlsCommand::Delete(
+            domains.into_iter().map(Cow::Owned).collect(),
+        )),
+        &mut buffer,
+    )?;
+    die_if_not_success("FOREIGN-TLS DELETE", responses.pop().unwrap());
+    Ok(())
+}
+
+fn retry_email(client: &mut RemoteClient, id: String) -> Result<(), Error> {
+    require_smtp_out_support(client)?;
+
+    let mut buffer = Vec::new();
+    let mut responses = client.command(
+        s::Command::XCrySmtpSpoolExecute(Cow::Owned(id)),
+        &mut buffer,
+    )?;
+    die_if_not_success("SMTP-OUT SPOOL EXECUTE", responses.pop().unwrap());
+    Ok(())
+}
+
+fn require_smtp_out_support(client: &mut RemoteClient) -> Result<(), Error> {
+    let mut buffer = Vec::new();
+    let mut responses = client.command(
+        s::Command::Simple(s::SimpleCommand::XCryGetUserConfig),
+        &mut buffer,
+    )?;
+    die_if_not_success("GET-USER-CONFIG", responses.pop().unwrap());
+
+    let current_config = responses
+        .into_iter()
+        .filter_map(|r| match r.response {
+            s::Response::XCryUserConfig(c) => Some(c),
+            _ => None,
+        })
+        .next()
+        .unwrap_or_else(|| die!(EX_PROTOCOL, "No user config returned"));
+
+    for cap in &current_config.capabilities {
+        if "SMTP-OUT".eq_ignore_ascii_case(cap) {
+            return Ok(());
+        }
+    }
+
+    die!(
+        EX_SOFTWARE,
+        "Crymap server does not support SMTP-OUT extensions",
+    )
 }
