@@ -92,6 +92,7 @@ async fn imap_test_impl() {
             LogPrefix::new(origin.to_string()),
             Arc::clone(&system_config),
             system_root.clone(),
+            None,
         );
 
         tokio::task::spawn_local(crate::imap::server::run(io, processor));

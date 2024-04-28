@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2022, 2023, Jason Lingle
+// Copyright (c) 2020, 2022, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -20,6 +20,7 @@ use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::fmt;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use log::error;
@@ -31,7 +32,7 @@ use crate::{
     },
     imap::response_writer::{OutputControl, OutputEvent},
     support::{
-        error::Error, log_prefix::LogPrefix, system_config::SystemConfig,
+        dns, error::Error, log_prefix::LogPrefix, system_config::SystemConfig,
     },
 };
 
@@ -95,6 +96,7 @@ pub(super) static TAGLINE: &str = concat!(
 pub struct CommandProcessor {
     pub(super) log_prefix: LogPrefix,
     pub(super) system_config: Arc<SystemConfig>,
+    pub(super) dns_resolver: Option<Rc<dns::Resolver>>,
     pub(super) data_root: PathBuf,
 
     pub(super) account: Option<Account>,
@@ -174,11 +176,13 @@ impl CommandProcessor {
         log_prefix: LogPrefix,
         system_config: Arc<SystemConfig>,
         data_root: PathBuf,
+        dns_resolver: Option<Rc<dns::Resolver>>,
     ) -> Self {
         CommandProcessor {
             log_prefix,
             system_config,
             data_root,
+            dns_resolver,
 
             account: None,
             selected: None,

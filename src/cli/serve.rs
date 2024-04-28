@@ -58,6 +58,14 @@ pub async fn imaps(
     let system_config = Arc::new(system_config);
 
     let acceptor = create_ssl_acceptor(&system_config, &system_root);
+    let dns_resolver =
+        match hickory_resolver::AsyncResolver::tokio_from_system_conf() {
+            Ok(r) => Some(Rc::new(r)),
+            Err(e) => {
+                error!("Failed to initialise DNS resolver: {e}");
+                None
+            },
+        };
 
     // We've opened access to everything on the main system we need; now we can
     // apply chroot and privilege deescalation.
@@ -95,8 +103,12 @@ pub async fn imaps(
 
     info!("{} SSL handshake succeeded", log_prefix);
 
-    let processor =
-        CommandProcessor::new(log_prefix.clone(), system_config, users_root);
+    let processor = CommandProcessor::new(
+        log_prefix.clone(),
+        system_config,
+        users_root,
+        dns_resolver,
+    );
     crate::imap::server::run(io, processor).await;
 }
 
@@ -212,7 +224,13 @@ pub async fn smtpsub(
     mut users_root: PathBuf,
     implicit_tls: bool,
 ) {
-    let host_name = smtp_host_name(&system_config);
+    if system_config.smtp.host_name.is_empty() {
+        fatal!(
+            EX_CONFIG,
+            "smtp.host_name must be explicitly configured for SMTP submission",
+        );
+    }
+    let host_name = system_config.smtp.host_name.clone();
     let ssl_acceptor = create_ssl_acceptor(&system_config, &system_root);
 
     // We've opened access to everything on the main system we need; now we can

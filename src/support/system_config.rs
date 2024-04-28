@@ -108,6 +108,9 @@ pub struct SmtpConfig {
     /// The host name to report as.
     ///
     /// If unset, the system host name is used.
+    ///
+    /// This MUST be configured explicitly for SMTP submission since it must be
+    /// a resolvable, fully-qualified host for that case.
     pub host_name: String,
 
     /// If true, the domain part of destination email addresses is kept.

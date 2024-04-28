@@ -192,3 +192,24 @@ fn foreign_smtp_tls() {
     assert_eq!(2, responses.len());
     assert_tagged_ok(responses.pop().unwrap());
 }
+
+#[test]
+fn spool_execute() {
+    let setup = set_up();
+    let mut client = setup.connect("xcryspex");
+    quick_log_in(&mut client);
+
+    // We don't have a way to actually verify that a real message would be
+    // executed properly, so just ensure the command is understood and that we
+    // get the message for a non-existent but valid ID.
+    command!([response] = client, c("XCRY SMTP-OUT SPOOL EXECUTE 42"));
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Nonexistent(())),
+        Error::NxMessage,
+    );
+
+    // Executing the command finagles with the `account` field; ensure we're
+    // still logged in properly.
+    quick_select(&mut client, "INBOX");
+}

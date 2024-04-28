@@ -17,9 +17,14 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use super::defs::*;
-use crate::{account::model::*, support::dns};
+use crate::{
+    account::{model::*, v2::SpooledMessageId},
+    support::{dns, error::Error},
+};
 
 impl CommandProcessor {
     pub(super) async fn cmd_xcry_foreign_smtp_tls(
@@ -90,5 +95,50 @@ impl CommandProcessor {
                 success()
             },
         }
+    }
+
+    pub(super) async fn cmd_xcry_smtp_spool_execute(
+        &mut self,
+        id: Cow<'_, str>,
+    ) -> CmdResult {
+        let Ok(id) = id.parse::<SpooledMessageId>() else {
+            return Err(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::No,
+                code: Some(s::RespTextCode::Nonexistent(())),
+                quip: Some(Cow::Borrowed("Bad spool ID")),
+            }));
+        };
+
+        let dns_cache = Rc::new(RefCell::new(dns::Cache::default()));
+
+        let Some(account) = self.account.take() else {
+            return Err(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Bad,
+                code: None,
+                quip: Some(Cow::Borrowed("Not logged in")),
+            }));
+        };
+
+        let account = Rc::new(RefCell::new(account));
+        let result = crate::smtp::outbound::send_message(
+            dns_cache,
+            self.dns_resolver.clone(),
+            Rc::clone(&account),
+            id,
+            self.system_config.smtp.host_name.clone(),
+            None,
+        )
+        .await;
+        self.account = Some(
+            Rc::into_inner(account)
+                .expect("send_message retained a reference to Account")
+                .into_inner(),
+        );
+
+        result.map_err(map_error! {
+            self,
+            NxMessage => (No, Some(s::RespTextCode::Nonexistent(()))),
+        })?;
+        success()
     }
 }

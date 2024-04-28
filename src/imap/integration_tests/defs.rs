@@ -115,6 +115,7 @@ async fn run_imap_server(
         LogPrefix::new(name.to_owned()),
         Arc::new(SystemConfig::default()),
         data_root,
+        None,
     );
     let io = ServerIo::new_owned_pair(server_in, server_out).unwrap();
     crate::imap::server::run(io, processor).await;

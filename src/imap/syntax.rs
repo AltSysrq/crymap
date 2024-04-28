@@ -1888,6 +1888,9 @@ syntax_rule! {
         #[prefix("XCRY SMTP-OUT FOREIGN-TLS ")]
         #[delegate]
         XCryForeignSmtpTls(XCryForeignSmtpTlsCommand<'a>),
+        #[prefix("XCRY SMTP-OUT SPOOL EXECUTE ")]
+        #[primitive(unicode_astring, astring)]
+        XCrySmtpSpoolExecute(Cow<'a, str>),
     }
 }
 

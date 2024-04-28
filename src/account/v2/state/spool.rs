@@ -36,6 +36,14 @@ impl fmt::Display for SpooledMessageId {
     }
 }
 
+impl std::str::FromStr for SpooledMessageId {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse::<i64>().map(|n| Self(storage::MessageId(n)))
+    }
+}
+
 impl SpooledMessageId {
     #[cfg(test)]
     pub const DUMMY: Self = Self(storage::MessageId(0));

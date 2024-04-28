@@ -185,6 +185,9 @@ impl CommandProcessor {
             s::Command::XCryForeignSmtpTls(cmd) => {
                 self.cmd_xcry_foreign_smtp_tls(cmd, sender).await
             },
+            s::Command::XCrySmtpSpoolExecute(ids) => {
+                self.cmd_xcry_smtp_spool_execute(ids).await
+            },
         };
 
         if res.is_ok() {
