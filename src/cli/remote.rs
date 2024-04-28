@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -198,7 +198,7 @@ fn die_if_not_success(what: &str, response: s::ResponseLine<'_>) {
                 "{} failed; condition: {:?}; text: {}",
                 what,
                 cond,
-                quip.unwrap_or_default()
+                quip.unwrap_or_default(),
             );
         },
         r => {
@@ -206,7 +206,7 @@ fn die_if_not_success(what: &str, response: s::ResponseLine<'_>) {
                 EX_PROTOCOL,
                 "Server returned unexpected response for {}: {:?}",
                 what,
-                r
+                r,
             );
         },
     }
@@ -248,7 +248,7 @@ following name inside the 'tmp' directory of your Crymap account:
 If you need to undo the password change, you or an administrator can replace
 'user.toml' in your Crymap account with that file. The backup file will be
 deleted on the next successful login 24 hours from now.",
-                file
+                file,
             );
             break;
         }
@@ -291,6 +291,27 @@ fn config(
             .push(s::XCryUserConfigOption::ExternalKeyPattern(Cow::Owned(ekp)));
     }
 
+    if let Some(s) = cmd.smtp_out_save {
+        require_configurable(&current_config, "SMTP-OUT");
+        configs.push(s::XCryUserConfigOption::SmtpOutSave(
+            Some(Cow::<str>::Owned(s)).filter(|s| !s.is_empty()),
+        ));
+    }
+
+    if let Some(s) = cmd.smtp_out_success_receipts {
+        require_configurable(&current_config, "SMTP-OUT");
+        configs.push(s::XCryUserConfigOption::SmtpOutSuccessReceipts(
+            Some(Cow::<str>::Owned(s)).filter(|s| !s.is_empty()),
+        ));
+    }
+
+    if let Some(s) = cmd.smtp_out_failure_receipts {
+        require_configurable(&current_config, "SMTP-OUT");
+        configs.push(s::XCryUserConfigOption::SmtpOutFailureReceipts(
+            Some(Cow::<str>::Owned(s)).filter(|s| !s.is_empty()),
+        ));
+    }
+
     if configs.is_empty() {
         println!(
             "Current configuration:\n\
@@ -302,8 +323,38 @@ fn config(
             current_config
                 .password_changed
                 .map(|dt| dt.to_rfc3339())
-                .unwrap_or_else(|| "never".to_owned())
+                .unwrap_or_else(|| "never".to_owned()),
         );
+        for extended in current_config.extended {
+            match extended {
+                s::XCry2UserConfigData::SmtpOutSave(None) => {
+                    println!("\tsmtp-out-save: messages NOT saved");
+                },
+                s::XCry2UserConfigData::SmtpOutSave(Some(ref mb)) => {
+                    println!("\tsmtp-out-save: messages saved to {mb}");
+                },
+                s::XCry2UserConfigData::SmtpOutSuccessReceipts(None) => {
+                    println!("\tsmtp-out-success-receipts: not enabled");
+                },
+                s::XCry2UserConfigData::SmtpOutSuccessReceipts(Some(
+                    ref mb,
+                )) => {
+                    println!("\tsmtp-out-success-receipts: delivered to {mb}");
+                },
+                s::XCry2UserConfigData::SmtpOutFailureReceipts(None) => {
+                    println!(
+                        "\tsmtp-out-failure-receipts: \
+                              delivered to INBOX by default"
+                    );
+                },
+                s::XCry2UserConfigData::SmtpOutFailureReceipts(Some(
+                    ref mb,
+                )) => {
+                    println!("\tsmtp-out-failure-receipts: delivered to {mb}");
+                },
+                s::XCry2UserConfigData::Unknown(..) => {},
+            }
+        }
     } else {
         let mut buffer = Vec::new();
         let mut responses = client
@@ -327,6 +378,6 @@ fn require_configurable(
     die!(
         EX_SOFTWARE,
         "{} is not configurable on this server",
-        required
+        required,
     );
 }

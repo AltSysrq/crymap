@@ -288,6 +288,43 @@ pub(super) struct RemoteConfigSubcommand {
     /// messages and operations originating from the system.
     #[structopt(long)]
     pub(super) external_key_pattern: Option<String>,
+
+    /// Change which mailbox sent messages are implicitly saved to.
+    ///
+    /// The default disables this feature. If you enable it, you must ensure
+    /// that your mail client(s) are configured not to save copies of outgoing
+    /// messages themselves. To explicitly configure the default, pass the
+    /// empty string to this option.
+    ///
+    /// This setting only has any effect if you are using Crymap for outbound
+    /// mail submission.
+    #[structopt(long)]
+    pub(super) smtp_out_save: Option<String>,
+
+    /// Enable delivery of mail success receipts to this mailbox.
+    ///
+    /// By default, receipts are not delivered for successful mail
+    /// transactions. To restore the default, pass the empty string.
+    ///
+    /// When enabled, any outbound mail operation which fully succeeds results
+    /// in a message being delivered to this mailbox, already marked as read,
+    /// indicating that success and providing technical details on the mail
+    /// delivery process.
+    ///
+    /// This setting only has any effect if you are using Crymap for outbound
+    /// mail submission.
+    #[structopt(long)]
+    pub(super) smtp_out_success_receipts: Option<String>,
+
+    /// Change which mailbox mail failure receipts are saved to.
+    ///
+    /// By default, receipts for failed mail transactions are delivered to the
+    /// INBOX.
+    ///
+    /// This setting only has any effect if you are using Crymap for outbound
+    /// mail submission.
+    #[structopt(long)]
+    pub(super) smtp_out_failure_receipts: Option<String>,
 }
 
 pub fn main() {
