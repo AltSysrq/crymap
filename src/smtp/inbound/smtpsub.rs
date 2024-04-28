@@ -16,8 +16,6 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-#![allow(dead_code)] // TODO Remove
-
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -48,13 +46,12 @@ use crate::{
 };
 
 const MAX_RECIPIENTS: usize = 50;
-const MAX_HEADER_BLOCK_SIZE: usize = 1 << 18;
 
 pub async fn serve_smtpsub(
     io: crate::support::async_io::ServerIo,
     config: Arc<SystemConfig>,
     log_prefix: LogPrefix,
-    ssl_acceptor: openssl::ssl::SslAcceptor,
+    ssl_acceptor: Option<openssl::ssl::SslAcceptor>,
     data_root: PathBuf,
     local_host_name: String,
     spool_out: Box<dyn FnMut(Rc<RefCell<Account>>, SpooledMessageId)>,

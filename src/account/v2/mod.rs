@@ -22,7 +22,6 @@ mod state;
 mod storage;
 
 pub use super::v1::account::account_config_file;
-#[allow(unused_imports)] // TODO Remove
 pub use state::{
     Account, DeliveryAccount, FetchReceiver, LogInError, Mailbox,
     SpooledMessage, SpooledMessageId,

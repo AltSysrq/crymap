@@ -22,7 +22,7 @@ mod spf;
 mod syntax;
 
 pub mod inbound;
-mod outbound;
+pub mod outbound;
 
 #[cfg(feature = "dev-tools")]
 pub use dmarc::compile_psl;

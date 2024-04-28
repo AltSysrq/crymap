@@ -89,10 +89,19 @@ enum ServerSubcommand {
     ///
     /// This is intended to be used with inetd, xinetd, etc.
     ServeLmtp(ServerCommonOptions),
-    /// Serve a single SMTP inbound session over standard IO.
+    /// Serve a single SMTP (clear+STARTTLS) inbound session over standard IO.
     ///
     /// This is intended to be used with inetd, xinetd, etc.
     ServeSmtpin(ServerCommonOptions),
+    /// Serve a single SMTP (clear+STARTTLS) submission session over standard
+    /// IO.
+    ///
+    /// This is intended to be used with inetd, xinetd, etc.
+    ServeSmtpsub(ServerCommonOptions),
+    /// Serve a single SMTPS submission session over standard IO.
+    ///
+    /// This is intended to be used with inetd, xinetd, etc.
+    ServeSmtpssub(ServerCommonOptions),
 }
 
 impl ServerSubcommand {
@@ -105,6 +114,8 @@ impl ServerSubcommand {
             ServerSubcommand::ServeImaps(ref mut c) => mem::take(c),
             ServerSubcommand::ServeLmtp(ref mut c) => mem::take(c),
             ServerSubcommand::ServeSmtpin(ref mut c) => mem::take(c),
+            ServerSubcommand::ServeSmtpsub(ref mut c) => mem::take(c),
+            ServerSubcommand::ServeSmtpssub(ref mut c) => mem::take(c),
         }
     }
 }
@@ -364,7 +375,9 @@ fn server(mut cmd: ServerSubcommand) {
             ServerSubcommand::Deliver(..)
                 | ServerSubcommand::ServeLmtp(..)
                 | ServerSubcommand::ServeImaps(..)
-                | ServerSubcommand::ServeSmtpin(..),
+                | ServerSubcommand::ServeSmtpin(..)
+                | ServerSubcommand::ServeSmtpsub(..)
+                | ServerSubcommand::ServeSmtpssub(..),
         )
     {
         if let Err(exit) =
@@ -440,6 +453,12 @@ fn server(mut cmd: ServerSubcommand) {
         },
         ServerSubcommand::ServeSmtpin(_) => {
             super::serve::smtpin(system_config, root, users_root);
+        },
+        ServerSubcommand::ServeSmtpsub(_) => {
+            super::serve::smtpsub(system_config, root, users_root, false);
+        },
+        ServerSubcommand::ServeSmtpssub(_) => {
+            super::serve::smtpsub(system_config, root, users_root, true);
         },
     }
 }

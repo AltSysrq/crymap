@@ -16,8 +16,6 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-#![allow(dead_code)] // TODO Remove
-
 use std::fmt;
 use std::fs;
 use std::io;

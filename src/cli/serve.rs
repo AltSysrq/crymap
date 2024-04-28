@@ -184,23 +184,133 @@ pub async fn smtpin(
         )
     });
 
-    let result = crate::smtp::inbound::serve_smtpin(
-        io,
-        Some(Rc::new(resolver)),
-        Rc::new(RefCell::new(dns::Cache::default())),
-        Arc::new(system_config),
-        log_prefix.clone(),
-        ssl_acceptor,
-        users_root,
-        host_name,
-        peer_ip,
-    )
-    .await;
+    let local_set = tokio::task::LocalSet::new();
+    let result = local_set
+        .run_until(crate::smtp::inbound::serve_smtpin(
+            io,
+            Some(Rc::new(resolver)),
+            Rc::new(RefCell::new(dns::Cache::default())),
+            Arc::new(system_config),
+            log_prefix.clone(),
+            ssl_acceptor,
+            users_root,
+            host_name,
+            peer_ip,
+        ))
+        .await;
 
     match result {
         Ok(()) => info!("{} Normal client disconnect", log_prefix),
         Err(e) => warn!("{} Abnormal client disconnect: {}", log_prefix, e),
     }
+}
+
+#[tokio::main(flavor = "current_thread")]
+pub async fn smtpsub(
+    system_config: SystemConfig,
+    system_root: PathBuf,
+    mut users_root: PathBuf,
+    implicit_tls: bool,
+) {
+    let host_name = smtp_host_name(&system_config);
+    let ssl_acceptor = create_ssl_acceptor(&system_config, &system_root);
+
+    // We've opened access to everything on the main system we need; now we can
+    // apply chroot and privilege deescalation.
+    let (log_prefix, _peer_name) = configure_system(
+        if implicit_tls { "smtpssub" } else { "smtpsub" },
+        &system_config,
+        &mut users_root,
+    );
+
+    let resolver =
+        match hickory_resolver::AsyncResolver::tokio_from_system_conf() {
+            Ok(r) => Rc::new(r),
+            Err(e) => {
+                fatal!(EX_OSERR, "Failed to initialise DNS resolver: {e}",)
+            },
+        };
+    let dns_cache = Rc::new(RefCell::new(dns::Cache::default()));
+
+    let io = ServerIo::new_stdio().unwrap_or_else(|e| {
+        fatal!(
+            EX_OSERR,
+            "Failed to put stdio into non-blocking mode: {e:?}",
+        )
+    });
+
+    let ssl_acceptor = if implicit_tls {
+        match tokio::time::timeout(
+            Duration::from_secs(30),
+            io.ssl_accept(&ssl_acceptor),
+        )
+        .await
+        {
+            Ok(Ok(())) => {},
+            Ok(Err(e)) => {
+                warn!("{} SSL handshake failed: {}", log_prefix, e);
+                std::process::exit(0)
+            },
+            Err(_timeout) => {
+                warn!("{} SSL handshake timed out", log_prefix);
+                std::process::exit(0)
+            },
+        }
+
+        // Get the key material out of memory.
+        drop(ssl_acceptor);
+        None
+    } else {
+        Some(ssl_acceptor)
+    };
+
+    info!("{} SSL handshake succeeded", log_prefix);
+
+    let local_set = tokio::task::LocalSet::new();
+    let log_prefix2 = log_prefix.clone();
+    let result = local_set
+        .run_until(crate::smtp::inbound::serve_smtpsub(
+            io,
+            Arc::new(system_config),
+            log_prefix.clone(),
+            ssl_acceptor,
+            users_root,
+            host_name.clone(),
+            Box::new(move |account, id| {
+                tokio::task::spawn_local({
+                    let log_prefix = log_prefix2.clone();
+                    let dns_cache = Rc::clone(&dns_cache);
+                    let resolver = Rc::clone(&resolver);
+                    let host_name = host_name.clone();
+                    async move {
+                        let result = crate::smtp::outbound::send_message(
+                            dns_cache,
+                            Some(resolver),
+                            account,
+                            id,
+                            host_name.clone(),
+                            None,
+                        )
+                        .await;
+                        if let Err(e) = result {
+                            error!(
+                                "{log_prefix} Error setting up \
+                                    message delivery: {e}"
+                            );
+                        }
+                    }
+                });
+            }),
+        ))
+        .await;
+
+    match result {
+        Ok(()) => info!("{} Normal client disconnect", log_prefix),
+        Err(e) => warn!("{} Abnormal client disconnect: {}", log_prefix, e),
+    }
+
+    // Wait for all mail to be sent.
+    local_set.await;
 }
 
 fn smtp_host_name(system_config: &SystemConfig) -> String {

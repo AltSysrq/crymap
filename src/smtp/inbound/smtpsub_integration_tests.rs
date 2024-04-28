@@ -174,7 +174,7 @@ async fn run_server(
             server_io,
             Arc::new(system_config),
             LogPrefix::new(cxn_name.to_owned()),
-            ssl_acceptor(),
+            Some(ssl_acceptor()),
             data_root,
             "mx.earth.com".to_owned(),
             Box::new(move |_, id| spool_tx.lock().unwrap().push(id)),

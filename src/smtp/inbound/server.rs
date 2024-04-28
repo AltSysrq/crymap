@@ -59,7 +59,7 @@ pub(super) struct Service {
 struct Server {
     io: BufStream<ServerIo>,
     log_prefix: LogPrefix,
-    ssl_acceptor: SslAcceptor,
+    ssl_acceptor: Option<SslAcceptor>,
     service: Service,
     local_host_name: String,
 
@@ -78,7 +78,7 @@ struct Server {
 pub(super) async fn run(
     io: ServerIo,
     log_prefix: LogPrefix,
-    ssl_acceptor: SslAcceptor,
+    ssl_acceptor: Option<SslAcceptor>,
     service: Service,
     local_host_name: String,
 ) -> Result<(), Error> {
@@ -343,7 +343,10 @@ impl Server {
             for (ix, &ext) in EXTENSIONS.iter().enumerate() {
                 // RFC 3207 requires not sending STARTTLS after TLS has been
                 // negotiated.
-                if "STARTTLS" == ext && self.io.get_ref().is_ssl() {
+                if "STARTTLS" == ext
+                    && (self.io.get_ref().is_ssl()
+                        || self.ssl_acceptor.is_none())
+                {
                     continue;
                 }
 
@@ -927,6 +930,18 @@ impl Server {
             need_recipients = false,
             need_data = false
         );
+
+        if self.ssl_acceptor.is_none() {
+            self.send_response(
+                Final,
+                pc::ActionNotTakenPermanent,
+                None,
+                Cow::Borrowed("TLS not configured"),
+            )
+            .await?;
+            return Ok(());
+        }
+
         self.send_response(
             Final,
             pc::ServiceReady,
@@ -936,7 +951,10 @@ impl Server {
         .await?;
 
         self.has_helo = false;
-        self.io.get_mut().ssl_accept(&self.ssl_acceptor).await?;
+        self.io
+            .get_mut()
+            .ssl_accept(&self.ssl_acceptor.take().unwrap())
+            .await?;
         self.send_greeting().await
     }
 

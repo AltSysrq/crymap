@@ -66,7 +66,6 @@ pub struct Request {
 
 pub enum RequestPayload {
     Helo(HeloRequest),
-    #[allow(dead_code)] // TODO Remove
     Auth(AuthRequest),
     Mail(MailRequest),
     Recipient(RecipientRequest),

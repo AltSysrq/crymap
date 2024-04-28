@@ -100,7 +100,7 @@ pub async fn serve_smtpin(
         super::server::run(
             io,
             log_prefix,
-            ssl_acceptor,
+            Some(ssl_acceptor),
             server_service,
             local_host_name
         ),
