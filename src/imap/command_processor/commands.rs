@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -180,6 +180,10 @@ impl CommandProcessor {
 
             s::Command::XCrySetUserConfig(configs) => {
                 self.cmd_xcry_set_user_config(configs, sender).await
+            },
+
+            s::Command::XCryForeignSmtpTls(cmd) => {
+                self.cmd_xcry_foreign_smtp_tls(cmd, sender).await
             },
         };
 

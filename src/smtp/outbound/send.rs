@@ -361,7 +361,7 @@ mod test {
     };
 
     struct Setup {
-        account_dir: TempDir,
+        _account_dir: TempDir,
         account: Rc<RefCell<Account>>,
     }
 
@@ -380,7 +380,7 @@ mod test {
         account.provision(b"hunter2").unwrap();
 
         Setup {
-            account_dir,
+            _account_dir: account_dir,
             account: Rc::new(RefCell::new(account)),
         }
     }

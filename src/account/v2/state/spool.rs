@@ -146,6 +146,12 @@ impl Account {
             .delete_message_spool_destinations(id.0, destinations)
     }
 
+    pub fn fetch_all_foreign_smtp_tls_stati(
+        &mut self,
+    ) -> Result<Vec<ForeignSmtpTlsStatus>, Error> {
+        self.metadb.fetch_all_foreign_smtp_tls_stati()
+    }
+
     pub fn fetch_foreign_smtp_tls_status(
         &mut self,
         domain: &str,

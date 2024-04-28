@@ -1693,6 +1693,18 @@ impl Connection {
             .map_err(Into::into)
     }
 
+    /// Fetch all SMTP TLS stati.
+    pub fn fetch_all_foreign_smtp_tls_stati(
+        &mut self,
+    ) -> Result<Vec<ForeignSmtpTlsStatus>, Error> {
+        self.cxn.enable_write(false)?;
+        self.cxn
+            .prepare("SELECT * FROM `foreign_smtp_tls_status`")?
+            .query_map((), from_row)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
     /// Inserts or updates the foreign SMTP TLS status for `status.domain`.
     pub fn put_foreign_smtp_tls_status(
         &mut self,

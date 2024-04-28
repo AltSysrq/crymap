@@ -106,6 +106,7 @@ mod flags;
 mod mailboxes;
 mod messages;
 mod search;
+mod smtp_out;
 mod user_config;
 
 pub use self::defs::CommandProcessor;

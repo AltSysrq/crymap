@@ -144,3 +144,51 @@ fn user_configuration() {
         }
     };
 }
+
+#[test]
+fn foreign_smtp_tls() {
+    let setup = set_up();
+    let mut client = setup.connect("xcryfstl");
+    quick_log_in(&mut client);
+
+    ok_command!(client, c("XCRY SMTP-OUT FOREIGN-TLS INIT-TEST"));
+    command!(mut responses = client, c("XCRY SMTP-OUT FOREIGN-TLS LIST"));
+    assert_eq!(3, responses.len());
+    assert_tagged_ok(responses.pop().unwrap());
+
+    let mut stati = responses
+        .into_iter()
+        .map(|line| match line.response {
+            s::Response::XCryForeignSmtpTls(data) => data,
+            r => panic!("unexpected response: {r:?}"),
+        })
+        .collect::<Vec<_>>();
+    stati.sort_by_key(|s| s.domain.clone());
+
+    assert_eq!(
+        vec![
+            s::XCryForeignSmtpTlsData {
+                domain: Cow::Borrowed("insecure.example.com"),
+                starttls: false,
+                valid_certificate: false,
+                tls_version: None,
+            },
+            s::XCryForeignSmtpTlsData {
+                domain: Cow::Borrowed("secure.example.com"),
+                starttls: true,
+                valid_certificate: true,
+                tls_version: Some(Cow::Borrowed("TLS 1.3")),
+            },
+        ],
+        stati,
+    );
+
+    ok_command!(
+        client,
+        c("XCRY SMTP-OUT FOREIGN-TLS DELETE INSECURE.EXAMPLE.COM")
+    );
+
+    command!(mut responses = client, c("XCRY SMTP-OUT FOREIGN-TLS LIST"));
+    assert_eq!(2, responses.len());
+    assert_tagged_ok(responses.pop().unwrap());
+}

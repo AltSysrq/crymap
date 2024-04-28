@@ -1583,6 +1583,24 @@ pub enum TlsVersion {
     Tls13,
 }
 
+impl TlsVersion {
+    pub fn human_readable(self) -> &'static str {
+        match self {
+            Self::Ssl3 => "SSL 3",
+            Self::Tls10 => "TLS 1",
+            Self::Tls11 => "TLS 1.1",
+            Self::Tls12 => "TLS 1.2",
+            Self::Tls13 => "TLS 1.3",
+        }
+    }
+}
+
+impl fmt::Display for TlsVersion {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self.human_readable(), f)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct ForeignSmtpTlsStatus {
     pub domain: String,

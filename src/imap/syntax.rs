@@ -231,6 +231,9 @@ syntax_rule! {
         #[prefix("XCRY BACKUP-FILE ")]
         #[primitive(unicode_astring, astring)]
         XCryBackupFile(Cow<'a, str>),
+        #[prefix("XCRY SMTP-OUT FOREIGN-TLS ")]
+        #[delegate]
+        XCryForeignSmtpTls(XCryForeignSmtpTlsData<'a>),
     }
 }
 
@@ -1882,6 +1885,9 @@ syntax_rule! {
         #[prefix("XCRY SET-USER-CONFIG") 1* prefix(" ")]
         #[delegate(XCryUserConfigOption)]
         XCrySetUserConfig(Vec<XCryUserConfigOption<'a>>),
+        #[prefix("XCRY SMTP-OUT FOREIGN-TLS ")]
+        #[delegate]
+        XCryForeignSmtpTls(XCryForeignSmtpTlsCommand<'a>),
     }
 }
 
@@ -2022,6 +2028,39 @@ syntax_rule! {
         #[prefix("SMTP-OUT-FAILURE-RECEIPTS ")]
         #[primitive(unicode_nstring, nstring)]
         SmtpOutFailureReceipts(Option<Cow<'a, str>>),
+    }
+}
+
+syntax_rule! {
+    #[]
+    enum XCryForeignSmtpTlsCommand<'a> {
+        #[]
+        #[tag("LIST")]
+        List(()),
+        #[]
+        #[tag("INIT-TEST")]
+        InitTest(()),
+        #[prefix("DELETE") 1* prefix(" ")]
+        #[primitive(unicode_astring, astring)]
+        Delete(Vec<Cow<'a, str>>),
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct XCryForeignSmtpTlsData<'a> {
+        #[]
+        #[primitive(unicode_astring, astring)]
+        domain: Cow<'a, str>,
+        #[]
+        #[cond(" STARTTLS")]
+        starttls: bool,
+        #[]
+        #[cond(" VALID-CERTIFICATE")]
+        valid_certificate: bool,
+        #[prefix(" ")]
+        #[primitive(unicode_nstring, nstring)]
+        tls_version: Option<Cow<'a, str>>,
     }
 }
 
