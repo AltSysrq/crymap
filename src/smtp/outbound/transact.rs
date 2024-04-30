@@ -380,14 +380,9 @@ impl Transaction<'_, '_> {
     async fn send_message_via_data(&mut self) -> Result<(), Error> {
         self.send_command("DATA").await?;
         match self.read_status().await? {
-            200..=299 => {
-                self.transcript.line(format_args!(
-                    "\"Success\" response code is nonsense here",
-                ));
-                return Err(Error::TryNextServer);
-            },
-
-            354 => {},
+            // 2XX status codes are undefined, but OpenSMTPD treats them the
+            // same as 354 here, presumably with good reason.
+            200..=299 | 354 => {},
 
             code => {
                 self.handle_status_as_server(code)?;
@@ -1237,6 +1232,28 @@ mod test {
                 R(pc::Ok, "OK"),
                 C("DATA"),
                 R(pc::StartMailInput, "OK"),
+                DotStuffedData,
+                R(pc::Ok, "OK"),
+                C("QUIT"),
+                R(pc::ServiceClosing, "Bye"),
+            ],
+        );
+    }
+
+    #[test]
+    fn data_two_hundred() {
+        all_succeed(
+            &SessionParms::default(),
+            &[
+                R(pc::Ok, "Greeting"),
+                C("EHLO mx.earth.com"),
+                R(pc::Ok, "No extensions supported"),
+                C("MAIL FROM:<zim@earth.com>"),
+                R(pc::Ok, "OK"),
+                C("RCPT TO:<tallest@irk.com>"),
+                R(pc::Ok, "OK"),
+                C("DATA"),
+                R(pc::Ok, "Not 354 for some reason..."),
                 DotStuffedData,
                 R(pc::Ok, "OK"),
                 C("QUIT"),
