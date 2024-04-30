@@ -114,6 +114,9 @@ struct Capabilities {
 
 impl Transaction<'_, '_> {
     async fn run(mut self) -> Result<Results, Error> {
+        // Process greeting
+        self.read_status_as_server().await?;
+
         let capabilities = self.execute_helo().await?;
         let (tls_status, capabilities) =
             self.negotiate_tls(capabilities).await?;
@@ -149,9 +152,6 @@ impl Transaction<'_, '_> {
     }
 
     async fn execute_helo(&mut self) -> Result<Capabilities, Error> {
-        // Process greeting
-        self.read_status_as_server().await?;
-
         let mut capabilities = Capabilities::default();
         self.send_command(&format!("EHLO {}", self.local_host_name))
             .await?;
@@ -1287,7 +1287,6 @@ mod test {
                 C("STARTTLS"),
                 R(pc::Ok, "Ok"),
                 StartTls(true),
-                R(pc::Ok, "Greeting"),
                 C("EHLO mx.earth.com"),
                 R(pc::Ok, "Ok"),
                 C("MAIL FROM:<zim@earth.com>"),
@@ -1398,7 +1397,6 @@ mod test {
                 C("STARTTLS"),
                 R(pc::Ok, "Ok"),
                 StartTls(true),
-                R(pc::Ok, "Greeting"),
                 C("EHLO mx.earth.com"),
                 R(pc::Ok, "Ok"),
                 C("MAIL FROM:<zim@earth.com>"),

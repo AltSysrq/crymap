@@ -141,7 +141,9 @@ impl SmtpClient {
         self.skip_pleasantries(command);
         self.simple_command("STARTTLS", "220 2.0.0");
         self.start_tls();
-        self.skip_pleasantries(command);
+        self.write_line(&format!("{}\r\n", command));
+        let responses = self.read_responses();
+        assert!(responses.last().unwrap().starts_with("250"));
     }
 
     /// Skip the greetings and so forth, enable TLS, and log in with the given

@@ -954,8 +954,7 @@ impl Server {
         self.io
             .get_mut()
             .ssl_accept(&self.ssl_acceptor.take().unwrap())
-            .await?;
-        self.send_greeting().await
+            .await
     }
 
     async fn need_helo(&mut self, present: bool) -> Option<Result<(), Error>> {

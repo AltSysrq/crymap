@@ -1074,7 +1074,7 @@ fn start_tls() {
 
     // Sleep briefly to ensure the async code has a chance to observe a stall.
     std::thread::sleep(std::time::Duration::from_millis(100));
-    cxn.skip_pleasantries("HELO 192.0.2.3");
+    cxn.simple_command("HELO 192.0.2.3", "250 ");
     cxn.simple_command("MAIL FROM:<>", "250 2.0.0");
     cxn.simple_command("RCPT TO:<zim@irk.com>", "250 2.1.5");
     cxn.simple_command("DATA", "354 ");

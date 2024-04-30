@@ -533,7 +533,9 @@ fn start_tls() {
 
     // Sleep briefly to ensure the async code has a chance to observe a stall.
     std::thread::sleep(std::time::Duration::from_millis(100));
-    cxn.skip_pleasantries("LHLO starttls");
+    cxn.write_line("LHLO starttls\r\n");
+    let responses = cxn.read_responses();
+    assert!(responses.last().unwrap().starts_with("250 "));
 
     let tls_email = "Subject: TLS\r\n\r\nThis message was sent over TLS.\r\n";
     cxn.simple_command("MAIL FROM:<>", "250 2.0.0");

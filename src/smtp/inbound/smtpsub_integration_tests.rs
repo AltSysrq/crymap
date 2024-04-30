@@ -258,13 +258,6 @@ fn ehlo() {
 
     // Sleep briefly to ensure the async code has a chance to observe a stall.
     std::thread::sleep(std::time::Duration::from_millis(100));
-    responses = cxn.read_responses();
-    assert_eq!(1, responses.len());
-    assert!(
-        responses[0].starts_with("220 mx.earth.com"),
-        "Unexpected greeting: {}",
-        responses[0],
-    );
 
     cxn.write_line("EHLO mail.irk.com\r\n");
     responses = cxn.read_responses();
@@ -335,7 +328,7 @@ fn out_of_order_commands() {
     cxn.simple_command("AUTH PLAIN emltAHppbQBodW50ZXIy", "538 5.7.11");
     cxn.simple_command("STARTTLS", "220");
     cxn.start_tls();
-    cxn.skip_pleasantries("HELO localhost");
+    cxn.simple_command("HELO localhost", "250 ");
     cxn.simple_command("AUTH PLAIN emltAHppbQBodW50ZXIy", "235");
 
     cxn.simple_command("MAIL FROM:<>", "250 2.0.0");
