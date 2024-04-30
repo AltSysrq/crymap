@@ -440,6 +440,42 @@ fn minimal_mail_delivery() {
 }
 
 #[test]
+fn slow_mail_delivery() {
+    fn delay() {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    let setup = set_up();
+    let mut cxn = setup.connect("slow_mail_delivery", false);
+    cxn.skip_pleasantries("HELO 192.0.2.3");
+    cxn.simple_command("MAIL FROM:<>", "250 2.0.0");
+    cxn.simple_command("RCPT TO:<zim@irk.com>", "250 2.1.5");
+    cxn.simple_command("DATA", "354 ");
+    cxn.write_raw(b"From: ");
+    delay();
+    cxn.write_raw(b"someone@earth.com\r");
+    delay();
+    cxn.write_raw(b"\nSubject: Foo");
+    delay();
+    cxn.write_raw(b"\r");
+    delay();
+    cxn.write_raw(b"\n");
+    delay();
+    cxn.write_raw(b"\r");
+    delay();
+    cxn.write_raw(b"\n");
+    cxn.write_raw(b"slow_mail_delivery\r\n.\r\n");
+
+    let responses = cxn.read_responses();
+    assert_eq!(1, responses.len());
+    assert!(responses[0].starts_with("250 2.0.0"));
+
+    let delivered =
+        fetch_email(&setup, "zim", "minimal_mail_delivery").unwrap();
+    println!("delivered:\n{delivered}");
+}
+
+#[test]
 fn multi_mail_delivery() {
     let setup = set_up();
     let mut cxn = setup.connect("multi_mail_delivery", false);

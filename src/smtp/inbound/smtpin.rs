@@ -893,7 +893,7 @@ pub(super) async fn buffer_headers(
         if let Some(m) =
             END_OF_HEADERS.find(&header_buffer[search_start..header_buffer_len])
         {
-            break m.end();
+            break search_start + m.end();
         }
 
         if header_buffer_len > MAX_HEADER_BLOCK_SIZE {
