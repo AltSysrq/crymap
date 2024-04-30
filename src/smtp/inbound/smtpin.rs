@@ -1468,7 +1468,7 @@ mod test {
             .spf_pass("example.com")
             .from_same("example.com")
             .dkim(Some("example.com"), Some("selector"), None)
-            .dmarc("v=DMARC1 p=reject aspf=s adkim=s")
+            .dmarc("v=DMARC1; p=reject; aspf=s; adkim=s")
             .run();
         assert_eq!(
             "Authentication-Results: localhost;\r\n\
@@ -1491,7 +1491,7 @@ mod test {
             .spf_pass("subdomain.example.com")
             .from_same("example.com")
             .dkim(Some("example.com"), Some("selector"), None)
-            .dmarc("v=DMARC1 p=reject aspf=s adkim=r")
+            .dmarc("v=DMARC1; p=reject; aspf=s; adkim=r")
             .run();
         assert_eq!(
             "Authentication-Results: localhost;\r\n\
@@ -1511,7 +1511,7 @@ mod test {
             .spf_pass("example.com")
             .from_same("example.com")
             .dkim(Some("subdomain.example.com"), Some("selector"), None)
-            .dmarc("v=DMARC1 p=reject aspf=r adkim=s")
+            .dmarc("v=DMARC1; p=reject; aspf=r; adkim=s")
             .run();
         assert_eq!(
             "Authentication-Results: localhost;\r\n\
@@ -1534,7 +1534,7 @@ mod test {
             .spf_pass("subdomain.example.com")
             .from_same("example.com")
             .dkim(Some("example.com"), Some("selector"), None)
-            .dmarc("v=DMARC1 p=reject aspf=r adkim=s")
+            .dmarc("v=DMARC1; p=reject; aspf=r; adkim=s")
             .run();
         assert_eq!(
             "Authentication-Results: localhost;\r\n\
@@ -1554,7 +1554,7 @@ mod test {
             .spf_pass("example.com")
             .from_same("example.com")
             .dkim(Some("subdomain.example.com"), Some("selector"), None)
-            .dmarc("v=DMARC1 p=reject aspf=s adkim=r")
+            .dmarc("v=DMARC1; p=reject; aspf=s; adkim=r")
             .run();
         assert_eq!(
             "Authentication-Results: localhost;\r\n\
@@ -1623,7 +1623,7 @@ mod test {
     fn authenticate_message_spf_errors() {
         let (headers, reject) = AuthMessageTest::new()
             .from_same("example.com")
-            .dmarc("v=DMARC1 p=reject")
+            .dmarc("v=DMARC1; p=reject")
             .dkim(Some("example.com"), Some("selector"), None)
             .spf_result(
                 "helo",
@@ -1648,7 +1648,7 @@ mod test {
 
         let (headers, reject) = AuthMessageTest::new()
             .from_same("example.com")
-            .dmarc("v=DMARC1 p=reject")
+            .dmarc("v=DMARC1; p=reject")
             .dkim(Some("example.com"), Some("selector"), None)
             .spf_result(
                 "helo",
@@ -1673,7 +1673,7 @@ mod test {
 
         let (headers, reject) = AuthMessageTest::new()
             .from_same("example.com")
-            .dmarc("v=DMARC1 p=reject")
+            .dmarc("v=DMARC1;p=reject")
             .dkim(Some("example.com"), Some("selector"), None)
             .spf_result(
                 "helo",
@@ -1698,7 +1698,7 @@ mod test {
 
         let (headers, reject) = AuthMessageTest::new()
             .from_same("example.com")
-            .dmarc("v=DMARC1 p=reject")
+            .dmarc("v=DMARC1; p=reject")
             .dkim(Some("example.com"), Some("selector"), None)
             .spf_result(
                 "helo",
@@ -1723,7 +1723,7 @@ mod test {
 
         let (headers, reject) = AuthMessageTest::new()
             .from_same("example.com")
-            .dmarc("v=DMARC1 p=reject")
+            .dmarc("v=DMARC1; p=reject")
             .dkim(Some("example.com"), Some("selector"), None)
             .spf_result(
                 "helo",
@@ -1748,7 +1748,7 @@ mod test {
 
         let (headers, reject) = AuthMessageTest::new()
             .from_same("example.com")
-            .dmarc("v=DMARC1 p=reject")
+            .dmarc("v=DMARC1; p=reject")
             .dkim(Some("example.com"), Some("selector"), None)
             .spf_result(
                 "helo",
@@ -1776,7 +1776,7 @@ mod test {
     fn authenticate_message_dkim_errors() {
         let (headers, reject) = AuthMessageTest::new()
             .from_same("example.com")
-            .dmarc("v=DMARC1 p=reject")
+            .dmarc("v=DMARC1; p=reject")
             .spf_pass("example.com")
             .dkim(
                 None,
@@ -1800,7 +1800,7 @@ mod test {
 
         let (headers, reject) = AuthMessageTest::new()
             .from_same("example.com")
-            .dmarc("v=DMARC1 p=reject")
+            .dmarc("v=DMARC1; p=reject")
             .spf_pass("example.com")
             .dkim(
                 Some("example.com"),
@@ -1827,7 +1827,7 @@ mod test {
 
         let (headers, reject) = AuthMessageTest::new()
             .from_same("example.com")
-            .dmarc("v=DMARC1 p=reject")
+            .dmarc("v=DMARC1; p=reject")
             .spf_pass("example.com")
             .dkim(
                 Some("example.com"),
@@ -1854,7 +1854,7 @@ mod test {
 
         let (headers, reject) = AuthMessageTest::new()
             .from_same("example.com")
-            .dmarc("v=DMARC1 p=reject")
+            .dmarc("v=DMARC1; p=reject")
             .spf_pass("example.com")
             .dkim(
                 Some("example.com"),
@@ -1878,7 +1878,7 @@ mod test {
 
         let (headers, reject) = AuthMessageTest::new()
             .from_same("example.com")
-            .dmarc("v=DMARC1 p=reject")
+            .dmarc("v=DMARC1; p=reject")
             .spf_pass("example.com")
             .dkim(
                 Some("example.com"),

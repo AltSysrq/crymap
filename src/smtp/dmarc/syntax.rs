@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -120,7 +120,7 @@ impl<'a> Record<'a> {
         let mut aggregate_report_addresses = None::<&'a str>;
         let mut message_report_addresses = None::<&'a str>;
 
-        for word in s.split([' ', '\t']) {
+        for word in s.split(';') {
             if word.is_empty() {
                 continue;
             }
@@ -129,6 +129,9 @@ impl<'a> Record<'a> {
             let Some((k, v)) = word.split_once('=') else {
                 continue;
             };
+
+            let k = k.trim();
+            let v = v.trim();
 
             match k {
                 "v" => {
@@ -246,11 +249,11 @@ mod test {
         assert_eq!(Err(Error::NoPolicy), Record::parse("v=DMARC1"));
         assert_eq!(
             Err(Error::InvalidPolicy),
-            Record::parse("v=DMARC1 p=whatever"),
+            Record::parse("v=DMARC1; p=whatever"),
         );
         assert_eq!(
             Err(Error::DuplicateField("p")),
-            Record::parse("v=DMARC1 p=reject p=none"),
+            Record::parse("v=DMARC1; p=reject; p=none"),
         );
 
         // Minimal record
@@ -268,7 +271,7 @@ mod test {
                 aggregate_report_addresses: None,
                 message_report_addresses: None,
             }),
-            Record::parse("v=DMARC1 p=quarantine"),
+            Record::parse("v = DMARC1 ; p = quarantine "),
         );
 
         // Maximal record
@@ -290,9 +293,9 @@ mod test {
                 message_report_addresses: Some("mailto:bar@example.com"),
             }),
             Record::parse(
-                "v=DMARC1 p=none s=reject adkim=s aspf=s fo=1:0:s:d \
-                 pct=42 rf=text/plain ri=3600 \
-                 rua=mailto:foo@example.com ruf=mailto:bar@example.com",
+                "v=DMARC1; p=none; s=reject; adkim=s; aspf=s; fo=1:0:s:d; \
+                 pct=42; rf=text/plain; ri=3600; \
+                 rua=mailto:foo@example.com; ruf=mailto:bar@example.com",
             ),
         );
 
@@ -312,7 +315,7 @@ mod test {
                 message_report_addresses: None,
             }),
             Record::parse(
-                "v=DMARC1 p=none adkim=y aspf=y fo=y pct=all ri=never",
+                "v=DMARC1; p=none; adkim=y; aspf=y; fo=y; pct=all; ri=never",
             ),
         );
     }

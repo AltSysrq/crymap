@@ -143,7 +143,7 @@ async fn run_server(
     ));
     dns_cache.txt.push((
         Rc::new(dns::Name::from_ascii("_dmarc.mars.com").unwrap()),
-        dns::Entry::Ok(vec!["v=DMARC1 p=reject".to_owned().into()]),
+        dns::Entry::Ok(vec!["v=DMARC1; p=reject".to_owned().into()]),
     ));
     dns_cache.txt.push((
         Rc::new(dns::Name::from_ascii("venus.com").unwrap()),
@@ -161,7 +161,7 @@ async fn run_server(
     ));
     dns_cache.txt.push((
         Rc::new(dns::Name::from_ascii("_dmarc.venus.com").unwrap()),
-        dns::Entry::Ok(vec!["v=DMARC1 p=reject".to_owned().into()]),
+        dns::Entry::Ok(vec!["v=DMARC1; p=reject".to_owned().into()]),
     ));
 
     let system_config = SystemConfig {
@@ -785,7 +785,7 @@ fn dmarc_accept_large_body() {
     cxn.write_line(&signature);
     cxn.write_line(unsigned_message_header);
     cxn.write_line("\r\n");
-    cxn.write_line(&unsigned_message_body);
+    cxn.write_raw(unsigned_message_body.as_bytes());
     cxn.write_line(".\r\n");
 
     let responses = cxn.read_responses();
