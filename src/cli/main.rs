@@ -78,6 +78,7 @@ pub(super) struct ServerCommonOptions {
 #[derive(StructOpt)]
 enum ServerSubcommand {
     Deliver(ServerDeliverSubcommand),
+    SmtpOutSanityCheck(SmtpOutSanityCheckSubcommand),
     /// Manage user accounts.
     User(ServerUserSubcommand),
     /// Serve a single IMAPS session over standard IO.
@@ -108,6 +109,9 @@ impl ServerSubcommand {
     fn common_options(&mut self) -> ServerCommonOptions {
         match *self {
             ServerSubcommand::Deliver(ref mut c) => mem::take(&mut c.common),
+            ServerSubcommand::SmtpOutSanityCheck(ref mut c) => {
+                mem::take(&mut c.common)
+            },
             ServerSubcommand::User(ServerUserSubcommand::Add(ref mut c)) => {
                 mem::take(&mut c.common)
             },
@@ -200,6 +204,24 @@ pub(super) struct ServerDeliverSubcommand {
     /// The files to import/deliver. "-" will read from stdin.
     #[structopt(parse(from_os_str), default_value = "-")]
     pub(super) inputs: Vec<PathBuf>,
+}
+
+/// Perform a sanity check on outbound SMTP capabilities.
+///
+/// This performs an assessment of how other mail servers may perceive your
+/// setup and provides recommendations for improving first-contact reputation.
+#[derive(StructOpt)]
+pub(super) struct SmtpOutSanityCheckSubcommand {
+    #[structopt(flatten)]
+    pub(super) common: ServerCommonOptions,
+
+    /// Assume this IP address is representative of the mail server, instead of
+    /// auto-detecting.
+    #[structopt(parse(try_from_str), long)]
+    pub(super) ip: Option<std::net::IpAddr>,
+
+    /// Simulate sending an email from this address.
+    pub(super) email: String,
 }
 
 #[derive(StructOpt, Default)]
@@ -517,6 +539,9 @@ fn server(mut cmd: ServerSubcommand) {
     match cmd {
         ServerSubcommand::Deliver(cmd) => {
             super::deliver::deliver(system_config, cmd, users_root);
+        },
+        ServerSubcommand::SmtpOutSanityCheck(cmd) => {
+            super::sanity::sanity_check(system_config, cmd);
         },
         ServerSubcommand::User(ServerUserSubcommand::Add(cmd)) => {
             super::user::add(cmd, users_root);

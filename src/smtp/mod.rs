@@ -17,12 +17,12 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 mod codes;
-mod dmarc;
-mod spf;
 mod syntax;
 
+pub mod dmarc;
 pub mod inbound;
 pub mod outbound;
+pub mod spf;
 
 #[cfg(feature = "dev-tools")]
 pub use dmarc::compile_psl;

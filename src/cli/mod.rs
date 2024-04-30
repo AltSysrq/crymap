@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020 Jason Lingle
+// Copyright (c) 2020, 2024 Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -30,5 +30,6 @@ mod imap_test;
 
 mod deliver;
 mod remote;
+mod sanity;
 mod serve;
 mod user;
