@@ -565,10 +565,6 @@ impl SmtpinService {
                 )
             })?;
 
-        // TODO Remove debugging
-        log::info!("full headers: {:?}", String::from_utf8_lossy(header_block));
-        log::info!("from header: {}", String::from_utf8_lossy(from_header));
-
         let from_addresses =
             header::parse_address_list(from_header).ok_or(SmtpResponse(
                 pc::TransactionFailed,
