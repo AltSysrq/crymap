@@ -31,6 +31,7 @@ use crate::{
     support::{
         append_limit::APPEND_SIZE_LIMIT,
         buffer::BufferReader,
+        dns,
         log_prefix::LogPrefix,
         safe_name::is_safe_name,
         system_config::{SmtpConfig, SystemConfig},
@@ -50,13 +51,9 @@ impl Recipient {
         let (mut local, domain) =
             match (split.next(), split.next(), split.next()) {
                 (Some(l), None, _) => (l.to_owned(), None),
-                (Some(l), Some(d), None) => {
-                    (l.to_owned(), Some(d.to_lowercase()))
-                },
+                (Some(l), Some(d), None) => (l.to_owned(), Some(d)),
                 _ => return None,
             };
-
-        // TODO Ensure domain is Punycode
 
         if !config.verbatim_user_names {
             local = local.to_lowercase();
@@ -69,7 +66,11 @@ impl Recipient {
 
         let normalised = match (config.keep_recipient_domain, domain) {
             (false, _) | (_, None) => local,
-            (true, Some(domain)) => format!("{}@{}", local, domain),
+            (true, Some(domain)) => {
+                let mut domain = dns::Name::from_str_relaxed(domain).ok()?;
+                domain.set_fqdn(false);
+                format!("{}@{}", local, domain.to_ascii())
+            },
         };
 
         if !is_safe_name(&normalised) {
@@ -245,6 +246,10 @@ mod test {
         assert_eq!(
             "FÖ.Ö+bar@baz.com",
             normalise("FÖ.Ö+bar@Baz.Com", true, true)
+        );
+        assert_eq!(
+            "föö@xn--br-via.com",
+            normalise("FÖ.Ö@BÄR.com.", true, false)
         );
 
         assert_eq!("<None>", normalise("foo@bar@baz", false, false));
