@@ -210,6 +210,7 @@ async fn try_domain(
         } else {
             try_addr(
                 transcript,
+                mx_domain,
                 addr,
                 account,
                 message_id,
@@ -281,6 +282,7 @@ async fn dns_a(
 
 async fn try_addr(
     transcript: &mut Transcript,
+    mx_domain: &Rc<dns::Name>,
     addr: IpAddr,
     account: &RefCell<Account>,
     message_id: SpooledMessageId,
@@ -329,6 +331,7 @@ async fn try_addr(
         message,
         &destinations.iter().map(|s| &**s).collect::<Vec<_>>(),
         tls_expectations,
+        mx_domain,
         local_host_name,
     )
     .await

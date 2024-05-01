@@ -35,7 +35,7 @@ use crate::{
         model::{ForeignSmtpTlsStatus, TlsVersion},
         v2::{SmtpTransfer, SpooledMessage},
     },
-    support::async_io::ServerIo,
+    support::{async_io::ServerIo, dns},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,6 +69,7 @@ pub async fn execute(
     message: SpooledMessage,
     destinations: &[&str],
     tls_expectations: &ForeignSmtpTlsStatus,
+    mx_domain: &dns::Name,
     local_host_name: &str,
 ) -> Result<Results, Error> {
     let tx = Transaction {
@@ -77,6 +78,7 @@ pub async fn execute(
         message,
         destinations,
         tls_expectations,
+        mx_domain,
         local_host_name,
 
         line_buffer: [0u8; MAX_LINE],
@@ -95,6 +97,7 @@ struct Transaction<'a, 'b> {
     message: SpooledMessage,
     destinations: &'b [&'b str],
     tls_expectations: &'b ForeignSmtpTlsStatus,
+    mx_domain: &'b dns::Name,
     local_host_name: &'b str,
 
     line_buffer: [u8; MAX_LINE],
@@ -264,10 +267,11 @@ impl Transaction<'_, '_> {
             )
             .map_err(unexpected_ssl_error)?;
 
+        let mx_domain_str = self.mx_domain.to_ascii();
         let ssl_result = tokio::time::timeout_at(
             self.command_deadline.into(),
             self.cxn.ssl_connect(
-                &self.tls_expectations.domain,
+                mx_domain_str.strip_suffix('.').unwrap_or(&*mx_domain_str),
                 &connector_builder.build(),
             ),
         )
@@ -885,12 +889,14 @@ mod test {
             size: parms.message_data.len() as u32,
             data: Box::new(io::Cursor::new(parms.message_data.clone())),
         };
+        let mx_domain = dns::Name::from_ascii("unused.com").unwrap();
         let client_future = execute(
             client_io,
             &mut transcript,
             message,
             parms.destinations,
             &parms.tls_expectations,
+            &mx_domain,
             parms.local_host_name,
         );
         let (ret, server_result) = tokio::join![client_future, server_future];
