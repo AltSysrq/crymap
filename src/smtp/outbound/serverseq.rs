@@ -305,6 +305,15 @@ async fn try_addr(
             return Err(transact::Error::TryNextServer);
         },
     };
+    // We need to convert the socket back into a non-async one since we want to
+    // manage the low-level tokio stuff ourselves.
+    let sock = match sock.into_std() {
+        Ok(sock) => sock,
+        Err(e) => {
+            transcript.line(format_args!("Failed to configure socket: {e}"));
+            return Err(transact::Error::TryNextServer);
+        },
+    };
     let server_io = match ServerIo::new_owned_socket(sock) {
         Ok(server_io) => server_io,
         Err(e) => {
