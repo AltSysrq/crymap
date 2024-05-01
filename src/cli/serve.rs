@@ -109,7 +109,10 @@ pub async fn imaps(
         users_root,
         dns_resolver,
     );
-    crate::imap::server::run(io, processor).await;
+    let local_set = tokio::task::LocalSet::new();
+    local_set
+        .run_until(crate::imap::server::run(io, processor))
+        .await;
 }
 
 #[tokio::main(flavor = "current_thread")]
