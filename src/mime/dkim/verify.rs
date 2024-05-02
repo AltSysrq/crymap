@@ -356,7 +356,8 @@ impl SubVerifier<'_> {
             },
         };
 
-        let header_data = hash::header_hash_data(&self.header, header_block);
+        let mut header_data =
+            hash::header_hash_data(&self.header, header_block);
         let mut verifier = match self.header.algorithm.signature {
             SignatureAlgorithm::Rsa => openssl::sign::Verifier::new(
                 self.header.algorithm.hash.message_digest(),
@@ -367,6 +368,20 @@ impl SubVerifier<'_> {
                 if self.header.algorithm.hash != HashAlgorithm::Sha256 {
                     return Err(Failure::InvalidHashSignatureCombination.into());
                 }
+
+                // There's a secret extra round of SHA-256 here. This seems to
+                // have been left in since the RSA data is necessarily hashed
+                // separately, but would be unnecessary since the first thing
+                // Ed25519 does is SHA-512.
+                let mut hasher = openssl::hash::Hasher::new(
+                    openssl::hash::MessageDigest::sha256(),
+                )
+                .map_err(Error::Ssl)?;
+                hasher.update(&header_data).map_err(Error::Ssl)?;
+                let bytes = hasher.finish().map_err(Error::Ssl)?;
+                header_data.clear();
+                header_data.extend_from_slice(&bytes);
+
                 // OpenSSL rejects explicit configuration of the digest.
                 openssl::sign::Verifier::new_without_digest(&public_key)
             },
@@ -479,6 +494,27 @@ mod test {
                 txt_records.clone(),
                 DKIM_AMAZONCOJP_RSA_SHA256,
             ),
+        );
+    }
+
+    #[test]
+    fn verify_rfc_8463() {
+        let txt_records = vec![
+            TxtRecordEntry {
+                selector: "brisbane".to_owned(),
+                sdid: "football.example.com".to_owned(),
+                txt: Ok(test_domain_keys::RFC8463_BRISBANE.to_owned().into()),
+            },
+            TxtRecordEntry {
+                selector: "test".to_owned(),
+                sdid: "football.example.com".to_owned(),
+                txt: Ok(test_domain_keys::RFC8463_TEST.to_owned().into()),
+            },
+        ];
+
+        assert_eq!(
+            vec![Ok(()), Ok(())],
+            run_verifier(1528637900, txt_records, RFC_8463),
         );
     }
 

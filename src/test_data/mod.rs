@@ -102,6 +102,9 @@ pub static DKIM_AMAZONCOJP_RSA_SHA256: &[u8] =
 pub static DKIM_YAHOO_RSA_SHA256: &[u8] =
     include_bytes!("dkim-yahoo-rsa-sha256.eml");
 
+/// The example message in RFC 8463 (DKIM Ed25519).
+pub static RFC_8463: &[u8] = include_bytes!("rfc-8463.eml");
+
 lazy_static::lazy_static! {
     pub static ref CERTIFICATE_PRIVATE_KEY: openssl::pkey::PKey<openssl::pkey::Private> =
         openssl::pkey::PKey::from_rsa(openssl::rsa::Rsa::generate(2048).unwrap())

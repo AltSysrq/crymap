@@ -171,13 +171,22 @@ impl Write for Signer<'_> {
 impl SubSigner<'_> {
     fn finish(mut self, header_block: &[u8]) -> Result<String, Error> {
         self.header.body_hash = self.hasher.finish(&self.header)?;
-        let hash_data = hash::header_hash_data(&self.header, header_block);
+        let mut hash_data = hash::header_hash_data(&self.header, header_block);
         let mut signer = match self.header.algorithm.signature {
             SignatureAlgorithm::Rsa => openssl::sign::Signer::new(
                 self.header.algorithm.hash.message_digest(),
                 self.key,
             ),
             SignatureAlgorithm::Ed25519 => {
+                let mut hasher = openssl::hash::Hasher::new(
+                    openssl::hash::MessageDigest::sha256(),
+                )
+                .map_err(Error::Ssl)?;
+                hasher.update(&hash_data).map_err(Error::Ssl)?;
+                let bytes = hasher.finish().map_err(Error::Ssl)?;
+                hash_data.clear();
+                hash_data.extend_from_slice(&bytes);
+
                 // OpenSSL rejects explicit configuration of the digest
                 openssl::sign::Signer::new_without_digest(self.key)
             },
