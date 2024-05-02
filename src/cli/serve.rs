@@ -181,14 +181,14 @@ pub async fn smtpin(
             IpAddr::V6(addr)
         }
     } else {
-        fatal!(EX_OSERR, "stdin does not seem to be a TCP connection",);
+        fatal!(EX_OSERR, "stdin does not seem to be a TCP connection");
     };
 
     let resolver =
         match hickory_resolver::AsyncResolver::tokio_from_system_conf() {
             Ok(r) => r,
             Err(e) => {
-                fatal!(EX_OSERR, "Failed to initialise DNS resolver: {e}",)
+                fatal!(EX_OSERR, "Failed to initialise DNS resolver: {e}")
             },
         };
 

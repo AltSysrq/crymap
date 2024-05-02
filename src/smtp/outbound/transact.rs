@@ -241,20 +241,39 @@ impl Transaction<'_, '_> {
             SslConnector::builder(SslMethod::tls_client())
                 .map_err(unexpected_ssl_error)?;
         let valid_certificate = Arc::new(AtomicBool::new(false));
-        connector_builder.set_verify_callback(
-            if self.tls_expectations.valid_certificate {
-                SslVerifyMode::PEER
-            } else {
-                SslVerifyMode::NONE
-            },
-            {
-                let valid_certificate = Arc::clone(&valid_certificate);
-                move |valid, _| {
+        let expect_valid_certificate = self.tls_expectations.valid_certificate;
+        // Exactly how to implement "accept any certificate, but tell me
+        // whether the certificate you accepted was valid" is surprisingly
+        // unclear.
+        //
+        // If the verification mode is not PEER, the `valid` argument to the
+        // callback will always be `false`. Thus we need to leave verification
+        // enabled if we hope to get any information on the status of the
+        // certificate.
+        //
+        // The callback itself is invoked three times on connection. On the
+        // third invocation, `valid` will be `true` if the earlier invocations
+        // returned `true`. The first two invocations appear to have the same
+        // value for `valid` --- at the very least, they are both `true` for a
+        // fully good certificate and both `false` for a non-expired
+        // self-signed certificate.
+        //
+        // Thus, we use the first invocation of the callback to extract the
+        // validity, but always return that the certificate should be treated
+        // as valid if we're not demanding a valid certificate. We then ignore
+        // the later invocations which may be subject to feedback from the
+        // callback returning `true`.
+        connector_builder.set_verify_callback(SslVerifyMode::PEER, {
+            let valid_certificate = Arc::clone(&valid_certificate);
+            let first_invocation = AtomicBool::new(true);
+            move |valid, _| {
+                eprintln!("verify_callback: valid={valid}");
+                if first_invocation.swap(false, Ordering::Relaxed) {
                     valid_certificate.store(valid, Ordering::Relaxed);
-                    valid
                 }
-            },
-        );
+                valid || !expect_valid_certificate
+            }
+        });
         connector_builder
             .set_min_proto_version(
                 match self.tls_expectations.tls_version.unwrap_or_default() {
