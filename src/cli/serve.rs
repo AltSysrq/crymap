@@ -410,6 +410,10 @@ fn configure_system(
         exit.exit();
     }
 
+    // We deliberately want to make things group-writable.
+    let _ =
+        nix::sys::stat::umask(nix::sys::stat::Mode::from_bits_retain(0o002));
+
     // We've dropped all privileges we can; it's now safe to start talking to
     // the client.
     match (nix::unistd::isatty(STDIN), nix::unistd::isatty(STDOUT)) {
