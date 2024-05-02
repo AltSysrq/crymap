@@ -179,7 +179,7 @@ impl SubSigner<'_> {
             ),
             SignatureAlgorithm::Ed25519 => {
                 let mut hasher = openssl::hash::Hasher::new(
-                    openssl::hash::MessageDigest::sha256(),
+                    self.header.algorithm.hash.message_digest(),
                 )
                 .map_err(Error::Ssl)?;
                 hasher.update(&hash_data).map_err(Error::Ssl)?;

@@ -374,7 +374,7 @@ impl SubVerifier<'_> {
                 // separately, but would be unnecessary since the first thing
                 // Ed25519 does is SHA-512.
                 let mut hasher = openssl::hash::Hasher::new(
-                    openssl::hash::MessageDigest::sha256(),
+                    self.header.algorithm.hash.message_digest(),
                 )
                 .map_err(Error::Ssl)?;
                 hasher.update(&header_data).map_err(Error::Ssl)?;
