@@ -172,6 +172,10 @@ pub struct SmtpDomain {
     ///   encoded in base64.
     /// - The string "ed25519:" followed by the ED25519 private key in raw
     ///   format, encoded in base64.
+    ///
+    /// Signatures on the outgoing message are put in lexicographical order by
+    /// keys. Some servers only look at the first signature, so the most
+    /// compatible algorithm should come first.
     pub dkim: BTreeMap<String, DkimKey>,
 }
 

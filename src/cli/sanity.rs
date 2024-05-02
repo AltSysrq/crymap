@@ -430,10 +430,16 @@ fn generate_dkim_config(
         "\
 \tCreate the following DNS records:
 \t\trsa._domainkey.{domain} TXT {rsa_txt}
-\t\ted25519._domainkey.{domain} TXT {ed25519_txt}
+\t\tzed25519._domainkey.{domain} TXT {ed25519_txt}
 \tAnd add the following lines to your Crymap SMTP configuration for {domain}:
 \t\tdkim.rsa = \"{rsa_cfg}\"
-\t\tdkim.ed25519 = \"{ed25519_cfg}\"",
+\t\tdkim.zed25519 = \"{ed25519_cfg}\"
+\tYou can rename the \"rsa\" and \"zed25519\" selectors if you like, but keep
+\tin mind the signatures will be sent in ascending lexicographical order by
+\tselector. As of 2024-05-02, Exchange Online (i.e. outlook.com and friends)
+\tonly looks at the first signature even if it doesn't understand it, and it
+\tdoes not understand ED25519 signatures, so it will reject your mail as spam
+\tif your ED25519 key comes first (hence the 'z' prefix in this suggestion).",
     );
 
     Ok(())
