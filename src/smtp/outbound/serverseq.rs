@@ -183,7 +183,7 @@ async fn dns_mx(
     }
 
     mx_records.shuffle(&mut rand::thread_rng());
-    mx_records.sort_by_key(|&(_, preference)| std::cmp::Reverse(preference));
+    mx_records.sort_by_key(|&(_, preference)| preference);
     Ok(mx_records.into_iter().map(|(name, _)| name).collect())
 }
 
@@ -561,7 +561,7 @@ mod test {
     fn simple_happy_path() {
         run_test(
             &[
-                ("example.com", &["10@mx2.example.com", "20@mx1.example.com"]),
+                ("example.com", &["20@mx2.example.com", "10@mx1.example.com"]),
                 ("mx1.example.com", &["1.2.3.4"]),
             ],
             &[(
@@ -583,7 +583,7 @@ mod test {
     fn simple_happy_path_ipv6() {
         run_test(
             &[
-                ("example.com", &["10@mx2.example.com", "20@mx1.example.com"]),
+                ("example.com", &["20@mx2.example.com", "10@mx1.example.com"]),
                 ("mx1.example.com", &["dead::beef"]),
             ],
             &[(
@@ -624,7 +624,7 @@ mod test {
     fn connect_try_next_server_ip_address() {
         run_test(
             &[
-                ("example.com", &["10@mx2.example.com", "20@mx1.example.com"]),
+                ("example.com", &["20@mx2.example.com", "10@mx1.example.com"]),
                 ("mx1.example.com", &["1.2.3.4", "4.5.6.7"]),
             ],
             &[
@@ -649,7 +649,7 @@ mod test {
     fn connect_try_next_server_mx_record() {
         run_test(
             &[
-                ("example.com", &["10@mx2.example.com", "20@mx1.example.com"]),
+                ("example.com", &["20@mx2.example.com", "10@mx1.example.com"]),
                 ("mx1.example.com", &["1.2.3.4"]),
                 ("mx2.example.com", &["4.5.6.7"]),
             ],
@@ -675,7 +675,7 @@ mod test {
     fn connect_total_failure() {
         run_test(
             &[
-                ("example.com", &["10@mx2.example.com", "20@mx1.example.com"]),
+                ("example.com", &["20@mx2.example.com", "10@mx1.example.com"]),
                 ("mx1.example.com", &["1.2.3.4"]),
                 ("mx2.example.com", &["4.5.6.7"]),
             ],
@@ -690,7 +690,7 @@ mod test {
     fn a_record_error() {
         run_test(
             &[
-                ("example.com", &["10@mx2.example.com", "20@mx1.example.com"]),
+                ("example.com", &["20@mx2.example.com", "10@mx1.example.com"]),
                 ("mx1.example.com", &["a-error"]),
                 ("mx2.example.com", &["4.5.6.7"]),
             ],
@@ -713,7 +713,7 @@ mod test {
     fn a_record_not_found() {
         run_test(
             &[
-                ("example.com", &["10@mx2.example.com", "20@mx1.example.com"]),
+                ("example.com", &["20@mx2.example.com", "10@mx1.example.com"]),
                 ("mx2.example.com", &["4.5.6.7"]),
             ],
             &[(
@@ -746,7 +746,7 @@ mod test {
     fn all_servers_tempfail() {
         run_test(
             &[
-                ("example.com", &["10@mx2.example.com", "20@mx1.example.com"]),
+                ("example.com", &["20@mx2.example.com", "10@mx1.example.com"]),
                 ("mx2.example.com", &["a-error", "aaaa-error"]),
             ],
             &[],
