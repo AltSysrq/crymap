@@ -476,6 +476,33 @@ fn slow_mail_delivery() {
 }
 
 #[test]
+fn pipelined_mail_delivery() {
+    let setup = set_up();
+    let mut cxn = setup.connect("pipelined_mail_delivery", false);
+    cxn.write_line(
+        "HELO 192.0.2.3\r\n\
+         MAIL FROM:<>\r\n\
+         RCPT TO:<zim@irk.com>\r\n\
+         DATA\r\n\
+         From: someone@earth.com\r\n\
+         Subject: Foo\r\n\
+         \r\n\
+         pipelined_mail_delivery\r\n\
+         .\r\n\
+         QUIT\r\n",
+    );
+    for _ in 0..7 {
+        let responses = cxn.read_responses();
+        assert_eq!(1, responses.len());
+        assert!(
+            responses[0].starts_with("2") || responses[0].starts_with("354 "),
+        );
+    }
+
+    assert!(fetch_email(&setup, "zim", "pipelined_mail_delivery").is_some());
+}
+
+#[test]
 fn multi_mail_delivery() {
     let setup = set_up();
     let mut cxn = setup.connect("multi_mail_delivery", false);
