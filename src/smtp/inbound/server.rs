@@ -21,6 +21,7 @@ use std::io;
 use std::pin::Pin;
 use std::str;
 use std::task;
+use std::time::{Duration, Instant};
 
 use log::{error, warn};
 use openssl::ssl::SslAcceptor;
@@ -64,6 +65,7 @@ struct Server {
     local_host_name: String,
 
     ineffective_commands: u32,
+    deadline_tx: mpsc::Sender<Instant>,
     quit: bool,
     has_helo: bool,
     has_mail_from: bool,
@@ -82,6 +84,8 @@ pub(super) async fn run(
     service: Service,
     local_host_name: String,
 ) -> Result<(), Error> {
+    let (deadline_tx, deadline_rx) = mpsc::channel(1);
+
     let mut server = Server {
         io: BufStream::new(io),
         log_prefix,
@@ -90,6 +94,7 @@ pub(super) async fn run(
         local_host_name,
 
         ineffective_commands: 0,
+        deadline_tx,
         quit: false,
         has_helo: false,
         has_mail_from: false,
@@ -98,7 +103,16 @@ pub(super) async fn run(
         sending_data: None,
         unix_newlines: false,
     };
-    server.run().await
+
+    tokio::select! {
+        r = server.run() => r,
+        _ = idle_timer(deadline_rx) => {
+            Err(Error::Io(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Connection idle timer expired",
+            )))
+        },
+    }
 }
 
 struct SendData {
@@ -177,6 +191,10 @@ impl Server {
     }
 
     async fn run_command(&mut self, buffer: &mut Vec<u8>) -> Result<(), Error> {
+        let _ = self
+            .deadline_tx
+            .send(Instant::now() + Duration::from_secs(60))
+            .await;
         buffer.clear();
 
         (&mut self.io)
@@ -736,6 +754,10 @@ impl Server {
         )
         .await?;
 
+        let _ = self
+            .deadline_tx
+            .send(Instant::now() + Duration::from_secs(1800))
+            .await;
         {
             let sending_data = self.sending_data.as_mut().unwrap();
             copy_with_dot_stuffing(
@@ -759,6 +781,12 @@ impl Server {
         len: u64,
         last: bool,
     ) -> Result<(), Error> {
+        // Extend the deadline to account for a 32kbps transfer rate.
+        let _ = self
+            .deadline_tx
+            .send(Instant::now() + Duration::from_secs(30 + len / 4000))
+            .await;
+
         let mut consumed = false;
         let result = self.cmd_binary_data_impl(&mut consumed, len, last).await;
         if !consumed {
@@ -1366,6 +1394,21 @@ async fn copy_with_dot_stuffing(
     }
 
     Ok(())
+}
+
+// Runs until either the deadline channel is closed or the current deadline has
+// expired. Used to force-close idle connections.
+async fn idle_timer(mut deadline_rx: mpsc::Receiver<Instant>) {
+    let mut deadline = Instant::now() + Duration::from_secs(30);
+
+    loop {
+        match tokio::time::timeout_at(deadline.into(), deadline_rx.recv()).await
+        {
+            Err(_) => return,   // Timed out
+            Ok(None) => return, // Done
+            Ok(Some(d)) => deadline = d,
+        }
+    }
 }
 
 #[cfg(test)]
