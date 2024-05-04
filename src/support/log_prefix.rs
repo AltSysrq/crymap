@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -17,6 +17,7 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::fmt;
+use std::mem;
 use std::sync::{Arc, Mutex};
 
 /// Tracks text that should be included in at the start of every log statement.
@@ -31,6 +32,7 @@ pub struct LogPrefix {
 struct Inner {
     protocol: String,
     user: Option<String>,
+    helo: Option<String>,
     ua_name: Option<String>,
     ua_version: Option<String>,
 }
@@ -41,6 +43,7 @@ impl LogPrefix {
             inner: Arc::new(Mutex::new(Inner {
                 protocol,
                 user: None,
+                helo: None,
                 ua_name: None,
                 ua_version: None,
             })),
@@ -55,7 +58,11 @@ impl LogPrefix {
     }
 
     pub fn set_user(&self, user: String) {
-        self.inner.lock().unwrap().user = Some(user.to_owned());
+        self.inner.lock().unwrap().user = Some(sanitise(user));
+    }
+
+    pub fn set_helo(&self, helo: String) {
+        self.inner.lock().unwrap().helo = Some(sanitise(helo));
     }
 
     pub fn set_user_agent(
@@ -64,8 +71,8 @@ impl LogPrefix {
         version: Option<String>,
     ) {
         let mut inner = self.inner.lock().unwrap();
-        inner.ua_name = name;
-        inner.ua_version = version;
+        inner.ua_name = name.map(sanitise);
+        inner.ua_version = version.map(sanitise);
     }
 }
 
@@ -74,15 +81,31 @@ impl fmt::Display for LogPrefix {
         let inner = self.inner.lock().unwrap();
         write!(f, "{}", inner.protocol)?;
         if inner.user.is_some()
+            || inner.helo.is_some()
             || inner.ua_name.is_some()
             || inner.ua_version.is_some()
         {
-            write!(f, "[{}", inner.user.as_deref().unwrap_or("<anon>"))?;
+            write!(f, "[")?;
+            let mut first = true;
+            if let Some(ref user) = inner.user {
+                write!(f, "{user}")?;
+                first = false;
+            }
+
+            if let Some(ref helo) = inner.helo {
+                if !mem::take(&mut first) {
+                    write!(f, " ")?;
+                }
+                write!(f, "helo={helo}")?;
+            }
 
             if inner.ua_name.is_some() || inner.ua_version.is_some() {
+                if !mem::take(&mut first) {
+                    write!(f, " ")?;
+                }
                 write!(
                     f,
-                    " {}/{}",
+                    "agent={}/{}",
                     inner.ua_name.as_deref().unwrap_or("unknown"),
                     inner.ua_version.as_deref().unwrap_or("unknown"),
                 )?;
@@ -92,4 +115,13 @@ impl fmt::Display for LogPrefix {
 
         Ok(())
     }
+}
+
+fn sanitise(mut s: String) -> String {
+    s.retain(|c| !c.is_control());
+    if let Some((truncate_len, _)) = s.char_indices().nth(64) {
+        s.truncate(truncate_len);
+    }
+
+    s
 }

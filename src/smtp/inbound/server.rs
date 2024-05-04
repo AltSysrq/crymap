@@ -23,7 +23,7 @@ use std::str;
 use std::task;
 use std::time::{Duration, Instant};
 
-use log::{error, warn};
+use log::{error, info, warn};
 use openssl::ssl::SslAcceptor;
 use tokio::io::{
     AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufStream, DuplexStream,
@@ -264,6 +264,7 @@ impl Server {
             match str::from_utf8(&buffer[..buffer.len() - line_ending_len]) {
                 Ok(s) => s,
                 Err(_) => {
+                    warn!("{} Non-UTF-8 command received", self.log_prefix);
                     self.send_response(
                         Final,
                         pc::CommandSyntaxError,
@@ -278,6 +279,18 @@ impl Server {
         let command = match command_line.parse::<Command>() {
             Ok(c) => c,
             Err(_) => {
+                let mut debug_line = command_line;
+                if let Some((truncate_len, _)) =
+                    debug_line.char_indices().nth(64)
+                {
+                    debug_line = &debug_line[..truncate_len];
+                }
+
+                warn!(
+                    "{} Received bad command {debug_line:?}",
+                    self.log_prefix
+                );
+
                 if looks_like_known_command(command_line) {
                     self.send_response(
                         Final,
@@ -333,6 +346,8 @@ impl Server {
         require!(self, need_helo = false);
 
         let extended = !"HELO".eq_ignore_ascii_case(&command);
+        self.log_prefix.set_helo(origin.clone());
+        info!("{} SMTP {command}", self.log_prefix);
 
         if !self
             .service_request(RequestPayload::Helo(HeloRequest {
@@ -399,6 +414,7 @@ impl Server {
         require!(self, need_helo = true, need_mail_from = false);
 
         if !self.io.get_ref().is_ssl() {
+            warn!("{} Rejected attempt to AUTH without TLS", self.log_prefix);
             return self.send_response(
                 Final,
                 pc::EncryptionRequiredForRequestedAuthenticationMechanism,
@@ -408,6 +424,10 @@ impl Server {
         }
 
         if !self.service.auth {
+            warn!(
+                "{} Rejected attempt to AUTH on an unauthenticated service",
+                self.log_prefix,
+            );
             return self
                 .send_response(
                     Final,
@@ -430,6 +450,10 @@ impl Server {
         }
 
         if !mechanism.eq_ignore_ascii_case("PLAIN") {
+            warn!(
+                "{} Rejected attempt to auth with method {mechanism:?}",
+                self.log_prefix,
+            );
             return self
                 .send_response(
                     Final,
@@ -610,6 +634,7 @@ impl Server {
             return Ok(());
         }
 
+        info!("{} Start mail transaction", self.log_prefix);
         self.ineffective_commands = 0;
         self.has_mail_from = true;
         self.send_response(
@@ -697,6 +722,7 @@ impl Server {
             1
         };
 
+        let mut success = false;
         for i in 0..need_responses {
             let response = recipients_rx
                 .recv()
@@ -718,6 +744,7 @@ impl Server {
                     Some((cc::Success, sc::Undefined)),
                     Cow::Borrowed("OK"),
                 ));
+            success |= (200..=299).contains(&(response.0 as i32));
             self.send_response(
                 Urgent.or_final(i + 1 == need_responses),
                 response.0,
@@ -726,6 +753,16 @@ impl Server {
             )
             .await?;
         }
+
+        info!(
+            "{} Completed data transfer {}",
+            self.log_prefix,
+            if success {
+                "successfully"
+            } else {
+                "unsuccessfully"
+            },
+        );
 
         self.recipients = 0;
         self.has_mail_from = false;
@@ -753,6 +790,8 @@ impl Server {
             Cow::Borrowed("Go ahead"),
         )
         .await?;
+
+        info!("{} Begin legacy-format data transfer", self.log_prefix);
 
         let _ = self
             .deadline_tx
@@ -818,6 +857,8 @@ impl Server {
             if !self.start_data_transfer().await? {
                 return Ok(());
             }
+
+            info!("{} Begin binary data transfer", self.log_prefix);
         }
 
         let abort = {
@@ -869,6 +910,7 @@ impl Server {
     }
 
     async fn cmd_verify(&mut self) -> Result<(), Error> {
+        info!("{} Rejected attempt to use VRFY", self.log_prefix);
         self.send_response(
             Final,
             pc::CannotVerify,
@@ -978,11 +1020,17 @@ impl Server {
         )
         .await?;
 
+        info!("{} Start TLS handshake", self.log_prefix);
+
         self.has_helo = false;
         self.io
             .get_mut()
             .ssl_accept(&self.ssl_acceptor.take().unwrap())
-            .await
+            .await?;
+
+        info!("{} TLS handshake completed", self.log_prefix);
+
+        Ok(())
     }
 
     async fn need_helo(&mut self, present: bool) -> Option<Result<(), Error>> {

@@ -397,7 +397,8 @@ impl SmtpinService {
                 )
             })?;
 
-        let data_buffer = data_buffer.flip().map_err(|_| {
+        let data_buffer = data_buffer.flip().map_err(|e| {
+            error!("I/O error flipping data buffer: {e}");
             SmtpResponse(
                 pc::TransactionFailed,
                 Some((cc::TempFail, sc::OtherMailSystem)),
@@ -426,6 +427,10 @@ impl SmtpinService {
         }
 
         let Some((_, domain)) = req.to.rsplit_once('@') else {
+            warn!(
+                "{} Rejected attempt to address mail to local user",
+                self.log_prefix,
+            );
             return Err(SmtpResponse(
                 pc::ActionNotTakenPermanent,
                 Some((cc::PermFail, sc::BadDestinationMailboxAddressSyntax)),
@@ -436,6 +441,10 @@ impl SmtpinService {
         };
 
         let Ok(domain) = dns::Name::from_str_relaxed(domain) else {
+            warn!(
+                "{} Rejected attempt to address mail to invalid domain",
+                self.log_prefix,
+            );
             return Err(SmtpResponse(
                 pc::ActionNotTakenPermanent,
                 Some((cc::PermFail, sc::BadDestinationMailboxAddressSyntax)),
@@ -445,6 +454,10 @@ impl SmtpinService {
 
         let domain = system_config::DomainName(domain);
         if !self.config.smtp.domains.contains_key(&domain) {
+            warn!(
+                "{} Rejected attempt to relay mail to {}",
+                self.log_prefix, domain.0,
+            );
             return Err(SmtpResponse(
                 pc::UserNotLocal,
                 Some((cc::PermFail, sc::DeliveryNotAuthorised)),
