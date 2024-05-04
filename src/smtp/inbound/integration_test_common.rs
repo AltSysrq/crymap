@@ -16,7 +16,7 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, Read, Write};
 use std::mem;
 
 use openssl::ssl::{SslAcceptor, SslConnector, SslMethod, SslVerifyMode};
@@ -50,23 +50,24 @@ impl SmtpClient {
     }
 
     /// Read responses from the client up to and including the final response.
-    ///
-    /// This creates a `BufReader` over `io` and will lose any data which was
-    /// buffered after the last read line. This should be fine since we don't
-    /// do pipelining here.
     pub fn read_responses(&mut self) -> Vec<String> {
         let mut ret = Vec::<String>::new();
-        let mut r = io::BufReader::new(&mut self.io);
 
         loop {
-            let mut line = String::new();
-            r.read_line(&mut line).unwrap();
-            println!("[{}] >> {:?}", self.name, line);
-
-            if line.is_empty() {
-                panic!("Unexpected EOF");
+            let mut line_bytes = Vec::<u8>::new();
+            // Read the line one byte at a time so that we don't lose pipelined
+            // responses (which we would do if we wrapped self.io in a
+            // BufReader).
+            while Some(b'\n') != line_bytes.last().copied() {
+                let mut buf = [0u8; 1];
+                let nread = self.io.read(&mut buf).unwrap();
+                if 0 == nread {
+                    panic!("Unexpected EOF");
+                }
+                line_bytes.push(buf[0]);
             }
 
+            let line = String::from_utf8(line_bytes).unwrap();
             let last = " " == &line[3..4];
             ret.push(line);
 
