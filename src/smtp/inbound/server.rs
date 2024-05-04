@@ -260,21 +260,30 @@ impl Server {
             1
         };
 
-        let command_line =
-            match str::from_utf8(&buffer[..buffer.len() - line_ending_len]) {
-                Ok(s) => s,
-                Err(_) => {
-                    warn!("{} Non-UTF-8 command received", self.log_prefix);
-                    self.send_response(
-                        Final,
-                        pc::CommandSyntaxError,
-                        Some((cc::PermFail, sc::OtherProtocolStatus)),
-                        Cow::Borrowed("Malformed UTF-8"),
-                    )
-                    .await?;
-                    return Ok(());
-                },
-            };
+        let command_line = &buffer[..buffer.len() - line_ending_len];
+        if command_line.contains(&0) {
+            warn!(
+                "{} Remote is speaking binary, closing connection",
+                self.log_prefix,
+            );
+            self.quit = true;
+            return Ok(());
+        }
+
+        let command_line = match str::from_utf8(command_line) {
+            Ok(s) => s,
+            Err(_) => {
+                warn!("{} Non-UTF-8 command received", self.log_prefix);
+                self.send_response(
+                    Final,
+                    pc::CommandSyntaxError,
+                    Some((cc::PermFail, sc::OtherProtocolStatus)),
+                    Cow::Borrowed("Malformed UTF-8"),
+                )
+                .await?;
+                return Ok(());
+            },
+        };
 
         let command = match command_line.parse::<Command>() {
             Ok(c) => c,

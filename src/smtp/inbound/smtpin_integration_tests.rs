@@ -352,6 +352,15 @@ fn wrong_greeting() {
 }
 
 #[test]
+fn binary_command() {
+    let setup = set_up();
+    let mut cxn = setup.connect("binary_command", false);
+    cxn.read_responses();
+    cxn.write_line("\0\n");
+    cxn.assert_eof();
+}
+
+#[test]
 fn relay_explicitly_rejected() {
     let setup = set_up();
     let mut cxn = setup.connect("relay_explicitly_rejected", false);

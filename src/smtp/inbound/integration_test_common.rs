@@ -157,4 +157,12 @@ impl SmtpClient {
         );
         self.simple_command(&auth, "235 ");
     }
+
+    pub fn assert_eof(&mut self) {
+        let mut buf = [0u8; 1];
+        assert_matches!(
+            io::ErrorKind::UnexpectedEof | io::ErrorKind::BrokenPipe,
+            self.io.read_exact(&mut buf).unwrap_err().kind(),
+        );
+    }
 }
