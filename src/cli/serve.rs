@@ -17,18 +17,16 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::cell::RefCell;
-use std::io::{self, Read, Write};
 use std::net::IpAddr;
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use log::{error, info, warn};
-use nix::poll::{poll, PollFd, PollFlags};
 use nix::sys::time::TimeValLike;
-use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
+use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 
 use crate::{
     imap::command_processor::CommandProcessor,
@@ -471,119 +469,4 @@ fn configure_system(
 
     info!("{} Connection established", log_prefix);
     (log_prefix, peer_name)
-}
-
-/// Provides read and write implementations to stdio without taking ownership
-/// and without buffering or locking.
-///
-/// Async implementations assume the stdio file descriptors have already been
-/// put into non-blocking mode.
-#[derive(Debug)]
-struct Stdio;
-
-impl Read for Stdio {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        nix::unistd::read(STDIN, buf)
-            .map_err(|e| io::Error::from_raw_os_error(e as i32))
-    }
-}
-
-impl Write for Stdio {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        nix::unistd::write(STDOUT, buf)
-            .map_err(|e| io::Error::from_raw_os_error(e as i32))
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-/// Wraps SslStream to implement Read and Write over this structure in the
-/// mutex, and also to deal with non-blocking IO.
-///
-/// We need to use non-blocking IO to allow writes to proceed even when read is
-/// blocking on getting data from the client, as when doing IDLE.
-struct WrappedIo(Arc<Mutex<SslStream<Stdio>>>);
-
-impl Read for WrappedIo {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        loop {
-            let res = {
-                let mut lock = self.0.lock().unwrap();
-                lock.ssl_read(buf)
-            };
-
-            match res {
-                Ok(n) => return Ok(n),
-                Err(e) => self.on_error(e)?,
-            }
-        }
-    }
-}
-
-impl Write for WrappedIo {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        loop {
-            let res = {
-                let mut lock = self.0.lock().unwrap();
-                lock.ssl_write(buf)
-            };
-
-            match res {
-                Ok(n) => return Ok(n),
-                Err(e) => self.on_error(e)?,
-            };
-        }
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        let mut lock = self.0.lock().unwrap();
-        lock.flush()
-    }
-}
-
-impl WrappedIo {
-    fn on_error(&mut self, e: openssl::ssl::Error) -> io::Result<()> {
-        match e.code() {
-            openssl::ssl::ErrorCode::WANT_READ => {
-                let stdin = std::io::stdin();
-                let mut stdin = [PollFd::new(
-                    &stdin,
-                    PollFlags::POLLIN | PollFlags::POLLERR,
-                )];
-
-                handle_poll_result(poll(&mut stdin, 30 * 60_000))
-            },
-            openssl::ssl::ErrorCode::WANT_WRITE => {
-                let stdout = std::io::stdout();
-                let mut stdout = [PollFd::new(
-                    &stdout,
-                    PollFlags::POLLOUT | PollFlags::POLLERR,
-                )];
-
-                handle_poll_result(poll(&mut stdout, 30 * 60_000))
-            },
-            _ => Err(e
-                .into_io_error()
-                .unwrap_or_else(|e| io::Error::new(io::ErrorKind::Other, e))),
-        }
-    }
-}
-
-fn handle_poll_result(
-    result: Result<nix::libc::c_int, nix::Error>,
-) -> io::Result<()> {
-    match result {
-        Ok(0) => {
-            Err(io::Error::new(io::ErrorKind::TimedOut, "Socket timed out"))
-        },
-        Ok(_) => Ok(()),
-        Err(nix::errno::Errno::EINTR) => Ok(()),
-        Err(e) => Err(nix_to_io(e)),
-    }
-}
-
-fn nix_to_io(e: nix::Error) -> io::Error {
-    io::Error::from_raw_os_error(e as i32)
 }
