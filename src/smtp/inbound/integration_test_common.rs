@@ -69,6 +69,7 @@ impl SmtpClient {
 
             let line = String::from_utf8(line_bytes).unwrap();
             let last = " " == &line[3..4];
+            println!("[{}] >> {:?}", self.name, line);
             ret.push(line);
 
             if last {

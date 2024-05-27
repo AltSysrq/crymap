@@ -381,21 +381,24 @@ impl SmtpinService {
             .fetch_dmarc_dkim_records(&from_header_domain, &dkim_verifier)
             .await;
 
-        let auth_headers = self
+        let (auth_headers, accept_message) = self
             .authenticate_message(
                 from_header_domain,
                 dkim_verifier,
                 dmarc_txt_records,
                 dkim_txt_records,
             )
-            .await
-            .map_err(|_| {
-                SmtpResponse(
-                    pc::TransactionFailed,
-                    Some((cc::PermFail, sc::DeliveryNotAuthorised)),
-                    Cow::Borrowed("Message rejected by DMARC policy"),
-                )
-            })?;
+            .await;
+
+        if !accept_message {
+            return Err(SmtpResponse(
+                pc::TransactionFailed,
+                Some((cc::PermFail, sc::DeliveryNotAuthorised)),
+                Cow::Owned(format!(
+                    "Message rejected by DMARC policy: {auth_headers:?}"
+                )),
+            ));
+        }
 
         let data_buffer = data_buffer.flip().map_err(|e| {
             error!("I/O error flipping data buffer: {e}");
@@ -705,7 +708,7 @@ impl SmtpinService {
         dkim_verifier: dkim::Verifier<'_>,
         dmarc_records: Result<Vec<Rc<str>>, dns::CacheError>,
         dkim_records: Vec<dkim::TxtRecordEntry>,
-    ) -> Result<String, ()> {
+    ) -> (String, bool) {
         let spf_result = if let Some(ref mut domain) = self.mail_from_domain {
             Some((
                 "envelope-from",
@@ -1023,6 +1026,7 @@ struct DkimResult {
 #[derive(Clone, Copy)]
 enum DkimStatus {
     Pass,
+    PermError,
     TempError,
     Neutral,
     Fail,
@@ -1097,7 +1101,6 @@ fn consolidate_dkim_results(
                 dkim::Error::Fail(f) => match f {
                     F::HeaderParse(..)
                     | F::DnsTxtParse(..)
-                    | F::DnsTxtNotFound(..)
                     | F::UnsupportedVersion
                     | F::InvalidPublicKey
                     | F::InvalidSdid
@@ -1111,7 +1114,13 @@ fn consolidate_dkim_results(
                         has_relevant_neutral |= relevant
                     },
 
-                    F::WeakHashFunction
+                    // DnsTxtNotFound is treated as a failure rather than a
+                    // permanent error so that an attacker cannot just sign the
+                    // message with a non-existent selector and a key of their
+                    // own invention to promote the message from "unsigned" to
+                    // "permerror".
+                    F::DnsTxtNotFound(..)
+                    | F::WeakHashFunction
                     | F::WeakKey
                     | F::BodyTruncated
                     | F::BodyHashMismatch
@@ -1154,7 +1163,7 @@ fn consolidate_dkim_results(
     } else if has_relevant_fail {
         (DkimStatus::Fail, "fail")
     } else if has_relevant_permerror {
-        (DkimStatus::Fail, "permerror")
+        (DkimStatus::PermError, "permerror")
     } else {
         (DkimStatus::Fail, "none")
     };
@@ -1178,7 +1187,7 @@ fn authenticate_message_impl(
     from_header_domain: Option<&DomainInfo>,
     dmarc_records: Result<Vec<Rc<str>>, dns::CacheError>,
     dkim_results: impl Iterator<Item = dkim::Outcome>,
-) -> Result<String, ()> {
+) -> (String, bool) {
     let mut headers = String::new();
 
     let dmarc_record = dmarc_records.as_ref().and_then(|txts| {
@@ -1275,6 +1284,9 @@ fn authenticate_message_impl(
             (spf::SpfResult::Fail | spf::SpfResult::None, _, _)
             | (_, DkimStatus::Fail, _) => (false, "fail"),
 
+            (spf::SpfResult::PermError, _, _)
+            | (_, DkimStatus::PermError, _) => (true, "permerror"),
+
             (spf::SpfResult::TempError, _, _)
             | (_, DkimStatus::TempError, _) => (true, "temperror"),
 
@@ -1322,11 +1334,7 @@ fn authenticate_message_impl(
         rand::rngs::OsRng.gen_range(0u32..99) < effective_dmarc_policy.percent;
     reject &= enable_reject;
 
-    if reject {
-        Err(())
-    } else {
-        Ok(headers)
-    }
+    (headers, !reject)
 }
 
 #[cfg(test)]
@@ -1422,7 +1430,7 @@ mod test {
         fn run(self) -> (String, bool) {
             let local_host_name = "localhost";
             let peer_ip = "192.0.2.3".parse::<IpAddr>().unwrap();
-            let headers = authenticate_message_impl(
+            let (headers, accept) = authenticate_message_impl(
                 local_host_name,
                 peer_ip,
                 false,
@@ -1440,10 +1448,10 @@ mod test {
                         _ => panic!("clone Io and Ssl somehow if needed"),
                     },
                 }),
-            )
-            .unwrap();
+            );
+            assert!(accept);
 
-            let rejected = match authenticate_message_impl(
+            let (headers2, accept) = authenticate_message_impl(
                 local_host_name,
                 peer_ip,
                 true,
@@ -1451,16 +1459,9 @@ mod test {
                 self.from_header_domain.as_ref(),
                 self.dmarc_records,
                 self.dkim_results.into_iter(),
-            ) {
-                Ok(h) => {
-                    assert_eq!(headers, h);
-                    false
-                },
-
-                Err(()) => true,
-            };
-
-            (headers, rejected)
+            );
+            assert_eq!(headers, headers2);
+            (headers, !accept)
         }
     }
 
@@ -1776,7 +1777,7 @@ mod test {
              \tdkim=pass (\r\n\
              \t\texample.com/selector: pass\r\n\
              \t);\r\n\
-             \tdmarc=neutral header.from=example.com\r\n\
+             \tdmarc=permerror header.from=example.com\r\n\
              Received-SPF: permerror\r\n\
              \tidentity=helo; client-ip=192.0.2.3;\r\n\
              \treceiver=\"localhost\"; helo=\"example.com\"\r\n",
@@ -1826,7 +1827,7 @@ mod test {
         assert_eq!(
             "Authentication-Results: localhost;\r\n\
              \tspf=pass;\r\n\
-             \tdkim=permerror (\r\n\
+             \tdkim=fail (\r\n\
              \t\texample.com/selector: can't find TXT record \
              selector._domainkey.example.com, or it is not DKIM1\r\n\
              \t);\r\n\
