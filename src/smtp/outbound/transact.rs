@@ -19,9 +19,10 @@
 use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::io;
+use std::mem;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 use std::time::{Duration, Instant};
 
@@ -71,6 +72,7 @@ pub async fn execute(
     tls_expectations: &ForeignSmtpTlsStatus,
     mx_domain: &dns::Name,
     local_host_name: &str,
+    verbose_outbound_tls: bool,
 ) -> Result<Results, Error> {
     let tx = Transaction {
         cxn,
@@ -80,6 +82,7 @@ pub async fn execute(
         tls_expectations,
         mx_domain,
         local_host_name,
+        verbose_outbound_tls,
 
         line_buffer: [0u8; MAX_LINE],
         line_buffer_len: 0,
@@ -99,6 +102,7 @@ struct Transaction<'a, 'b> {
     tls_expectations: &'b ForeignSmtpTlsStatus,
     mx_domain: &'b dns::Name,
     local_host_name: &'b str,
+    verbose_outbound_tls: bool,
 
     line_buffer: [u8; MAX_LINE],
     line_buffer_len: usize,
@@ -237,81 +241,34 @@ impl Transaction<'_, '_> {
             self.tls_expectations.tls_version.unwrap_or_default(),
         ));
 
-        let mut connector_builder =
-            SslConnector::builder(SslMethod::tls_client())
-                .map_err(unexpected_ssl_error)?;
-        let valid_certificate = Arc::new(AtomicBool::new(false));
-        let expect_valid_certificate = self.tls_expectations.valid_certificate;
-        // Exactly how to implement "accept any certificate, but tell me
-        // whether the certificate you accepted was valid" is surprisingly
-        // unclear.
-        //
-        // If the verification mode is not PEER, the `valid` argument to the
-        // callback will always be `false`. Thus we need to leave verification
-        // enabled if we hope to get any information on the status of the
-        // certificate.
-        //
-        // The callback itself is invoked three times on connection. On the
-        // third invocation, `valid` will be `true` if the earlier invocations
-        // returned `true`. The first two invocations appear to have the same
-        // value for `valid` --- at the very least, they are both `true` for a
-        // fully good certificate and both `false` for a non-expired
-        // self-signed certificate.
-        //
-        // Thus, we use the first invocation of the callback to extract the
-        // validity, but always return that the certificate should be treated
-        // as valid if we're not demanding a valid certificate. We then ignore
-        // the later invocations which may be subject to feedback from the
-        // callback returning `true`.
-        connector_builder.set_verify_callback(SslVerifyMode::PEER, {
-            let valid_certificate = Arc::clone(&valid_certificate);
-            let first_invocation = AtomicBool::new(true);
-            move |valid, _| {
-                eprintln!("verify_callback: valid={valid}");
-                if first_invocation.swap(false, Ordering::Relaxed) {
-                    valid_certificate.store(valid, Ordering::Relaxed);
-                }
-                valid || !expect_valid_certificate
-            }
-        });
-        connector_builder
-            .set_min_proto_version(
-                match self.tls_expectations.tls_version.unwrap_or_default() {
-                    TlsVersion::Ssl3 => None,
-                    TlsVersion::Tls10 => Some(SslVersion::TLS1),
-                    TlsVersion::Tls11 => Some(SslVersion::TLS1_1),
-                    TlsVersion::Tls12 => Some(SslVersion::TLS1_2),
-                    TlsVersion::Tls13 => Some(SslVersion::TLS1_3),
-                },
-            )
-            .map_err(unexpected_ssl_error)?;
-
-        let mx_domain_str = self.mx_domain.to_ascii();
-        let ssl_result = tokio::time::timeout_at(
+        let Ok(handshake_result) = tokio::time::timeout_at(
             self.command_deadline.into(),
-            self.cxn.ssl_connect(
-                mx_domain_str.strip_suffix('.').unwrap_or(&*mx_domain_str),
-                &connector_builder.build(),
-            ),
+            tls_handshake(&self.cxn, self.mx_domain, self.tls_expectations),
         )
-        .await;
+        .await
+        else {
+            self.transcript
+                .line(format_args!("<> TLS handshake timed out"));
+            return Err(Error::TryNextServer);
+        };
 
-        match ssl_result {
-            Ok(Ok(())) => {},
-            Err(_) => {
-                self.transcript
-                    .line(format_args!("<> TLS handshake timed out"));
-                return Err(Error::TryNextServer);
-            },
-            Ok(Err(e)) => {
-                self.transcript
-                    .line(format_args!("<> TLS handshake failed: {e}"));
-                return Err(Error::TryNextServer);
-            },
+        let handshake_result = handshake_result?;
+        if self.verbose_outbound_tls {
+            if let Some(description) = handshake_result.certificate_description
+            {
+                for line in description.lines() {
+                    self.transcript.line(format_args!("<< {line}"));
+                }
+            }
         }
 
-        new_status.valid_certificate =
-            valid_certificate.load(Ordering::Relaxed);
+        if let Err(e) = handshake_result.result {
+            self.transcript
+                .line(format_args!("<> TLS handshake failed: {e}"));
+            return Err(Error::TryNextServer);
+        }
+
+        new_status.valid_certificate = handshake_result.valid_certificate;
 
         let tls_version = match self.cxn.ssl_version() {
             None | Some(SslVersion::SSL3) => TlsVersion::Ssl3,
@@ -778,6 +735,123 @@ async fn copy_with_dot_stuffing(
     Ok(())
 }
 
+struct TlsHandshakeResult {
+    result: Result<(), crate::support::error::Error>,
+    valid_certificate: bool,
+    certificate_description: Option<String>,
+}
+
+async fn tls_handshake(
+    cxn: &ServerIo,
+    mx_domain: &dns::Name,
+    tls_expectations: &ForeignSmtpTlsStatus,
+) -> Result<TlsHandshakeResult, Error> {
+    #[derive(Default)]
+    struct CertificateInfo {
+        valid: bool,
+        description: String,
+    }
+
+    let mut mx_domain_str = mx_domain.to_ascii();
+    if mx_domain_str.ends_with('.') {
+        mx_domain_str.truncate(mx_domain_str.len() - 1);
+    }
+
+    let mut connector_builder = SslConnector::builder(SslMethod::tls_client())
+        .map_err(unexpected_ssl_error)?;
+    let expect_valid_certificate = tls_expectations.valid_certificate;
+    let certificate_info = Arc::new(Mutex::new(CertificateInfo::default()));
+
+    // Exactly how to implement "accept any certificate, but tell me whether
+    // the certificate you accepted was valid" is surprisingly unclear.
+    //
+    // If the verification mode is not PEER, the `valid` argument to the
+    // callback will always be `false`. Thus we need to leave verification
+    // enabled if we hope to get any information on the status of the
+    // certificate.
+    //
+    // The callback itself is invoked three times on connection. On the third
+    // invocation, `valid` will be `true` if the earlier invocations returned
+    // `true`. The first two invocations appear to have the same value for
+    // `valid` --- at the very least, they are both `true` for a fully good
+    // certificate and both `false` for a non-expired self-signed certificate.
+    //
+    // Thus, we use the first invocation of the callback to extract the
+    // validity, but always return that the certificate should be treated as
+    // valid if we're not demanding a valid certificate. We then ignore the
+    // later invocations which may be subject to feedback from the callback
+    // returning `true`.
+    connector_builder.set_verify_callback(SslVerifyMode::PEER, {
+        let certificate_info = Arc::clone(&certificate_info);
+        let first_invocation = AtomicBool::new(true);
+        let mx_domain_str = mx_domain_str.clone();
+        move |valid, x509store| {
+            if first_invocation.swap(false, Ordering::Relaxed) {
+                let mut certificate_info = certificate_info.lock().unwrap();
+                certificate_info.valid = valid;
+
+                let _ = writeln!(
+                    certificate_info.description,
+                    "Received certificate that ought to be for {:?}:",
+                    mx_domain_str,
+                );
+                match x509store.chain() {
+                    None => {
+                        certificate_info.description.push_str("<no chain>");
+                    },
+
+                    Some(chain) => {
+                        for (i, x509) in chain.iter().enumerate() {
+                            if 0 != i {
+                                certificate_info.description.push('\n');
+                            }
+
+                            match x509.to_text() {
+                                Ok(bytes) => certificate_info
+                                    .description
+                                    .push_str(&String::from_utf8_lossy(&bytes)),
+
+                                Err(e) => {
+                                    let _ = write!(
+                                        certificate_info.description,
+                                        "<error: {e}>",
+                                    );
+                                },
+                            }
+                        }
+                    },
+                }
+            }
+            valid || !expect_valid_certificate
+        }
+    });
+    connector_builder
+        .set_min_proto_version(
+            match tls_expectations.tls_version.unwrap_or_default() {
+                TlsVersion::Ssl3 => None,
+                TlsVersion::Tls10 => Some(SslVersion::TLS1),
+                TlsVersion::Tls11 => Some(SslVersion::TLS1_1),
+                TlsVersion::Tls12 => Some(SslVersion::TLS1_2),
+                TlsVersion::Tls13 => Some(SslVersion::TLS1_3),
+            },
+        )
+        .map_err(unexpected_ssl_error)?;
+
+    let ssl_result = cxn
+        .ssl_connect(&mx_domain_str, &connector_builder.build())
+        .await;
+
+    let mut certificate_info = certificate_info.lock().unwrap();
+    Ok(TlsHandshakeResult {
+        result: ssl_result,
+        valid_certificate: certificate_info.valid,
+        certificate_description: Some(mem::take(
+            &mut certificate_info.description,
+        ))
+        .filter(|s| !s.is_empty()),
+    })
+}
+
 #[cfg(test)]
 mod test {
     use std::os::unix::net::UnixStream;
@@ -917,6 +991,7 @@ mod test {
             &parms.tls_expectations,
             &mx_domain,
             parms.local_host_name,
+            false,
         );
         let (ret, server_result) = tokio::join![client_future, server_future];
 
@@ -2050,5 +2125,39 @@ mod test {
             &SessionParms::default(),
             &[SessionStep::InfiniteResponse],
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[cfg(feature = "live-network-tests")]
+    async fn tls_handshake_recognises_valid_certificate() {
+        let sock = std::net::TcpStream::connect("lin.gl:443").unwrap();
+        let sock = ServerIo::new_owned_socket(sock).unwrap();
+        let mx_domain = dns::Name::from_ascii("lin.gl.").unwrap();
+        let mut tls_expectations = ForeignSmtpTlsStatus::default();
+
+        let handshake_result =
+            tls_handshake(&sock, &mx_domain, &tls_expectations)
+                .await
+                .unwrap();
+        if let Some(ref d) = handshake_result.certificate_description {
+            println!("{}", d);
+        }
+
+        assert!(handshake_result.result.is_ok());
+        assert!(handshake_result.valid_certificate);
+        assert!(handshake_result.certificate_description.is_some());
+        drop(sock);
+
+        let sock = std::net::TcpStream::connect("lin.gl:443").unwrap();
+        let sock = ServerIo::new_owned_socket(sock).unwrap();
+        tls_expectations.valid_certificate = true;
+        tls_expectations.tls_version = Some(TlsVersion::Tls13);
+        let handshake_result =
+            tls_handshake(&sock, &mx_domain, &tls_expectations)
+                .await
+                .unwrap();
+        assert!(handshake_result.result.is_ok());
+        assert!(handshake_result.valid_certificate);
+        assert!(handshake_result.certificate_description.is_some());
     }
 }

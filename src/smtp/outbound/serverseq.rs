@@ -59,6 +59,7 @@ pub async fn execute(
     domain: Rc<dns::Name>,
     destinations: Vec<String>,
     local_host_name: String,
+    verbose_outbound_tls: bool,
     mock_connect: Option<MockConnect<'_>>,
 ) -> Results {
     let mut transcript = Transcript::new(account.borrow().common_paths());
@@ -107,6 +108,7 @@ pub async fn execute(
             message_id,
             &destinations,
             &local_host_name,
+            verbose_outbound_tls,
             &tls_expectations,
             mock_connect,
         )
@@ -196,6 +198,7 @@ async fn try_domain(
     message_id: SpooledMessageId,
     destinations: &[String],
     local_host_name: &str,
+    verbose_outbound_tls: bool,
     tls_expectations: &ForeignSmtpTlsStatus,
     mock_connect: Option<MockConnect<'_>>,
 ) -> TransactResult {
@@ -216,6 +219,7 @@ async fn try_domain(
                 message_id,
                 destinations,
                 local_host_name,
+                verbose_outbound_tls,
                 tls_expectations,
             )
             .await
@@ -288,6 +292,7 @@ async fn try_addr(
     message_id: SpooledMessageId,
     destinations: &[String],
     local_host_name: &str,
+    verbose_outbound_tls: bool,
     tls_expectations: &ForeignSmtpTlsStatus,
 ) -> TransactResult {
     let message = match account.borrow_mut().open_spooled_message(message_id) {
@@ -333,6 +338,7 @@ async fn try_addr(
         tls_expectations,
         mx_domain,
         local_host_name,
+        verbose_outbound_tls,
     )
     .await
 }
@@ -491,6 +497,7 @@ mod test {
             Rc::new(dns::Name::from_ascii("example.com").unwrap()),
             emails_vec(),
             "localhost".to_owned(),
+            false,
             Some(&mock_connect),
         )
         .await;

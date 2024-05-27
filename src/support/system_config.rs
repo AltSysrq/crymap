@@ -134,6 +134,19 @@ pub struct SmtpConfig {
     /// Punycode, lower-cased, and retains its periods.
     pub verbatim_user_names: bool,
 
+    /// Whether inbound SMTP will reject messages that have a hard failure.
+    ///
+    /// Inbound SMTP always evaluates SPF, DKIM, and DMARC and attaches their
+    /// results to the message. If this is true, and the DMARC configuration
+    /// indicates that hard failures should be rejected, inbound SMTP will fail
+    /// the mail transaction of hard failures. Otherwise, hard failures are
+    /// delivered normally.
+    pub reject_dmarc_failures: bool,
+
+    /// Whether to produce verbose information about outbound TLS connections
+    /// in mail transaction receipts.
+    pub verbose_outbound_tls: bool,
+
     /// The domains governed by this server.
     ///
     /// Each entry describes a single domain. Domains may be named either in
@@ -151,15 +164,6 @@ pub struct SmtpConfig {
     /// `keep_recipient_domain` is false, LMTP will accept mail for any domain.
     /// It is up to the upstream SMTP server to perform filtering.
     pub domains: BTreeMap<DomainName, SmtpDomain>,
-
-    /// Whether inbound SMTP will reject messages that have a hard failure.
-    ///
-    /// Inbound SMTP always evaluates SPF, DKIM, and DMARC and attaches their
-    /// results to the message. If this is true, and the DMARC configuration
-    /// indicates that hard failures should be rejected, inbound SMTP will fail
-    /// the mail transaction of hard failures. Otherwise, hard failures are
-    /// delivered normally.
-    pub reject_dmarc_failures: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

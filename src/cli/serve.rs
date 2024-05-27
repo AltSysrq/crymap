@@ -232,6 +232,7 @@ pub async fn smtpsub(
         );
     }
     let host_name = system_config.smtp.host_name.clone();
+    let verbose_outbound_tls = system_config.smtp.verbose_outbound_tls;
     let ssl_acceptor = create_ssl_acceptor(&system_config, &system_root);
 
     // We've opened access to everything on the main system we need; now we can
@@ -308,6 +309,7 @@ pub async fn smtpsub(
                             account,
                             id,
                             host_name.clone(),
+                            verbose_outbound_tls,
                             None,
                         )
                         .await;

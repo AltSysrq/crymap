@@ -134,6 +134,7 @@ impl CommandProcessor {
             Rc::clone(&account),
             id,
             self.system_config.smtp.host_name.clone(),
+            self.system_config.smtp.verbose_outbound_tls,
             None,
         )
         .await;

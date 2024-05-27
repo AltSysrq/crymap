@@ -56,6 +56,7 @@ pub async fn send_message(
     account: Rc<RefCell<Account>>,
     message_id: SpooledMessageId,
     local_host_name: String,
+    verbose_outbound_tls: bool,
     mock_serverseq: Option<
         &dyn Fn(Rc<dns::Name>, Vec<String>) -> serverseq::Results,
     >,
@@ -122,6 +123,7 @@ pub async fn send_message(
                         Rc::clone(&domain),
                         destinations,
                         local_host_name,
+                        verbose_outbound_tls,
                         None,
                     )
                     .await
@@ -473,6 +475,7 @@ mod test {
             Rc::clone(&setup.account),
             spooled_message_id,
             "localhost".to_owned(),
+            false,
             Some(&mock_serverseq),
         )
         .await

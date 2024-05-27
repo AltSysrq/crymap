@@ -94,6 +94,10 @@ verbatim_user_names = false
 # This has no effect on LMTP or SMTP submission.
 reject_dmarc_failures = false
 
+# If enabled, receipts produced for outbound SMTP transactions will include
+# very verbose details about TLS handshakes.
+verbose_outbound_tls = false
+
 # Each entry under `smtp.domains` describes an SMTP domain the Crymap server
 # will support. You only need to configure this if Crymap is handling SMTP
 # itself.
