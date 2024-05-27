@@ -39,7 +39,7 @@ single system UNIX account.
 The author uses Crymap for all personal email. It is known to work well in this
 use case. But this is naturally a fairly small amount of experience; in
 particular, Crymap has only seen day-to-day use in conjunction with Thunderbird
-and Fairmail.
+and FairEmail.
 
 Crymap is currently maintained by its author alone. I am motivated to address
 bugs, but feature requests are unlikely to be accepted unless they offer
