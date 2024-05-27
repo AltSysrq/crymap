@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -29,7 +29,6 @@ use crate::account::{
 use crate::mime::fetch::search::{OptionalSearchParts, SearchFetcher};
 use crate::mime::grovel;
 use crate::support::error::Error;
-use crate::support::threading;
 
 impl StatefulMailbox {
     /// The `SEARCH` command.
@@ -65,27 +64,16 @@ impl StatefulMailbox {
         &mut self,
         request: &SearchRequest,
     ) -> Result<SearchResponse<Uid>, Error> {
-        static SG: threading::ScatterGather = threading::ScatterGather {
-            batch_size: 4,
-            escalate: std::time::Duration::from_millis(10),
-            buffer_size: 32,
-        };
-
         let mut ops = Vec::new();
         self.compile_and(&mut ops, &request.queries);
         let want = search_backend::want(&ops);
 
         let ops = Arc::new(ops);
-        let mut hits = Vec::new();
-        SG.run(
-            self.state.uids(),
-            |uid| (uid, self.search_one(uid, &ops, want)),
-            |(uid, hit)| {
-                if hit {
-                    hits.push(uid);
-                }
-            },
-        );
+        let mut hits = self
+            .state
+            .uids()
+            .filter(|&uid| self.search_one(uid, &ops, want))
+            .collect::<Vec<_>>();
         // RFC 3501 doesn't require the results to be in any particular order,
         // but this step is very cheap and there could be clients depending on
         // it. We also need the output sorted for ESEARCH.

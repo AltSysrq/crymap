@@ -27,7 +27,6 @@
 //! usage low rather than raw performance.
 
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
 
 use lazy_static::lazy_static;
 
@@ -89,111 +88,5 @@ fn run_background_work() {
         };
 
         task()
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct ScatterGather {
-    /// The number of items processed at a time.
-    ///
-    /// This is used as a control to reduce the frequency at which the
-    /// scatter-gather operation must check the system clock.
-    pub batch_size: usize,
-    /// Interval, in milliseconds, over which a scatter-gather operation will
-    /// escalate the amount of resources dedicated to the operation.
-    pub escalate: Duration,
-    /// The maximum number of inputs to buffer.
-    pub buffer_size: usize,
-}
-
-lazy_static! {
-    static ref MAX_THREADS: usize = std::env::var("CRYMAP_MAX_THREADS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or_else(num_cpus::get);
-}
-
-impl ScatterGather {
-    /// Run a possibly concurrent "scatter gather" operation.
-    ///
-    /// Items are pulled from `items`, processed (possibly concurrently) by
-    /// `mapper`, and finally reduced serially by `reduce`.
-    ///
-    /// This initially runs in single-threaded operation. If the `escalate`
-    /// duration is exceeded, it switches to multi-threaded mode, and the host
-    /// thread simply acts as a task distributor.
-    ///
-    /// Once this call returns, any threads that were spawned have been cleaned
-    /// up.
-    pub fn run<I: IntoIterator, O>(
-        self,
-        inputs: I,
-        mapper: impl Fn(I::Item) -> O + Send + Sync,
-        mut reduce: impl FnMut(O) + Send,
-    ) where
-        I::Item: Send,
-    {
-        let mut period_start = Instant::now();
-        let mut inputs = inputs.into_iter();
-        let max_threads = *MAX_THREADS;
-
-        // Single-threaded mode
-        loop {
-            for _ in 0..self.batch_size {
-                match inputs.next() {
-                    None => return,
-                    Some(input) => reduce(mapper(input)),
-                }
-            }
-
-            if max_threads > 1 {
-                let now = Instant::now();
-                if now.duration_since(period_start) > self.escalate {
-                    period_start = now;
-                    break;
-                }
-            }
-        }
-
-        // Enter multi-threaded mode
-        let reduce = Mutex::new(reduce);
-        let mut current_threads = 0;
-        let mut target_threads = 2.min(max_threads);
-        let (input_send, input_recv) =
-            crossbeam::channel::bounded(self.buffer_size);
-
-        crossbeam::scope(|s| loop {
-            while current_threads < target_threads {
-                let input_recv = input_recv.clone();
-                let mapper = &mapper;
-                let reduce = &reduce;
-                s.spawn(move |_| {
-                    for input in input_recv.iter() {
-                        let output = mapper(input);
-                        let mut reduce = reduce.lock().unwrap();
-                        (*reduce)(output);
-                    }
-                });
-                current_threads += 1;
-            }
-
-            for _ in 0..self.batch_size {
-                match inputs.next() {
-                    None => {
-                        drop(input_send);
-                        return;
-                    },
-                    Some(input) => input_send.send(input).unwrap(),
-                }
-            }
-
-            let now = Instant::now();
-            if now.duration_since(period_start) > self.escalate {
-                target_threads =
-                    target_threads.saturating_mul(2).min(max_threads);
-                period_start = now;
-            }
-        })
-        .unwrap();
     }
 }
