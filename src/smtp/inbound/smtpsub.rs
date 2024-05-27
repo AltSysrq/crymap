@@ -406,7 +406,7 @@ impl SmtpsubService {
         // Implicitly set the return path to the From address if the client
         // didn't suggest otherwise.
         if self.return_path.is_empty() {
-            self.return_path = mailbox_addr.clone();
+            self.return_path.clone_from(&mailbox_addr);
         }
         let (dkim_ssid, smtp_domain_cfg) =
             self.require_authed_return_path(&mailbox_addr)?;

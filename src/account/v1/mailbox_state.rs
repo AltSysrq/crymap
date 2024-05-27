@@ -678,7 +678,7 @@ impl MailboxState {
         } else {
             let expunge_start = seqnum_reference
                 .into_iter()
-                .zip(uid_reference.into_iter())
+                .zip(uid_reference)
                 .take_while(|&(seqnum, uid)| {
                     Some(uid) == self.seqnum_to_uid(seqnum).ok()
                 })

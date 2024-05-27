@@ -197,7 +197,7 @@ impl SmtpinService {
         self.tls = req.tls;
 
         // Set helo_host first because domain_info() reads it.
-        self.helo_host = req.host.clone();
+        self.helo_host.clone_from(&req.host);
         self.helo_domain = self.domain_info(req.host, true);
 
         Ok(())

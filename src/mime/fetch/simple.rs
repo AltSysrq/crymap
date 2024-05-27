@@ -89,7 +89,7 @@ impl Visitor for FlagsFetcher {
     }
 
     fn flags(&mut self, flags: &[Flag]) -> Result<(), FlagsInfo> {
-        self.info.flags = flags.to_owned();
+        flags.clone_into(&mut self.info.flags);
         Ok(())
     }
 
