@@ -782,45 +782,49 @@ async fn tls_handshake(
     // later invocations which may be subject to feedback from the callback
     // returning `true`.
     connector_builder.set_verify_callback(SslVerifyMode::PEER, {
-        let certificate_info = Arc::clone(&certificate_info);
+        let certificate_info = Arc::downgrade(&certificate_info);
         let first_invocation = AtomicBool::new(true);
         let mx_domain_str = mx_domain_str.clone();
         move |valid, x509store| {
-            if first_invocation.swap(false, Ordering::Relaxed) {
-                let mut certificate_info = certificate_info.lock().unwrap();
-                certificate_info.valid = valid;
+            let Some(certificate_info) = certificate_info.upgrade() else {
+                return valid || !expect_valid_certificate;
+            };
+            let mut certificate_info = certificate_info.lock().unwrap();
 
-                let _ = writeln!(
-                    certificate_info.description,
-                    "Received certificate that ought to be for {:?}:",
-                    mx_domain_str,
-                );
-                match x509store.chain() {
-                    None => {
-                        certificate_info.description.push_str("<no chain>");
-                    },
+            let _ = writeln!(
+                certificate_info.description,
+                "Received certificate that ought to be for {:?}, v={}:",
+                mx_domain_str, valid,
+            );
+            match x509store.chain() {
+                None => {
+                    certificate_info.description.push_str("<no chain>");
+                },
 
-                    Some(chain) => {
-                        for (i, x509) in chain.iter().enumerate() {
-                            if 0 != i {
-                                certificate_info.description.push('\n');
-                            }
-
-                            match x509.to_text() {
-                                Ok(bytes) => certificate_info
-                                    .description
-                                    .push_str(&String::from_utf8_lossy(&bytes)),
-
-                                Err(e) => {
-                                    let _ = write!(
-                                        certificate_info.description,
-                                        "<error: {e}>",
-                                    );
-                                },
-                            }
+                Some(chain) => {
+                    for (i, x509) in chain.iter().enumerate() {
+                        if 0 != i {
+                            certificate_info.description.push('\n');
                         }
-                    },
-                }
+
+                        match x509.to_text() {
+                            Ok(bytes) => certificate_info
+                                .description
+                                .push_str(&String::from_utf8_lossy(&bytes)),
+
+                            Err(e) => {
+                                let _ = write!(
+                                    certificate_info.description,
+                                    "<error: {e}>",
+                                );
+                            },
+                        }
+                    }
+                },
+            }
+
+            if first_invocation.swap(false, Ordering::Relaxed) {
+                certificate_info.valid = valid;
             }
             valid || !expect_valid_certificate
         }
