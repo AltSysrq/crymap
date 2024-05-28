@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -33,7 +33,6 @@ use super::defs::*;
 use crate::account::model::*;
 use crate::support::error::Error;
 use crate::support::file_ops::IgnoreKinds;
-use crate::support::threading;
 
 /// The maximum number of rollup files that can exist before we start deleting
 /// them (but not the transactions they contain) with a shorter grace period to
@@ -234,17 +233,11 @@ impl StatefulMailbox {
             return;
         }
 
-        let s_clone = self.s.clone();
-        let gc_in_progress = Arc::clone(&self.gc_in_progress);
-        if self.synchronous_gc {
-            s_clone.do_gc(rollups);
-            gc_in_progress.store(false, SeqCst);
-        } else {
-            threading::run_in_background(move || {
-                s_clone.do_gc(rollups);
-                gc_in_progress.store(false, SeqCst);
-            });
-        }
+        // We used to start the GC in the background here, but that is now
+        // obsolete since the V1 data model is only used for reading in
+        // production.
+        self.s.do_gc(rollups);
+        self.gc_in_progress.store(false, SeqCst);
     }
 
     /// If there is not already a garbage-collection cycle planned or running

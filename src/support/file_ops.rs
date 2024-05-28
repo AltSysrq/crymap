@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -27,7 +27,6 @@ use log::error;
 use rand::{rngs::OsRng, Rng};
 
 use super::error::Error;
-use super::threading;
 
 /// Write `data` into the file at `path`, atomically.
 ///
@@ -55,10 +54,10 @@ pub fn spit(
 }
 
 /// Delete `target` by moving it into the directory given by `garbage` (with a
-/// new random name) and recursively removing it in the background.
+/// new random name) and recursively removing it.
 ///
-/// This is used to make removal of large directory trees both fast and atomic.
-pub fn delete_async(
+/// This is used to make removal of large directory trees atomic.
+pub fn delete_atomically(
     target: impl AsRef<Path>,
     garbage: impl AsRef<Path>,
 ) -> io::Result<()> {
@@ -71,11 +70,9 @@ pub fn delete_async(
 
         match fs::rename(target, &dst) {
             Ok(()) => {
-                threading::run_in_background(move || {
-                    if let Err(e) = fs::remove_dir_all(&dst) {
-                        error!("Failed to remove {}: {}", dst.display(), e);
-                    }
-                });
+                if let Err(e) = fs::remove_dir_all(&dst) {
+                    error!("Failed to remove {}: {}", dst.display(), e);
+                }
                 break;
             },
             Err(e) if io::ErrorKind::AlreadyExists == e.kind() => continue,

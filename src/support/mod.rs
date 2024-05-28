@@ -33,7 +33,6 @@ pub mod safe_name;
 pub mod small_bitset;
 pub mod sysexits;
 pub mod system_config;
-pub mod threading;
 pub mod un64;
 pub mod unix_privileges;
 pub mod user_config;

@@ -320,12 +320,12 @@ impl MailboxPath {
         // If no children, completely remove self
         // This also handles the case where self does not exist
         if self.children().next().is_none() {
-            file_ops::delete_async(&self.base_path, garbage)
+            file_ops::delete_atomically(&self.base_path, garbage)
                 .on_not_found(Error::NxMailbox)
         } else {
             // Atomically turn into a \Noselect mailbox if we were selectable
             let selectable = match self.scoped_data_path().and_then(|p| {
-                file_ops::delete_async(p, garbage).map_err(|e| e.into())
+                file_ops::delete_atomically(p, garbage).map_err(|e| e.into())
             }) {
                 Ok(()) => true,
                 Err(Error::MailboxUnselectable) => false,

@@ -598,7 +598,8 @@ impl<'a> HierIdScheme<'a> {
             // directory itself has been removed.
             if allocated && !exists {
                 path.set_extension("d");
-                file_ops::delete_async(&path, garbage).ignore_not_found()?;
+                file_ops::delete_atomically(&path, garbage)
+                    .ignore_not_found()?;
             }
 
             path.pop();
