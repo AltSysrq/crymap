@@ -17,9 +17,6 @@
 -- Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 -- Defines the mailboxes owned by the user.
---
--- The hierarchy is not explicitly represented and must be inferred from the
--- paths.
 CREATE TABLE `mailbox` (
   -- The surrogate ID for this mailbox. This is also used for the MAILBOXID
   -- reported to the client and is also the `UIDVALIDITY` value.
@@ -59,9 +56,6 @@ VALUES (0, 0, '/', false);
 -- flags exist for each specific mailbox.
 CREATE TABLE `flag` (
   -- The integer ID for this flag.
-  --
-  -- In messages, this is the offset + 1 of the bit corresponding to the flag
-  -- (because AUTOINCREMENT starts at 1).
   `id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
   -- The flag itself. E.g. "\Deleted", "\Sent", "Keyword".
   --
@@ -116,8 +110,8 @@ CREATE TABLE `message` (
   -- maintained automatically by triggers.
   `refcount` INTEGER NOT NULL DEFAULT 0,
   -- `summary_bucket` and `summary_increment` are used to efficiently determine
-  -- whether there could be any files in the message store. They are based on
-  -- hashes of `path`. `summary_bucket` ranges from 0..=255 and
+  -- whether there could be any untracked files in the message store. They are
+  -- based on hashes of `path`. `summary_bucket` ranges from 0..=255 and
   -- `summary_increment` from 1..=65535.
   `summary_bucket` INTEGER NOT NULL,
   `summary_increment` INTEGER NOT NULL,
