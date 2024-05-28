@@ -6,7 +6,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #
-# Compiled on 2024-01-01 19:12:45.793483577 UTC.
+# Compiled on 2024-05-28 00:09:12.951325780 UTC.
 aaa
 aarp
 abb
@@ -16,10 +16,12 @@ abc
 able
 abogado
 abudhabi
-ac . 29
+ac . 44
 com
 drr
 edu
+feedback
+forms
 gov
 mil
 net
@@ -156,8 +158,9 @@ org
 
 agakhan
 agency
-ai . 21
+ai . 28
 com
+framer
 net
 off
 org
@@ -184,14 +187,12 @@ allstate
 ally
 alsace
 alstom
-am . 49
+am . 39
 blogspot
 co
 com
 commune
-neko
 net
-nyaa
 org
 radio
 
@@ -216,21 +217,32 @@ pb
 
 aol
 apartments
-app . 307
+app . 419
+adaptable
 beget * 1
 
 bookonline
 clerk
 clerkstage
+csb . 9
+preview
+
+cyclic
 deta
 developer * 1
 
 easypanel
 edgecompute
 encr
+expo . 9
+staging
+
 fireweb
+flutterflow
 framer
 hasura
+hosted * 1
+
 loginline
 messerli
 netlify
@@ -242,19 +254,25 @@ northflank * 1
 ondigitalocean
 onflashdrive
 platform0
-run . 3
-a
+replit . 4
+id
 
-snowflake . 13
-privatelink
+run * 1
+
+snowflake * 18
+privatelink * 1
+
 
 storipress
 streamlit
 telebit
 typedream
+upsun * 1
+
 vercel
 web
 wnext
+zeabur
 
 apple
 aq
@@ -295,8 +313,10 @@ as . 5
 gov
 
 asda
-asia . 9
+asia . 20
 cloudns
+daemon
+dix
 
 associates
 at . 214
@@ -389,12 +409,15 @@ auspost
 author
 auto
 autos
-avianca
 aw . 5
 com
 
-aws . 1079
-sagemaker  1062
+aws . 1285
+repost  14
+private * 1
+
+
+sagemaker  1243
 af-south-1  17
 notebook
 studio
@@ -403,11 +426,13 @@ ap-east-1  17
 notebook
 studio
 
-ap-northeast-1  17
+ap-northeast-1  26
+labeling
 notebook
 studio
 
-ap-northeast-2  17
+ap-northeast-2  26
+labeling
 notebook
 studio
 
@@ -415,18 +440,21 @@ ap-northeast-3  17
 notebook
 studio
 
-ap-south-1  17
+ap-south-1  26
+labeling
 notebook
 studio
 
 ap-south-2  10
 notebook
 
-ap-southeast-1  17
+ap-southeast-1  26
+labeling
 notebook
 studio
 
-ap-southeast-2  17
+ap-southeast-2  26
+labeling
 notebook
 studio
 
@@ -437,11 +465,18 @@ studio
 ap-southeast-4  10
 notebook
 
-ca-central-1  17
+ca-central-1  40
+labeling
 notebook
+notebook-fips
 studio
 
-eu-central-1  17
+ca-west-1  24
+notebook
+notebook-fips
+
+eu-central-1  26
+labeling
 notebook
 studio
 
@@ -456,14 +491,17 @@ eu-south-1  17
 notebook
 studio
 
-eu-south-2  10
-notebook
-
-eu-west-1  17
+eu-south-2  17
 notebook
 studio
 
-eu-west-2  17
+eu-west-1  26
+labeling
+notebook
+studio
+
+eu-west-2  26
+labeling
 notebook
 studio
 
@@ -487,12 +525,14 @@ sa-east-1  17
 notebook
 studio
 
-us-east-1  31
+us-east-1  40
+labeling
 notebook
 notebook-fips
 studio
 
-us-east-2  31
+us-east-2  40
+labeling
 notebook
 notebook-fips
 studio
@@ -509,27 +549,20 @@ notebook-fips
 studio
 studio-fips
 
-us-west-1  17
+us-west-1  31
 notebook
+notebook-fips
 studio
 
-us-west-2  31
+us-west-2  40
+labeling
 notebook
 notebook-fips
 studio
 
 
 
-ax . 26
-be
-cat
-es
-eu
-gg
-mc
-us
-xy
-
+ax
 axa
 az . 50
 biz
@@ -559,7 +592,6 @@ rs
 baby
 baidu
 banamex
-bananarepublic
 band
 bank
 bar
@@ -594,10 +626,11 @@ bcg
 bcn
 bd * 1
 
-be . 112
+be . 120
 123website
 ac
 blogspot
+cloudns
 interhostsolutions  7
 cloud
 
@@ -1050,23 +1083,25 @@ mil
 mycloud
 of
 
-bz . 28
+bz . 34
 com
 edu
 gov
 gsj
+mydns
 net
 org
 za
 
 bzh
-ca . 94
+ca . 98
 ab
 awdev * 1
 
 barsy
 bc
 blogspot
+box
 co
 gc
 mb
@@ -1091,7 +1126,11 @@ call
 calvinklein
 cam
 camera
-camp
+camp . 12
+emf  4
+at
+
+
 canon
 capetown
 capital
@@ -1117,7 +1156,8 @@ catholic
 cba
 cbn
 cbre
-cc . 96
+cc . 107
+cleverapps
 cloudns
 csx
 fantasyleague
@@ -1142,12 +1182,22 @@ blogspot
 cfa
 cfd
 cg
-ch . 152
+ch . 213
 123website
 12hp
 2ix
 4lima
 blogspot
+cloudns
+cloudscale  38
+cust
+lpg  9
+objects
+
+rma  9
+objects
+
+
 dnsking
 firenet * 10
 svc * 1
@@ -1175,7 +1225,7 @@ chintai
 christmas
 chrome
 church
-ci . 79
+ci . 76
 ac
 asso
 co
@@ -1188,7 +1238,6 @@ gouv
 int
 md
 net
-nl
 or
 org
 presse
@@ -1204,8 +1253,9 @@ city
 ck * 5
 www
 
-cl . 25
+cl . 33
 blogspot
+cloudns
 co
 gob
 gov
@@ -1217,12 +1267,13 @@ click
 clinic
 clinique
 clothing
-cloud . 616
+cloud . 699
 axarnet  6
 es-1
 
 banzai * 1
 
+cyclic
 diadem
 elementor
 encoway  4
@@ -1248,7 +1299,11 @@ kuleuven
 linkyard
 magentosite * 1
 
+observablehq
 on-rancher * 1
+
+onstackit  6
+runs
 
 oxa . 7
 tn
@@ -1264,13 +1319,14 @@ ca
 uk
 us
 
-scw  246
+scw  270
 baremetal  28
 fr-par-1
 fr-par-2
 nl-ams-1
 
-fr-par  54
+fr-par  62
+cockpit
 fnc . 11
 functions
 
@@ -1286,7 +1342,8 @@ priv
 pub
 
 k8s
-nl-ams  34
+nl-ams  42
+cockpit
 k8s . 7
 nodes
 
@@ -1294,7 +1351,8 @@ s3
 s3-website
 whm
 
-pl-waw  30
+pl-waw  38
+cockpit
 k8s . 7
 nodes
 
@@ -1313,9 +1371,11 @@ trendhosting  7
 ch
 de
 
+unison-services
 urown
 vapor
 voorloper
+zap
 
 club . 20
 barsy
@@ -1329,11 +1389,15 @@ com
 gov
 net
 
-cn . 761
+cn . 795
 ac
 ah
 bj
 canva-apps
+canvasite  9
+my * 1
+
+
 com . 544
 amazonaws  445
 airflow  37
@@ -1414,6 +1478,7 @@ jx
 ln
 mil
 mo
+myqnapcloud
 net
 nm
 nx
@@ -1437,7 +1502,7 @@ xz
 yn
 zj
 
-co . 164
+co . 174
 arts
 carrd
 com . 10
@@ -1468,6 +1533,8 @@ id
 
 supabase
 web
+xmit * 1
+
 
 coach
 codes . 10
@@ -1477,7 +1544,7 @@ owo * 1
 coffee
 college
 cologne
-com . 13268
+com . 14295
 001www
 0emm * 1
 
@@ -1485,6 +1552,7 @@ com . 13268
 1kapp
 3utilities
 4u
+a2hosted
 adobeaemcloud . 10
 dev * 1
 
@@ -1493,8 +1561,9 @@ africa
 airkitapps
 airkitapps-au
 aivencloud
+aliases121
 alpha-myqnapcloud
-amazonaws  7468
+amazonaws  8036
 af-south-1  212
 aws-cloud9  16
 webview-assets
@@ -1517,7 +1586,11 @@ s3-accesspoint
 s3-object-lambda
 s3-website
 
-airflow  254
+airflow  332
+af-south-1 * 1
+
+ap-east-1 * 1
+
 ap-northeast-1 * 1
 
 ap-northeast-2 * 1
@@ -1534,17 +1607,23 @@ eu-central-1 * 1
 
 eu-north-1 * 1
 
+eu-south-1 * 1
+
 eu-west-1 * 1
 
 eu-west-2 * 1
 
 eu-west-3 * 1
 
+me-south-1 * 1
+
 sa-east-1 * 1
 
 us-east-1 * 1
 
 us-east-2 * 1
+
+us-west-1 * 1
 
 us-west-2 * 1
 
@@ -1661,11 +1740,14 @@ s3-accesspoint
 s3-object-lambda
 s3-website
 
-ap-south-2  92
+ap-south-2  139
 dualstack  19
 s3
 s3-accesspoint
 
+emrappui-prod
+emrnotebooks-prod
+emrstudio-prod
 execute-api
 s3
 s3-accesspoint
@@ -1732,11 +1814,14 @@ s3-accesspoint
 s3-object-lambda
 s3-website
 
-ap-southeast-4  92
+ap-southeast-4  139
 dualstack  19
 s3
 s3-accesspoint
 
+emrappui-prod
+emrnotebooks-prod
+emrstudio-prod
 execute-api
 s3
 s3-accesspoint
@@ -1769,6 +1854,24 @@ s3-fips
 s3-object-lambda
 s3-website
 
+ca-west-1  189
+dualstack  58
+s3
+s3-accesspoint
+s3-accesspoint-fips
+s3-fips
+s3-website
+
+emrappui-prod
+emrnotebooks-prod
+emrstudio-prod
+execute-api
+s3
+s3-accesspoint
+s3-accesspoint-fips
+s3-fips
+s3-website
+
 compute * 1
 
 compute-1 * 1
@@ -1798,11 +1901,14 @@ s3-accesspoint
 s3-object-lambda
 s3-website
 
-eu-central-2  92
+eu-central-2  139
 dualstack  19
 s3
 s3-accesspoint
 
+emrappui-prod
+emrnotebooks-prod
+emrstudio-prod
 execute-api
 s3
 s3-accesspoint
@@ -1852,11 +1958,14 @@ s3-accesspoint
 s3-object-lambda
 s3-website
 
-eu-south-2  92
+eu-south-2  139
 dualstack  19
 s3
 s3-accesspoint
 
+emrappui-prod
+emrnotebooks-prod
+emrstudio-prod
 execute-api
 s3
 s3-accesspoint
@@ -1930,11 +2039,20 @@ s3-accesspoint
 s3-object-lambda
 s3-website
 
-il-central-1  92
+il-central-1  185
+aws-cloud9  16
+webview-assets
+
+cloud9  5
+vfs
+
 dualstack  19
 s3
 s3-accesspoint
 
+emrappui-prod
+emrnotebooks-prod
+emrstudio-prod
 execute-api
 s3
 s3-accesspoint
@@ -2183,7 +2301,7 @@ s3-object-lambda
 s3-website
 
 
-amazoncognito  536
+amazoncognito  644
 af-south-1  6
 auth
 
@@ -2199,6 +2317,9 @@ auth
 ap-south-1  6
 auth
 
+ap-south-2  6
+auth
+
 ap-southeast-1  6
 auth
 
@@ -2208,16 +2329,25 @@ auth
 ap-southeast-3  6
 auth
 
+ap-southeast-4  6
+auth
+
 ca-central-1  6
 auth
 
 eu-central-1  6
 auth
 
+eu-central-2  6
+auth
+
 eu-north-1  6
 auth
 
 eu-south-1  6
+auth
+
+eu-south-2  6
 auth
 
 eu-west-1  6
@@ -2230,6 +2360,9 @@ eu-west-3  6
 auth
 
 il-central-1  6
+auth
+
+me-central-1  6
 auth
 
 me-south-1  6
@@ -2270,10 +2403,12 @@ r * 1
 
 
 ar
+atmeta
 authgear-staging
 authgearapps
 awsapprunner * 1
 
+awsapps
 awsglobalaccelerator
 awsmppl
 balena-devices
@@ -2294,9 +2429,14 @@ br
 builtwithdark
 cafjs
 canva-apps
+cdn77-storage
 cechire
 cf-ipfs
 ciscofreak
+clever-cloud  15
+services * 1
+
+
 cloudcontrolapp
 cloudcontrolled
 cloudflare-ipfs
@@ -2311,6 +2451,9 @@ stg-builder * 1
 
 
 codespot
+cprapid * 1
+
+cpserver
 customer-oci * 28
 oci * 1
 
@@ -2319,6 +2462,7 @@ ocp * 1
 ocs * 1
 
 
+cyclic-app
 damnserver
 datadetect  15
 demo
@@ -2341,6 +2485,7 @@ digitaloceanspaces * 1
 discordsays
 discordsez
 ditchyourip
+dnsabr
 dnsalias
 dnsdojo
 dnsiskinky
@@ -2486,6 +2631,7 @@ googlecode
 gotdns
 gotpantheon
 gr
+grayjayleagues
 health-carereform
 herokuapp
 herokussl
@@ -2598,9 +2744,6 @@ linodeobjects * 1
 linodeusercontent  4
 ip
 
-lmpm  5
-app
-
 logoip
 loseyourip
 lpusercontent
@@ -2616,10 +2759,12 @@ mex
 miniserver
 myactivedirectory
 myasustor
+mycloudnas
 mydatto
 mydobiss
 mydrobo
 myiphost
+mynascloud
 myqnapcloud
 mysecuritycamera
 myshopblocks
@@ -2698,6 +2843,16 @@ ru
 sa
 sakuratan
 sakuraweb
+salesforce  56
+platform  42
+code-builder-stg  20
+test  10
+001 * 1
+
+
+
+
+
 saves-the-whales
 scrysec
 securitytactics
@@ -2731,6 +2886,9 @@ stackhero-network
 stdlib  5
 api
 
+streak-link
+streaklinks
+streakusercontent
 streamlitapp
 stufftoread
 tb-hosting  6
@@ -2749,23 +2907,29 @@ pro
 
 uk
 unusualperson
+upsunapp
 us
 uy
 vipsinaapp
 vultrobjects * 1
 
+w-corp-staticblitz
+w-credentialless-staticblitz
+w-staticblitz
 wafaicloud  13
 jed
 lon
 ryd
 
 wafflecell
+webadorsite
 wiardweb  7
 pages
 
 withgoogle
 withyoutube
 wixsite
+wixstudio
 woltlab-demo
 workisboring
 wpdevcloud
@@ -2783,7 +2947,6 @@ u2-local
 yolasite
 za
 
-comcast
 commbank
 community . 21
 myforum
@@ -2851,10 +3014,18 @@ edu
 net
 org
 
-cx . 14
+cx . 86
+assessments
 ath
+calculators
+cloudns
+funnels
 gov
 info
+paynow
+quizzes
+researched
+tests
 
 cy . 85
 ac
@@ -2877,9 +3048,12 @@ tm
 
 cymru
 cyou
-cz . 85
+cz . 107
 blogspot
 co
+contentproxy9  5
+rsc
+
 e4
 metacentrum  19
 cloud * 1
@@ -3004,10 +3178,12 @@ democrat
 dental
 dentist
 desi
-design . 5
+design . 13
 bss
+graphic
 
-dev . 244
+dev . 490
+12chars
 autocode
 curv
 deno
@@ -3017,6 +3193,9 @@ fly
 gateway * 1
 
 githubpreview
+is-a
+is-cool
+is-not-a
 iserv
 lcl * 1
 
@@ -3026,13 +3205,45 @@ localcert  11
 user * 1
 
 
+localplayer
 loginline
 mediatech
+modx
 ngrok
 ngrok-free
 pages
+panel
 platter-app
 r2
+replit . 161
+archer
+bones
+canary
+global
+hacker
+id
+janeway
+kim
+kira
+kirk
+odo
+paris
+picard
+pike
+prerelease
+reed
+riker
+sisko
+spock
+staging
+sulu
+tarpit
+teams
+tucker
+wesley
+worf
+
+runcontainers
 shiftcrypto
 stg * 1
 
@@ -3042,6 +3253,7 @@ vercel
 webhare * 1
 
 workers
+xmit
 
 dhl
 diamonds
@@ -3174,7 +3386,11 @@ net
 org
 sci
 
-email
+email . 14
+crisp  4
+on
+
+
 emerck
 energy
 engineer
@@ -3384,10 +3600,15 @@ gallery
 gallo
 gallup
 game
-games
+games . 13
+pley
+sheezy
+
 gap
 garden
-gay
+gay . 7
+pages
+
 gb
 gbiz
 gd  9
@@ -3411,7 +3632,7 @@ gent
 genting
 george
 gf
-gg . 39
+gg . 47
 co
 cya
 kaas
@@ -3420,6 +3641,7 @@ org
 panel . 8
 daemon
 
+stackit
 
 ggee
 gh . 21
@@ -3441,14 +3663,13 @@ gift
 gifts
 gives
 giving
-gl . 27
+gl . 24
 biz
 co
 com
 edu
 net
 org
-xx
 
 glass
 gle
@@ -3483,8 +3704,7 @@ google
 gop
 got
 gov
-gp . 31
-app
+gp . 27
 asso
 com
 edu
@@ -3512,17 +3732,14 @@ group . 11
 discourse
 
 gs
-gt . 40
-blog
+gt . 29
 com
-de
 edu
 gob
 ind
 mil
 net
 org
-to
 
 gu . 35
 com
@@ -3534,15 +3751,13 @@ net
 org
 web
 
-guardian
 gucci
 guge
 guide
 guitars
 guru
 gw
-gy . 27
-be
+gy . 24
 co
 com
 edu
@@ -3598,8 +3813,7 @@ xn--zf0avx
 
 hkt
 hm
-hn . 28
-cc
+hn . 25
 com
 edu
 gob
@@ -3638,8 +3852,11 @@ hotels
 hotmail
 house
 how
-hr . 32
+hr . 49
 blogspot
+brendly  6
+shop
+
 com
 free
 from
@@ -3647,7 +3864,7 @@ iz
 name
 
 hsbc
-ht . 79
+ht . 82
 adult
 art
 asso
@@ -3664,6 +3881,7 @@ perso
 pol
 pro
 rel
+rt
 shop
 
 hu . 191
@@ -3768,7 +3986,7 @@ imamat
 imdb
 immo
 immobilien
-in . 208
+in . 220
 5g
 6g
 ac
@@ -3782,7 +4000,9 @@ business
 ca
 cloudns
 cn
-co
+co . 8
+cyclic
+
 com
 coop
 cs
@@ -3853,7 +4073,7 @@ eu
 international
 intuit
 investments
-io . 933
+io . 1003
 2038
 apigee
 azurecontainer * 1
@@ -3880,12 +4100,17 @@ uk0
 bitbucket
 bluebite
 boxfuse
+brave  8
+s * 1
+
+
 browsersafetymark
 cleverapps
 com
 dappnode  8
 dyndns
 
+darklang
 dedyn
 definima
 drud
@@ -3896,11 +4121,11 @@ fh-muenster
 forgerock  4
 id
 
-ghost
 github
 gitlab
 hasura-app
 hostyhosting
+hypernode
 hzc
 jele
 lair  6
@@ -3949,6 +4174,9 @@ devices
 s5y * 1
 
 sandcats
+scrypted  8
+client
+
 shiftcrypto
 shiftedit
 shw
@@ -3984,6 +4212,8 @@ vbrplsbx  3
 g
 
 virtualserver
+webflow
+webflowtest
 webthings
 wedeploy
 wixstudio
@@ -4022,8 +4252,9 @@ org
 ismaili
 ist
 istanbul
-it . 3871
+it . 3879
 123homepage
+12chars
 16-b
 32-b
 64-b
@@ -4483,7 +4714,11 @@ jobs
 joburg
 jot
 joy
-jp . 15563
+jp . 15593
+0am
+0g0
+0j0
+0t0
 2-d
 ac
 ad
@@ -5572,6 +5807,7 @@ mods
 mond
 mongolian
 moo
+mydns
 nagano . 572
 achi
 agematsu
@@ -5927,6 +6163,7 @@ peewee
 penne
 pepper
 perma
+pgw
 pigboat
 pinoko
 punyu
@@ -6354,6 +6591,7 @@ user
 weblike
 websozai
 whitesnow
+wjg
 xii
 xn--0trq7p7nn
 xn--1ctwo
@@ -6514,18 +6752,13 @@ kerryhotels
 kerrylogistics
 kerryproperties
 kfh
-kg . 45
-blog
+kg . 28
 com
 edu
 gov
-io
-jp
 mil
 net
 org
-tv
-uk
 us
 
 kh * 1
@@ -6717,14 +6950,21 @@ lilly
 limited
 limo
 lincoln
-link . 22
+link . 50
 cyon
 dweb * 1
 
+myfritz
 mypep
+nftstorage  6
+ipfs
+
 
 lipsy
-live . 5
+live . 18
+aem
+ewp * 1
+
 hlx
 
 living
@@ -6767,11 +7007,10 @@ gov
 net
 org
 
-ls . 38
+ls . 35
 ac
 biz
 co
-de
 edu
 gov
 info
@@ -6844,14 +7083,11 @@ asso
 tm
 
 mckinsey
-md . 22
-at
+md . 13
 blogspot
-de
-jp
-to
+ir
 
-me . 333
+me . 325
 ac
 barsy
 brasilia
@@ -6888,7 +7124,6 @@ nohost
 noip
 org
 priv
-ravendb
 soundcast
 synology
 tcp4
@@ -7123,7 +7358,7 @@ nom
 
 ne
 nec
-net . 2031
+net . 2193
 adobeaemcloud
 adobeio-static
 adobeioruntime
@@ -7146,7 +7381,10 @@ prod  5
 cdn
 
 
+azure-api
 azure-mobile
+azureedge
+azurefd
 azurestaticapps . 61
 1
 2
@@ -7162,9 +7400,6 @@ westeurope
 westus2
 
 azurewebsites
-bar0
-bar1
-bar2
 barsy
 bitbridge
 blackbaudcdn
@@ -7200,6 +7435,8 @@ dattolocal
 ddns
 debian
 definima
+dns-cloud
+dns-dynamic
 dnsalias
 dnsdojo
 dnsup
@@ -7267,10 +7504,14 @@ is-a-chef
 is-a-geek
 isa-geek
 jp
+keyword-on
 kicks-ass
 kinghost
 knx-server
 krellian
+live-on
+localcert
+localhostcert
 massivegrid  43
 paas  33
 fr-1
@@ -7291,6 +7532,7 @@ myeffect
 myfritz
 mymediapc
 mypsx
+myradweb
 mysecuritycamera
 myspreadshop
 nhlfan
@@ -7330,6 +7572,7 @@ servebbs
 serveblog
 serveftp
 serveminecraft
+server-on
 shopselect
 siteleaf
 square7
@@ -7349,7 +7592,11 @@ thruhere
 torproject . 7
 pages
 
-ts
+trafficmanager
+ts . 8
+c * 1
+
+
 tsukaeru  10
 jelastic
 
@@ -7365,6 +7612,12 @@ ric
 
 
 webhop
+windows  26
+core  6
+blob
+
+servicebus
+
 yandexcloud . 17
 storage
 website
@@ -8286,8 +8539,9 @@ mine
 shacknet
 
 nyc
-nz . 105
+nz . 113
 ac
+cloudns
 co . 10
 blogspot
 
@@ -8312,7 +8566,6 @@ office
 okinawa
 olayan
 olayangroup
-oldnavy
 ollo
 om . 39
 co
@@ -8326,8 +8579,10 @@ org
 pro
 
 omega
-one . 37
+one . 46
 homelink
+kin * 1
+
 onred . 9
 staging
 
@@ -8347,7 +8602,7 @@ oracle
 orange . 6
 tech
 
-org . 1379
+org . 1388
 accesscam
 ae
 altervista
@@ -8489,6 +8744,7 @@ is-a-linux-user
 is-a-patsfan
 is-a-soxfan
 is-found
+is-local
 is-lost
 is-saved
 is-very-bad
@@ -8565,7 +8821,8 @@ nom
 org
 sld
 
-page . 60
+page . 64
+aem
 codeberg
 hlx
 hlx3
@@ -8605,7 +8862,8 @@ org
 pfizer
 pg * 1
 
-ph . 31
+ph . 39
+cloudns
 com
 edu
 gov
@@ -8654,7 +8912,7 @@ net
 org
 web
 
-pl . 1619
+pl . 1627
 agro
 aid
 art
@@ -8668,6 +8926,7 @@ beskidy
 bialowieza
 bialystok
 bielawa
+bielsko
 bieszczady
 biz
 boleslawiec
@@ -8914,9 +9173,7 @@ pnc
 pohl
 poker
 politie
-porn . 7
-indie
-
+porn
 post
 pr . 56
 ac
@@ -8937,7 +9194,8 @@ pramerica
 praxi
 press
 prime
-pro . 82
+pro . 96
+12chars
 aaa
 aca
 acct
@@ -8953,6 +9211,7 @@ eng
 jur
 law
 med
+ngrok
 recht
 
 prod
@@ -8986,8 +9245,12 @@ nome
 org
 publ
 
-pub . 7
+pub . 24
 barsy
+id * 1
+
+kin * 1
+
 
 pw . 35
 belau
@@ -9025,9 +9288,10 @@ quebec
 quest
 racing
 radio
-re . 23
+re . 27
 asso
 blogspot
+can
 com
 nom
 
@@ -9082,9 +9346,10 @@ store
 tm
 www
 
-rocks . 27
+rocks . 35
 lima-city
 myddns
+stackit
 webspace
 
 rodeo
@@ -9105,8 +9370,7 @@ ox
 ua
 
 rsvp
-ru . 346
-123sait
+ru . 338
 ac
 adygeya
 bashkiria
@@ -9164,7 +9428,7 @@ vladimir
 
 rugby
 ruhr
-run . 100
+run . 129
 build * 1
 
 code * 1
@@ -9179,6 +9443,11 @@ onporter
 ravendb
 repl
 servers
+stackit
+val  13
+express
+web
+
 wix
 
 rw . 28
@@ -9336,7 +9605,7 @@ net
 org
 per
 
-sh . 78
+sh . 71
 bip
 com
 gov
@@ -9345,13 +9614,11 @@ mil
 net
 now
 org
-platform  14
-bc
+platform  11
 ent
 eu
 us
 
-vxl
 wedeploy
 
 shangrila
@@ -9369,27 +9636,35 @@ hoplix
 shopping
 shouji
 show
-si . 25
+si . 28
 blogspot
+f5
 gitapp
 gitpage
 
 silk
 sina
 singles
-site . 143
+site . 183
 barsy
 byen
+canva  9
+my * 1
+
+
 cloudera * 1
 
+convex
 cyon
 fastvps
 fnwk
 folionetwork
 jele
+jouwweb
 lelux
 loginline
 mintere
+notion
 novecore
 omniwe
 opensocial
@@ -9429,7 +9704,7 @@ perso
 univ
 
 sncf
-so . 28
+so . 36
 com
 edu
 gov
@@ -9437,6 +9712,7 @@ me
 net
 org
 sch
+surveys
 
 soccer
 social
@@ -9471,12 +9747,13 @@ net
 org
 sch
 
-st . 79
+st . 87
 co
 com
 consulado
 edu
 embaixada
+helioho
 kirara
 mil
 net
@@ -9606,11 +9883,7 @@ tatar
 tattoo
 tax
 taxi
-tc . 10
-ch
-me
-we
-
+tc
 tci
 td . 10
 blogspot
@@ -9620,7 +9893,9 @@ team . 20
 discourse
 jelastic
 
-tech
+tech . 12
+cleverapps
+
 technology . 4
 co
 
@@ -9703,20 +9978,18 @@ org
 perso
 tourism
 
-to . 77
+to . 68
 611
 com
 edu
 gov
 mil
 net
-nyan
 org
 oya
 quickconnect  8
 direct
 
-rdv
 vpnplus
 x0
 
@@ -9725,9 +9998,11 @@ prequalifyme
 
 tokyo
 tools
-top . 15
+top . 25
 now-dns
 ntdll
+wadl * 1
+
 
 toray
 toshiba
@@ -9806,7 +10081,7 @@ sakura
 worse-than
 
 tvs
-tw . 108
+tw . 114
 blogspot
 club
 com . 10
@@ -9818,6 +10093,7 @@ game
 gov
 idv
 mil
+mydns
 net
 org
 url
@@ -9942,7 +10218,7 @@ or
 org
 sc
 
-uk . 446
+uk . 443
 ac
 barsy
 co . 130
@@ -9967,10 +10243,9 @@ wellbeingzone
 
 conn
 copro
-gov . 33
+gov . 22
 api
 campaign
-homeoffice
 service
 
 hosp
@@ -9983,6 +10258,7 @@ ltd
 me
 net
 nhs
+nimsite
 org . 57
 affinitylottery
 glug
@@ -10004,7 +10280,7 @@ university
 uno
 uol
 ups
-us . 1273
+us . 1313
 ak . 12
 cc
 k12
@@ -10079,6 +10355,7 @@ cc
 k12
 lib
 
+heliohost
 hi . 8
 cc
 lib
@@ -10189,6 +10466,7 @@ cc
 k12
 lib
 
+ngo
 nh . 12
 cc
 k12
@@ -10255,6 +10533,11 @@ lib
 sd . 8
 cc
 lib
+
+servername
+srv . 7
+gh
+gl
 
 stuff-4-sale
 tn . 12
@@ -10326,7 +10609,7 @@ va
 vacations
 vana
 vanguard
-vc . 38
+vc . 44
 0e
 com
 edu
@@ -10335,6 +10618,7 @@ gv . 3
 d
 
 mil
+mydns
 net
 org
 
@@ -10365,9 +10649,7 @@ ventures
 verisign
 versicherung
 vet
-vg . 4
-at
-
+vg
 vi . 20
 co
 com
@@ -10469,19 +10751,18 @@ vinhlong
 vinhphuc
 yenbai
 
-vodka
+vodka . 5
+aaa
+
 volvo
 vote
 voting
 voto
 voyage
-vu . 32
-blog
+vu . 20
 cn
 com
-dev
 edu
-me
 net
 org
 
@@ -10520,7 +10801,9 @@ winners
 wme
 wolterskluwer
 woodside
-work
+work . 9
+corpnet
+
 works
 world
 wow
@@ -10540,7 +10823,6 @@ wtc
 wtf
 xbox
 xerox
-xfinity
 xihuan
 xin
 xn--11b4c3d
@@ -10809,10 +11091,11 @@ net
 org
 sch
 
-zone . 29
+zone . 37
 cloud66
 hs
 lima
+stackit
 triton * 1
 
 
