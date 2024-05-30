@@ -265,11 +265,6 @@ store to maintain tri-state flags like Junk/NonJunk/(nothing) properly.)
 
 Modseqs are 63-bit integers as required by the later QRESYNC extension.
 
-Internally, Modseqs are a 2-element vector clock pairing the maximum known UID
-with a monotonic "Change ID" (CID) with additional bookkeeping to maintain the
-extension's strict ordering requirements. This can be seen in returned Modseq
-values as the UID multiplied by 4 billion plus the CID.
-
 If multiple messages are changed at once, they all receive the same Modseq.
 
 Expunging a message increments the highest Modseq value.
