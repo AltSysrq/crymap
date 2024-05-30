@@ -71,3 +71,16 @@ The user data directory contains the following files:
   derive their master key from their password. This file can be overwritten
   with an earlier backup version (either a backup created under `tmp` or by
   some external backup system) to revert a password change.
+
+## OpenSSL mirrors
+
+If Crymap is set up in a way that causes it to chroot, it will maintain a copy
+of the system OpenSSL certificate store within each chroot. This will usually
+manifest as an `etc` or `usr` directory within the `users` directory or within
+each user directory. This is needed so that certificates of external servers
+can be validated when using outbound SMTP, as they must access these files
+after Crymap has moved into the chroot and rendered the normal location of
+these files inaccessible.
+
+If possible, Crymap will create hard links, but will copy the files if the
+destination directory is on a different file system.
