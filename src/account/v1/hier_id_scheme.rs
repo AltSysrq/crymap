@@ -936,6 +936,9 @@ mod test {
     }
 
     #[test]
+    // Ignored --- Test is very slow and creates very, very many inodes, and
+    // this code is effectively dead in production now.
+    #[ignore]
     fn test_emplace_many() {
         use rayon::prelude::*;
 
