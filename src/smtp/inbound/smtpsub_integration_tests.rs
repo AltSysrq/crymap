@@ -425,7 +425,7 @@ fn invalid_auth() {
     cxn.simple_command("AUTH PLAIN", "334 ");
     cxn.simple_command("invalidbase64!", "500 5.5.2");
     cxn.simple_command("AUTH PLAIN", "334 ");
-    let mut overlong = "long".repeat(32768 / 4 + 1);
+    let mut overlong = "long".repeat(1025);
     overlong.push_str("\r\n");
     cxn.write_raw(overlong.as_bytes());
     let responses = cxn.read_responses();
