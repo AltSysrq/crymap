@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -39,6 +39,10 @@ impl Visitor for UidFetcher {
     fn end(&mut self) -> Uid {
         panic!("UidFetcher.end()")
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -53,6 +57,10 @@ impl Visitor for ModseqFetcher {
 
     fn end(&mut self) -> Modseq {
         panic!("ModseqFetcher.end()")
+    }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
     }
 }
 
@@ -81,7 +89,7 @@ impl Visitor for FlagsFetcher {
     }
 
     fn flags(&mut self, flags: &[Flag]) -> Result<(), FlagsInfo> {
-        self.info.flags = flags.to_owned();
+        flags.clone_into(&mut self.info.flags);
         Ok(())
     }
 
@@ -97,6 +105,10 @@ impl Visitor for FlagsFetcher {
     fn end(&mut self) -> FlagsInfo {
         mem::take(&mut self.info)
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -105,12 +117,20 @@ pub struct Rfc822SizeFetcher;
 impl Visitor for Rfc822SizeFetcher {
     type Output = u32;
 
+    fn rfc822_size(&mut self, size: u32) -> Result<(), u32> {
+        Err(size)
+    }
+
     fn metadata(&mut self, md: &MessageMetadata) -> Result<(), u32> {
         Err(md.size)
     }
 
     fn end(&mut self) -> u32 {
         panic!("Rfc822SizeFetcher.end()")
+    }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
     }
 }
 
@@ -130,6 +150,10 @@ impl Visitor for InternalDateFetcher {
     fn end(&mut self) -> DateTime<FixedOffset> {
         panic!("InternalDateFetcher.end()")
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -138,11 +162,48 @@ pub struct EmailIdFetcher;
 impl Visitor for EmailIdFetcher {
     type Output = String;
 
+    fn email_id(&mut self, id: &str) -> Result<(), String> {
+        Err(id.to_owned())
+    }
+
     fn metadata(&mut self, md: &MessageMetadata) -> Result<(), String> {
         Err(md.format_email_id())
     }
 
     fn end(&mut self) -> String {
         panic!("EmailIdFetcher.end()")
+    }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SaveDateFetcher;
+
+impl Visitor for SaveDateFetcher {
+    type Output = Option<DateTime<FixedOffset>>;
+
+    fn savedate(
+        &mut self,
+        savedate: DateTime<Utc>,
+    ) -> Result<(), Option<DateTime<FixedOffset>>> {
+        Err(Some(savedate.into()))
+    }
+
+    fn metadata(
+        &mut self,
+        _: &MessageMetadata,
+    ) -> Result<(), Option<DateTime<FixedOffset>>> {
+        Err(None)
+    }
+
+    fn end(&mut self) -> Option<DateTime<FixedOffset>> {
+        None
+    }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
     }
 }

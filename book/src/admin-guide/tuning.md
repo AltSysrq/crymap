@@ -1,23 +1,11 @@
 # Tuning
 
-Crymap's tuning options are very limited; in fact, Crymap itself directly
-provides only one.
+Crymap's performance tuning options are very limited; in fact, Crymap itself
+does not provide any at all.
 
 ## Thread Count
 
-When certain operations across multiple items, such as fetches or searching,
-take too long, Crymap will spin up extra threads to parallelise the work and
-reduce latency. By default, it will create up to as many threads as there are
-CPU cores.
-
-The environment variable `CRYMAP_MAX_THREADS` can be set to any integer to
-override this. Setting it to `1` will completely prevent Crymap from trying to
-parallelise work.
-
-Note that you cannot make Crymap fully single-threaded for this operation. Even
-if it is set to `1`, Crymap will still spawn extra threads for background
-cleanups and idling, which are sufficient to cause the memory allocator to
-switch to multi-threaded mode on multi-core systems.
+As of Crymap 2.0.0, Crymap is always entirely single-threaded.
 
 ## Memory Allocator
 

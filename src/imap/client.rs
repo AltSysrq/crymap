@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -35,7 +35,7 @@ use lazy_static::lazy_static;
 use regex::bytes::Regex;
 use thiserror::Error;
 
-use super::lex::LexWriter;
+use super::lex::{InlineSplice, LexWriter};
 use super::mailbox_name::MailboxName;
 use super::syntax as s;
 
@@ -63,6 +63,70 @@ pub struct Client<R, W> {
     next_tag: u64,
 }
 
+// Custom implementation of DeflateEncoder because the one in flate2 does not
+// reliably sync the output stream.
+// TODO Probably related to the TODO in Cargo.toml. It looks like the flush()
+// implementation only sets Sync for the first attempt and then forgets about
+// it for subsequent passes.
+pub struct DeflateEncoder<W> {
+    inner: W,
+    buf: [u8; 1024],
+    compress: flate2::Compress,
+}
+
+impl<W> DeflateEncoder<W> {
+    fn new(inner: W) -> Self {
+        Self {
+            inner,
+            buf: [0u8; 1024],
+            compress: flate2::Compress::new(flate2::Compression::best(), false),
+        }
+    }
+}
+
+impl<W: Write> Write for DeflateEncoder<W> {
+    fn write(&mut self, src: &[u8]) -> io::Result<usize> {
+        if src.is_empty() {
+            return Ok(0);
+        }
+
+        loop {
+            let before_in = self.compress.total_in();
+            let before_out = self.compress.total_out();
+            self.compress
+                .compress(src, &mut self.buf, flate2::FlushCompress::None)
+                .unwrap();
+            let after_in = self.compress.total_in();
+            let after_out = self.compress.total_out();
+
+            self.inner
+                .write_all(&self.buf[..(after_out - before_out) as usize])?;
+            let written = (after_in - before_in) as usize;
+            if written > 0 {
+                return Ok(written);
+            }
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        loop {
+            let before_out = self.compress.total_out();
+            self.compress
+                .compress(&[], &mut self.buf, flate2::FlushCompress::Sync)
+                .unwrap();
+            let after_out = self.compress.total_out();
+            if after_out == before_out {
+                break;
+            }
+
+            self.inner
+                .write_all(&self.buf[..(after_out - before_out) as usize])?;
+        }
+
+        self.inner.flush()
+    }
+}
+
 impl<R: BufRead, W: Write> Client<R, W> {
     pub fn new(read: R, write: W, trace_stderr: Option<&'static str>) -> Self {
         Client {
@@ -75,10 +139,8 @@ impl<R: BufRead, W: Write> Client<R, W> {
 
     pub fn compress(
         self,
-    ) -> Client<
-        io::BufReader<flate2::read::DeflateDecoder<R>>,
-        flate2::write::DeflateEncoder<W>,
-    > {
+    ) -> Client<io::BufReader<flate2::read::DeflateDecoder<R>>, DeflateEncoder<W>>
+    {
         if let Some(prefix) = self.trace_stderr {
             eprintln!("{:10} WIRE <start deflate>", prefix);
         }
@@ -87,10 +149,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
             read: io::BufReader::new(flate2::read::DeflateDecoder::new(
                 self.read,
             )),
-            write: flate2::write::DeflateEncoder::new(
-                self.write,
-                flate2::Compression::best(),
-            ),
+            write: DeflateEncoder::new(self.write),
             trace_stderr: self.trace_stderr,
             next_tag: self.next_tag,
         }
@@ -143,7 +202,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
     ) -> Result<(), Error> {
         loop {
             let nread = self.read_line_raw(dst)?;
-            if !dst.ends_with(b"\r\n") {
+            if 0 == nread || !dst.ends_with(b"\r\n") {
                 return Err(Error::Io(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
                     "Line didn't end with CRLF",
@@ -240,7 +299,11 @@ impl<R: BufRead, W: Write> Client<R, W> {
                 tag: Cow::Owned(format!("{}", tag)),
                 cmd: command,
             }
-            .write_to(&mut LexWriter::new(&mut command_buffer, true, true))
+            .write_to(&mut LexWriter::new(
+                InlineSplice(&mut command_buffer),
+                true,
+                true,
+            ))
             .unwrap();
         }
 
@@ -268,7 +331,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
 
         let mut request_buffer = Vec::<u8>::new();
         command.write_to(&mut LexWriter::new(
-            &mut request_buffer,
+            InlineSplice(&mut request_buffer),
             true,
             true,
         ))?;
@@ -304,7 +367,11 @@ impl<R: BufRead, W: Write> Client<R, W> {
         data: &[u8],
     ) -> Result<(), Error> {
         let mut request_buffer = Vec::<u8>::new();
-        frag.write_to(&mut LexWriter::new(&mut request_buffer, true, true))?;
+        frag.write_to(&mut LexWriter::new(
+            InlineSplice(&mut request_buffer),
+            true,
+            true,
+        ))?;
         write!(request_buffer, "{{{}}}\r\n", data.len())?;
 
         self.trace(false, ">>[app]", &request_buffer);

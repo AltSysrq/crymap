@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -17,817 +17,747 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::borrow::Cow;
-use std::io::{self, BufRead, Read, Write};
-use std::mem;
-use std::str;
-use std::sync::{Arc, Mutex};
+use std::io;
+use std::pin::{pin, Pin};
+use std::time::Duration;
 
-use lazy_static::lazy_static;
-use log::{error, info};
-use regex::bytes::Regex;
+use log::{info, warn};
+use tokio::io::AsyncWriteExt;
 
-use super::command_processor::CommandProcessor;
-use super::lex::LexWriter;
-use super::syntax as s;
-use crate::account::mailbox::IdleNotifier;
-use crate::support::append_limit::APPEND_SIZE_LIMIT;
-use crate::support::error::Error;
+use super::{
+    command_processor::CommandProcessor,
+    request_reader::{
+        AppendContinuation, CommandStart, CompressionStatus, RequestReader,
+    },
+    response_writer::{self, OutputControl, OutputDisconnect, OutputEvent},
+};
+use crate::{
+    imap::syntax as s,
+    support::{append_limit::APPEND_SIZE_LIMIT, async_io::ServerIo},
+};
 
-const MAX_CMDLINE: usize = 65536;
+/// Runs the IMAPS server over the given I/O socket(s) using the given command
+/// processor.
+///
+/// This logs the final outcome itself.
+pub async fn run(mut io: ServerIo, mut processor: CommandProcessor) {
+    let (input_result, output_result) =
+        run_impl(io.clone(), &mut processor).await;
 
-lazy_static! {
-    static ref LITERAL_AT_EOL: Regex =
-        Regex::new(r#"~?\{([0-9]+)\+?\}$"#).unwrap();
+    // Close the TLS session cleanly if possible.
+    let _ = tokio::time::timeout(Duration::from_secs(5), io.shutdown()).await;
+
+    match (input_result, output_result) {
+        (Some(Ok(())), _) => {
+            info!("{} Normal client disconnect", processor.log_prefix());
+        },
+
+        (Some(Err(ProcessError::Protocol)), _) => {
+            warn!("{} Unrecoverable protocol error", processor.log_prefix());
+        },
+
+        (Some(Err(ProcessError::Loitering)), _) => {
+            warn!("{} Disconnected due to loitering", processor.log_prefix());
+        },
+
+        (Some(Err(ProcessError::InputIo(e))), _) | (_, Some(Err(e)))
+            if io::ErrorKind::UnexpectedEof == e.kind() =>
+        {
+            info!("{} Client closed connection", processor.log_prefix());
+        }
+
+        (Some(Err(ProcessError::InputIo(e))), _) | (_, Some(Err(e)))
+            if io::ErrorKind::TimedOut == e.kind() =>
+        {
+            info!("{} Network timed out", processor.log_prefix());
+        }
+
+        (Some(Err(ProcessError::InputIo(e))), _) => {
+            warn!(
+                "{} Disconnected due to input I/O error: {e}",
+                processor.log_prefix(),
+            );
+        },
+
+        (_, Some(Err(e))) => {
+            warn!(
+                "{} Disconnected due to output I/O error: {e}",
+                processor.log_prefix(),
+            );
+        },
+
+        (_, Some(Ok(OutputDisconnect::ByControl))) => {
+            warn!(
+                "{} Connection terminated by server logic",
+                processor.log_prefix(),
+            );
+        },
+
+        // These imply that the other side chose to exit first, so they
+        // shouldn't happen.
+        (Some(Err(ProcessError::OutputClosed)), _) |
+        (_, Some(Ok(OutputDisconnect::InputClosed))) |
+        // Doesn't happen since one side always exits.
+        (None, None) => {
+            warn!(
+                "{} Disconnected for unknown reason",
+                processor.log_prefix(),
+            );
+        }
+    }
 }
 
-pub struct Server {
-    read: Box<dyn BufRead + Send>,
-    write: Arc<Mutex<Box<dyn Write + Send>>>,
-    processor: CommandProcessor,
-    sent_bye: bool,
-    compressing: bool,
+async fn run_impl(
+    io: ServerIo,
+    processor: &mut CommandProcessor,
+) -> (
+    Option<Result<(), ProcessError>>,
+    Option<io::Result<OutputDisconnect>>,
+) {
+    let (output_tx, output_rx) = tokio::sync::mpsc::channel(16);
+    let (ping_tx, ping_rx) = tokio::sync::mpsc::channel(1);
+    let inactivity_monitor = inactivity_monitor(ping_rx, output_tx.clone());
+    let mut input_processor =
+        pin!(process_input(io.clone(), processor, ping_tx, output_tx));
+    let mut response_writer =
+        pin!(response_writer::write_responses(io, output_rx));
+
+    // Generally, we want both results to best determine why the connection
+    // terminated. However, on graceless disconnect, it's not necessarily
+    // possible for this to happen, in particular because the output side tries
+    // its best to flush before terminating even after noticing its channel has
+    // been closed, so we give a few seconds for things to respond, then give
+    // up.
+    tokio::select! {
+        _ = inactivity_monitor => {
+            let output_result = tokio::time::timeout(
+                Duration::from_secs(5),
+                response_writer).await.ok();
+            (Some(Err(ProcessError::Loitering)), output_result)
+        },
+
+        input_result = &mut input_processor => {
+            let output_result = tokio::time::timeout(
+                Duration::from_secs(5),
+                response_writer).await.ok();
+            (Some(input_result), output_result)
+        },
+
+        output_result = &mut response_writer => {
+            let input_result = tokio::time::timeout(
+                Duration::from_secs(5),
+                input_processor).await.ok();
+            (input_result, Some(output_result))
+        },
+    }
 }
 
-impl Server {
-    pub fn new<R: BufRead + Send + 'static, W: Write + Send + 'static>(
-        read: R,
-        write: W,
-        processor: CommandProcessor,
-    ) -> Self {
-        Server {
-            read: Box::new(read),
-            write: Arc::new(Mutex::new(Box::new(write))),
-            processor,
-            sent_bye: false,
-            compressing: false,
-        }
-    }
-
-    /// Run the server.
-    ///
-    /// Blocks until an error occurs or a BYE response has been sent.
-    pub fn run(&mut self) -> Result<(), Error> {
-        self.send_response(self.processor.greet())?;
-
-        let mut cmdline = Vec::<u8>::new();
-
-        while !self.sent_bye && !self.processor.logged_out() {
-            let nread = self.buffer_next_line(&mut cmdline, true)?;
-            let nread = match nread {
-                Some(n) => n,
-                None => continue,
-            };
-
-            if let Some((before_literal, length, literal_plus)) =
-                self.check_literal(&cmdline, nread)
-            {
-                if let Ok((b"", append)) =
-                    s::AppendCommandStart::parse(before_literal)
-                {
-                    if 0 == length || length > APPEND_SIZE_LIMIT {
-                        let tag = append.tag.into_owned();
-                        self.reject_append(
-                            &mut cmdline,
-                            Cow::Owned(tag),
-                            length,
-                            literal_plus,
-                        )?;
-                        continue;
-                    }
-
-                    self.accept_literal(literal_plus)?;
-
-                    let tag = (*append.tag).to_owned();
-                    let utf8 = append.first_fragment.utf8;
-                    let mut literal_reader =
-                        self.read.by_ref().take(length.into());
-                    if let Err(resp) = self.processor.cmd_append_start(
-                        append,
-                        length,
-                        &mut literal_reader,
-                    ) {
-                        // cmd_append_start() may have ended prematurely, so
-                        // ensure we read the entire literal.
-                        let _ = io::copy(&mut literal_reader, &mut io::sink());
-                        self.send_response(s::ResponseLine {
-                            tag: Some(Cow::Owned(tag)),
-                            response: resp,
-                        })?;
-                        self.discard_command(&mut cmdline, None)?;
-                        self.processor.cmd_append_abort();
-                        continue;
-                    }
-
-                    self.handle_append(&mut cmdline, tag, utf8)?;
-                } else {
-                    // Not an append; just add the literal to the command line.
-
-                    cmdline.extend_from_slice(b"\r\n");
-                    if length as usize + cmdline.len() > MAX_CMDLINE {
-                        self.command_line_too_long(
-                            &mut cmdline,
-                            true,
-                            true,
-                            Some((length, literal_plus)),
-                        )?;
-                        continue;
-                    }
-
-                    self.accept_literal(literal_plus)?;
-                    let nread = self
-                        .read
-                        .by_ref()
-                        .take(length as u64)
-                        .read_to_end(&mut cmdline)?;
-                    if nread != length as usize {
-                        return Err(Error::Io(io::Error::new(
-                            io::ErrorKind::UnexpectedEof,
-                            "EOF reading literal",
-                        )));
-                    }
-                }
-            } else {
-                // No ending literal; this should be a complete command
-                self.handle_complete_command(&cmdline)?;
-                cmdline.clear();
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Read the next line, appending it to `cmdline`.
-    ///
-    /// Returns the number of bytes added to `cmdline`.
-    ///
-    /// Both DOS newlines and sane newlines (THE HORROR!) are accepted. The
-    /// line ending is removed from the buffer.
-    ///
-    /// If EOF is reached before the full line is read, returns an
-    /// `UnexpectedEof` IO error.
-    ///
-    /// If the maximum command line length is exceeded, sends an appropriate
-    /// response to the client, swallows the whole command, and returns
-    /// `None` successfully with `cmdline` clear.
-    fn buffer_next_line(
-        &mut self,
-        cmdline: &mut Vec<u8>,
-        initial: bool,
-    ) -> Result<Option<usize>, Error> {
-        let mut nread = self
-            .read
-            .by_ref()
-            .take(MAX_CMDLINE as u64)
-            .read_until(b'\n', cmdline)?;
-
-        if 0 == nread {
-            return Err(Error::Io(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "EOF reached before reading full line",
-            )));
-        }
-
-        if cmdline.len() > MAX_CMDLINE || !cmdline.ends_with(b"\n") {
-            self.command_line_too_long(cmdline, false, initial, None)?;
-            return Ok(None);
-        }
-
-        // Drop ending LF
-        cmdline.pop().expect("No LF at end of cmdline?");
-        nread -= 1;
-        // If there's an ending CR, drop that too
-        if cmdline.ends_with(b"\r") {
-            cmdline.pop().expect("No CR at end of cmdline?");
-            nread -= 1;
-        }
-
-        Ok(Some(nread))
-    }
-
-    /// Check whether the current command line ends with a literal.
-    ///
-    /// Only the last `nread` bytes of the command line are checked, so that
-    /// this can consider only things added by the last read operation.
-    fn check_literal<'a>(
-        &self,
-        cmdline: &'a [u8],
-        nread: usize,
-    ) -> Option<(&'a [u8], u32, bool)> {
-        LITERAL_AT_EOL
-            .captures(&cmdline[cmdline.len() - nread..])
-            .and_then(|c| c.get(0).and_then(|m0| c.get(1).map(|m1| (m0, m1))))
-            .and_then(|(m0, m1)| {
-                str::from_utf8(m1.as_bytes())
-                    .ok()
-                    .and_then(|s| s.parse::<u32>().ok())
-                    .map(|len| {
-                        (
-                            &cmdline[..m0.start()],
-                            len,
-                            m0.as_bytes().contains(&b'+'),
-                        )
-                    })
+macro_rules! bye {
+    ($output_tx:expr, $err:expr, $code:expr, $quip:expr $(,)*) => {
+        let _ = $output_tx
+            .send(OutputEvent::ResponseLine {
+                line: s::ResponseLine {
+                    tag: None,
+                    response: s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Bye,
+                        code: $code,
+                        quip: Some(Cow::Borrowed($quip)),
+                    }),
+                },
+                ctl: OutputControl::Disconnect,
             })
-    }
+            .await;
+        return Err($err);
+    };
+}
 
-    /// Send the appropriate continuation for a literal.
-    fn accept_literal(&self, literal_plus: bool) -> Result<(), Error> {
-        if !literal_plus {
-            let mut w = self.write.lock().unwrap();
-            w.write_all(b"+ go\r\n")?;
-            w.flush()?;
+macro_rules! send_cond {
+    ($output_tx:expr, $tag:expr, $cond:ident, $code:expr, $quip:expr $(,)*) => {
+        $output_tx
+            .send(OutputEvent::ResponseLine {
+                line: s::ResponseLine {
+                    tag: Some($tag),
+                    response: s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::$cond,
+                        code: $code,
+                        quip: Some(Cow::Borrowed($quip)),
+                    }),
+                },
+                ctl: OutputControl::Flush,
+            })
+            .await
+            .map_err(|_| ProcessError::OutputClosed)
+    };
+}
+
+async fn process_input(
+    io: ServerIo,
+    processor: &mut CommandProcessor,
+    ping_tx: tokio::sync::mpsc::Sender<bool>,
+    mut output_tx: tokio::sync::mpsc::Sender<OutputEvent>,
+) -> Result<(), ProcessError> {
+    let mut request_reader = RequestReader::new(io);
+    let mut unauthenticated_commands = 0;
+
+    output_tx
+        .send(OutputEvent::ResponseLine {
+            line: processor.greet(),
+            ctl: OutputControl::Flush,
+        })
+        .await
+        .map_err(|_| ProcessError::OutputClosed)?;
+
+    while !processor.logged_out() {
+        let authenticated = processor.is_authenticated();
+        let _ = ping_tx.send(authenticated).await;
+
+        if !authenticated {
+            unauthenticated_commands += 1;
+            // Limit the number of commands that can be executed before
+            // authenticating. This limits the effectiveness of using COMPRESS
+            // to flood the server with NOOPs etc.
+            if unauthenticated_commands > 30 {
+                bye!(
+                    output_tx,
+                    ProcessError::Loitering,
+                    None,
+                    "LOGIN or GET OUT",
+                );
+            }
         }
 
-        Ok(())
-    }
+        // We only allow overlong line recovery if authenticated. This prevents
+        // using COMPRESS to send a deflate bomb to flood the CPU.
+        let start = request_reader
+            .read_command_start(&mut output_tx, authenticated)
+            .await
+            .map_err(ProcessError::InputIo)?;
 
-    /// Handle command rejection due to the command line limit being exceeded.
-    ///
-    /// `recoverable` indicates whether it is expected that this condition can
-    /// be repaired by following the basic lexical syntax until the end of the
-    /// command is reached. This must be `false` if `cmdline` could potentially
-    /// contain a partial literal.
-    ///
-    /// `initial` indicates whether `cmdline` is expected to contain a tag.
-    ///
-    /// `literal_info` gives details about a literal, if any, which is
-    /// currently initiated at the end of `cmdline`.
-    fn command_line_too_long(
-        &mut self,
-        cmdline: &mut Vec<u8>,
-        recoverable: bool,
-        initial: bool,
-        literal_info: Option<(u32, bool)>,
-    ) -> Result<(), Error> {
-        if let (true, Ok((_, frag))) =
-            (initial, s::UnknownCommandFragment::parse(&cmdline))
-        {
-            self.send_response(s::ResponseLine {
-                // The RFC 3501 grammar doesn't allow tagged BYE, so if we're
-                // going to send BYE, we need to ensure it is untagged.
-                tag: if recoverable { Some(frag.tag) } else { None },
-                response: s::Response::Cond(s::CondResponse {
-                    cond: if recoverable {
-                        s::RespCondType::No
-                    } else {
-                        s::RespCondType::Bye
-                    },
-                    code: None,
-                    quip: Some(Cow::Borrowed("Command line too long")),
-                }),
-            })?;
-            self.discard_command(cmdline, literal_info)?;
-        } else {
-            self.send_response(s::ResponseLine {
-                tag: None,
-                response: s::Response::Cond(s::CondResponse {
-                    cond: s::RespCondType::Bye,
-                    code: None,
-                    quip: Some(Cow::Borrowed(if initial {
-                        "That doesn't look anything like \
-                             an IMAP command!"
-                    } else {
-                        "Command line continuation too long"
-                    })),
-                }),
-            })?;
-            cmdline.clear();
-        }
+        match start {
+            CommandStart::Incomprehensible => {
+                bye!(
+                    output_tx,
+                    ProcessError::Protocol,
+                    Some(s::RespTextCode::Parse(())),
+                    "That doesn't look anything like an IMAP command!",
+                );
+            },
 
-        Ok(())
-    }
+            CommandStart::Bad(tag) => {
+                send_cond!(
+                    output_tx,
+                    Cow::Owned(tag),
+                    Bad,
+                    Some(s::RespTextCode::Parse(())),
+                    "Unrecognised command syntax",
+                )?;
+            },
 
-    /// Discard data from the read stream until an error occurs, a BYE response
-    /// is sent, or the end of the command is reached.
-    ///
-    /// This assumes that the current `cmdline` is incomplete, i.e., the caller
-    /// knows there is at least one more line belonging to the command. The
-    /// command is not parsed for literals on entry to this function, since in
-    /// some cases (for example, during append), the literal may have been
-    /// consumed already.
-    ///
-    /// `literal_info` gives details on any unconsumed literal currently at the
-    /// end of `cmdline`.
-    fn discard_command(
-        &mut self,
-        cmdline: &mut Vec<u8>,
-        mut literal_info: Option<(u32, bool)>,
-    ) -> Result<(), Error> {
-        while !self.sent_bye {
-            if let Some((len, literal_plus)) = literal_info.take() {
-                // If not using LITERAL+, the No or Bad response we already
-                // sent back to the client aborts the literal, so we are
-                // consistent at this point.
-                if !literal_plus {
-                    break;
+            CommandStart::TooLongRecovered(tag) => {
+                send_cond!(
+                    output_tx,
+                    Cow::Owned(tag),
+                    No,
+                    None,
+                    "Command line too long",
+                )?;
+            },
+
+            CommandStart::TooLongFatal(_tag) => {
+                bye!(
+                    output_tx,
+                    ProcessError::Protocol,
+                    None,
+                    "Command line too long",
+                );
+            },
+
+            CommandStart::OutputDisconnected => {
+                return Err(ProcessError::OutputClosed);
+            },
+
+            CommandStart::AppendStart {
+                append,
+                size,
+                literal_plus,
+            } => {
+                let append = s::AppendCommandStart::<'static> {
+                    tag: Cow::Owned(append.tag.into_owned()),
+                    mailbox: append.mailbox.into_static(),
+                    first_fragment: append.first_fragment,
+                };
+                handle_append(
+                    &mut request_reader,
+                    &mut output_tx,
+                    processor,
+                    append,
+                    size,
+                    literal_plus,
+                )
+                .await?;
+            },
+
+            CommandStart::AuthenticateStart(auth) => {
+                if let Some(line) = processor.authenticate_start(&auth) {
+                    output_tx
+                        .send(OutputEvent::ResponseLine {
+                            ctl: command_end_ctl(&line.response),
+                            line,
+                        })
+                        .await
+                        .map_err(|_| ProcessError::OutputClosed)?;
+                    continue;
                 }
 
-                // Discard the literal
-                io::copy(
-                    &mut self.read.by_ref().take(len.into()),
-                    &mut io::sink(),
-                )?;
-            }
+                let auth = s::AuthenticateCommandStart::<'static> {
+                    tag: Cow::Owned(auth.tag.into_owned()),
+                    auth_type: Cow::Owned(auth.auth_type.into_owned()),
+                    initial_response: auth
+                        .initial_response
+                        .map(|ir| Cow::Owned(ir.into_owned())),
+                };
+                output_tx
+                    .send(OutputEvent::ContinuationLine {
+                        // The "prompt" is actually the challenge data, of which
+                        // there is none.
+                        prompt: "",
+                    })
+                    .await
+                    .map_err(|_| ProcessError::OutputClosed)?;
 
-            cmdline.clear();
-            let nread = self.buffer_next_line(cmdline, false)?;
-            let nread = match nread {
-                Some(n) => n,
-                None => break,
-            };
+                let Some(auth_data) = request_reader
+                    .read_raw_line()
+                    .await
+                    .map_err(ProcessError::InputIo)?
+                else {
+                    bye!(
+                        output_tx,
+                        ProcessError::Protocol,
+                        None,
+                        "Auth data too long",
+                    );
+                };
 
-            if let Some((_, len, literal_plus)) =
-                self.check_literal(cmdline, nread)
-            {
-                literal_info = Some((len, literal_plus));
-            } else {
-                // Reached end of line without literal; command is done
-                break;
-            }
-        }
+                let line = processor.authenticate_finish(auth, auth_data);
+                output_tx
+                    .send(OutputEvent::ResponseLine {
+                        ctl: command_end_ctl(&line.response),
+                        line,
+                    })
+                    .await
+                    .map_err(|_| ProcessError::OutputClosed)?;
+            },
 
-        cmdline.clear();
-        Ok(())
-    }
-
-    fn handle_complete_command(&mut self, cmdline: &[u8]) -> Result<(), Error> {
-        if let Ok((b"", auth_start)) =
-            s::AuthenticateCommandStart::parse(&cmdline)
-        {
-            self.handle_authenticate(auth_start)?;
-        } else if let Ok((b"", cmdline)) = s::CommandLine::parse(&cmdline) {
-            match cmdline {
+            CommandStart::StandAlone(cmd) => match cmd {
                 s::CommandLine {
                     tag,
                     cmd: s::Command::Simple(s::SimpleCommand::Compress),
-                } => self.handle_compress(tag)?,
+                } => {
+                    let tag = tag.into_owned();
+                    handle_compress(&mut request_reader, &mut output_tx, tag)
+                        .await?;
+                },
 
                 s::CommandLine {
                     tag,
                     cmd: s::Command::Simple(s::SimpleCommand::Idle),
-                } => self.handle_idle(tag)?,
-
-                cmdline => {
-                    let r = self.processor.handle_command(
-                        cmdline,
-                        &response_sender(
-                            &self.write,
-                            self.processor.unicode_aware(),
-                        ),
-                    );
-                    self.send_response(r)?;
-                }
-            }
-        } else if let Ok((_, frag)) = s::UnknownCommandFragment::parse(&cmdline)
-        {
-            self.send_response(s::ResponseLine {
-                tag: Some(frag.tag),
-                response: s::Response::Cond(s::CondResponse {
-                    cond: s::RespCondType::Bad,
-                    code: Some(s::RespTextCode::Parse(())),
-                    quip: Some(Cow::Borrowed("Unrecognised command syntax")),
-                }),
-            })?;
-        } else {
-            self.send_response(s::ResponseLine {
-                tag: None,
-                response: s::Response::Cond(s::CondResponse {
-                    cond: s::RespCondType::Bye,
-                    code: Some(s::RespTextCode::Parse(())),
-                    quip: Some(Cow::Borrowed(
-                        "That doesn't look anything like an IMAP command!",
-                    )),
-                }),
-            })?;
-        }
-
-        Ok(())
-    }
-
-    /// Handle the full AUTHENTICATE flow.
-    fn handle_authenticate(
-        &mut self,
-        cmd: s::AuthenticateCommandStart<'_>,
-    ) -> Result<(), Error> {
-        if let Some(response_line) = self.processor.authenticate_start(&cmd) {
-            self.send_response(response_line)?;
-            return Ok(());
-        }
-
-        {
-            let mut w = self.write.lock().unwrap();
-            // The space after the + is mandatory, and what follows is any
-            // Base64 data we have to send, but there is none.
-            w.write_all(b"+ \r\n")?;
-            w.flush()?;
-        }
-
-        let mut buffer = Vec::new();
-        self.read
-            .by_ref()
-            .take(MAX_CMDLINE as u64)
-            .read_until(b'\n', &mut buffer)?;
-
-        if !buffer.ends_with(b"\n") {
-            self.send_response(s::ResponseLine {
-                tag: None,
-                response: s::Response::Cond(s::CondResponse {
-                    cond: s::RespCondType::Bye,
-                    code: None,
-                    quip: Some(Cow::Borrowed(
-                        "AUTHENTICATE data too long or read truncated",
-                    )),
-                }),
-            })?;
-            return Ok(());
-        }
-
-        buffer.pop();
-        if buffer.ends_with(b"\r") {
-            buffer.pop();
-        }
-
-        let response_line = self.processor.authenticate_finish(cmd, &buffer);
-        self.send_response(response_line)?;
-        Ok(())
-    }
-
-    /// Handle the APPEND command beyond the first item.
-    ///
-    /// This must be called immediately after the literal of the first item has
-    /// been fully read.
-    ///
-    /// The `utf8` flag indicates whether we need to expect the end of a UTF8
-    /// literal.
-    fn handle_append(
-        &mut self,
-        cmdline: &mut Vec<u8>,
-        tag: String,
-        mut utf8: bool,
-    ) -> Result<(), Error> {
-        loop {
-            cmdline.clear();
-            let nread = self.buffer_next_line(cmdline, false)?;
-            let mut nread = match nread {
-                Some(n) => n,
-                None => {
-                    self.processor.cmd_append_abort();
-                    break;
-                }
-            };
-
-            // If we just ended a UTF8 append item, check for the closing
-            // parenthesis
-            if utf8 {
-                if Some(&b')') != cmdline.get(0) {
-                    // Recovering from the unmatched parenthesis is awkward and not
-                    // that important to do, so just give up.
-                    self.send_response(s::ResponseLine {
-                        tag: None,
-                        response: s::Response::Cond(s::CondResponse {
-                            cond: s::RespCondType::Bye,
-                            code: Some(s::RespTextCode::Parse(())),
-                            quip: Some(Cow::Borrowed(
-                                "Missing ')' after UTF8 literal",
-                            )),
-                        }),
-                    })?;
-                    self.processor.cmd_append_abort();
-                    return Ok(());
-                } else {
-                    cmdline.remove(0);
-                    nread -= 1;
-                }
-            }
-
-            // End of append if the command line is empty
-            if cmdline.is_empty() {
-                let r = self.processor.cmd_append_commit(
-                    Cow::Owned(tag),
-                    &response_sender(
-                        &self.write,
-                        self.processor.unicode_aware(),
-                    ),
-                );
-                self.send_response(r)?;
-                break;
-            }
-
-            if let Some((before_literal, length, literal_plus)) =
-                self.check_literal(cmdline, nread)
-            {
-                if 0 == length || length > APPEND_SIZE_LIMIT {
-                    self.reject_append(
-                        cmdline,
-                        Cow::Owned(tag),
-                        length,
-                        literal_plus,
-                    )?;
-                    self.processor.cmd_append_abort();
-                    break;
-                }
-
-                if let Ok((b"", frag)) =
-                    s::AppendFragment::parse(before_literal)
-                {
-                    utf8 = frag.utf8;
-                    self.accept_literal(literal_plus)?;
-
-                    let mut literal_reader =
-                        self.read.by_ref().take(length.into());
-                    if let Err(resp) = self.processor.cmd_append_item(
-                        frag,
-                        length,
-                        &mut literal_reader,
-                    ) {
-                        // cmd_append_start() may have ended prematurely, so
-                        // ensure we read the entire literal.
-                        let _ = io::copy(&mut literal_reader, &mut io::sink());
-                        self.send_response(s::ResponseLine {
-                            tag: Some(Cow::Owned(tag)),
-                            response: resp,
-                        })?;
-                        self.discard_command(cmdline, None)?;
-                        self.processor.cmd_append_abort();
-                        break;
-                    }
-
-                    continue;
-                } else {
-                    self.send_response(s::ResponseLine {
-                        tag: Some(Cow::Owned(tag)),
-                        response: s::Response::Cond(s::CondResponse {
-                            cond: s::RespCondType::Bad,
-                            code: Some(s::RespTextCode::Parse(())),
-                            quip: Some(Cow::Borrowed("Bad APPEND syntax")),
-                        }),
-                    })?;
-                    self.discard_command(
-                        cmdline,
-                        Some((length, literal_plus)),
-                    )?;
-                    self.processor.cmd_append_abort();
-                    break;
-                }
-            }
-
-            // Not an understood append fragment
-            self.send_response(s::ResponseLine {
-                tag: Some(Cow::Owned(tag)),
-                response: s::Response::Cond(s::CondResponse {
-                    cond: s::RespCondType::Bad,
-                    code: Some(s::RespTextCode::Parse(())),
-                    quip: Some(Cow::Borrowed("Bad APPEND syntax (no literal)")),
-                }),
-            })?;
-            // We don't need to call `discard_command` because we know there's
-            // no literal; we can just clear the buffer on exit from the
-            // function.
-            self.processor.cmd_append_abort();
-            break;
-        }
-
-        cmdline.clear();
-        Ok(())
-    }
-
-    fn reject_append(
-        &mut self,
-        cmdline: &mut Vec<u8>,
-        tag: Cow<'_, str>,
-        length: u32,
-        literal_plus: bool,
-    ) -> Result<(), Error> {
-        self.send_response(s::ResponseLine {
-            tag: Some(tag),
-            response: s::Response::Cond(s::CondResponse {
-                cond: s::RespCondType::Bad,
-                code: if 0 == length {
-                    None
-                } else {
-                    Some(s::RespTextCode::Limit(()))
+                } => {
+                    let tag = tag.into_owned();
+                    handle_idle(
+                        &mut request_reader,
+                        &mut output_tx,
+                        processor,
+                        tag,
+                    )
+                    .await?;
                 },
-                quip: Some(Cow::Borrowed(if 0 == length {
-                    "APPEND aborted by 0-size literal"
-                } else {
-                    "APPEND size limit exceeded"
-                })),
-            }),
-        })?;
-        self.discard_command(cmdline, Some((length, literal_plus)))?;
-        self.processor.cmd_append_abort();
-        Ok(())
-    }
 
-    fn handle_compress(&mut self, tag: Cow<'_, str>) -> Result<(), Error> {
-        if self.compressing {
-            self.send_response(s::ResponseLine {
-                tag: Some(tag),
-                response: s::Response::Cond(s::CondResponse {
-                    cond: s::RespCondType::No,
-                    code: Some(s::RespTextCode::CompressionActive(())),
-                    quip: Some(Cow::Borrowed("Already compressing")),
-                }),
-            })?;
-            return Ok(());
-        }
-
-        let mut write = self.write.lock().unwrap();
-        let mut write: &mut Box<dyn Write + Send> = &mut write;
-        self.compressing = true;
-
-        // Send the OK before applying compression
-        // We do this with the lock held to ensure any sources of async
-        // notifications (e.g. NOTIFY) don't come between the OK and
-        // compression taking effect.
-        {
-            let mut response = s::ResponseLine {
-                tag: Some(tag),
-                response: s::Response::Cond(s::CondResponse {
-                    cond: s::RespCondType::Ok,
-                    code: None,
-                    quip: Some(Cow::Borrowed("Oo.")),
-                }),
-            };
-            let mut w = LexWriter::new(
-                &mut write,
-                self.processor.unicode_aware(),
-                false,
-            );
-            response.write_to(&mut w)?;
-            w.verbatim_bytes(b"\r\n")?;
-        }
-        write.flush()?;
-
-        self.read =
-            Box::new(io::BufReader::new(flate2::read::DeflateDecoder::new(
-                mem::replace(&mut self.read, Box::new(&[] as &[u8])),
-            )));
-        *write = Box::new(flate2::write::DeflateEncoder::new(
-            mem::replace(write, Box::new(Vec::new())),
-            flate2::Compression::new(3),
-        ));
-
-        info!("{} Compression started", self.processor.log_prefix());
-
-        Ok(())
-    }
-
-    fn handle_idle(&mut self, tag: Cow<'_, str>) -> Result<(), Error> {
-        // This is a bit complicated so it needs some explanation.
-        //
-        // When we start the IDLE command, we first let cmd_idle() check
-        // whether that's even possible. If not, the first lambda never gets
-        // called. In this case, `started_idle` remains `false`, and we just
-        // finish by sending the response over the wire.
-        //
-        // If we *do* start the IDLE, things are more difficult. The first
-        // lambda takes care of sending the continuation line over the wire,
-        // sets `started_idle` to true, and moves our reader out of `read`. A
-        // separate thread is then spawned which waits for the read to yield a
-        // complete line or fail. Once that happens, it flags the IDLE as done
-        // (by setting `keep_idling` in the context to `false`), notifies any
-        // pending listener, and sends the reader back to the original thread
-        // over a channel.
-
-        struct IdleContext {
-            keep_idling: bool,
-            notifier: Option<IdleNotifier>,
-        }
-
-        let (send_read, recv_read) = std::sync::mpsc::sync_channel::<
-            Result<Box<dyn BufRead + Send>, io::Error>,
-        >(1);
-        let context: Arc<Mutex<IdleContext>> =
-            Arc::new(Mutex::new(IdleContext {
-                keep_idling: true,
-                notifier: None,
-            }));
-        let mut started_idle = false;
-
-        let sender =
-            response_sender(&self.write, self.processor.unicode_aware());
-
-        let read_ref = &mut self.read;
-        let write_ref = &self.write;
-        let log_prefix = self.processor.log_prefix().to_owned();
-
-        let response = self.processor.cmd_idle(
-            || {
-                let mut w = write_ref.lock().unwrap();
-                w.write_all(b"+ idling\r\n")?;
-                w.flush()?;
-                started_idle = true;
-
-                let cxt = Arc::clone(&context);
-
-                let mut read = mem::replace(read_ref, Box::new(&[] as &[u8]));
-                std::thread::spawn(move || {
-                    let mut done_line = Vec::new();
-                    let mut read_result = read
-                        .by_ref()
-                        .take(16)
-                        .read_until(b'\n', &mut done_line);
-
-                    if read_result.is_ok() && done_line.is_empty() {
-                        read_result = Err(io::Error::new(
-                            io::ErrorKind::UnexpectedEof,
-                            "Connection closed while idling",
-                        ));
-                    }
-
-                    if read_result.is_ok() && !done_line.ends_with(b"\n") {
-                        read_result = Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "Expected DONE, got garbage",
-                        ));
-                    }
-
-                    // Either we got DONE\r\n (or some other line that fits in
-                    // the buffer, we don't really care), or something's gone
-                    // very wrong. Either way, we just end the idle and let the
-                    // outer code deal with it.
-                    {
-                        let mut cxt = cxt.lock().unwrap();
-                        cxt.keep_idling = false;
-                        if let Some(notifier) = cxt.notifier.take() {
-                            if let Err(e) = notifier.notify() {
-                                error!(
-                                    "{} Failed to end IDLE: {}",
-                                    log_prefix, e
-                                );
-                            }
-                        }
-                    }
-
-                    send_read.send(read_result.map(|_| read)).unwrap();
-                });
-
-                Ok(())
+                cmd => {
+                    let line =
+                        processor.handle_command(cmd, output_tx.clone()).await;
+                    // Notably, for LOGOUT, this does not actually cause the
+                    // final OK to be sent with OutputControl::Disconnect.
+                    // Instead, the input loop simply exits when it sees the
+                    // processor has logged out.
+                    output_tx
+                        .send(OutputEvent::ResponseLine {
+                            ctl: command_end_ctl(&line.response),
+                            line,
+                        })
+                        .await
+                        .map_err(|_| ProcessError::OutputClosed)?;
+                },
             },
-            |listener| {
-                let mut context = context.lock().unwrap();
-                context.notifier = Some(listener.notifier());
-                context.keep_idling
-            },
-            || {
-                let mut w = write_ref.lock().unwrap();
-                w.flush()?;
-                Ok(())
-            },
-            tag,
-            &sender,
-        );
-
-        drop(sender);
-
-        if started_idle {
-            self.read = recv_read.recv().unwrap()?;
         }
-
-        self.send_response(response)?;
-        Ok(())
     }
 
-    fn send_response(
-        &mut self,
-        mut r: s::ResponseLine<'_>,
-    ) -> Result<(), Error> {
-        self.sent_bye |= matches!(
-            r,
-            s::ResponseLine {
-                response: s::Response::Cond(s::CondResponse {
-                    cond: s::RespCondType::Bye,
-                    ..
-                }),
-                ..
-            }
-        );
-
-        let mut w = self.write.lock().unwrap();
-        {
-            let mut w =
-                LexWriter::new(&mut *w, self.processor.unicode_aware(), false);
-            r.write_to(&mut w)?;
-            w.verbatim_bytes(b"\r\n")?;
-        }
-        w.flush()?;
-        Ok(())
-    }
+    Ok(())
 }
 
-fn response_sender<'a>(
-    w: &'a Arc<Mutex<Box<dyn Write + Send>>>,
-    unicode_aware: bool,
-) -> impl Fn(s::Response<'_>) + Send + Sync + 'a {
-    move |r| {
-        let mut w = w.lock().unwrap();
-        let mut w = LexWriter::new(&mut *w, unicode_aware, false);
-        let _ = s::ResponseLine {
-            tag: None,
-            response: r,
+enum ProcessError {
+    InputIo(io::Error),
+    Protocol,
+    Loitering,
+    OutputClosed,
+}
+
+async fn handle_append(
+    request_reader: &mut RequestReader<ServerIo>,
+    output_tx: &mut tokio::sync::mpsc::Sender<OutputEvent>,
+    processor: &mut CommandProcessor,
+    append: s::AppendCommandStart<'_>,
+    mut size: u32,
+    mut literal_plus: bool,
+) -> Result<(), ProcessError> {
+    let tag = append.tag.clone().into_owned();
+
+    if let Err(e) = processor.cmd_append_start(&append) {
+        request_reader
+            .abort_append(size, literal_plus)
+            .await
+            .map_err(ProcessError::InputIo)?;
+        output_tx
+            .send(OutputEvent::ResponseLine {
+                ctl: command_end_ctl(&e),
+                line: s::ResponseLine {
+                    tag: Some(Cow::Owned(tag)),
+                    response: e,
+                },
+            })
+            .await
+            .map_err(|_| ProcessError::OutputClosed)?;
+        return Ok(());
+    }
+
+    let mut fragment = append.first_fragment;
+    // For each iteration of the loop, we're about to read a
+    // literal described by (size, literal_plus, fragment)
+    loop {
+        // Verify allowable sizes. (0 explicitly cancels but is
+        // still a NO.)
+        if 0 == size {
+            send_cond!(
+                output_tx,
+                Cow::Owned(tag),
+                No,
+                None,
+                "Zero-size APPEND",
+            )?;
+            request_reader
+                .abort_append(size, literal_plus)
+                .await
+                .map_err(ProcessError::InputIo)?;
+            return Ok(());
         }
-        .write_to(&mut w);
-        let _ = w.verbatim_bytes(b"\r\n");
+
+        if size > APPEND_SIZE_LIMIT {
+            send_cond!(
+                output_tx,
+                Cow::Owned(tag),
+                No,
+                Some(s::RespTextCode::TooBig(())),
+                "APPEND message too big",
+            )?;
+            request_reader
+                .abort_append(size, literal_plus)
+                .await
+                .map_err(ProcessError::InputIo)?;
+            return Ok(());
+        }
+
+        // Ready to read the literal.
+        if !literal_plus {
+            output_tx
+                .send(OutputEvent::ContinuationLine { prompt: "go" })
+                .await
+                .map_err(|_| ProcessError::OutputClosed)?;
+        }
+
+        // Process this item.
+        let result = {
+            let mut reader = request_reader.read_append_literal(size);
+            let result = processor
+                .cmd_append_item(&fragment, size, Pin::new(&mut reader))
+                .await;
+            // Ensure we consume the whole thing
+            tokio::io::copy(&mut reader, &mut tokio::io::sink())
+                .await
+                .map_err(ProcessError::InputIo)?;
+            result
+        };
+
+        // Back out if this item specifically failed.
+        if let Err(response) = result {
+            output_tx
+                .send(OutputEvent::ResponseLine {
+                    ctl: command_end_ctl(&response),
+                    line: s::ResponseLine {
+                        tag: Some(Cow::Owned(tag)),
+                        response,
+                    },
+                })
+                .await
+                .map_err(|_| ProcessError::OutputClosed)?;
+            processor.cmd_append_abort();
+            request_reader
+                .abort_append_after_literal()
+                .await
+                .map_err(ProcessError::InputIo)?;
+            return Ok(());
+        }
+
+        let next = request_reader
+            .continue_append(fragment.utf8)
+            .await
+            .map_err(ProcessError::InputIo)?;
+
+        match next {
+            AppendContinuation::NextPart {
+                fragment: f,
+                size: s,
+                literal_plus: l,
+            } => {
+                // Ok, keep going
+                fragment = f;
+                size = s;
+                literal_plus = l;
+            },
+
+            AppendContinuation::Done => break,
+
+            AppendContinuation::SyntaxError => {
+                processor.cmd_append_abort();
+                send_cond!(
+                    output_tx,
+                    Cow::Owned(tag),
+                    Bad,
+                    Some(s::RespTextCode::Parse(())),
+                    "Bad APPEND continuation",
+                )?;
+                return Ok(());
+            },
+
+            AppendContinuation::TooLong => {
+                processor.cmd_append_abort();
+                send_cond!(
+                    output_tx,
+                    Cow::Owned(tag),
+                    Bad,
+                    None,
+                    "APPEND continuation line too long",
+                )?;
+                return Ok(());
+            },
+        }
+    }
+
+    // The last item was prepared, and the parser is beyond the end of the
+    // whole APPEND.
+    let line = processor
+        .cmd_append_commit(Cow::Owned(tag), output_tx.clone())
+        .await;
+    output_tx
+        .send(OutputEvent::ResponseLine {
+            ctl: command_end_ctl(&line.response),
+            line,
+        })
+        .await
+        .map_err(|_| ProcessError::OutputClosed)?;
+    Ok(())
+}
+
+async fn handle_compress(
+    request_reader: &mut RequestReader<ServerIo>,
+    output_tx: &mut tokio::sync::mpsc::Sender<OutputEvent>,
+    tag: String,
+) -> Result<(), ProcessError> {
+    let response = match request_reader.start_compression() {
+        CompressionStatus::Started => s::CondResponse {
+            cond: s::RespCondType::Ok,
+            code: None,
+            quip: Some(Cow::Borrowed("Oo.")),
+        },
+
+        CompressionStatus::AlreadyActive => s::CondResponse {
+            cond: s::RespCondType::No,
+            code: Some(s::RespTextCode::CompressionActive(())),
+            quip: Some(Cow::Borrowed("Already compressing")),
+        },
+
+        CompressionStatus::InvalidPipelinedData => s::CondResponse {
+            cond: s::RespCondType::Bad,
+            code: Some(s::RespTextCode::ClientBug(())),
+            quip: Some(Cow::Borrowed(
+                "There is pipelined data behind the \
+                     COMPRESS command",
+            )),
+        },
+    };
+
+    output_tx
+        .send(OutputEvent::ResponseLine {
+            ctl: if s::RespCondType::Ok == response.cond {
+                OutputControl::EnableCompression
+            } else {
+                OutputControl::Flush
+            },
+            line: s::ResponseLine {
+                tag: Some(Cow::Owned(tag)),
+                response: s::Response::Cond(response),
+            },
+        })
+        .await
+        .map_err(|_| ProcessError::OutputClosed)?;
+
+    Ok(())
+}
+
+async fn handle_idle(
+    request_reader: &mut RequestReader<ServerIo>,
+    output_tx: &mut tokio::sync::mpsc::Sender<OutputEvent>,
+    processor: &mut CommandProcessor,
+    tag: String,
+) -> Result<(), ProcessError> {
+    if let Some(line) = processor.cmd_idle_preflight(&tag) {
+        output_tx
+            .send(OutputEvent::ResponseLine {
+                ctl: command_end_ctl(&line.response),
+                line,
+            })
+            .await
+            .map_err(|_| ProcessError::OutputClosed)?;
+        return Ok(());
+    }
+
+    output_tx
+        .send(OutputEvent::ContinuationLine { prompt: "idling" })
+        .await
+        .map_err(|_| ProcessError::OutputClosed)?;
+
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
+    let mut idle = pin!(processor.cmd_idle(&tag, output_tx.clone(), cancel_rx));
+    let read_line = async move {
+        let line = request_reader.read_raw_line().await;
+        let _ = cancel_tx.send(());
+        line
+    };
+
+    let fatal_error = tokio::select! {
+        idle_error = &mut idle => {
+            // IDLE only exits early on error, which is always
+            // fatal, so cancelling the non-cancel-safe
+            // read_raw_line() is fine.
+            Some(idle_error)
+        },
+
+        line = read_line => {
+            // If we got an IO error, cancel everything because the connection
+            // is dead.
+            let line = line.map_err(ProcessError::InputIo)?;
+
+            if line.is_some() {
+                // Normal case, we got a line (presumably "DONE", but we don't
+                // care) which cancels the IDLE gracefully.
+                None
+            } else {
+                // The "DONE" line was somehow too long.
+                Some(s::ResponseLine {
+                    tag: None,
+                    response: s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Bye,
+                        code: None,
+                        quip: Some(Cow::Borrowed(
+                            "Expecting 'DONE', got far more than that",
+                        )),
+                    }),
+                })
+            }
+        },
+    };
+
+    if let Some(fatal_error) = fatal_error {
+        // This could be cancelling the non-cancel-safe
+        // cmd_idle(), but that's fine since we're
+        // disconnecting anyway.
+        output_tx
+            .send(OutputEvent::ResponseLine {
+                line: fatal_error,
+                ctl: OutputControl::Disconnect,
+            })
+            .await
+            .map_err(|_| ProcessError::OutputClosed)?;
+        return Err(ProcessError::Protocol);
+    }
+
+    let line = idle.await;
+    output_tx
+        .send(OutputEvent::ResponseLine {
+            ctl: command_end_ctl(&line.response),
+            line,
+        })
+        .await
+        .map_err(|_| ProcessError::OutputClosed)?;
+    Ok(())
+}
+
+/// Monitors for request inactivity.
+///
+/// Each message on `ping` resets the clock and informs whether the connection
+/// is authenticated.
+///
+/// This only terminates if the inactivity timer elapses.
+async fn inactivity_monitor(
+    mut ping: tokio::sync::mpsc::Receiver<bool>,
+    output_tx: tokio::sync::mpsc::Sender<OutputEvent>,
+) {
+    let mut authenticated = false;
+    loop {
+        let timeout = if authenticated {
+            // A bit over the required 30 minutes
+            Duration::from_secs(31 * 60)
+        } else {
+            // RFC 3501 requires the timer to be at least 30 minutes, but
+            // possibly only intends that to apply to logged in clients. RFC
+            // 9051 amends it to explicitly allow shorter timeouts for
+            // not-logged-in clients.
+            Duration::from_secs(300)
+        };
+
+        tokio::select! {
+            _ = tokio::time::sleep(timeout) => break,
+            auth = ping.recv() => authenticated = auth.unwrap_or(false),
+        }
+    }
+
+    let _ = output_tx
+        .send(OutputEvent::ResponseLine {
+            ctl: OutputControl::Disconnect,
+            line: s::ResponseLine {
+                tag: None,
+                response: s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Bye,
+                    code: None,
+                    quip: Some(Cow::Borrowed(if authenticated {
+                        "Inactivity timer elapsed"
+                    } else {
+                        "Authentication timed out"
+                    })),
+                }),
+            },
+        })
+        .await;
+}
+
+fn command_end_ctl(response: &s::Response<'_>) -> OutputControl {
+    if matches!(
+        *response,
+        s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Bye,
+            ..
+        }),
+    ) {
+        OutputControl::Disconnect
+    } else {
+        OutputControl::Flush
     }
 }

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -15,6 +15,8 @@
 //
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
+
+use std::borrow::Cow;
 
 use super::super::defs::*;
 use crate::account::model::Flag;
@@ -209,7 +211,8 @@ fn store_unchanged_concurrent() {
     )));
     unpack_cond_response! {
         (Some(_), s::RespCondType::Ok,
-         Some(s::RespTextCode::ExpungeIssued(())), _) = responses.pop().unwrap()
+         Some(s::RespTextCode::Modified(Cow::Borrowed("1:2"))), _) =
+            responses.pop().unwrap()
     };
 
     command!(responses = client, c("FETCH 1:2 FLAGS"));
@@ -220,7 +223,7 @@ fn store_unchanged_concurrent() {
         }) in responses => {
             has_msgatt_matching! {
                 s::MsgAtt::Flags(s::FlagsFetch::Recent(ref flags)) in fr => {
-                    assert!(flags.contains(&Flag::Deleted));
+                    assert!(!flags.contains(&Flag::Deleted));
                 }
             };
         }
@@ -232,7 +235,7 @@ fn store_unchanged_concurrent() {
         }) in responses => {
             has_msgatt_matching! {
                 s::MsgAtt::Flags(s::FlagsFetch::Recent(ref flags)) in fr => {
-                    assert!(flags.contains(&Flag::Deleted));
+                    assert!(!flags.contains(&Flag::Deleted));
                 }
             }
         }

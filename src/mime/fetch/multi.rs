@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -41,6 +41,7 @@ pub enum FetchedItem {
     Flags(simple::FlagsInfo),
     Rfc822Size(u32),
     InternalDate(DateTime<FixedOffset>),
+    SaveDate(Option<DateTime<FixedOffset>>),
     EmailId(String),
     ThreadIdNil,
     Envelope(Box<envelope::Envelope>),
@@ -150,6 +151,15 @@ impl MultiFetcher {
         )))
     }
 
+    /// Fetch the "save date" of the message.
+    pub fn add_save_date(&mut self) {
+        self.add_fetcher(Box::new(VisitorMap::new(
+            Box::new(simple::SaveDateFetcher),
+            FetchedItem::SaveDate,
+            FetchedItem::into_none,
+        )))
+    }
+
     /// Fetch the email id of the message.
     pub fn add_email_id(&mut self) {
         self.add_fetcher(Box::new(VisitorMap::new(
@@ -207,7 +217,7 @@ impl MultiFetcher {
     ) -> Result<(), Vec<FetchedItem>> {
         for i in 0..self.fetchers.len() {
             let result =
-                self.fetchers[i].as_mut().map(|v| f(v)).unwrap_or(Ok(()));
+                self.fetchers[i].as_mut().map(&mut f).unwrap_or(Ok(()));
             if let Err(result) = result {
                 self.results[i] = result;
                 self.fetchers[i] = None;
@@ -216,7 +226,7 @@ impl MultiFetcher {
         }
 
         if 0 == self.remaining {
-            Err(mem::replace(&mut self.results, Vec::new()))
+            Err(mem::take(&mut self.results))
         } else {
             Ok(())
         }
@@ -230,8 +240,19 @@ impl Visitor for MultiFetcher {
         self.on_fetchers(|fetcher| fetcher.uid(uid))
     }
 
+    fn email_id(&mut self, id: &str) -> Result<(), Self::Output> {
+        self.on_fetchers(|fetcher| fetcher.email_id(id))
+    }
+
     fn last_modified(&mut self, modseq: Modseq) -> Result<(), Self::Output> {
         self.on_fetchers(|fetcher| fetcher.last_modified(modseq))
+    }
+
+    fn savedate(
+        &mut self,
+        savedate: DateTime<Utc>,
+    ) -> Result<(), Self::Output> {
+        self.on_fetchers(|fetcher| fetcher.savedate(savedate))
     }
 
     fn want_flags(&self) -> bool {
@@ -251,6 +272,10 @@ impl Visitor for MultiFetcher {
 
     fn end_flags(&mut self) -> Result<(), Self::Output> {
         self.on_fetchers(|fetcher| fetcher.end_flags())
+    }
+
+    fn rfc822_size(&mut self, size: u32) -> Result<(), Self::Output> {
+        self.on_fetchers(|fetcher| fetcher.rfc822_size(size))
     }
 
     fn metadata(
@@ -283,11 +308,9 @@ impl Visitor for MultiFetcher {
     fn leaf_section(
         &mut self,
     ) -> Option<Box<dyn Visitor<Output = Self::Output>>> {
-        for fetcher in &mut self.fetchers {
-            if let Some(ref mut fetcher) = fetcher {
-                if let Some(new) = fetcher.leaf_section() {
-                    *fetcher = new;
-                }
+        for fetcher in self.fetchers.iter_mut().flatten() {
+            if let Some(new) = fetcher.leaf_section() {
+                *fetcher = new;
             }
         }
         None
@@ -344,7 +367,7 @@ impl Visitor for MultiFetcher {
         }
 
         if 0 == self.remaining {
-            Err(mem::replace(&mut self.results, Vec::new()))
+            Err(mem::take(&mut self.results))
         } else {
             Ok(())
         }
@@ -352,8 +375,11 @@ impl Visitor for MultiFetcher {
 
     fn end(&mut self) -> Self::Output {
         self.on_fetchers(|fetcher| Err(fetcher.end()))
-            .err()
-            .expect("Failed to complete MultiFetcher.end()")
+            .expect_err("Failed to complete MultiFetcher.end()")
+    }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        panic!("missing method on MultiFetcher")
     }
 }
 
@@ -364,6 +390,7 @@ mod test {
 
     use super::*;
     use crate::mime::grovel;
+    use crate::support::chronox::*;
 
     #[test]
     fn test_multi_fetch() {
@@ -403,18 +430,24 @@ mod test {
         fetcher.add_flags();
         fetcher.add_rfc822size();
         fetcher.add_internal_date();
+        fetcher.add_save_date();
         fetcher.add_email_id();
 
         let uid = Uid::u(42);
-        let modseq = Modseq::new(Uid::u(56), Cid(100));
-        let internal_date = FixedOffset::east(0).timestamp_millis(1000);
+        let modseq = Modseq::of(56100);
+        let internal_date =
+            FixedOffset::zero().timestamp_millis_opt(1000).unwrap();
+        let savedate = Utc.timestamp_millis_opt(2000).unwrap();
         let mut result = grovel::grovel(
-            &grovel::SimpleAccessor {
+            &mut grovel::SimpleAccessor {
                 data: crate::test_data::RFC3501_P56.to_owned().into(),
                 uid,
+                email_id: Some("E1234".to_owned()),
                 last_modified: modseq,
                 recent: true,
                 flags: vec![Flag::Deleted],
+                rfc822_size: Some(1234),
+                savedate: Some(savedate),
                 metadata: MessageMetadata {
                     size: 1234,
                     internal_date,
@@ -427,12 +460,12 @@ mod test {
         )
         .unwrap();
 
-        assert_eq!(10, result.len());
+        assert_eq!(11, result.len());
 
         match &result[0] {
             &FetchedItem::Envelope(ref envelope) => {
                 assert_eq!("RFC 3501", envelope.subject.as_ref().unwrap());
-            }
+            },
             r => panic!("Unexpected envelope result: {:#?}", r),
         }
 
@@ -441,7 +474,7 @@ mod test {
                 let mut content = String::new();
                 bs.buffer.read_to_string(&mut content).unwrap();
                 assert_eq!("Part 3.1\r\n", content);
-            }
+            },
             r => panic!("Unexpected [3.1] result: {:#?}", r),
         }
 
@@ -450,7 +483,7 @@ mod test {
                 let mut content = String::new();
                 bs.buffer.read_to_string(&mut content).unwrap();
                 assert!(content.starts_with("Content-Id: 2"));
-            }
+            },
             r => panic!("Unexpected [2] result: {:#?}", r),
         }
 
@@ -459,7 +492,7 @@ mod test {
                 let mut content = String::new();
                 bs.buffer.read_to_string(&mut content).unwrap();
                 assert_eq!("Part 4.2.2.1\r\n", content);
-            }
+            },
             r => panic!("Unexpected [4.2.2.1] result: {:#?}", r),
         }
 
@@ -477,7 +510,7 @@ mod test {
             &FetchedItem::Flags(ref f) => {
                 assert!(f.recent);
                 assert_eq!(vec![Flag::Deleted], f.flags);
-            }
+            },
             r => panic!("Unexpected Flags result: {:#?}", r),
         }
 
@@ -488,15 +521,25 @@ mod test {
 
         match &result[8] {
             &FetchedItem::InternalDate(id) => {
-                assert_eq!(FixedOffset::east(0).timestamp_millis(1000), id)
-            }
+                assert_eq!(
+                    FixedOffset::zero().timestamp_millis_opt(1000).unwrap(),
+                    id
+                )
+            },
             r => panic!("Unexpected internal date result: {:#?}", r),
         }
 
         match &result[9] {
+            &FetchedItem::SaveDate(sd) => {
+                assert_eq!(Some(DateTime::<FixedOffset>::from(savedate)), sd);
+            },
+            r => panic!("Unexpected save date result: {r:#?}"),
+        }
+
+        match &result[10] {
             &FetchedItem::EmailId(ref id) => {
-                assert_eq!("EAQIDBAUGBwgJCgsMDQ4P", id);
-            }
+                assert_eq!("E1234", id);
+            },
             r => panic!("Unexpected email id result: {:#?}", r),
         }
     }

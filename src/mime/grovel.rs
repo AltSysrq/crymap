@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -24,6 +24,8 @@ use std::mem;
 use std::rc::Rc;
 use std::str;
 
+use chrono::prelude::*;
+
 use super::header::{self, ContentType};
 use crate::account::model::*;
 use crate::support::error::Error;
@@ -43,12 +45,28 @@ pub trait Visitor: fmt::Debug {
 
     /// Receives the UID of the message being processed.
     fn uid(&mut self, uid: Uid) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
+    }
+
+    /// Receives the `EMAILID` for the message when using the V2 storage
+    /// system. Not called for V1.
+    fn email_id(&mut self, id: &str) -> Result<(), Self::Output> {
+        self.visit_default()
     }
 
     /// Receives the last modified `Modseq` of the message.
     fn last_modified(&mut self, modseq: Modseq) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
+    }
+
+    /// Receives the `SAVEDATE` of the message.
+    ///
+    /// Not called for V1.
+    fn savedate(
+        &mut self,
+        savedate: DateTime<Utc>,
+    ) -> Result<(), Self::Output> {
+        self.visit_default()
     }
 
     /// Indicates whether loading the flags for the message would be useful.
@@ -58,18 +76,27 @@ pub trait Visitor: fmt::Debug {
 
     /// Indicates the current message has the given flags.
     fn flags(&mut self, flags: &[Flag]) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Indicates that the current message is marked \Recent.
     fn recent(&mut self) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Indicates that there are no more flags on the current message,
     /// including not \Recent.
     fn end_flags(&mut self) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
+    }
+
+    /// Receives the size of the message if it becomes available before the
+    /// metadata has been decoded.
+    ///
+    /// This will not be called if the size cannot be computed without decoding
+    /// the metadata. In that case, the size must be obtained via `metadata()`.
+    fn rfc822_size(&mut self, size: u32) -> Result<(), Self::Output> {
+        self.visit_default()
     }
 
     /// Receives the `MessageMetadata` of the message being processed.
@@ -77,7 +104,7 @@ pub trait Visitor: fmt::Debug {
         &mut self,
         metadata: &MessageMetadata,
     ) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Called once for every line which passes through the parser, in its raw
@@ -92,7 +119,7 @@ pub trait Visitor: fmt::Debug {
     ///
     /// This is called before more specific methods relating to the line.
     fn raw_line(&mut self, line: &[u8]) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Called for each header found.
@@ -107,7 +134,7 @@ pub trait Visitor: fmt::Debug {
         name: &str,
         value: &[u8],
     ) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Called for the content type once it has been parsed.
@@ -118,7 +145,7 @@ pub trait Visitor: fmt::Debug {
         &mut self,
         ct: &ContentType<'_>,
     ) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Indicates that `start_part` will not get called at this level.
@@ -139,7 +166,7 @@ pub trait Visitor: fmt::Debug {
     /// Multipart segments also have "content", which is simply their raw
     /// representation.
     fn start_content(&mut self) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Called as raw data which is strictly part of this part is encountered.
@@ -147,7 +174,7 @@ pub trait Visitor: fmt::Debug {
     /// `data` will usually either be a line ending itself or have no line
     /// ending.
     fn content(&mut self, data: &[u8]) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Indicates that the start of a multipart part has been encountered.
@@ -169,7 +196,7 @@ pub trait Visitor: fmt::Debug {
         &mut self,
         child_result: Self::Output,
     ) -> Result<(), Self::Output> {
-        Ok(())
+        self.visit_default()
     }
 
     /// Indicates that the end of the segment has been reached.
@@ -177,25 +204,39 @@ pub trait Visitor: fmt::Debug {
     /// This is always the last method to be called. It takes `&mut self` to
     /// keep the trait object-safe.
     fn end(&mut self) -> Self::Output;
+
+    /// The default implementation of all the methods but `end`,
+    /// `start_part`, and `leaf_section`.
+    fn visit_default(&mut self) -> Result<(), Self::Output>;
 }
 
 /// Used by `Groveller` to access information about a message.
+///
+/// Methods on `MessageAccessor` are `&mut` to allow the accessor to cache data
+/// or invoke mutable methods on references it contains. The accessor is
+/// expected to be idempotent.
 pub trait MessageAccessor {
     type Reader: BufRead;
 
-    fn uid(&self) -> Uid;
-    fn last_modified(&self) -> Modseq;
-    fn is_recent(&self) -> bool;
-    fn flags(&self) -> Vec<Flag>;
-    fn open(&self) -> Result<(MessageMetadata, Self::Reader), Error>;
+    fn uid(&mut self) -> Uid;
+    fn email_id(&mut self) -> Option<String>;
+    fn last_modified(&mut self) -> Modseq;
+    fn savedate(&mut self) -> Option<DateTime<Utc>>;
+    fn is_recent(&mut self) -> bool;
+    fn flags(&mut self) -> Vec<Flag>;
+    fn rfc822_size(&mut self) -> Option<u32>;
+    fn open(&mut self) -> Result<(MessageMetadata, Self::Reader), Error>;
 }
 
 #[cfg(test)]
 pub struct SimpleAccessor {
     pub uid: Uid,
+    pub email_id: Option<String>,
     pub last_modified: Modseq,
     pub recent: bool,
     pub flags: Vec<Flag>,
+    pub savedate: Option<DateTime<Utc>>,
+    pub rfc822_size: Option<u32>,
     pub metadata: MessageMetadata,
     pub data: Vec<u8>,
 }
@@ -205,9 +246,12 @@ impl Default for SimpleAccessor {
     fn default() -> Self {
         SimpleAccessor {
             uid: Uid::MIN,
+            email_id: None,
             last_modified: Modseq::MIN,
             recent: false,
             flags: vec![],
+            savedate: None,
+            rfc822_size: None,
             metadata: MessageMetadata::default(),
             data: vec![],
         }
@@ -220,23 +264,35 @@ impl MessageAccessor for SimpleAccessor {
     // can actually test buffering paths
     type Reader = std::io::BufReader<std::io::Cursor<Vec<u8>>>;
 
-    fn uid(&self) -> Uid {
+    fn uid(&mut self) -> Uid {
         self.uid
     }
 
-    fn last_modified(&self) -> Modseq {
+    fn email_id(&mut self) -> Option<String> {
+        self.email_id.clone()
+    }
+
+    fn last_modified(&mut self) -> Modseq {
         self.last_modified
     }
 
-    fn is_recent(&self) -> bool {
+    fn savedate(&mut self) -> Option<DateTime<Utc>> {
+        self.savedate
+    }
+
+    fn is_recent(&mut self) -> bool {
         self.recent
     }
 
-    fn flags(&self) -> Vec<Flag> {
+    fn flags(&mut self) -> Vec<Flag> {
         self.flags.clone()
     }
 
-    fn open(&self) -> Result<(MessageMetadata, Self::Reader), Error> {
+    fn rfc822_size(&mut self) -> Option<u32> {
+        self.rfc822_size
+    }
+
+    fn open(&mut self) -> Result<(MessageMetadata, Self::Reader), Error> {
         Ok((
             self.metadata.clone(),
             std::io::BufReader::with_capacity(
@@ -248,7 +304,7 @@ impl MessageAccessor for SimpleAccessor {
 }
 
 pub fn grovel<V>(
-    accessor: &impl MessageAccessor,
+    accessor: &mut impl MessageAccessor,
     visitor: impl IntoBoxedVisitor<V>,
 ) -> Result<V, Error> {
     Groveller::new(visitor.into_boxed_visitor()).grovel(accessor)
@@ -393,7 +449,10 @@ impl<V> Groveller<V> {
     }
 
     /// Process the message produced by the given accessor.
-    fn grovel(mut self, accessor: &impl MessageAccessor) -> Result<V, Error> {
+    fn grovel(
+        mut self,
+        accessor: &mut impl MessageAccessor,
+    ) -> Result<V, Error> {
         if let Err(result) = self.check_info(accessor) {
             return Ok(result);
         }
@@ -406,9 +465,18 @@ impl<V> Groveller<V> {
         self.read_through(reader)
     }
 
-    fn check_info(&mut self, accessor: &impl MessageAccessor) -> Result<(), V> {
+    fn check_info(
+        &mut self,
+        accessor: &mut impl MessageAccessor,
+    ) -> Result<(), V> {
         self.visitor.uid(accessor.uid())?;
+        if let Some(email_id) = accessor.email_id() {
+            self.visitor.email_id(&email_id)?;
+        }
         self.visitor.last_modified(accessor.last_modified())?;
+        if let Some(savedate) = accessor.savedate() {
+            self.visitor.savedate(savedate)?;
+        }
 
         if self.visitor.want_flags() {
             if accessor.is_recent() {
@@ -418,6 +486,10 @@ impl<V> Groveller<V> {
             let flags = accessor.flags();
             self.visitor.flags(&flags)?;
             self.visitor.end_flags()?;
+        }
+
+        if let Some(rfc822_size) = accessor.rfc822_size() {
+            self.visitor.rfc822_size(rfc822_size)?;
         }
 
         Ok(())
@@ -480,10 +552,14 @@ impl<V> Groveller<V> {
             // the next buffer. This is necessary since the next input could be
             // a LF followed by a multipart boundary, in which case this CR
             // must not become part of the child content. We don't need to do
-            // this if the buffer is not full since that indicates we hit EOF.
+            // this if the buffer is not full since that indicates we hit EOL.
             // We also don't need to worry about additional CR bytes before the
             // one we chop off since at this point we know they are not
             // followed by a LF.
+            //
+            // In other words, we're ensuring that we don't split a CRLF pair.
+            // We save the CR so that on the next cycle we either just have
+            // CRLF as a buffer or determine this is an unpaired CR.
             if MAX_BUFFER == buf.len() && Some(&b'\r') == buf.last() {
                 wrapped_cr = true;
                 buf.pop();
@@ -621,7 +697,7 @@ impl<V> Groveller<V> {
     }
 
     fn process_buffered_header(&mut self) -> Result<(), V> {
-        let mut bh = mem::replace(&mut self.buffered_header, Vec::new());
+        let mut bh = mem::take(&mut self.buffered_header);
         let ret = self.process_header(&bh);
         bh.clear();
         self.buffered_header = bh;
@@ -660,7 +736,7 @@ impl<V> Groveller<V> {
 
         self.seen_content_type = true;
 
-        self.visitor.content_type(&ct)?;
+        self.visitor.content_type(ct)?;
 
         if ct.is_type("multipart") {
             if let Some(bound) = ct.parm("boundary") {
@@ -841,10 +917,21 @@ impl<
         self.delegate.uid(uid).map_err(&mut self.map_to)
     }
 
+    fn email_id(&mut self, id: &str) -> Result<(), Self::Output> {
+        self.delegate.email_id(id).map_err(&mut self.map_to)
+    }
+
     fn last_modified(&mut self, modseq: Modseq) -> Result<(), Self::Output> {
         self.delegate
             .last_modified(modseq)
             .map_err(&mut self.map_to)
+    }
+
+    fn savedate(
+        &mut self,
+        savedate: DateTime<Utc>,
+    ) -> Result<(), Self::Output> {
+        self.delegate.savedate(savedate).map_err(&mut self.map_to)
     }
 
     fn want_flags(&self) -> bool {
@@ -861,6 +948,10 @@ impl<
 
     fn end_flags(&mut self) -> Result<(), Self::Output> {
         self.delegate.end_flags().map_err(&mut self.map_to)
+    }
+
+    fn rfc822_size(&mut self, size: u32) -> Result<(), Self::Output> {
+        self.delegate.rfc822_size(size).map_err(&mut self.map_to)
     }
 
     fn metadata(
@@ -939,6 +1030,10 @@ impl<
 
     fn end(&mut self) -> Self::Output {
         (self.map_to)(self.delegate.end())
+    }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        panic!("missing method on VisitorMap")
     }
 }
 

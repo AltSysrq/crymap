@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -198,8 +198,8 @@ fn error_cases() {
     command!([response] = client, c("DELETE ../foo"));
     assert_error_response(
         response,
-        Some(s::RespTextCode::Cannot(())),
-        Error::UnsafeName,
+        Some(s::RespTextCode::Nonexistent(())),
+        Error::NxMailbox,
     );
 
     command!([response] = client, c("RENAME INBOX Archive"));
@@ -212,8 +212,8 @@ fn error_cases() {
     command!([response] = client, c("RENAME Archive INBOX"));
     assert_error_response(
         response,
-        Some(s::RespTextCode::AlreadyExists(())),
-        Error::MailboxExists,
+        Some(s::RespTextCode::Cannot(())),
+        Error::BadOperationOnInbox,
     );
 
     command!([response] = client, c("RENAME Archive Archive"));
@@ -261,8 +261,8 @@ fn error_cases() {
     command!([response] = client, c("RENAME ../foo bar"));
     assert_error_response(
         response,
-        Some(s::RespTextCode::Cannot(())),
-        Error::UnsafeName,
+        Some(s::RespTextCode::Nonexistent(())),
+        Error::NxMailbox,
     );
 }
 

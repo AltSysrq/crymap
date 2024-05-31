@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -122,10 +122,14 @@
 //!   `&[u8]`) is inserted between items.
 //! - `box`: Wrap/unwrap a `Box`.
 #![allow(dead_code)]
-#![allow(clippy::large_enum_variant)]
+#![allow(
+    clippy::large_enum_variant,
+    clippy::derivable_impls,
+    clippy::match_like_matches_macro
+)]
 
 use std::borrow::Cow;
-use std::io::{self, Write};
+use std::io;
 use std::str;
 
 use chrono::prelude::*;
@@ -136,7 +140,7 @@ use nom::{
     *,
 };
 
-use super::lex::LexWriter;
+use super::lex::{LexOutput, LexWriter};
 use super::literal_source::LiteralSource;
 use super::mailbox_name::MailboxName;
 use crate::account::model::Flag;
@@ -227,6 +231,9 @@ syntax_rule! {
         #[prefix("XCRY BACKUP-FILE ")]
         #[primitive(unicode_astring, astring)]
         XCryBackupFile(Cow<'a, str>),
+        #[prefix("XCRY SMTP-OUT FOREIGN-TLS ")]
+        #[delegate]
+        XCryForeignSmtpTls(XCryForeignSmtpTlsData<'a>),
     }
 }
 
@@ -368,6 +375,10 @@ syntax_rule! {
         #[prefix("COPYUID ")]
         #[delegate]
         CopyUid(CopyUidData<'a>),
+        // RFC 4469, by proxy of RFC 7889
+        #[]
+        #[tag("TOOBIG")]
+        TooBig(()),
         // RFC 6154
         #[]
         #[tag("USEATTR")]
@@ -1014,6 +1025,9 @@ syntax_rule! {
         #[]
         #[tag("INTERNALDATE")]
         InternalDate(()),
+        #[]
+        #[tag("SAVEDATE")]
+        SaveDate(()),
         #[prefix("RFC822") opt]
         #[delegate(FetchAttRfc822)]
         Rfc822(Option<FetchAttRfc822>),
@@ -1190,6 +1204,9 @@ syntax_rule! {
         #[prefix("INTERNALDATE ")]
         #[primitive(datetime, datetime)]
         InternalDate(DateTime<FixedOffset>),
+        #[prefix("SAVEDATE ") opt]
+        #[primitive(datetime, datetime)]
+        SaveDate(Option<DateTime<FixedOffset>>),
         // The formal grammar permits NIL for all these literals, but the
         // recommendation on the mailing list generally seems to be to never do
         // that and return empty strings instead, so we don't consider the NIL
@@ -1307,6 +1324,8 @@ simple_enum! {
         Unseen("UNSEEN"),
         Draft("DRAFT"),
         Undraft("UNDRAFT"),
+        // RFC 8514
+        SaveDateSupported("SAVEDATESUPPORTED"),
     }
 }
 
@@ -1354,6 +1373,10 @@ simple_enum! {
         SentBefore("SENTBEFORE"),
         SentOn("SENTON"),
         SentSince("SENTSINCE"),
+        // RFC 8514
+        SavedBefore("SAVEDBEFORE"),
+        SavedOn("SAVEDON"),
+        SavedSince("SAVEDSINCE"),
     }
 }
 
@@ -1756,6 +1779,8 @@ simple_enum! {
         LogOut("LOGOUT"),
         Noop("NOOP"),
         StartTls("STARTTLS"),
+        XCryFlagsOff("XCRY FLAGS OFF"),
+        XCryFlagsOn("XCRY FLAGS ON"),
         XCryGetUserConfig("XCRY GET-USER-CONFIG"),
         XCryPurge("XCRY PURGE"),
         XCryZstdTrain("XCRY ZSTD TRAIN"),
@@ -1860,6 +1885,12 @@ syntax_rule! {
         #[prefix("XCRY SET-USER-CONFIG") 1* prefix(" ")]
         #[delegate(XCryUserConfigOption)]
         XCrySetUserConfig(Vec<XCryUserConfigOption<'a>>),
+        #[prefix("XCRY SMTP-OUT FOREIGN-TLS ")]
+        #[delegate]
+        XCryForeignSmtpTls(XCryForeignSmtpTlsCommand<'a>),
+        #[prefix("XCRY SMTP-OUT SPOOL EXECUTE ")]
+        #[primitive(unicode_astring, astring)]
+        XCrySmtpSpoolExecute(Cow<'a, str>),
     }
 }
 
@@ -1942,9 +1973,40 @@ syntax_rule! {
         #[prefix(" ") nil]
         #[primitive(datetime, datetime)]
         password_changed: Option<DateTime<FixedOffset>>,
+        // Crymap 2.0.0+
         #[0* prefix(" ")]
+        #[delegate(XCry2UserConfigData)]
+        extended: Vec<XCry2UserConfigData<'a>>,
+    }
+}
+
+syntax_rule! {
+    #[]
+    enum XCry2UserConfigData<'a> {
+        #[prefix("SMTP-OUT-SAVE ")]
+        #[primitive(unicode_nstring, nstring)]
+        SmtpOutSave(Option<Cow<'a, str>>),
+        #[prefix("SMTP-OUT-SUCCESS-RECEIPTS ")]
+        #[primitive(unicode_nstring, nstring)]
+        SmtpOutSuccessReceipts(Option<Cow<'a, str>>),
+        #[prefix("SMTP-OUT-FAILURE-RECEIPTS ")]
+        #[primitive(unicode_nstring, nstring)]
+        SmtpOutFailureReceipts(Option<Cow<'a, str>>),
+        #[]
+        #[delegate]
+        Unknown(XCryUnknownUserConfigData<'a>),
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct XCryUnknownUserConfigData<'a> {
+        #[]
         #[primitive(unicode_astring, astring)]
-        extended: Vec<Cow<'a, str>>,
+        key: Cow<'a, str>,
+        #[prefix(" ")]
+        #[primitive(unicode_astring, astring)]
+        value: Cow<'a, str>,
     }
 }
 
@@ -1960,6 +2022,48 @@ syntax_rule! {
         #[prefix("PASSWORD ")]
         #[primitive(unicode_astring, astring)]
         Password(Cow<'a, str>),
+        #[prefix("SMTP-OUT-SAVE ")]
+        #[primitive(unicode_nstring, nstring)]
+        SmtpOutSave(Option<Cow<'a, str>>),
+        #[prefix("SMTP-OUT-SUCCESS-RECEIPTS ")]
+        #[primitive(unicode_nstring, nstring)]
+        SmtpOutSuccessReceipts(Option<Cow<'a, str>>),
+        #[prefix("SMTP-OUT-FAILURE-RECEIPTS ")]
+        #[primitive(unicode_nstring, nstring)]
+        SmtpOutFailureReceipts(Option<Cow<'a, str>>),
+    }
+}
+
+syntax_rule! {
+    #[]
+    enum XCryForeignSmtpTlsCommand<'a> {
+        #[]
+        #[tag("LIST")]
+        List(()),
+        #[]
+        #[tag("INIT-TEST")]
+        InitTest(()),
+        #[prefix("DELETE") 1* prefix(" ")]
+        #[primitive(unicode_astring, astring)]
+        Delete(Vec<Cow<'a, str>>),
+    }
+}
+
+syntax_rule! {
+    #[]
+    struct XCryForeignSmtpTlsData<'a> {
+        #[]
+        #[primitive(unicode_astring, astring)]
+        domain: Cow<'a, str>,
+        #[]
+        #[cond(" STARTTLS")]
+        starttls: bool,
+        #[]
+        #[cond(" VALID-CERTIFICATE")]
+        valid_certificate: bool,
+        #[prefix(" ")]
+        #[primitive(unicode_nstring, nstring)]
+        tls_version: Option<Cow<'a, str>>,
     }
 }
 
@@ -2049,7 +2153,7 @@ fn literal(i: &[u8]) -> IResult<&[u8], &[u8]> {
     let (i, len) = sequence::delimited(
         alt((tag("~{"), tag("{"))),
         number,
-        alt((tag("+}\r\n"), tag("}\r\n"))),
+        alt((tag("+}\r\n"), tag("+}\n"), tag("}\r\n"), tag("}\n"))),
     )(i)?;
     bytes::complete::take(len)(i)
 }
@@ -2070,8 +2174,10 @@ fn literal_source(i: &[u8]) -> IResult<&[u8], LiteralSource> {
 fn literal_literal_source(i: &[u8]) -> IResult<&[u8], LiteralSource> {
     let (i, prefix) = alt((tag("~{"), tag("{")))(i)?;
     let binary = prefix.starts_with(b"~");
-    let (i, len) =
-        sequence::terminated(number, alt((tag("+}\r\n"), tag("}\r\n"))))(i)?;
+    let (i, len) = sequence::terminated(
+        number,
+        alt((tag("+}\r\n"), tag("+}\n"), tag("}\r\n"), tag("}\n"))),
+    )(i)?;
     let (i, data) = bytes::complete::take(len)(i)?;
 
     Ok((
@@ -2097,7 +2203,7 @@ fn quoted(i: &[u8]) -> IResult<&[u8], Cow<str>> {
         tag("\""),
         multi::fold_many0(
             map(quoted_string_content, String::from_utf8_lossy),
-            Cow::Owned(String::new()),
+            || Cow::Owned(String::new()),
             |mut accum: Cow<str>, piece| {
                 if accum.is_empty() {
                     piece
@@ -2276,6 +2382,7 @@ fn datetime(i: &[u8]) -> IResult<&[u8], DateTime<FixedOffset>> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::support::chronox::*;
 
     macro_rules! assert_reversible {
         ($ty:ty, $expected_text:expr, $value:expr) => {
@@ -3414,7 +3521,7 @@ mod test {
             MsgAtt,
             "INTERNALDATE \" 4-Jul-2020 16:31:00 +0100\"",
             MsgAtt::InternalDate(
-                FixedOffset::east(3600).ymd(2020, 7, 4).and_hms(16, 31, 0)
+                FixedOffset::eastx(3600).ymd_hmsx(2020, 7, 4, 16, 31, 0),
             )
         );
 
@@ -3680,7 +3787,7 @@ mod test {
             "BEFORE \"4-Jul-2020\"",
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::Before,
-                date: NaiveDate::from_ymd(2020, 7, 4),
+                date: NaiveDate::from_ymdx(2020, 7, 4),
             })
         );
         assert_reversible!(
@@ -3737,7 +3844,7 @@ mod test {
             "ON \"4-Jul-2020\"",
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::On,
-                date: NaiveDate::from_ymd(2020, 7, 4),
+                date: NaiveDate::from_ymdx(2020, 7, 4),
             })
         );
         assert_reversible!(
@@ -3755,7 +3862,7 @@ mod test {
             "SINCE \"4-Jul-2020\"",
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::Since,
-                date: NaiveDate::from_ymd(2020, 7, 4),
+                date: NaiveDate::from_ymdx(2020, 7, 4),
             })
         );
         assert_reversible!(
@@ -3840,7 +3947,7 @@ mod test {
             "SENTBEFORE \"4-Jul-2020\"",
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::SentBefore,
-                date: NaiveDate::from_ymd(2020, 7, 4),
+                date: NaiveDate::from_ymdx(2020, 7, 4),
             })
         );
         assert_reversible!(
@@ -3848,7 +3955,7 @@ mod test {
             "SENTON \"4-Jul-2020\"",
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::SentOn,
-                date: NaiveDate::from_ymd(2020, 7, 4),
+                date: NaiveDate::from_ymdx(2020, 7, 4),
             })
         );
         assert_reversible!(
@@ -3856,7 +3963,7 @@ mod test {
             "SENTSINCE \"4-Jul-2020\"",
             SearchKey::Date(DateSearchKey {
                 typ: DateSearchKeyType::SentSince,
-                date: NaiveDate::from_ymd(2020, 7, 4),
+                date: NaiveDate::from_ymdx(2020, 7, 4),
             })
         );
         assert_reversible!(SearchKey, "SMALLER 42", SearchKey::Smaller(42));
@@ -5104,9 +5211,8 @@ mod test {
                 first_fragment: AppendFragment {
                     flags: None,
                     internal_date: Some(
-                        FixedOffset::east(3600)
-                            .ymd(2020, 7, 4)
-                            .and_hms(16, 31, 0)
+                        FixedOffset::eastx(3600)
+                            .ymd_hmsx(2020, 7, 4, 16, 31, 0),
                     ),
                     utf8: false,
                 }
@@ -5121,9 +5227,8 @@ mod test {
                 first_fragment: AppendFragment {
                     flags: Some(vec![Flag::Deleted]),
                     internal_date: Some(
-                        FixedOffset::east(3600)
-                            .ymd(2020, 7, 4)
-                            .and_hms(16, 31, 0)
+                        FixedOffset::eastx(3600)
+                            .ymd_hmsx(2020, 7, 4, 16, 31, 0)
                     ),
                     utf8: false,
                 }

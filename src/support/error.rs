@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -44,6 +44,8 @@ pub enum Error {
     BadOperationOnInbox,
     #[error("No such mailbox")]
     NxMailbox,
+    #[error("Internal error: Mailbox ID out of range")]
+    MailboxIdOutOfRange,
     #[error("Message expunged")]
     ExpungedMessage,
     #[error("Message not addressable by sequence number")]
@@ -58,10 +60,14 @@ pub enum Error {
     CorruptFileLayout,
     #[error("Unsupported special-use for CREATE")]
     UnsupportedSpecialUse,
+    #[error("Unknown mailbox attribute")]
+    UnknownMailboxAttribute,
     #[error("Rename source and destination are the same")]
     RenameToSelf,
     #[error("Rename destination is child of self")]
     RenameIntoSelf,
+    #[error("Move source and destination are the same")]
+    MoveIntoSelf,
     #[error("Too many items in batch operation")]
     BatchTooBig,
     #[error("Unknown Content-Transfer-Encoding")]
@@ -76,4 +82,8 @@ pub enum Error {
     Cbor(#[from] serde_cbor::error::Error),
     #[error(transparent)]
     Toml(#[from] toml::de::Error),
+    #[error(transparent)]
+    Rusqlite(#[from] rusqlite::Error),
+    #[error("unexpected SQLite error: {0}")]
+    Sqlite(std::os::raw::c_int),
 }

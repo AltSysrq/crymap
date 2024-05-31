@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -20,39 +20,41 @@ use std::borrow::Cow;
 use std::convert::TryFrom;
 
 use super::defs::*;
-use crate::account::mailbox::StatefulMailbox;
 use crate::account::model::*;
+use crate::account::v2::{Account, Mailbox};
 use crate::support::error::Error;
 
 impl CommandProcessor {
-    pub(super) fn cmd_search(
+    pub(super) async fn cmd_search(
         &mut self,
         cmd: s::SearchCommand<'_>,
         tag: &str,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
-        self.search(cmd, tag, sender, false, StatefulMailbox::seqnum_search)
+        self.search(cmd, tag, sender, false, Account::seqnum_search)
+            .await
     }
 
-    pub(super) fn cmd_uid_search(
+    pub(super) async fn cmd_uid_search(
         &mut self,
         cmd: s::SearchCommand<'_>,
         tag: &str,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
-        self.search(cmd, tag, sender, true, StatefulMailbox::search)
+        self.search(cmd, tag, sender, true, Account::search).await
     }
 
-    fn search<
+    async fn search<
         T: Into<u32> + TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync + Copy,
     >(
         &mut self,
         mut cmd: s::SearchCommand<'_>,
         tag: &str,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
         is_uid: bool,
         f: impl FnOnce(
-            &mut StatefulMailbox,
+            &mut Account,
+            &Mailbox,
             &SearchRequest,
         ) -> Result<SearchResponse<T>, Error>,
     ) -> CmdResult {
@@ -73,11 +75,11 @@ impl CommandProcessor {
         let request = self.search_command_from_ast(&mut has_modseq, cmd)?;
 
         if has_modseq && self.selected.is_some() {
-            self.enable_condstore(sender, true);
+            self.enable_condstore(sender, true).await;
         }
 
-        let response =
-            f(selected!(self)?, &request).map_err(map_error!(self))?;
+        let response = f(account!(self)?, selected!(self)?, &request)
+            .map_err(map_error!(self))?;
         // We normally return a response. If SAVE is specified, we won't unless
         // another return option requests it.
         let mut return_response =
@@ -85,7 +87,7 @@ impl CommandProcessor {
 
         let response = if return_extended {
             let mut r = s::EsearchResponse {
-                tag: Cow::Borrowed(tag),
+                tag: Cow::Owned(tag.to_owned()),
                 uid: is_uid,
                 min: None,
                 max: None,
@@ -171,7 +173,7 @@ impl CommandProcessor {
             }
 
             if has_modseq {
-                r.modseq = modseq.map(|m| m.raw().get());
+                r.modseq = modseq.map(|m| m.raw());
             }
 
             s::Response::Esearch(r)
@@ -182,7 +184,7 @@ impl CommandProcessor {
                 // Only return the MODSEQ item if the client specified a MODSEQ
                 // criterion.
                 max_modseq: if has_modseq {
-                    response.max_modseq.map(|m| m.raw().get())
+                    response.max_modseq.map(|m| m.raw())
                 } else {
                     None
                 },
@@ -190,7 +192,7 @@ impl CommandProcessor {
         };
 
         if return_response {
-            sender(response);
+            send_response(sender, response).await;
         }
         success()
     }
@@ -249,6 +251,9 @@ impl CommandProcessor {
                 s::SimpleSearchKey::Unseen => SearchQuery::Unseen,
                 s::SimpleSearchKey::Draft => SearchQuery::Draft,
                 s::SimpleSearchKey::Undraft => SearchQuery::Undraft,
+                s::SimpleSearchKey::SaveDateSupported => {
+                    SearchQuery::SaveDateSupported
+                },
             }),
             s::SearchKey::Text(text_key) => {
                 let val = text_key.value.into_owned();
@@ -261,7 +266,7 @@ impl CommandProcessor {
                     s::TextSearchKeyType::Text => SearchQuery::Text(val),
                     s::TextSearchKeyType::To => SearchQuery::To(val),
                 })
-            }
+            },
             s::SearchKey::Date(date_key) => {
                 let date = date_key.date;
                 Ok(match date_key.typ {
@@ -270,19 +275,26 @@ impl CommandProcessor {
                     s::DateSearchKeyType::Since => SearchQuery::Since(date),
                     s::DateSearchKeyType::SentBefore => {
                         SearchQuery::SentBefore(date)
-                    }
+                    },
                     s::DateSearchKeyType::SentOn => SearchQuery::SentOn(date),
                     s::DateSearchKeyType::SentSince => {
                         SearchQuery::SentSince(date)
-                    }
+                    },
+                    s::DateSearchKeyType::SavedBefore => {
+                        SearchQuery::SavedBefore(date)
+                    },
+                    s::DateSearchKeyType::SavedOn => SearchQuery::SavedOn(date),
+                    s::DateSearchKeyType::SavedSince => {
+                        SearchQuery::SavedSince(date)
+                    },
                 })
-            }
+            },
             s::SearchKey::Keyword(flag) => {
                 Ok(SearchQuery::Keyword(flag.to_string()))
-            }
+            },
             s::SearchKey::Unkeyword(flag) => {
                 Ok(SearchQuery::Unkeyword(flag.to_string()))
-            }
+            },
             s::SearchKey::Header(header) => Ok(SearchQuery::Header(
                 header.header.into_owned(),
                 header.value.into_owned(),
@@ -298,10 +310,10 @@ impl CommandProcessor {
             s::SearchKey::Smaller(thresh) => Ok(SearchQuery::Smaller(thresh)),
             s::SearchKey::Uid(ss) => {
                 Ok(SearchQuery::UidSet(self.parse_uid_range(&ss)?))
-            }
+            },
             s::SearchKey::Seqnum(ss) => {
                 Ok(SearchQuery::SequenceSet(self.parse_seqnum_range(&ss)?))
-            }
+            },
             s::SearchKey::And(parts) => Ok(SearchQuery::And(
                 parts
                     .into_iter()
@@ -310,14 +322,14 @@ impl CommandProcessor {
             )),
             s::SearchKey::Modseq(m) => {
                 *has_modseq = true;
-                Ok(SearchQuery::Modseq(m.modseq))
-            }
+                Ok(SearchQuery::Modseq(Modseq::of(m.modseq)))
+            },
             s::SearchKey::EmailId(id) => {
                 Ok(SearchQuery::EmailId(id.into_owned()))
-            }
+            },
             s::SearchKey::ThreadId(id) => {
                 Ok(SearchQuery::ThreadId(id.into_owned()))
-            }
+            },
         }
     }
 }

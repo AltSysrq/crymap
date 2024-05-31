@@ -46,12 +46,15 @@ created, users can be treated as regular file system objects. In particular:
 - A user can be renamed by simply renaming the entry under `users`.
 
 - User aliases can be created by symlinking the additional alias to the user
-  data directory.
+  data directory. These symlinks are understood to allow the user to use all of
+  them equivalently. For example, if `bob` is a symlink to `robert`, the user
+  can log in as `robert` and then send mail as `bob`.
 
 - Users can be deleted by removing their entry from `users`.
 
 - Users can be disabled by renaming them to an illegal user name. The simplest
-  way is to just prefix their name with `%`.
+  way is to just prefix their name with `%`. You do need to deal with any
+  aliases as well, though.
 
 - A user can be imported from another Crymap installation by simply moving the
   user data directory (or a symlink thereto) into `users`.

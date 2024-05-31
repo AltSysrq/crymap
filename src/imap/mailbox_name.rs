@@ -99,4 +99,11 @@ impl<'a> MailboxName<'a> {
             utf7::IMAP.decode(&self.raw)
         }
     }
+
+    pub fn into_static(self) -> MailboxName<'static> {
+        MailboxName {
+            utf8: self.utf8,
+            raw: Cow::Owned(self.raw.into_owned()),
+        }
+    }
 }

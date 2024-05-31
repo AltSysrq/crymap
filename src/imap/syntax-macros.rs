@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -93,7 +93,7 @@ macro_rules! syntax_rule {
                     }))(i)
             }
 
-            pub fn write_to(&mut self, lex: &mut LexWriter<impl Write>)
+            pub fn write_to(&mut self, lex: &mut LexWriter<impl LexOutput>)
                             -> io::Result<()> {
                 let this = self;
                 apply_write_modifiers!([$($whole_struct_mod)*], lex, this, {
@@ -138,7 +138,7 @@ macro_rules! syntax_rule {
                     ))(i)
             }
 
-            pub fn write_to(&mut self, lex: &mut LexWriter<impl Write>)
+            pub fn write_to(&mut self, lex: &mut LexWriter<impl LexOutput>)
                             -> io::Result<()> {
                 let this = self;
                 apply_write_modifiers!([$($whole_enum_mod)*], lex, this, {
@@ -187,7 +187,7 @@ macro_rules! apply_nom_modifiers {
         ))
     };
     ([0*($sep:expr) $($rest:tt)*], $inner:expr) => {
-        multi::separated_list(
+        multi::separated_list0(
             kw($sep),
             apply_nom_modifiers!([$($rest)*], $inner))
     };
@@ -196,7 +196,7 @@ macro_rules! apply_nom_modifiers {
             apply_nom_modifiers!([$($rest)*], $inner))
     };
     ([1*($sep:expr) $($rest:tt)*], $inner:expr) => {
-        multi::separated_nonempty_list(
+        multi::separated_list1(
             kw($sep),
             apply_nom_modifiers!([$($rest)*], $inner))
     };
@@ -383,7 +383,7 @@ macro_rules! simple_enum {
                 ))(i)
             }
 
-            pub fn write_to(&self, lex: &mut LexWriter<impl Write>)
+            pub fn write_to(&self, lex: &mut LexWriter<impl LexOutput>)
                             -> io::Result<()> {
                 lex.verbatim(match *self {
                     $($name::$case_name => $case_repr,)+

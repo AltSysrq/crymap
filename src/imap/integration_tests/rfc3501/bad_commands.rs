@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -22,7 +22,8 @@ use super::super::defs::*;
 fn unknown_commands() {
     let setup = set_up();
     let mut client = setup.connect("3501bcuc");
-    skip_greeting(&mut client);
+    // Log in so that long-line recovery is enabled.
+    quick_log_in(&mut client);
 
     client.write_raw(b"1 PLUGH\r\n").unwrap();
     let mut buffer = Vec::new();
@@ -81,7 +82,9 @@ fn unknown_commands() {
     // Ensure that command discarding does not end up recurring if a continued
     // line is itself too long.
     client.write_raw(b"5 CREATE {100000+}\r\n").unwrap();
-    // The initial NO is actually sent after the first line
+    client.write_raw("x".repeat(100000).as_bytes()).unwrap();
+    client.write_raw(b"\r\n").unwrap();
+    // Now that we've completed the huge "line", we get the NO.
     let mut buffer = Vec::new();
     let r = client.read_one_response(&mut buffer).unwrap();
     unpack_cond_response! {
@@ -90,21 +93,23 @@ fn unknown_commands() {
             assert_eq!("Command line too long", quip);
         }
     }
-    client.write_raw("x".repeat(100000).as_bytes()).unwrap();
-    // Server may hang up on this one
-    let _ = client.write_raw("6 ".repeat(50000).as_bytes());
-    // Now we get a BYE due to rejecting the continuation line
+
+    client.write_raw("6 ".repeat(50000).as_bytes()).unwrap();
+    client.write_raw(b"\r\n").unwrap();
     let mut buffer = Vec::new();
     let r = client.read_one_response(&mut buffer).unwrap();
     unpack_cond_response! {
-        (None, s::RespCondType::Bye, None, _) = r => { }
+        (Some(tag), s::RespCondType::No, None, Some(quip)) = r => {
+            assert_eq!("6", tag);
+            assert_eq!("Command line too long", quip);
+        }
     }
 
     client = setup.connect("3501bcuc");
     skip_greeting(&mut client);
 
     // Ignore errors here since the server may hang up before we write the full
-    // payload
+    // payload, as long line recovery is disabled while logged out.
     let _ = client.write_raw("x".repeat(100_000).as_bytes());
     let mut buffer = Vec::new();
     let r = client.read_one_response(&mut buffer).unwrap();
@@ -216,4 +221,56 @@ fn bad_append_recovery() {
     has_untagged_response_matching! {
         s::Response::Exists(0) in responses
     }
+}
+
+#[test]
+fn connection_closed_after_too_many_unauthed_commands() {
+    let setup = set_up();
+    let mut client = setup.connect("3501ccuc");
+    skip_greeting(&mut client);
+
+    for i in 0..100 {
+        let mut buffer = Vec::new();
+        // If the server is done with us, we may or may not succeed to write
+        // the request onto the wire depending on when exactly the server
+        // closes its side of the pipe.
+        match client.write_raw(format!("N{i} NOOP\r\n").as_bytes()) {
+            Ok(()) => {
+                let response = client.read_one_response(&mut buffer).unwrap();
+                match response.response {
+                    s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Ok,
+                        ..
+                    }) => continue,
+
+                    s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Bye,
+                        ..
+                    }) => {
+                        // The connection should be disconnected.
+                        assert!(client.read_one_response(&mut buffer).is_err());
+                        return;
+                    },
+
+                    _ => panic!("unexpected response: {response:?}"),
+                }
+            },
+
+            Err(_) => {
+                // The server closed the pipe before we could write the
+                // request, but the BYE should still be on the wire.
+                let response = client.read_one_response(&mut buffer).unwrap();
+                assert_matches!(
+                    s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Bye,
+                        ..
+                    }),
+                    response.response,
+                );
+                return;
+            },
+        }
+    }
+
+    panic!("connection was never closed");
 }

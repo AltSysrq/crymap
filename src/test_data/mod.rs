@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -82,3 +82,49 @@ pub static SINGLE_PART_BASE64: &[u8] = include_bytes!("single-part-base64.eml");
 /// A multi-part message with two base64-encoded parts, one of which contains
 /// an encoded NUL byte.
 pub static MULTI_PART_BASE64: &[u8] = include_bytes!("multi-part-base64.eml");
+
+/// Message sent by lin.gl (using dkim-proxy) with `rsa-sha1` DKIM and
+/// `relaxed/strict` canonicalisation.
+pub static DKIM_LINGL_RSA_SHA1: &[u8] =
+    include_bytes!("dkim-lingl-rsa-sha1.eml");
+
+/// Message sent by Amazon SES with 2 `rsa-sha256` DKIM signatures using
+/// `relaxed/strict` canonicalisation and different headers on each signature.
+///
+/// Note that the domain key for the `amazon.co.jp` signature has been revoked
+/// and the original value is not known.
+pub static DKIM_AMAZONCOJP_RSA_SHA256: &[u8] =
+    include_bytes!("dkim-amazoncojp-2x-rsa-sha256.eml");
+
+/// Message sent by Yahoo! with `rsa-sha256` DKIM and `relaxed/relaxed`
+/// canonicalisation. The main message body includes duplicated and
+/// leading/trailing space which is subject to canonicalisation.
+pub static DKIM_YAHOO_RSA_SHA256: &[u8] =
+    include_bytes!("dkim-yahoo-rsa-sha256.eml");
+
+/// The example message in RFC 8463 (DKIM Ed25519).
+pub static RFC_8463: &[u8] = include_bytes!("rfc-8463.eml");
+
+lazy_static::lazy_static! {
+    pub static ref CERTIFICATE_PRIVATE_KEY: openssl::pkey::PKey<openssl::pkey::Private> =
+        openssl::pkey::PKey::from_rsa(openssl::rsa::Rsa::generate(2048).unwrap())
+            .unwrap();
+    pub static ref CERTIFICATE: openssl::x509::X509 = {
+        let mut builder = openssl::x509::X509Builder::new().unwrap();
+        builder.set_pubkey(&CERTIFICATE_PRIVATE_KEY).unwrap();
+        builder
+            .sign(
+                &CERTIFICATE_PRIVATE_KEY,
+                openssl::hash::MessageDigest::sha256(),
+            )
+            .unwrap();
+        builder.set_version(2).unwrap();
+        builder
+            .set_not_before(&openssl::asn1::Asn1Time::from_unix(0).unwrap())
+            .unwrap();
+        builder
+            .set_not_after(&openssl::asn1::Asn1Time::days_from_now(2).unwrap())
+            .unwrap();
+        builder.build()
+    };
+}

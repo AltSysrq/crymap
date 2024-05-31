@@ -82,10 +82,10 @@ impl<R: Read> BufRead for Reader<R> {
                 Ok(_) => (),
                 Err(e) if io::ErrorKind::UnexpectedEof == e.kind() => {
                     return Ok(&[]);
-                }
+                },
                 Err(e) => {
                     return Err(e);
-                }
+                },
             }
 
             is_encoded = self.next_is_encoded;
@@ -275,6 +275,7 @@ impl<W: FinishWrite> FinishWrite for Writer<W> {
     }
 }
 
+#[allow(clippy::manual_range_contains)]
 fn is_base64(b: u8) -> bool {
     (b >= b'a' && b <= b'z')
         || (b >= b'A' && b <= b'Z')

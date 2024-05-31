@@ -62,7 +62,7 @@ fn test_list_status() {
             assert_eq!("5819lsst/foo", sr.mailbox.raw);
             assert!(sr.atts.contains(&s::StatusResponseAtt::Recent(2)));
             assert!(sr.atts.contains(&s::StatusResponseAtt::UidNext(3)));
-        }
+        },
         r => panic!("Unexpected response: {:?}", r),
     }
 
@@ -73,7 +73,7 @@ fn test_list_status() {
         } => {
             assert_eq!("5819lsst/noselect", lr.name.raw);
             assert!(lr.flags.contains(&Cow::Borrowed("\\Noselect")));
-        }
+        },
         r => panic!("Unexpected response: {:?}", r),
     }
 
@@ -93,7 +93,7 @@ fn test_list_status() {
             assert_eq!("5819lsst/noselect/bar", sr.mailbox.raw);
             assert!(sr.atts.contains(&s::StatusResponseAtt::Recent(3)));
             assert!(sr.atts.contains(&s::StatusResponseAtt::UidNext(4)));
-        }
+        },
         r => panic!("Unexpected response: {:?}", r),
     }
 

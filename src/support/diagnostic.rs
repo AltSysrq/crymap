@@ -58,12 +58,12 @@ fn redirect_stderr(stderr_path: &Path) -> Result<(), Sysexit> {
                 e,
             );
             Err(EX_CANTCREAT)
-        }
+        },
 
         Ok(2) => Ok(()),
         Ok(fd) => {
             error!("failed to redirect stderr: got fd {} instead of 2", fd);
             Err(EX_OSERR)
-        }
+        },
     }
 }

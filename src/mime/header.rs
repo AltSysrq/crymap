@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -40,10 +40,22 @@ use std::fmt;
 use std::str;
 
 use chrono::prelude::*;
+use lazy_static::lazy_static;
 use nom::bytes::complete::{is_a, is_not, tag};
 use nom::*;
 
 use super::encoded_word::ew_decode;
+
+lazy_static! {
+    /// Regex which matches folded header lines in a fully-buffered header
+    /// block. Group 1 is the header line excluding the final line ending;
+    /// group 2 is the header name; group 3 is the header value.
+    pub static ref FULL_HEADER_LINE: regex::bytes::Regex =
+        regex::bytes::Regex::new(
+            "(?ms)^(([^: \t\r\n]+)[ \t]*:[ \t]*\
+             ([^\r\n]*(:?\r?\n[ \t]+[^\r\n]*)*))\r?$",
+        ).unwrap();
+}
 
 /// Parse a MIME-format date, as defined by RFC 5322.
 pub fn parse_datetime(date_str: &str) -> Option<DateTime<FixedOffset>> {
@@ -192,6 +204,27 @@ impl<'a> fmt::Debug for AddrSpec<'a> {
     }
 }
 
+impl<'a> fmt::Display for AddrSpec<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (i, part) in self.local.iter().enumerate() {
+            if 0 != i {
+                write!(f, ".")?;
+            }
+            write!(f, "{}", String::from_utf8_lossy(part))?;
+        }
+        if !self.domain.is_empty() {
+            write!(f, "@")?;
+            for (i, part) in self.domain.iter().enumerate() {
+                if 0 != i {
+                    write!(f, ".")?;
+                }
+                write!(f, "{}", String::from_utf8_lossy(part))?;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct Mailbox<'a> {
     pub addr: AddrSpec<'a>,
@@ -281,19 +314,14 @@ impl<'a> ContentType<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ContentTransferEncoding {
+    #[default]
     SevenBit,
     EightBit,
     Binary,
     QuotedPrintable,
     Base64,
-}
-
-impl Default for ContentTransferEncoding {
-    fn default() -> Self {
-        ContentTransferEncoding::SevenBit
-    }
 }
 
 impl ContentTransferEncoding {
@@ -406,6 +434,7 @@ fn ocfws(i: &[u8]) -> IResult<&[u8], ()> {
 
 // RFC 5322 3.2.3 "Atom text"
 // Amended by RFC 6532 to include all non-ASCII characters
+#[allow(clippy::manual_range_contains)]
 fn atext(i: &[u8]) -> IResult<&[u8], &[u8]> {
     bytes::complete::take_while1(|ch| {
         // RFC5322 ALPHA
@@ -480,7 +509,7 @@ fn quoted_string(i: &[u8]) -> IResult<&[u8], Cow<'_, [u8]>> {
         sequence::pair(ocfws, tag(b"\"")),
         multi::fold_many0(
             qcontent,
-            Cow::Borrowed(&[] as &[u8]),
+            || Cow::Borrowed(&[] as &[u8]),
             |mut acc: Cow<[u8]>, item| {
                 if acc.is_empty() {
                     acc = Cow::Borrowed(item);
@@ -737,9 +766,10 @@ fn date_time(i: &[u8]) -> IResult<&[u8], Option<DateTime<FixedOffset>>> {
     let (i, (year, month, day)) = date(i)?;
     let (i, ((hour, minute, second), zone)) = time(i)?;
 
-    let res = FixedOffset::east_opt(zone * 60)
-        .and_then(|off| off.ymd_opt(year as i32, month, day).latest())
-        .and_then(|date| date.and_hms_opt(hour, minute, second));
+    let res = FixedOffset::east_opt(zone * 60).and_then(|off| {
+        off.with_ymd_and_hms(year as i32, month, day, hour, minute, second)
+            .latest()
+    });
 
     Ok((i, res))
 }
@@ -754,10 +784,10 @@ fn local_part(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
     combinator::map(
         sequence::tuple((
             // Need to parse leading dots in separately because
-            // separated_nonempty_list won't allow the first element to be
+            // separated_list1 won't allow the first element to be
             // empty.
             local_leading_dots,
-            multi::separated_nonempty_list(
+            multi::separated_list1(
                 local_separator,
                 combinator::map(
                     combinator::opt(combinator::map(word, |(_, w)| w)),
@@ -807,10 +837,7 @@ fn local_separator(i: &[u8]) -> IResult<&[u8], &[u8]> {
 
 // RFC 5322 4.4 obsolete domain format
 fn obs_domain(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
-    multi::separated_nonempty_list(
-        tag(b"."),
-        combinator::map(atom, Cow::Borrowed),
-    )(i)
+    multi::separated_list1(tag(b"."), combinator::map(atom, Cow::Borrowed))(i)
 }
 
 // RFC 5322 3.4.1 domain name text
@@ -831,10 +858,14 @@ fn domain_literal(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
     combinator::map(
         sequence::delimited(
             sequence::pair(ocfws, tag(b"[")),
-            multi::fold_many0(dcontent, vec![b'['], |mut acc, item| {
-                acc.extend_from_slice(item);
-                acc
-            }),
+            multi::fold_many0(
+                dcontent,
+                || vec![b'['],
+                |mut acc, item| {
+                    acc.extend_from_slice(item);
+                    acc
+                },
+            ),
             sequence::pair(tag(b"]"), ocfws),
         ),
         |mut res| {
@@ -873,14 +904,14 @@ fn addr_spec(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
 fn conservative_addr_spec(i: &[u8]) -> IResult<&[u8], AddrSpec<'_>> {
     let (i, local) = sequence::preceded(
         ocfws,
-        multi::separated_nonempty_list(
+        multi::separated_list1(
             tag(b"."),
             combinator::map(atext, Cow::Borrowed),
         ),
     )(i)?;
     let (i, domain) = sequence::preceded(
         tag(b"@"),
-        multi::separated_nonempty_list(
+        multi::separated_list1(
             tag(b"."),
             combinator::map(atext, Cow::Borrowed),
         ),
@@ -910,7 +941,7 @@ fn obs_display_name(i: &[u8]) -> IResult<&[u8], Vec<Cow<'_, [u8]>>> {
 // apparently felt --- even in 2007 --- that this is still important enough to
 // put in the IMAP compliance tester.
 fn obs_domain_list(i: &[u8]) -> IResult<&[u8], Vec<Vec<Cow<'_, [u8]>>>> {
-    multi::separated_nonempty_list(
+    multi::separated_list1(
         multi::many1_count(branch::alt((
             cfws,
             combinator::map(tag(b","), |_| ()),
@@ -1004,7 +1035,7 @@ fn obs_list_delim(i: &[u8]) -> IResult<&[u8], ()> {
 fn mailbox_list(i: &[u8]) -> IResult<&[u8], Vec<Mailbox<'_>>> {
     sequence::delimited(
         combinator::opt(obs_list_delim),
-        multi::separated_nonempty_list(obs_list_delim, mailbox),
+        multi::separated_list1(obs_list_delim, mailbox),
         combinator::opt(obs_list_delim),
     )(i)
 }
@@ -1044,7 +1075,7 @@ fn address(i: &[u8]) -> IResult<&[u8], Address<'_>> {
 fn address_list(i: &[u8]) -> IResult<&[u8], Vec<Address<'_>>> {
     sequence::delimited(
         combinator::opt(obs_addr_list_delim),
-        multi::separated_nonempty_list(obs_addr_list_delim, address),
+        multi::separated_list1(obs_addr_list_delim, address),
         combinator::opt(obs_addr_list_delim),
     )(i)
 }

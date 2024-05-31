@@ -1,2 +1,17 @@
 max_width = 80
 newline_style = "Unix"
+
+# Not having the trailing commas is too confusing and irritating.
+#
+# match x {
+#   0 => {
+#     do_something()
+#   } // no comma here because it's a block
+#   1 => foo! {
+#     do_something()
+#   }, // comma here because it's not a block even though it looks like one
+#   2 => Struct {
+#     foo: bar,
+#   }, // comma here because it's an expression
+# }
+match_block_trailing_comma = true

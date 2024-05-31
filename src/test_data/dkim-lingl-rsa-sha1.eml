@@ -1,0 +1,89 @@
+Delivered-To: lindotgl@gmail.com
+Received: by 2002:a17:907:74e:b0:91f:7e00:cfe5 with SMTP id xc14csp2230374ejb;
+        Mon, 8 May 2023 13:19:34 -0700 (PDT)
+X-Google-Smtp-Source: ACHHUZ5FrWVZPlXhXq+6A6P8Ox8WSrSixkwz8r5b5pKApTuQs5awwPAsarL7veFi/fRAa20QwPBo
+X-Received: by 2002:a67:ee55:0:b0:434:711e:e2c4 with SMTP id g21-20020a67ee55000000b00434711ee2c4mr3748845vsp.14.1683577174117;
+        Mon, 08 May 2023 13:19:34 -0700 (PDT)
+ARC-Seal: i=1; a=rsa-sha256; t=1683577174; cv=none;
+        d=google.com; s=arc-20160816;
+        b=sT0MYE51Xw8/c/baZBH7uZTSIfb0xJExAY8NHwZ+8TZjmbcdLf+h17kf+s7ZQOgK9I
+         xJz+zjmraSd5YcNz1z0dN0IVGoj8bg4Z3TFxoIcWeVn9no6vdgNAB3BPsb4wsMM2rzZV
+         NINw1h5GeODKtBUEcYxern+8EKsIXCsMtkDVu1+FC4vwelM6dcJuTtEXDmBQyAuSOLm+
+         KLWBbIFn/ndoCwHTazSJRRBFIfLsXUxCEQ21yLo6qUPX2ziZ7HzS630xe4nUnv18xzdo
+         O/DmmO1xQOPhvfg+b1TpSKCp0WA2/yeK6tL6MDCj2gdy7h3BAdH6h0UOonOIx9q2YKpk
+         zpiw==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20160816;
+        h=content-transfer-encoding:subject:from:to:content-language
+         :user-agent:mime-version:date:message-id:domainkey-signature
+         :dkim-signature;
+        bh=9xekNbLjtI/veF41xifn5/85wtY6PIanhoDoLQhHjuI=;
+        b=FPDIfYUrI99IDeSYUd8PIatf+ivtotmnyzONSLkOLlWy2PjJBvmNFqsb6l+qBQptPl
+         KTNIAQgprAzDJomLumORunBuHtj00Y1FQix2lICJqqDsmK/cQkjudbeL4uqyIhPR2hVK
+         TC/GS5J/HwW1dVvox6whVtpce1gZ3L5Z5YWK9EzBexzzmY91bPLa4vEsIpDQw+Jhlnr0
+         YPqJND6KogcHtphSBLggS/uk6AGI76gNoYcETPH2h7NKC2P7koTrpMLjTSKd3eNgdGzJ
+         KGQK6uypbEfNW6aa2xr5b9YpUf2vODRf5w4Ppb+mSUdtN5vuUhhpE9e+O1BbE3oc0K3R
+         wibw==
+ARC-Authentication-Results: i=1; mx.google.com;
+       dkim=pass header.i=@lin.gl header.s=selector1 header.b=IWB9g5Dq;
+       spf=pass (google.com: domain of jason@lin.gl designates 104.219.54.11 as permitted sender) smtp.mailfrom=jason@lin.gl;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=lin.gl
+Return-Path: <jason@lin.gl>
+Received: from tenshi.cloud.lin.gl (tenshi.cloud.lin.gl. [104.219.54.11])
+        by mx.google.com with ESMTPS id y12-20020a9f2b8c000000b007719b75128esi188576uai.171.2023.05.08.13.19.32
+        for <lindotgl@gmail.com>
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Mon, 08 May 2023 13:19:32 -0700 (PDT)
+Received-SPF: pass (google.com: domain of jason@lin.gl designates 104.219.54.11 as permitted sender) client-ip=104.219.54.11;
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@lin.gl header.s=selector1 header.b=IWB9g5Dq;
+       spf=pass (google.com: domain of jason@lin.gl designates 104.219.54.11 as permitted sender) smtp.mailfrom=jason@lin.gl;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=lin.gl
+Received: from tenshi.cloud.lin.gl (localhost [127.0.0.1])
+	by tenshi.cloud.lin.gl (OpenSMTPD) with ESMTP id 227e5be0
+	for <lindotgl@gmail.com>;
+	Mon, 8 May 2023 20:19:30 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha1; c=relaxed; d=lin.gl; h=message-id:date
+	:mime-version:to:from:subject:content-type
+	:content-transfer-encoding; s=selector1; bh=rnQpHRF2D2lVmnkKkePd
+	zkry2F8=; b=IWB9g5DqRp1bujI0mN3a65F6UuVDi/mqUrT8oXd+SLvjqbuqayMN
+	BCJdd/HgoZd4rJlgruqsavTMZriKi4xFgnUqLg+0EcqNStNu+9Ny1AFpEInX1Np1
+	0f80Iktwlu7v7nLbGQnEHGtjgWAxiit25l0TSqcApYs3W/tskqqVCbwl9D/gdk9c
+	++oz0WNPDHcK0uxcm6FQFNLYrGjwmU6/E4et/1MiyzM1CQgUKHpqb+T//Kg+zDgJ
+	1Yo5bMnipPFc0gvPM8Z8ln+mIb+MKkRjCRYbE/zJMdjN6giLE9n0wgAxfKXx/Hrd
+	W5mabxTTXMXi9m1LeBxuO63x0TJ9pP/b+yZb0PviVnOv80QTmvYZSsT+IKn3gcVx
+	vv9wx0a7YY6M1fHdsyJYLq1FoIr5Ca9+WBJIofAqJhioI8dBIy59K9osWh/YyPjb
+	OWjvolfTA0EhTaMcZNoGL8DZrXbXvDjI2+hQLP7nAP4rMH8y54miBojjY96F4jTC
+	/x7JJFVqYuRs8nrlYQl2iq6Rtu8utuzzAObMHhs2jst8Q1p/xiQ4eGkBvV1O9TLH
+	PbDSvS0nzWF6+f5XM/J3ELYMqWJ1LU03kgnQ2y6yQnBVrWW+kH+HRYIGYzktoftP
+	Aidn5MwXR8J60IGVee4Eg/A0u5FYzLvQ5w9+iJCaowz/rKM7irnXbPU=
+DomainKey-Signature: a=rsa-sha1; c=nofws; d=lin.gl; h=message-id:date
+	:mime-version:to:from:subject:content-type
+	:content-transfer-encoding; q=dns; s=selector1; b=QE4t48qKzXmwt7
+	3AdSDmN0CtItFoxdhPLZ91MaoLc+cvBKEhAHnJqLXA32opTPH+s0hpp1vA5zRdY3
+	iofTCpQBgAy4udoKt8OhGA4eO3pcXmCqzZ4+xNjb4pRw61+cMUPGWffOPFWc7U5E
+	HdxJO9LycOIEFMGs/pvo+hN6JWCVWdhR0099L+xv1CD7itJyAvNtdA2YNpAzNjYj
+	VStia4ODYmWjUpBIsmQv2BtMEevFWaBkZPEZCWZVlavY5CHMcHkmLU2AD4WTvZ/+
+	3BVQ63CZD8IY74TwfR5uJ7qTD7+4Cd36tOrT9JIqrc0EMXk8EzT1jU3Vrf2MvWpz
+	CSQCYERyVaNdCCsnt0e+oOcfZyfuiq3m8yTT/LypPzvYe/JMmGOw2lq8JBIy5R0a
+	GB2rH9BLgo5IM9t3+R+A5dcLzQH3xzmFr7RAu4hpXIyIKnCa4RUaC9R0teNgHPFt
+	jUFjk6pBXLdLtcPZk+n6lpD1qlHxZTNF1ekrE3lretiabTfWVqjkW6oIaynQiUrQ
+	d7InpLzW/2bMIR63swWxwsbW/NBT+r98VsSPPdjIXwPPyXrC80Lx7YhHDFXpIW39
+	CEZOKzVZGHz44RMItNBuXDiJgtkDaie2mOQaMY6woMgjYnUqzLw02n3pWiAodeOJ
+	WHe55n1YhJjBQryM1dY+XjQhg7ms0=
+Received: from [192.168.10.199] (redacted)
+	by tenshi.cloud.lin.gl (OpenSMTPD) with ESMTPSA id 3fa65e2f (TLSv1.3:TLS_AES_256_GCM_SHA384:256:NO)
+	for <lindotgl@gmail.com>;
+	Mon, 8 May 2023 20:19:30 +0000 (UTC)
+Message-ID: <10d8b2e8-acd3-98d9-5312-6e2a9c900286@lin.gl>
+Date: Mon, 8 May 2023 20:19:29 +0000
+MIME-Version: 1.0
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:102.0) Gecko/20100101
+ Thunderbird/102.10.0
+Content-Language: en-GB
+To: lindotgl@gmail.com
+From: Jason Lingle <jason@lin.gl>
+Subject: Test email
+Content-Type: text/plain; charset=UTF-8; format=flowed
+Content-Transfer-Encoding: 7bit
+
+The server has been reprovisioned; can we send email?

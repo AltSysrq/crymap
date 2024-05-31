@@ -35,9 +35,9 @@ The password change takes effect immediately, but does not terminate existing
 IMAP sessions.
 
 **Note that your Crymap password is independent of your other email
-password(s).** You need to change both. (It is possible to use different
-passwords for the separate systems too, if you prefer, though not all mail
-clients can work with such a configuration.)
+password(s), if there are any.** You need to change both. (It is possible to
+use different passwords for the separate systems too, if you prefer, though not
+all mail clients can work with such a configuration.)
 
 If you find you need to undo the password change, the administrator can help
 you with that.
@@ -61,6 +61,46 @@ crymap remote config --external-key-pattern "external-%Y" \
 # Rotate once per week
 crymap remote config --external-key-pattern "external-%Y-%W" \
     --internal-key-pattern "internal-%Y-%W" --user=USER --host=HOST
+```
+
+### Outbound mail configuration
+
+This section only applies if your site uses Crymap for outbound mail.
+
+Normally, your mail client needs to "send" a message twice: Once to request it
+to be sent to the recipients, and again to save it into your "Sent" folder.
+You can configure Crymap to implicitly save sent messages instead, which will
+make the send process faster and smoother:
+
+```sh
+# By default you have a "Sent" folder. If you renamed it to something else,
+# you need to use that name here. If the folder does not exist, your messages
+# will *NOT* be saved!
+crymap remote config --smtp-out-save=Sent --user=USER --host=HOST
+```
+
+If you do this, you'll also need to configure your email client(s) to not also
+save a copy to the Sent folder themselves.
+
+Whenever Crymap sends email to another server, it generates a "receipt" which
+includes technical details of the mail transaction. By default, if the
+transaction succeeds, the receipt is discarded, and if it fails, it is
+delivered to you as a message in your inbox. Both of these are configurable. In
+the example below, we assume you've created "Success" and "Failure" sub-folders
+under your default "Sent" folder.
+
+```sh
+# Configuring this will cause you to also get messages about mail successfully
+# sent. If the folder you give here doesn't exist, they'll go to your inbox
+# instead. These messages will be delivered already marked as "read".
+# To disable, rerun with --smtp-out-success=''
+crymap remote config --smtp-out-success-receipts=Sent/Success --user=USER --host=HOST
+
+# Configuring this will change where failure receipts are sent. If the folder
+# you give here doesn't exist, they'll go to your inbox instead. You cannot
+# disable delivery of these notifications, as they are the only way to find out
+# that your mail cannot be sent.
+crymap remote config --smtp-out-failure-receipts=Sent/Failure --user=USER --host=HOST
 ```
 
 ### Viewing the current configuration

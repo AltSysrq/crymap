@@ -16,6 +16,10 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
+// This warning occurs because we're abusing ? as a short-circuit-on-success
+// operator.
+#![allow(clippy::result_large_err)]
+
 use std::borrow::Cow;
 use std::mem;
 use std::str;
@@ -71,6 +75,7 @@ pub struct Envelope {
 }
 
 bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     struct EnvelopeParts: u32 {
         const DATE = 1 << 0;
         const SUBJECT = 1 << 1;
@@ -169,6 +174,10 @@ impl grovel::Visitor for EnvelopeFetcher {
     fn end(&mut self) -> Envelope {
         mem::take(&mut self.envelope)
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
 }
 
 impl EnvelopeFetcher {
@@ -195,7 +204,7 @@ impl EnvelopeFetcher {
             match address {
                 header::Address::Mailbox(mailbox) => {
                     field.push(to_envelope_address(mailbox))
-                }
+                },
                 header::Address::Group(group) => {
                     field.push(EnvelopeAddress {
                         name: None,
@@ -215,7 +224,7 @@ impl EnvelopeFetcher {
                         local: None,
                         domain: None,
                     });
-                }
+                },
             }
         }
 
@@ -274,7 +283,7 @@ mod test {
     fn parse(message: &str) -> Envelope {
         let message = message.replace('\n', "\r\n");
         grovel::grovel(
-            &grovel::SimpleAccessor {
+            &mut grovel::SimpleAccessor {
                 data: message.into(),
                 ..grovel::SimpleAccessor::default()
             },

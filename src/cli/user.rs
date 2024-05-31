@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -24,9 +24,9 @@ use std::sync::Arc;
 use rand::{rngs::OsRng, Rng};
 
 use super::main::ServerUserAddSubcommand;
-use crate::account::account::Account;
+use crate::account::v2::Account;
 use crate::crypt::master_key::MasterKey;
-use crate::support::safe_name::is_safe_name;
+use crate::support::{log_prefix::LogPrefix, safe_name::is_safe_name};
 
 pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
     if !is_safe_name(&cmd.name) {
@@ -83,28 +83,23 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
         match user_result {
             (q, Err(e)) => {
                 die!(EX_OSFILE, "Unable to look up UNIX user {}: {}", q, e)
-            }
+            },
             (q, Ok(None)) => die!(EX_NOUSER, "{} is not a UNIX user", q),
             (_, Ok(Some(user))) if user.uid == nix::unistd::ROOT => {
                 die!(EX_USAGE, "Creating account for root not allowed")
-            }
+            },
             (_, Ok(Some(user))) => Some(user),
         }
+    } else if cmd.uid.is_some() {
+        die!(EX_NOPERM, "`-u` can only be used as root.")
     } else {
-        if cmd.uid.is_some() {
-            die!(EX_NOPERM, "`-u` can only be used as root.")
-        } else {
-            None
-        }
+        None
     };
 
     let password = if cmd.prompt_password {
-        match rpassword::read_password_from_tty(Some("Password: ")).and_then(
-            |a| {
-                rpassword::read_password_from_tty(Some("Confirm: "))
-                    .map(|b| (a, b))
-            },
-        ) {
+        match rpassword::prompt_password("Password: ").and_then(|a| {
+            rpassword::prompt_password("Confirm: ").map(|b| (a, b))
+        }) {
             Err(e) => die!(EX_NOINPUT, "Failed to read password: {}", e),
             Ok((a, b)) if a != b => die!(EX_DATAERR, "Passwords don't match"),
             Ok((a, _)) if a.is_empty() => die!(EX_NOINPUT, "No password given"),
@@ -112,7 +107,7 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
         }
     } else {
         let data: [u8; 8] = OsRng.gen();
-        base64::encode(&data)
+        base64::encode(data)
     };
 
     if let Err(e) = fs::DirBuilder::new().mode(0o770).create(&actual_path) {
@@ -167,13 +162,12 @@ pub(super) fn add(cmd: ServerUserAddSubcommand, users_root: PathBuf) {
         }
     }
 
-    let account = Account::new(
-        "account-setup".to_owned(),
-        actual_path,
-        Some(Arc::new(MasterKey::new())),
-    );
-
-    if let Err(e) = account.provision(password.as_bytes()) {
+    let log_prefix = LogPrefix::new("account-setup".to_owned());
+    log_prefix.set_user(cmd.name.clone());
+    if let Err(e) =
+        Account::new(log_prefix, actual_path, Arc::new(MasterKey::new()))
+            .and_then(|mut account| account.provision(password.as_bytes()))
+    {
         die!(EX_SOFTWARE, "Error provisioning account: {}", e);
     }
 

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -214,6 +214,10 @@ impl Visitor for BodyStructureFetcher {
 
         mem::take(&mut self.bs)
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
 }
 
 impl BodyStructureFetcher {
@@ -282,6 +286,8 @@ mod test {
     use std::fs;
     use std::path::{Path, PathBuf};
 
+    use chrono::prelude::*;
+
     use super::*;
     use crate::account::model::*;
     use crate::mime::grovel;
@@ -290,7 +296,7 @@ mod test {
     fn parse(message: &str) -> BodyStructure {
         let message = message.replace('\n', "\r\n");
         grovel::grovel(
-            &grovel::SimpleAccessor {
+            &mut grovel::SimpleAccessor {
                 data: message.into(),
                 ..grovel::SimpleAccessor::default()
             },
@@ -884,7 +890,7 @@ hello world
         // 2007-11-19.
         // > That message has a body structure numbering regime looking like:
         let bs = grovel::grovel(
-            &grovel::SimpleAccessor {
+            &mut grovel::SimpleAccessor {
                 data: crate::test_data::TORTURE_TEST.to_owned().into(),
                 ..grovel::SimpleAccessor::default()
             },
@@ -1235,24 +1241,36 @@ hello world
                 impl grovel::MessageAccessor for Accessor {
                     type Reader = std::io::BufReader<fs::File>;
 
-                    fn uid(&self) -> Uid {
+                    fn uid(&mut self) -> Uid {
                         Uid::MIN
                     }
 
-                    fn last_modified(&self) -> Modseq {
+                    fn email_id(&mut self) -> Option<String> {
+                        None
+                    }
+
+                    fn last_modified(&mut self) -> Modseq {
                         Modseq::MIN
                     }
 
-                    fn is_recent(&self) -> bool {
+                    fn savedate(&mut self) -> Option<DateTime<Utc>> {
+                        None
+                    }
+
+                    fn is_recent(&mut self) -> bool {
                         false
                     }
 
-                    fn flags(&self) -> Vec<Flag> {
+                    fn flags(&mut self) -> Vec<Flag> {
                         vec![]
                     }
 
+                    fn rfc822_size(&mut self) -> Option<u32> {
+                        None
+                    }
+
                     fn open(
-                        &self,
+                        &mut self,
                     ) -> Result<(MessageMetadata, Self::Reader), Error>
                     {
                         Ok((
@@ -1264,8 +1282,11 @@ hello world
                     }
                 }
 
-                grovel::grovel(&Accessor(path), BodyStructureFetcher::new())
-                    .unwrap();
+                grovel::grovel(
+                    &mut Accessor(path),
+                    BodyStructureFetcher::new(),
+                )
+                .unwrap();
             } else if path.is_dir() {
                 do_test_corpus(path);
             }

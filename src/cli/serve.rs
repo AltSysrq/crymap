@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -16,20 +16,25 @@
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
-use std::io::{self, Read, Write};
+use std::cell::RefCell;
+use std::net::IpAddr;
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::Duration;
 
 use log::{error, info, warn};
-use nix::poll::{poll, PollFd, PollFlags};
 use nix::sys::time::TimeValLike;
-use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
+use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 
-use crate::imap::command_processor::CommandProcessor;
-use crate::imap::server::Server;
-use crate::support::system_config::SystemConfig;
-use crate::support::unix_privileges;
+use crate::{
+    imap::command_processor::CommandProcessor,
+    support::{
+        async_io::ServerIo, dns, log_prefix::LogPrefix,
+        system_config::SystemConfig, unix_privileges,
+    },
+};
 
 const STDIN: RawFd = 0;
 const STDOUT: RawFd = 1;
@@ -42,7 +47,8 @@ macro_rules! fatal {
     }}
 }
 
-pub fn imaps(
+#[tokio::main(flavor = "current_thread")]
+pub async fn imaps(
     system_config: SystemConfig,
     system_root: PathBuf,
     mut users_root: PathBuf,
@@ -50,104 +56,302 @@ pub fn imaps(
     let system_config = Arc::new(system_config);
 
     let acceptor = create_ssl_acceptor(&system_config, &system_root);
+    let dns_resolver =
+        match hickory_resolver::AsyncResolver::tokio_from_system_conf() {
+            Ok(r) => Some(Rc::new(r)),
+            Err(e) => {
+                error!("Failed to initialise DNS resolver: {e}");
+                None
+            },
+        };
 
     // We've opened access to everything on the main system we need; now we can
     // apply chroot and privilege deescalation.
-    let peer_name = configure_system("", &system_config, &mut users_root);
+    let (log_prefix, _) =
+        configure_system("imaps", &system_config, &mut users_root);
 
-    let ssl_stream = match acceptor.accept(Stdio) {
-        Ok(ss) => ss,
-        Err(e) => {
-            warn!("{} SSL handshake failed: {}", peer_name, e);
-            std::process::exit(0)
-        }
-    };
-
-    info!("{} SSL handshake succeeded", peer_name);
-
-    // This mutex is pretty unfortunate, but needed right now to split
-    // SslStream into two pieces.
-    let ssl_stream = Arc::new(Mutex::new(ssl_stream));
-
-    let processor =
-        CommandProcessor::new(peer_name.clone(), system_config, users_root);
-
-    let mut server = Server::new(
-        io::BufReader::new(WrappedIo(Arc::clone(&ssl_stream))),
-        io::BufWriter::new(WrappedIo(Arc::clone(&ssl_stream))),
-        processor,
-    );
-
-    if let Err(e) = nix::fcntl::fcntl(
-        STDIN,
-        nix::fcntl::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
-    )
-    .and_then(|_| {
-        nix::fcntl::fcntl(
-            STDOUT,
-            nix::fcntl::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
-        )
-    }) {
+    let io = ServerIo::new_stdio().unwrap_or_else(|e| {
         fatal!(
             EX_OSERR,
             "{} Unable to put input/output into non-blocking mode: {}",
-            peer_name,
+            log_prefix,
             e
-        );
+        )
+    });
+
+    match tokio::time::timeout(
+        Duration::from_secs(30),
+        io.ssl_accept(&acceptor),
+    )
+    .await
+    {
+        Ok(Ok(())) => {},
+        Ok(Err(e)) => {
+            warn!("{} SSL handshake failed: {}", log_prefix, e);
+            std::process::exit(0)
+        },
+        Err(_timeout) => {
+            warn!("{} SSL handshake timed out", log_prefix);
+            std::process::exit(0)
+        },
     }
 
-    match server.run() {
-        Ok(_) => info!("{} Normal client disconnect", peer_name),
-        Err(e) => warn!("{} Abnormal client disconnect: {}", peer_name, e),
-    }
+    // Get the key material out of memory.
+    drop(acceptor);
+
+    info!("{} SSL handshake succeeded", log_prefix);
+
+    let processor = CommandProcessor::new(
+        log_prefix.clone(),
+        system_config,
+        users_root,
+        dns_resolver,
+    );
+    let local_set = tokio::task::LocalSet::new();
+    local_set
+        .run_until(crate::imap::server::run(io, processor))
+        .await;
 }
 
-pub fn lmtp(
+#[tokio::main(flavor = "current_thread")]
+pub async fn lmtp(
     system_config: SystemConfig,
     system_root: PathBuf,
     mut users_root: PathBuf,
 ) {
-    let host_name = if system_config.lmtp.host_name.is_empty() {
-        let mut buf = [0u8; 256];
-        let host_name_cstr =
-            nix::unistd::gethostname(&mut buf).unwrap_or_else(|e| {
-                fatal!(
-                    EX_OSERR,
-                    "Failed to determine host name; you may \
-                     need to explicitly configure it: {}",
-                    e
-                )
-            });
-        host_name_cstr
-            .to_str()
-            .unwrap_or_else(|_| {
-                fatal!(EX_OSERR, "System host name is not UTF-8")
-            })
-            .to_owned()
-    } else {
-        system_config.lmtp.host_name.clone()
-    };
-
+    let host_name = smtp_host_name(&system_config);
     let ssl_acceptor = create_ssl_acceptor(&system_config, &system_root);
 
     // We've opened access to everything on the main system we need; now we can
     // apply chroot and privilege deescalation.
-    let peer_name = configure_system("lmtp:", &system_config, &mut users_root);
+    let (log_prefix, peer_name) =
+        configure_system("lmtp", &system_config, &mut users_root);
 
-    let mut server = crate::lmtp::server::Server::new(
-        Box::new(io::BufReader::new(Stdio)),
-        Box::new(io::BufWriter::new(Stdio)),
+    let io = ServerIo::new_stdio().unwrap_or_else(|e| {
+        fatal!(
+            EX_OSERR,
+            "Failed to put stdio into non-blocking mode: {e:?}",
+        )
+    });
+
+    let result = crate::smtp::inbound::serve_lmtp(
+        io,
         Arc::new(system_config),
-        format!("lmtp:{}", peer_name),
+        log_prefix.clone(),
         ssl_acceptor,
         users_root,
         host_name,
-        peer_name.clone(),
+        peer_name,
+    )
+    .await;
+
+    match result {
+        Ok(()) => info!("{} Normal client disconnect", log_prefix),
+        Err(e) => warn!("{} Abnormal client disconnect: {}", log_prefix, e),
+    }
+}
+
+#[tokio::main(flavor = "current_thread")]
+pub async fn smtpin(
+    system_config: SystemConfig,
+    system_root: PathBuf,
+    mut users_root: PathBuf,
+) {
+    let host_name = smtp_host_name(&system_config);
+    let ssl_acceptor = create_ssl_acceptor(&system_config, &system_root);
+
+    // We've opened access to everything on the main system we need; now we can
+    // apply chroot and privilege deescalation.
+    let (log_prefix, _peer_name) =
+        configure_system("smtpin", &system_config, &mut users_root);
+
+    let peer_ip = if let Ok(addr) =
+        nix::sys::socket::getpeername::<nix::sys::socket::SockaddrIn>(STDIN)
+    {
+        IpAddr::V4(*std::net::SocketAddrV4::from(addr).ip())
+    } else if let Ok(addr) =
+        nix::sys::socket::getpeername::<nix::sys::socket::SockaddrIn6>(STDIN)
+    {
+        let addr = *std::net::SocketAddrV6::from(addr).ip();
+        if let Some(v4) = addr.to_ipv4_mapped() {
+            IpAddr::V4(v4)
+        } else {
+            IpAddr::V6(addr)
+        }
+    } else {
+        fatal!(EX_OSERR, "stdin does not seem to be a TCP connection");
+    };
+
+    let resolver =
+        match hickory_resolver::AsyncResolver::tokio_from_system_conf() {
+            Ok(r) => r,
+            Err(e) => {
+                fatal!(EX_OSERR, "Failed to initialise DNS resolver: {e}")
+            },
+        };
+
+    let io = ServerIo::new_stdio().unwrap_or_else(|e| {
+        fatal!(
+            EX_OSERR,
+            "Failed to put stdio into non-blocking mode: {e:?}",
+        )
+    });
+
+    let local_set = tokio::task::LocalSet::new();
+    let result = local_set
+        .run_until(crate::smtp::inbound::serve_smtpin(
+            io,
+            Some(Rc::new(resolver)),
+            Rc::new(RefCell::new(dns::Cache::default())),
+            Arc::new(system_config),
+            log_prefix.clone(),
+            ssl_acceptor,
+            users_root,
+            host_name,
+            peer_ip,
+        ))
+        .await;
+
+    match result {
+        Ok(()) => info!("{} Normal client disconnect", log_prefix),
+        Err(e) => warn!("{} Abnormal client disconnect: {}", log_prefix, e),
+    }
+}
+
+#[tokio::main(flavor = "current_thread")]
+pub async fn smtpsub(
+    system_config: SystemConfig,
+    system_root: PathBuf,
+    mut users_root: PathBuf,
+    implicit_tls: bool,
+) {
+    if system_config.smtp.host_name.is_empty() {
+        fatal!(
+            EX_CONFIG,
+            "smtp.host_name must be explicitly configured for SMTP submission",
+        );
+    }
+    let host_name = system_config.smtp.host_name.clone();
+    let verbose_outbound_tls = system_config.smtp.verbose_outbound_tls;
+    let ssl_acceptor = create_ssl_acceptor(&system_config, &system_root);
+
+    // We've opened access to everything on the main system we need; now we can
+    // apply chroot and privilege deescalation.
+    let (log_prefix, _peer_name) = configure_system(
+        if implicit_tls { "smtpssub" } else { "smtpsub" },
+        &system_config,
+        &mut users_root,
     );
 
-    match server.run() {
-        Ok(_) => info!("lmtp:{} Normal client disconnect", peer_name),
-        Err(e) => warn!("lmtp:{} Abnormal client disconnect: {}", peer_name, e),
+    let resolver =
+        match hickory_resolver::AsyncResolver::tokio_from_system_conf() {
+            Ok(r) => Rc::new(r),
+            Err(e) => {
+                fatal!(EX_OSERR, "Failed to initialise DNS resolver: {e}",)
+            },
+        };
+    let dns_cache = Rc::new(RefCell::new(dns::Cache::default()));
+
+    let io = ServerIo::new_stdio().unwrap_or_else(|e| {
+        fatal!(
+            EX_OSERR,
+            "Failed to put stdio into non-blocking mode: {e:?}",
+        )
+    });
+
+    let ssl_acceptor = if implicit_tls {
+        match tokio::time::timeout(
+            Duration::from_secs(30),
+            io.ssl_accept(&ssl_acceptor),
+        )
+        .await
+        {
+            Ok(Ok(())) => {},
+            Ok(Err(e)) => {
+                warn!("{} SSL handshake failed: {}", log_prefix, e);
+                std::process::exit(0)
+            },
+            Err(_timeout) => {
+                warn!("{} SSL handshake timed out", log_prefix);
+                std::process::exit(0)
+            },
+        }
+
+        // Get the key material out of memory.
+        drop(ssl_acceptor);
+        None
+    } else {
+        Some(ssl_acceptor)
+    };
+
+    info!("{} SSL handshake succeeded", log_prefix);
+
+    let local_set = tokio::task::LocalSet::new();
+    let log_prefix2 = log_prefix.clone();
+    let result = local_set
+        .run_until(crate::smtp::inbound::serve_smtpsub(
+            io,
+            Arc::new(system_config),
+            log_prefix.clone(),
+            ssl_acceptor,
+            users_root,
+            host_name.clone(),
+            Box::new(move |account, id| {
+                tokio::task::spawn_local({
+                    let log_prefix = log_prefix2.clone();
+                    let dns_cache = Rc::clone(&dns_cache);
+                    let resolver = Rc::clone(&resolver);
+                    let host_name = host_name.clone();
+                    async move {
+                        let result = crate::smtp::outbound::send_message(
+                            dns_cache,
+                            Some(resolver),
+                            account,
+                            id,
+                            host_name.clone(),
+                            verbose_outbound_tls,
+                            None,
+                        )
+                        .await;
+                        if let Err(e) = result {
+                            error!(
+                                "{log_prefix} Error setting up \
+                                    message delivery: {e}"
+                            );
+                        }
+                    }
+                });
+            }),
+        ))
+        .await;
+
+    match result {
+        Ok(()) => info!("{} Normal client disconnect", log_prefix),
+        Err(e) => warn!("{} Abnormal client disconnect: {}", log_prefix, e),
+    }
+
+    // Wait for all mail to be sent.
+    local_set.await;
+}
+
+fn smtp_host_name(system_config: &SystemConfig) -> String {
+    if system_config.smtp.host_name.is_empty() {
+        let host_name_cstr = nix::unistd::gethostname().unwrap_or_else(|e| {
+            fatal!(
+                EX_OSERR,
+                "Failed to determine host name; you may \
+                 need to explicitly configure it: {}",
+                e
+            )
+        });
+        host_name_cstr
+            .to_str()
+            .unwrap_or_else(|| {
+                fatal!(EX_OSERR, "System host name is not UTF-8")
+            })
+            .to_owned()
+    } else {
+        system_config.smtp.host_name.clone()
     }
 }
 
@@ -196,15 +400,19 @@ fn create_ssl_acceptor(
 }
 
 fn configure_system(
-    log_prefix: &str,
+    protocol: &str,
     system_config: &SystemConfig,
     users_root: &mut PathBuf,
-) -> String {
+) -> (LogPrefix, String) {
     if let Err(exit) =
         unix_privileges::assume_system(&system_config.security, users_root)
     {
         exit.exit();
     }
+
+    // We deliberately want to make things group-writable.
+    let _ =
+        nix::sys::stat::umask(nix::sys::stat::Mode::from_bits_retain(0o002));
 
     // We've dropped all privileges we can; it's now safe to start talking to
     // the client.
@@ -213,32 +421,39 @@ fn configure_system(
             // In this case, we *do* want to use die!() since we're on a
             // terminal.
             die!(EX_USAGE, "stdin and stdout must not be a terminal")
-        }
+        },
         _ => (),
     }
 
-    let mut peer_name = match nix::sys::socket::getpeername(STDIN) {
-        Ok(addr) => addr.to_string(),
-        Err(e) => {
-            warn!("Unable to determine peer name: {}", e);
-            "unknown-socket".to_owned()
-        }
-    };
+    let mut peer_name = nix::sys::socket::getpeername::<
+        nix::sys::socket::UnixAddr,
+    >(STDIN)
+    .map(|addr| addr.to_string())
+    .or_else(|_| {
+        nix::sys::socket::getpeername::<nix::sys::socket::SockaddrIn>(STDIN)
+            .map(|addr| addr.to_string())
+    })
+    .or_else(|_| {
+        nix::sys::socket::getpeername::<nix::sys::socket::SockaddrIn6>(STDIN)
+            .map(|addr| addr.to_string())
+    })
+    .unwrap_or_else(|_| "unknown-socket".to_owned());
 
     // On FreeBSD, getpeername() on a UNIX socket returns "@\0", which breaks
     // syslog if we log that.
     if peer_name.contains('\0') {
-        peer_name = "unknown-socket".to_owned();
+        "unknown-socket".clone_into(&mut peer_name);
     }
+    let log_prefix = LogPrefix::new(format!("{protocol}:{peer_name}"));
 
     if let Err(e) = nix::sys::socket::setsockopt(
-        STDIN,
+        &std::io::stdin(),
         nix::sys::socket::sockopt::ReceiveTimeout,
         &nix::sys::time::TimeVal::minutes(30),
     )
     .and_then(|_| {
         nix::sys::socket::setsockopt(
-            STDOUT,
+            &std::io::stdout(),
             nix::sys::socket::sockopt::SendTimeout,
             &nix::sys::time::TimeVal::minutes(30),
         )
@@ -249,122 +464,11 @@ fn configure_system(
     // It is not unusual for stdio to be UNIX sockets instead of TCP, so don't
     // complain if setting TCP_NODELAY fails.
     let _ = nix::sys::socket::setsockopt(
-        STDOUT,
+        &std::io::stdout(),
         nix::sys::socket::sockopt::TcpNoDelay,
         &true,
     );
 
-    info!("{}{} Connection established", log_prefix, peer_name);
-    peer_name
-}
-
-// Read and write to the stdio FDs without buffering
-#[derive(Debug)]
-struct Stdio;
-
-impl Read for Stdio {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        nix::unistd::read(STDIN, buf).map_err(|e| {
-            io::Error::from_raw_os_error(e.as_errno().unwrap() as i32)
-        })
-    }
-}
-
-impl Write for Stdio {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        nix::unistd::write(STDOUT, buf).map_err(|e| {
-            io::Error::from_raw_os_error(e.as_errno().unwrap() as i32)
-        })
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-/// Wraps SslStream to implement Read and Write over this structure in the
-/// mutex, and also to deal with non-blocking IO.
-///
-/// We need to use non-blocking IO to allow writes to proceed even when read is
-/// blocking on getting data from the client, as when doing IDLE.
-struct WrappedIo(Arc<Mutex<SslStream<Stdio>>>);
-
-impl Read for WrappedIo {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        loop {
-            let res = {
-                let mut lock = self.0.lock().unwrap();
-                lock.ssl_read(buf)
-            };
-
-            match res {
-                Ok(n) => return Ok(n),
-                Err(e) => self.on_error(e)?,
-            }
-        }
-    }
-}
-
-impl Write for WrappedIo {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        loop {
-            let res = {
-                let mut lock = self.0.lock().unwrap();
-                lock.ssl_write(buf)
-            };
-
-            match res {
-                Ok(n) => return Ok(n),
-                Err(e) => self.on_error(e)?,
-            };
-        }
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        let mut lock = self.0.lock().unwrap();
-        lock.flush()
-    }
-}
-
-impl WrappedIo {
-    fn on_error(&mut self, e: openssl::ssl::Error) -> io::Result<()> {
-        match e.code() {
-            openssl::ssl::ErrorCode::WANT_READ => {
-                let mut stdin = [PollFd::new(
-                    STDIN,
-                    PollFlags::POLLIN | PollFlags::POLLERR,
-                )];
-
-                handle_poll_result(poll(&mut stdin, 30 * 60_000))
-            }
-            openssl::ssl::ErrorCode::WANT_WRITE => {
-                let mut stdout = [PollFd::new(
-                    STDOUT,
-                    PollFlags::POLLOUT | PollFlags::POLLERR,
-                )];
-
-                handle_poll_result(poll(&mut stdout, 30 * 60_000))
-            }
-            _ => Err(e
-                .into_io_error()
-                .unwrap_or_else(|e| io::Error::new(io::ErrorKind::Other, e))),
-        }
-    }
-}
-
-fn handle_poll_result(
-    result: Result<nix::libc::c_int, nix::Error>,
-) -> io::Result<()> {
-    match result {
-        Ok(0) => {
-            Err(io::Error::new(io::ErrorKind::TimedOut, "Socket timed out"))
-        }
-        Ok(_) => Ok(()),
-        Err(nix::Error::Sys(nix::errno::Errno::EINTR)) => Ok(()),
-        Err(e) => Err(nix_to_io(e)),
-    }
-}
-
-fn nix_to_io(e: nix::Error) -> io::Error {
-    io::Error::from_raw_os_error(e.as_errno().unwrap() as i32)
+    info!("{} Connection established", log_prefix);
+    (log_prefix, peer_name)
 }

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2021, Jason Lingle
+// Copyright (c) 2020, 2021, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -35,7 +35,7 @@ fn flag_crud() {
     assert_eq!(2, responses.len());
     assert_tagged_ok(responses.pop().unwrap());
     assert_eq!(
-        &r("2 FETCH (UID 3 FLAGS (\\Recent \\Deleted \\Seen))"),
+        &r("2 FETCH (UID 3 FLAGS (\\Recent \\Seen \\Deleted))"),
         &responses[0].response
     );
 
@@ -47,25 +47,27 @@ fn flag_crud() {
         &responses[0].response
     );
 
-    command!(mut responses = client, c("STORE 2 FLAGS ($Important)"));
+    ok_command!(client, c("XCRY FLAGS ON"));
+    command!(mut responses = client, c("STORE 2 FLAGS (3501flfc)"));
     assert_eq!(3, responses.len());
     assert_tagged_ok(responses.pop().unwrap());
     has_untagged_response_matching! {
         s::Response::Flags(ref flags) in responses => {
-            assert!(flags.contains(&Flag::Keyword("$Important".to_owned())));
+            assert!(flags.contains(&Flag::Keyword("3501flfc".to_owned())));
         }
     }
     assert_eq!(
-        &r("2 FETCH (UID 3 FLAGS (\\Recent $Important))"),
+        &r("2 FETCH (UID 3 FLAGS (\\Recent 3501flfc))"),
         &responses[1].response
     );
+    ok_command!(client, c("XCRY FLAGS OFF"));
 
     // No-op without .SILENT produces fetch response anyway
     command!(mut responses = client, c("STORE 2 -FLAGS (\\Deleted)"));
     assert_eq!(2, responses.len());
     assert_tagged_ok(responses.pop().unwrap());
     assert_eq!(
-        &r("2 FETCH (UID 3 FLAGS (\\Recent $Important))"),
+        &r("2 FETCH (UID 3 FLAGS (\\Recent 3501flfc))"),
         &responses[0].response
     );
 
@@ -131,7 +133,7 @@ fn error_conditions() {
     }
 
     command!([response] = client, c("UID STORE 2 +FLAGS (\\Answered)"));
-    assert_tagged_ok(response);
+    assert_tagged_no(response);
 
     // Create a situation in which `client` knows about a message by UID but
     // doesn't have it in its snapshot.
@@ -146,12 +148,12 @@ fn error_conditions() {
     ok_command!(client, c("STORE 1 +FLAGS (\\Answered)"));
 
     command!(mut responses = client, c("UID STORE 2 +FLAGS (\\Seen)"));
-    // It returns OK but has no effect
+    // It returns NO and has no effect.
     // Since UID STORE is not a cursed command, we also get the asynchronous
     // updates here:
     // 2 EXISTS, 1 RECENT, 2 FETCH ..., TAG OK NIL
     assert_eq!(4, responses.len());
-    assert_tagged_ok(responses.pop().unwrap());
+    assert_tagged_no(responses.pop().unwrap());
     assert_eq!(
         &r("2 FETCH (UID 2 FLAGS (\\Answered))"),
         &responses[2].response

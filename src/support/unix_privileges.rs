@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -17,12 +17,11 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 use std::os::unix::fs::MetadataExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use log::{error, warn};
 
-use super::sysexits::*;
-use super::system_config::SecurityConfig;
+use crate::support::{file_ops, sysexits::*, system_config::SecurityConfig};
 
 /// If a system user is configured, switch to it if not already that user.
 ///
@@ -77,11 +76,7 @@ pub fn assume_system(
     }
 
     if security.chroot_system {
-        if let Err(e) =
-            // chroot, then chdir, since users_root could be relative
-            nix::unistd::chroot(users_root)
-                .and_then(|_| nix::unistd::chdir("/"))
-        {
+        if let Err(e) = chroot(users_root) {
             fatal!(
                 EX_OSERR,
                 "Failed to chroot to '{}': {}",
@@ -158,7 +153,7 @@ pub fn assume_user_privileges(
                 e
             );
             return Err(EX_NOUSER);
-        }
+        },
     };
     let target_uid = nix::unistd::Uid::from_raw(md.uid() as nix::libc::uid_t);
     let (has_user_groups, target_gid) =
@@ -179,10 +174,10 @@ pub fn assume_user_privileges(
                                 log_prefix, e
                             );
                             (false, user.gid)
-                        }
+                        },
                     }
                 }
-            }
+            },
             Ok(None) => {
                 // Failure to access /etc/group is expected if we chroot'ed
                 // into the system data directory already
@@ -198,14 +193,14 @@ pub fn assume_user_privileges(
                     false,
                     nix::unistd::Gid::from_raw(md.gid() as nix::libc::gid_t),
                 )
-            }
+            },
             Err(e) => {
                 // Failure to access /etc/group is expected if we chroot'ed
                 // into the system data directory already
                 if !chroot_system {
                     warn!(
                         "{} Failed to look up passwd entry for UID {}, \
-                     assuming GID {}: {}",
+                         assuming GID {}: {}",
                         log_prefix,
                         target_uid,
                         md.gid(),
@@ -216,13 +211,12 @@ pub fn assume_user_privileges(
                     false,
                     nix::unistd::Gid::from_raw(md.gid() as nix::libc::gid_t),
                 )
-            }
+            },
         };
 
     if !effective_only {
-        if let Err(e) = nix::unistd::chdir(user_dir)
-            .and_then(|()| nix::unistd::chroot(user_dir))
-        {
+        prepare_chroot(user_dir);
+        if let Err(e) = chroot(user_dir) {
             error!(
                 "{} Chroot (forced because Crymap is running as root) \
                  into '{}' failed: {}",
@@ -276,4 +270,88 @@ pub fn assume_user_privileges(
     }
 
     Ok(())
+}
+
+fn chroot(chroot_dir: &Path) -> nix::Result<()> {
+    prepare_chroot(chroot_dir);
+    // chroot first in case chroot_dir is relative.
+    nix::unistd::chroot(chroot_dir).and_then(|()| nix::unistd::chdir("/"))
+}
+
+fn prepare_chroot(chroot_dir: &Path) {
+    // OpenSSL will want to look into its own files after we chroot if we end
+    // up doing outbound SMTP, so make sure the files it wants are actually
+    // available in the chroot.
+    match get_openssldir() {
+        None => {
+            error!(
+                "Couldn't determine OPENSSLDIR, certificate validation for \
+                 outbound SMTP will not work!",
+            );
+        },
+
+        Some(dir) => {
+            if let Err(e) = file_ops::replicate_directory_for_chroot(
+                &Path::new("/").join(dir),
+                &chroot_dir.join(dir),
+            ) {
+                error!(
+                    "Couldn't replicate OPENSSLDIR /{openssldir} \
+                     into chroot at {chroot_dir}/{openssldir}: {e}; \
+                     certificate validation for outbound SMTP will not work!",
+                    openssldir = dir.display(),
+                    chroot_dir = chroot_dir.display(),
+                );
+            }
+        },
+    }
+}
+
+/// Retrieves the OPENSSL directory, *relative* to the root of the FS.
+fn get_openssldir() -> Option<&'static Path> {
+    // This is, apparently, the only way to get any inkling of where OpenSSL
+    // plans on looking for files. For whatever reason, it's in some
+    // human-readable format that we then need to parse.
+    //
+    // This isn't 100% reliable since it can be overridden by an environment
+    // variable, so there's no way to find out exactly what OpenSSL plans to
+    // do, but overriding that directory for production Crymap would be very
+    // unusual.
+    return parse_openssldir(openssl::version::dir());
+}
+
+/// Parses the string produced by `openssl::version::dir` to produce a path,
+/// *relative* to the root of the FS, of the OpenSSL directory.
+fn parse_openssldir(s: &str) -> Option<&Path> {
+    s.split('"')
+        .nth(1)
+        .map(|s| s.strip_prefix('/').unwrap_or(s).as_ref())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_get_openssldir() {
+        let rel_dir = get_openssldir().unwrap();
+        assert!(
+            std::fs::metadata(Path::new("/").join(rel_dir).join("certs"))
+                .unwrap()
+                .is_dir()
+        );
+    }
+
+    #[test]
+    fn test_parse_openssldir() {
+        assert_eq!(None, parse_openssldir("OPENSSLDIR: N/A"));
+        assert_eq!(
+            Some(Path::new("usr/lib/ssl")),
+            parse_openssldir("OPENSSLDIR: \"/usr/lib/ssl\""),
+        );
+        assert_eq!(
+            Some(Path::new("usr/lib/ssl")),
+            parse_openssldir("OPENSSLDIR: \"usr/lib/ssl\""),
+        );
+    }
 }

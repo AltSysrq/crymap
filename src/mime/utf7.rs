@@ -82,13 +82,11 @@ impl Utf7 {
                 if *in_encoded {
                     *in_encoded = self.is_base64_char(ch);
                     Some((ix, false))
+                } else if self.shift_in == ch {
+                    *in_encoded = true;
+                    Some((ix, true))
                 } else {
-                    if self.shift_in == ch {
-                        *in_encoded = true;
-                        Some((ix, true))
-                    } else {
-                        Some((ix, false))
-                    }
+                    Some((ix, false))
                 }
             })
             .filter(|&(_, is_start)| is_start)
@@ -243,15 +241,15 @@ impl Utf7 {
     }
 
     fn is_direct(&self, byte: u8) -> bool {
-        byte >= b' ' && byte < 0x7F && !self.indirect.contains(&byte)
+        (b' '..0x7F).contains(&byte) && !self.indirect.contains(&byte)
     }
 
     fn is_base64_char(&self, ch: u8) -> bool {
-        (ch >= b'a' && ch <= b'z')
-            || (ch >= b'A' && ch <= b'Z')
-            || (ch >= b'0' && ch <= b'9')
-            || ch == b'+'
-            || ch == self.ch_63
+        ch.is_ascii_lowercase()
+            || ch.is_ascii_uppercase()
+            || ch.is_ascii_digit()
+            || b'+' == ch
+            || self.ch_63 == ch
     }
 }
 

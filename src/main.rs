@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -21,12 +21,15 @@
     clippy::module_inception,
     clippy::type_complexity,
     clippy::too_many_arguments,
-    clippy::needless_range_loop
+    clippy::needless_range_loop,
+    clippy::needless_borrowed_reference,
+    clippy::precedence
 )]
+#![deny(clippy::pattern_type_mismatch)]
 
 #[cfg(test)]
 macro_rules! assert_matches {
-    ($expected:pat, $actual:expr) => {
+    ($expected:pat, $actual:expr $(,)*) => {
         match $actual {
             $expected => (),
             unexpected => panic!(
@@ -46,8 +49,8 @@ mod account;
 mod cli;
 mod crypt;
 mod imap;
-mod lmtp;
 mod mime;
+mod smtp;
 
 #[cfg(test)]
 mod test_data;

@@ -238,7 +238,7 @@ fn esearch_eq(
         } => {
             expected.tag = Cow::Owned(er.tag.clone().into_owned());
             assert_eq!(expected, er);
-        }
+        },
 
         r => panic!("Unexpected response: {:?}", r),
     }

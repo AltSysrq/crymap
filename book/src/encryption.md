@@ -159,11 +159,10 @@ Since Crymap encrypts *all* message data at rest and has per-user isolation, it
 provides full defence against theft of storage medium and file exfiltration. It
 is also able to protect _most_ message metadata, such as message flags. An
 attacker with file system access can still use that access to form educated
-guesses about when certain messages were delivered, whether they have been
-read, and their approximate size. Also note that the user folder structure is
-fully exposed. On the other hand, since Crymap transparently decrypts data
-before sending it over IMAP, compromising an IMAP connection reveals all data
-going over the wire.
+guesses about when certain messages were delivered and their approximate size.
+On the other hand, since Crymap transparently decrypts data before sending it
+over IMAP, compromising an IMAP connection reveals all data going over the
+wire.
 
 - Protects from theft of storage medium.
 

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -42,6 +42,7 @@ use crate::account::model::*;
 use crate::mime::content_encoding::ContentDecoder;
 use crate::mime::grovel::Visitor;
 use crate::mime::header;
+use crate::support::chronox::*;
 
 const READ_LIMIT: usize = 131072;
 
@@ -51,6 +52,7 @@ bitflags! {
     /// I.e., these are things that may be encountered naturally before inputs
     /// that actually contribute to the search result and can be usefully
     /// skipped.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct OptionalSearchParts: u32 {
         const FLAGS = 1 << 0;
         const HEADER_MAP = 1 << 1;
@@ -73,7 +75,19 @@ pub struct SearchData {
     pub last_modified: Option<Modseq>,
     pub flags: Option<Vec<Flag>>,
     pub recent: Option<bool>,
+    /// The `EMAILID`.
+    ///
+    /// This will be copied from `metadata` if that is encountered first.
+    pub email_id: Option<String>,
+    /// The `RFC822.SIZE`.
+    ///
+    /// This will be copied from `metadata` if that is encountered first.
+    pub rfc822_size: Option<u32>,
 
+    /// The save date of the message. This will be copied from
+    /// `metadata.internal_date` if the save date is not found by the time the
+    /// message is opened.
+    pub save_date: Option<DateTime<FixedOffset>>,
     pub metadata: Option<MessageMetadata>,
 
     /// All headers on the message, with encoded words decoded.
@@ -188,6 +202,11 @@ impl<F: FnMut(&SearchData) -> Option<bool>> Visitor for SearchFetcher<F> {
         Ok(())
     }
 
+    fn email_id(&mut self, email_id: &str) -> Result<(), bool> {
+        self.data.email_id = Some(email_id.to_owned());
+        self.eval()
+    }
+
     fn last_modified(&mut self, modseq: Modseq) -> Result<(), bool> {
         self.data.last_modified = Some(modseq);
         self.eval()
@@ -213,8 +232,29 @@ impl<F: FnMut(&SearchData) -> Option<bool>> Visitor for SearchFetcher<F> {
         self.eval()
     }
 
+    fn rfc822_size(&mut self, size: u32) -> Result<(), bool> {
+        self.data.rfc822_size = Some(size);
+        self.eval()
+    }
+
+    fn savedate(&mut self, date: DateTime<Utc>) -> Result<(), bool> {
+        self.data.save_date = Some(date.into());
+        self.eval()
+    }
+
     fn metadata(&mut self, md: &MessageMetadata) -> Result<(), bool> {
         self.data.metadata = Some(md.to_owned());
+
+        if self.data.email_id.is_none() {
+            self.data.email_id = Some(md.format_email_id());
+        }
+        if self.data.rfc822_size.is_none() {
+            self.data.rfc822_size = Some(md.size);
+        }
+        if self.data.save_date.is_none() {
+            self.data.save_date = Some(md.internal_date);
+        }
+
         self.eval()
     }
 
@@ -312,7 +352,7 @@ impl<F: FnMut(&SearchData) -> Option<bool>> Visitor for SearchFetcher<F> {
         self.data.recent.get_or_insert(false);
         self.data.metadata.get_or_insert_with(|| MessageMetadata {
             size: 0,
-            internal_date: FixedOffset::east(0).timestamp_millis(0),
+            internal_date: FixedOffset::zero().timestamp0(),
             email_id: Default::default(),
         });
         self.finish_headers();
@@ -324,16 +364,18 @@ impl<F: FnMut(&SearchData) -> Option<bool>> Visitor for SearchFetcher<F> {
         );
 
         self.eval()
-            .err()
-            .expect("Failed to eval() to something after all fields set")
+            .expect_err("Failed to eval() to something after all fields set")
+    }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
     }
 }
 
 impl<F: FnMut(&SearchData) -> Option<bool>> SearchFetcher<F> {
     fn finish_headers(&mut self) {
         if self.data.headers.is_none() {
-            self.data.headers =
-                Some(mem::replace(&mut self.headers, HashMap::new()));
+            self.data.headers = Some(mem::take(&mut self.headers));
         }
         self.data.from.get_or_insert_with(String::new);
         self.data.cc.get_or_insert_with(String::new);
@@ -341,7 +383,7 @@ impl<F: FnMut(&SearchData) -> Option<bool>> SearchFetcher<F> {
         self.data.to.get_or_insert_with(String::new);
         self.data
             .date
-            .get_or_insert_with(|| FixedOffset::east(0).timestamp_millis(0));
+            .get_or_insert_with(|| FixedOffset::zero().timestamp0());
         self.data.subject.get_or_insert_with(String::new);
     }
 
@@ -373,12 +415,12 @@ impl<F: FnMut(&SearchData) -> Option<bool>> SearchFetcher<F> {
         }
 
         let mut result = String::with_capacity(value.len() + 16);
-        let parsed = header::parse_address_list(value).unwrap_or_else(Vec::new);
+        let parsed = header::parse_address_list(value).unwrap_or_default();
         for address in parsed {
             match address {
                 header::Address::Mailbox(mailbox) => {
                     push_mailbox(&mut result, mailbox);
-                }
+                },
                 header::Address::Group(group) => {
                     result.push('"');
                     result.push_str(&decode_phrase(group.name));
@@ -387,7 +429,7 @@ impl<F: FnMut(&SearchData) -> Option<bool>> SearchFetcher<F> {
                         push_mailbox(&mut result, mailbox);
                     }
                     result.push_str("; ");
-                }
+                },
             }
         }
 
@@ -444,6 +486,10 @@ impl Visitor for ContentAccumulator {
         let _ = self.content(&[0]);
         false
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -453,14 +499,19 @@ mod test {
 
     fn parse(message: &str) -> SearchData {
         let message = message.replace('\n', "\r\n");
-        let accessor = grovel::SimpleAccessor {
+        let mut accessor = grovel::SimpleAccessor {
             uid: Uid::u(42),
-            last_modified: Modseq::new(Uid::u(56), Cid(100)),
+            email_id: Some("E1234".to_owned()),
+            last_modified: Modseq::of(56100),
             recent: true,
             flags: vec![Flag::Flagged],
+            rfc822_size: Some(12345),
+            savedate: Some(Utc.timestamp_millis_opt(2000).unwrap()),
             metadata: MessageMetadata {
                 size: 12345,
-                internal_date: FixedOffset::east(3600).timestamp_millis(1000),
+                internal_date: FixedOffset::eastx(3600)
+                    .timestamp_millis_opt(1000)
+                    .unwrap(),
                 email_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
             },
             data: message.into(),
@@ -470,7 +521,7 @@ mod test {
         let capture2 = Rc::clone(&capture);
 
         grovel::grovel(
-            &accessor,
+            &mut accessor,
             SearchFetcher::new(OptionalSearchParts::all(), move |sd| {
                 if sd.content.is_some() {
                     *capture2.borrow_mut() = sd.clone();
@@ -504,10 +555,7 @@ This is the content.
         );
 
         assert_eq!(Some(Uid::u(42)), result.uid);
-        assert_eq!(
-            Some(Modseq::new(Uid::u(56), Cid(100))),
-            result.last_modified
-        );
+        assert_eq!(Some(Modseq::of(56100)), result.last_modified);
         assert_eq!(Some(true), result.recent);
         assert_eq!(Some(vec![Flag::Flagged]), result.flags);
         assert_eq!(12345, result.metadata.as_ref().unwrap().size);

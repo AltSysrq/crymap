@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -20,64 +20,17 @@ use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::marker::PhantomData;
-use std::num::{NonZeroU32, NonZeroU64};
+use std::num::NonZeroU32;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::path::PathBuf;
 use std::str::FromStr;
 
 use chrono::prelude::*;
 use serde::{Deserialize, Serialize};
+use tempfile::TempPath;
 
-use crate::account::mailbox::BufferedMessage;
 use crate::mime::fetch;
 use crate::support::error::Error;
-
-/// A change identifier.
-///
-/// Change identifiers are assigned sequentially, starting from 1, for all
-/// metadata changes in a mailbox. They are one of two components of a
-/// `Modseq`.
-///
-/// Cid 0, while not assigned to any specific change, represents the creation
-/// of a message.
-///
-/// Though this contains a `u32`, only values between `MIN` and `MAX` are valid
-/// (and `GENESIS` when referring to the instant a UID is allocated) since RFC
-/// 5162 felt the need to accommodate defective environments lacking proper
-/// 64-bit integers.
-#[derive(
-    Deserialize,
-    Serialize,
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-)]
-#[serde(transparent)]
-pub struct Cid(pub u32);
-
-impl Cid {
-    pub const GENESIS: Self = Cid(0);
-    pub const MIN: Self = Cid(1);
-    /// This could be increased to `(1 << 32)`, but the overhead of using
-    /// real multiplication and division is pretty small, and this way the
-    /// base-10 integers IMAP sends over the wire are readable (in combination
-    /// with a `Uid` to form a `Modseq`).
-    pub const END: Self = Cid(4_000_000_000);
-    pub const MAX: Self = Cid(Cid::END.0 - 1);
-
-    pub fn next(self) -> Option<Self> {
-        if self < Cid::MAX {
-            Some(Cid(self.0 + 1))
-        } else {
-            None
-        }
-    }
-}
 
 /// Uniquely identifies a message within a single mailbox.
 ///
@@ -112,13 +65,11 @@ impl Default for Uid {
 impl Uid {
     // Unsafe because new() isn't const for some reason
     pub const MIN: Self = unsafe { Uid(NonZeroU32::new_unchecked(1)) };
-    // The maximum possible UID value is limited by the 63-bit `Modseq` space
-    // and the value the UID is multiplied with.
-    pub const MAX: Self = unsafe {
-        Uid(NonZeroU32::new_unchecked(
-            (((1u64 << 63) - 1) / (Cid::END.0 as u64)) as u32,
-        ))
-    };
+    // The maximum possible UID value in the V1 data store is limited by the
+    // 63-bit `Modseq` space and the value the UID is multiplied with, but we
+    // don't care about enforcing that anymore, so we can just use u32::MAX, as
+    // V2 has no such limit.
+    pub const MAX: Self = unsafe { Uid(NonZeroU32::new_unchecked(u32::MAX)) };
 
     pub fn of(uid: u32) -> Option<Self> {
         NonZeroU32::new(uid).map(Uid).filter(|&u| u <= Uid::MAX)
@@ -146,9 +97,9 @@ impl TryFrom<u32> for Uid {
     }
 }
 
-impl Into<u32> for Uid {
-    fn into(self) -> u32 {
-        self.0.get()
+impl From<Uid> for u32 {
+    fn from(uid: Uid) -> u32 {
+        uid.0.get()
     }
 }
 
@@ -219,9 +170,9 @@ impl TryFrom<u32> for Seqnum {
     }
 }
 
-impl Into<u32> for Seqnum {
-    fn into(self) -> u32 {
-        self.0.get()
+impl From<Seqnum> for u32 {
+    fn from(s: Seqnum) -> u32 {
+        s.0.get()
     }
 }
 
@@ -233,95 +184,47 @@ impl fmt::Debug for Seqnum {
 
 /// A CONDSTORE/QRESYNC "modifier sequence" number.
 ///
-/// In this implementation, this is a 2-element vector clock of a UID and a
-/// CID, which allows message insertions to be more weakly-ordered with respect
-/// to metadata changes (which is important so that mail delivery does not need
-/// to deal with loading the metadata just to add its message).
-///
-/// A message with a given UID is said to come into existence at the moment
-/// identified by `Modseq::new(uid, Cid::GENESIS)`. Each change takes place
-/// with a UID equalling the largest known UID at the time and the CID assigned
-/// to that particular change.
-///
-/// While this is modelled as a vector clock, it is actually strictly ordered
-/// with respect to its integer value, as required by QRESYNC. That is, given
-/// any two `Modseq` values in the same mailbox, there will never be a case
-/// where `a.uid() > b.uid()` but `a.cid() < b.cid()`, except for the case of
-/// message insertions whose CID is 0. While those are technically "concurrent"
-/// with all metadata updates, we do not need to handle that according to
-/// vector clock interpretation because the client will never be given a
-/// `HIGHESTMODSEQ` with a CID of 0 unless there have been no metadata
-/// operations at all.
-///
-/// The reported `HIGHESTMODSEQ` always has the UID of the last seen message
-/// and the CID of the last seen metadata operation.
-///
-/// The "primordial" modifier sequence number, used for a brand new mailbox, is
-/// not representable by this structure. It is sent over the wire as 1.
+/// This is just a wrapper around a 64-bit integer. While we never generate
+/// `Modseq` values of 0 (and, in fact, CONDSTORE requires that 0 refers to a
+/// time before anything ever happened), we do need to understand a client
+/// talking about Modseq 0.
 #[derive(
-    Deserialize, Serialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
+    Deserialize,
+    Serialize,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
 )]
 #[serde(transparent)]
-pub struct Modseq(NonZeroU64);
+pub struct Modseq(u64);
 
 impl Modseq {
-    // Unsafe because NonZeroU64::new() is non-const.
-    pub const MIN: Self =
-        unsafe { Modseq(NonZeroU64::new_unchecked(Cid::END.0 as u64)) };
+    /// The minimum real `Modseq`.
+    ///
+    /// The value less than this can still occur if requested by the client.
+    pub const MIN: Self = Self(1);
+    /// The maximum allowable `Modseq` value.
+    pub const MAX: Self = Self(i64::MAX as u64);
 
-    pub fn of(raw: u64) -> Option<Self> {
-        NonZeroU64::new(raw)
-            .map(Modseq)
-            .filter(|&m| m >= Modseq::MIN)
+    pub fn of(raw: u64) -> Self {
+        Self(raw)
     }
 
-    pub fn new(uid: Uid, cid: Cid) -> Self {
-        Modseq(
-            NonZeroU64::new(
-                (uid.0.get() as u64) * (Cid::END.0 as u64) + cid.0 as u64,
-            )
-            .unwrap(),
-        )
-    }
-
-    pub fn raw(self) -> NonZeroU64 {
+    pub fn raw(self) -> u64 {
         self.0
     }
 
-    pub fn uid(self) -> Uid {
-        Uid::of((self.0.get() / (Cid::END.0 as u64)) as u32).unwrap()
-    }
-
-    pub fn cid(self) -> Cid {
-        Cid((self.0.get() % (Cid::END.0 as u64)) as u32)
-    }
-
-    pub fn combine(self, other: Self) -> Self {
-        Modseq::new(self.uid().max(other.uid()), self.cid().max(other.cid()))
-    }
-
-    pub fn with_uid(self, uid: Uid) -> Self {
-        Modseq::new(uid, self.cid())
-    }
-
-    pub fn with_cid(self, cid: Cid) -> Self {
-        Modseq::new(self.uid(), cid)
-    }
-
     pub fn next(self) -> Option<Self> {
-        self.cid().next().map(|cid| self.with_cid(cid))
-    }
-}
-
-impl fmt::Debug for Modseq {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Modseq({}:{}={})",
-            self.uid().0.get(),
-            self.cid().0,
-            self.0.get()
-        )
+        if Self::MAX == self {
+            None
+        } else {
+            Some(Self(self.0 + 1))
+        }
     }
 }
 
@@ -449,13 +352,13 @@ impl<T: TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync> SeqRange<T> {
 
     /// Return an iterator to the items in this set.
     ///
-    /// Invalid items and items greater than `max`. are silently excluded.
+    /// Invalid items and items greater than `max` are silently excluded.
     ///
     /// Items are delivered in strictly ascending order.
-    pub fn items<'a>(
-        &'a self,
+    pub fn items(
+        &self,
         max: impl Into<u32>,
-    ) -> impl Iterator<Item = T> + 'a {
+    ) -> impl Iterator<Item = T> + Clone + '_ {
         let max: u32 = max.into();
         self.parts
             .iter()
@@ -486,14 +389,14 @@ impl<T: TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync> SeqRange<T> {
                 (Some(only), None, None) => {
                     let only = do_parse(only, splat)?;
                     this.insert_raw(only, only);
-                }
+                },
                 (Some(start), Some(end), None) => {
                     let start = do_parse(start, splat)?;
                     let end = do_parse(end, splat)?;
                     // RFC 3501 allows the endpoints to be in either order for
                     // some reason
                     this.insert_raw(start.min(end), end.max(start));
-                }
+                },
                 _ => return None,
             }
         }
@@ -555,9 +458,29 @@ impl fmt::Debug for SeqRange<Uid> {
     }
 }
 
+impl fmt::Debug for SeqRange<u32> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[index {}]", self)
+    }
+}
+
 impl<T> Default for SeqRange<T> {
     fn default() -> Self {
         SeqRange::new()
+    }
+}
+
+/// For test convenience. Panics if the `Vec` isn't sorted.
+#[cfg(test)]
+impl<T: TryFrom<u32> + Into<u32> + PartialOrd + Send + Sync> From<Vec<T>>
+    for SeqRange<T>
+{
+    fn from(v: Vec<T>) -> Self {
+        let mut this = Self::new();
+        for item in v {
+            this.append(item);
+        }
+        this
     }
 }
 
@@ -581,16 +504,22 @@ pub enum Flag {
     Keyword(String),
 }
 
+impl Flag {
+    pub fn as_str(&self) -> &str {
+        match *self {
+            Flag::Answered => "\\Answered",
+            Flag::Deleted => "\\Deleted",
+            Flag::Draft => "\\Draft",
+            Flag::Flagged => "\\Flagged",
+            Flag::Seen => "\\Seen",
+            Flag::Keyword(ref kw) => kw,
+        }
+    }
+}
+
 impl fmt::Display for Flag {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Flag::Answered => write!(f, "\\Answered"),
-            Flag::Deleted => write!(f, "\\Deleted"),
-            Flag::Draft => write!(f, "\\Draft"),
-            Flag::Flagged => write!(f, "\\Flagged"),
-            Flag::Seen => write!(f, "\\Seen"),
-            Flag::Keyword(ref kw) => write!(f, "{}", kw),
-        }
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -616,6 +545,8 @@ impl FromStr for Flag {
             Ok(Flag::Seen)
         } else if s.starts_with('\\') {
             Err(Error::NxFlag)
+        } else if s.is_empty() {
+            Err(Error::UnsafeName)
         } else if s.as_bytes().iter().copied().all(is_atom_char) {
             Ok(Flag::Keyword(s.to_owned()))
         } else {
@@ -625,12 +556,8 @@ impl FromStr for Flag {
 }
 
 fn is_atom_char(ch: u8) -> bool {
-    match ch {
-        0..=b' ' => false,
-        127..=255 => false,
-        b'(' | b')' | b'{' | b'*' | b'%' | b'\\' | b'"' | b']' => false,
-        _ => true,
-    }
+    !matches!(ch, 0..=b' ' | 127..=255 |
+              b'(' | b')' | b'{' | b'*' | b'%' | b'\\' | b'"' | b']')
 }
 
 impl PartialEq for Flag {
@@ -647,7 +574,7 @@ impl PartialEq for Flag {
             // way to get Unicode flags within RFC 3501 anyway).
             (&Flag::Keyword(ref a), &Flag::Keyword(ref b)) => {
                 a.eq_ignore_ascii_case(b)
-            }
+            },
             _ => false,
         }
     }
@@ -688,19 +615,75 @@ pub enum MailboxAttribute {
 impl MailboxAttribute {
     pub fn name(&self) -> &'static str {
         match *self {
-            MailboxAttribute::Noselect => "\\Noselect",
-            MailboxAttribute::Noinferiors => "\\Noinferiors",
-            MailboxAttribute::HasChildren => "\\HasChildren",
-            MailboxAttribute::HasNoChildren => "\\HasNoChildren",
-            MailboxAttribute::NonExistent => "\\NonExistent",
-            MailboxAttribute::Subscribed => "\\Subscribed",
-            MailboxAttribute::Archive => "\\Archive",
-            MailboxAttribute::Drafts => "\\Drafts",
-            MailboxAttribute::Flagged => "\\Flagged",
-            MailboxAttribute::Junk => "\\Junk",
-            MailboxAttribute::Sent => "\\Sent",
-            MailboxAttribute::Trash => "\\Trash",
-            MailboxAttribute::Important => "\\Important",
+            Self::Noselect => "\\Noselect",
+            Self::Noinferiors => "\\Noinferiors",
+            Self::HasChildren => "\\HasChildren",
+            Self::HasNoChildren => "\\HasNoChildren",
+            Self::NonExistent => "\\NonExistent",
+            Self::Subscribed => "\\Subscribed",
+            Self::Archive => "\\Archive",
+            Self::Drafts => "\\Drafts",
+            Self::Flagged => "\\Flagged",
+            Self::Junk => "\\Junk",
+            Self::Sent => "\\Sent",
+            Self::Trash => "\\Trash",
+            Self::Important => "\\Important",
+        }
+    }
+
+    pub fn is_special_use(self) -> bool {
+        matches!(
+            self,
+            Self::Archive
+                | Self::Drafts
+                | Self::Flagged
+                | Self::Junk
+                | Self::Sent
+                | Self::Trash
+                | Self::Important
+        )
+    }
+
+    pub fn special_use_from_str(special_use: &str) -> Result<Self, Error> {
+        Self::from_str(special_use)
+            .ok()
+            .filter(|attr| attr.is_special_use())
+            .ok_or(Error::UnsupportedSpecialUse)
+    }
+}
+
+impl FromStr for MailboxAttribute {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Error> {
+        if "\\Noselect".eq_ignore_ascii_case(s) {
+            Ok(Self::Noselect)
+        } else if "\\Noinferiors".eq_ignore_ascii_case(s) {
+            Ok(Self::Noinferiors)
+        } else if "\\HasChildren".eq_ignore_ascii_case(s) {
+            Ok(Self::HasChildren)
+        } else if "\\HasNoChildren".eq_ignore_ascii_case(s) {
+            Ok(Self::HasNoChildren)
+        } else if "\\NonExistent".eq_ignore_ascii_case(s) {
+            Ok(Self::NonExistent)
+        } else if "\\Subscribed".eq_ignore_ascii_case(s) {
+            Ok(Self::Subscribed)
+        } else if "\\archive".eq_ignore_ascii_case(s) {
+            Ok(MailboxAttribute::Archive)
+        } else if "\\drafts".eq_ignore_ascii_case(s) {
+            Ok(MailboxAttribute::Drafts)
+        } else if "\\flagged".eq_ignore_ascii_case(s) {
+            Ok(MailboxAttribute::Flagged)
+        } else if "\\junk".eq_ignore_ascii_case(s) {
+            Ok(MailboxAttribute::Junk)
+        } else if "\\sent".eq_ignore_ascii_case(s) {
+            Ok(MailboxAttribute::Sent)
+        } else if "\\trash".eq_ignore_ascii_case(s) {
+            Ok(MailboxAttribute::Trash)
+        } else if "\\important".eq_ignore_ascii_case(s) {
+            Ok(MailboxAttribute::Important)
+        } else {
+            Err(Error::UnknownMailboxAttribute)
         }
     }
 }
@@ -795,7 +778,7 @@ pub struct StatusResponse {
     pub uidvalidity: Option<u32>,
     pub unseen: Option<usize>,
     // ==================== RFC 7162 ====================
-    pub max_modseq: Option<u64>,
+    pub max_modseq: Option<Modseq>,
     // ==================== RFC 8474 ====================
     pub mailbox_id: Option<String>,
     // ==================== RFC 8438 ====================
@@ -924,16 +907,34 @@ pub struct SelectResponse {
     /// `TAG OK [READ-WRITE|READ-ONLY]`
     pub read_only: bool,
     // ==================== RFC 7162 ====================
-    /// The greatest `Modseq` currently in the mailbox, or `None` if
-    /// primordial.
+    /// The greatest `Modseq` currently in the mailbox.
     ///
-    /// `* OK [HIGHESTMODSEQ max_modseq.unwrap_or(1)]`
-    pub max_modseq: Option<Modseq>,
+    /// `* OK [HIGHESTMODSEQ max_modseq]`
+    pub max_modseq: Modseq,
+}
+
+/// Unsolicited responses that can be sent after the cursed seqnum-based
+/// `FETCH`, `STORE`, and `SEARCH` command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MiniPollResponse {
+    /// UIDs of messages that should be sent in unsolicited `FETCH` responses
+    /// because their metadata changed.
+    pub fetch: Vec<Uid>,
+    /// If `Some`, the snapshot has diverged from reality and a `HIGHESTMODSEQ`
+    /// must be sent after the `FETCH` responses to correct the client's
+    /// modseq.
+    ///
+    /// This only includes UIDs currently mapped to sequence numbers, but may
+    /// include UIDs that have since been expunged. Flag updates on UIDs not
+    /// yet mapped to sequence numbers are lost, since those `FETCH` responses
+    /// are expected to happen when the full poll announces the new messages to
+    /// the client.
+    pub divergent_modseq: Option<Modseq>,
 }
 
 /// Unsolicited responses that can be sent after commands (other than `FETCH`,
 /// `STORE`, `SEARCH`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PollResponse {
     /// Any messages to report as expunged.
     ///
@@ -953,7 +954,8 @@ pub struct PollResponse {
     /// ...
     /// ```
     pub expunge: Vec<(Seqnum, Uid)>,
-    /// If the mailbox size has changed, the new size.
+    /// If any new messages were added, the new mailbox size after processing
+    /// expungements.
     /// `* exists EXISTS`
     pub exists: Option<usize>,
     /// If there are new messages, the new recent count.
@@ -962,8 +964,8 @@ pub struct PollResponse {
     /// UIDs of messages that should be sent in unsolicited `FETCH` responses
     /// because their metadata changed or they recently came into existence.
     pub fetch: Vec<Uid>,
-    /// The new `HIGHESTMODSEQ`, or `None` if still primordial or hasn't
-    /// changed since the last poll.
+    /// The new `HIGHESTMODSEQ`, or `None` if it hasn't changed since the last
+    /// poll.
     pub max_modseq: Option<Modseq>,
 }
 
@@ -972,10 +974,8 @@ pub struct PollResponse {
 pub struct QresyncRequest {
     /// The last known UID validity value for the mailbox.
     pub uid_validity: u32,
-    /// If set, only consider changes that may have occurred after this point.
-    ///
-    /// If clear, consider changes from all time.
-    pub resync_from: Option<Modseq>,
+    /// Only consider changes that may have occurred after this point.
+    pub resync_from: Modseq,
     /// If set, only return information for UIDs in this set.
     pub known_uids: Option<SeqRange<Uid>>,
     /// If set and `resync_from` is earlier than the last known expungement,
@@ -985,7 +985,7 @@ pub struct QresyncRequest {
 }
 
 /// The result from a `QRESYNC` operation.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct QresyncResponse {
     /// Messages that have been expunged since the reference point or best
     /// guess thereof.
@@ -1046,17 +1046,17 @@ where
     ///
     /// This corresponds to `UNCHANGEDSINCE`.
     ///
-    /// This is a raw value that nominally should be a `Modseq`. This is
-    /// because we must allow clients to submit values less than `Modseq::MIN`,
-    /// even though they are doomed to failure. At that, RFC 7162 *requires*
-    /// that an `UNCHANGEDSINCE` of 0 MUST fail (Page 12, Example 6):
+    /// This is the weird case that requires us to be able to represent
+    /// `Modseq(0)`, even though requests with `unchanged_since: 0` are doomed
+    /// to failure. At that, RFC 7162 *requires* that an `UNCHANGEDSINCE` of 0
+    /// MUST fail (Page 12, Example 6):
     ///
     /// > Use of UNCHANGEDSINCE with a modification sequence of 0 always fails
     /// > if the metadata item exists.  A system flag MUST always be considered
     /// > existent, whether it was set or not.
     ///
     /// (Hooray for novel hard requirements set out in examples...)
-    pub unchanged_since: Option<u64>,
+    pub unchanged_since: Option<Modseq>,
 }
 
 /// Response information for `STORE` and `UID STORE`.
@@ -1166,6 +1166,8 @@ where
     pub rfc822size: bool,
     /// Return internal date?
     pub internal_date: bool,
+    /// Return save date?
+    pub save_date: bool,
     /// Return envelope?
     pub envelope: bool,
     /// Return bodystructure?
@@ -1177,8 +1179,6 @@ where
     pub modseq: bool,
     /// If set, filter out messages which have not been changed since the given
     /// time.
-    ///
-    /// If the client requests a `Modseq` less than `Modseq::MIN`, pass `None`.
     pub changed_since: Option<Modseq>,
     /// Should the fetch process gather UIDs which were expunged for a
     /// `VANISHED` response? If `changed_since` is greater than the earliest
@@ -1285,7 +1285,7 @@ where
 /// worked well with clients.
 ///
 /// 4.1.2+loopbreaker is what we implement here.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum FetchResponseKind {
     /// Return OK.
     ///
@@ -1297,6 +1297,7 @@ pub enum FetchResponseKind {
     /// missing messages. This means that either `collect_vanished` was
     /// specified, or `changed_since` was given and had a UID greater than any
     /// expunged UID encountered.
+    #[default]
     Ok,
     /// Return NO.
     ///
@@ -1310,12 +1311,6 @@ pub enum FetchResponseKind {
     /// another FETCH request since the last poll and got a `No` for one or
     /// more of the same UIDs.
     Bye,
-}
-
-impl Default for FetchResponseKind {
-    fn default() -> Self {
-        FetchResponseKind::Ok
-    }
 }
 
 /// The part of a `FETCH` response that must be sent before the fetched items.
@@ -1333,9 +1328,13 @@ pub struct PrefetchResponse {
     /// not affect the sequence number mapping, so a client could only become
     /// confused if it modified the sequence number mapping anyway, in which
     /// case it would be better to send the `VANISHED (EARLIER)` *after* the
-    /// `FETCH` responses. There's also the simple fact that 3501 permits the
-    /// server to send any `FETCH` response whenever it wants, so this
-    /// requirement overall seems like it should be moot.
+    /// `FETCH` responses, which would make it possible to inform clients of
+    /// messages that could not be fetched because the server has removed them
+    /// entirely (though this is rarely necessary in this implementation since
+    /// we keep orphaned messages around for quite a while). There's also the
+    /// simple fact that 3501 permits the server to send any `FETCH` response
+    /// whenever it wants, so this requirement overall seems like it should be
+    /// moot.
     ///
     /// Nonetheless, we order this first since it's a "MUST" requirement.
     pub vanished: SeqRange<Uid>,
@@ -1421,9 +1420,14 @@ pub enum SearchQuery {
     Unkeyword(String),
     Unseen,
     And(Vec<SearchQuery>),
-    Modseq(u64),
+    Modseq(Modseq),
     EmailId(String),
     ThreadId(String),
+    // RFC 8514
+    SavedBefore(NaiveDate),
+    SavedOn(NaiveDate),
+    SavedSince(NaiveDate),
+    SaveDateSupported,
 }
 
 /// The response from the `SEARCH` (`ID` = `Seqnum`) or `UID SEARCH`
@@ -1497,7 +1501,7 @@ where
 }
 
 /// The response from the `COPY` and `UID COPY` commands.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct CopyResponse {
     /// The UID validity value of the destination mailbox.
     pub uid_validity: u32,
@@ -1513,6 +1517,9 @@ pub struct SetUserConfigRequest {
     pub internal_key_pattern: Option<String>,
     pub external_key_pattern: Option<String>,
     pub password: Option<String>,
+    pub smtp_out_save: Option<Option<String>>,
+    pub smtp_out_success_receipts: Option<Option<String>>,
+    pub smtp_out_failure_receipts: Option<Option<String>>,
 }
 
 /// Holder for common paths used pervasively through a process.
@@ -1561,9 +1568,45 @@ impl MessageMetadata {
     pub fn format_email_id(&self) -> String {
         format!(
             "E{}",
-            base64::encode_config(&self.email_id, base64::URL_SAFE)
+            base64::encode_config(self.email_id, base64::URL_SAFE)
         )
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum TlsVersion {
+    #[default]
+    Ssl3,
+    Tls10,
+    Tls11,
+    Tls12,
+    Tls13,
+}
+
+impl TlsVersion {
+    pub fn human_readable(self) -> &'static str {
+        match self {
+            Self::Ssl3 => "SSL 3",
+            Self::Tls10 => "TLS 1",
+            Self::Tls11 => "TLS 1.1",
+            Self::Tls12 => "TLS 1.2",
+            Self::Tls13 => "TLS 1.3",
+        }
+    }
+}
+
+impl fmt::Display for TlsVersion {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self.human_readable(), f)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct ForeignSmtpTlsStatus {
+    pub domain: String,
+    pub starttls: bool,
+    pub valid_certificate: bool,
+    pub tls_version: Option<TlsVersion>,
 }
 
 mod email_id_ser {
@@ -1614,13 +1657,17 @@ mod email_id_ser {
 #[cfg(test)]
 impl Default for MessageMetadata {
     fn default() -> Self {
+        use crate::support::chronox::*;
         MessageMetadata {
             size: 0,
-            internal_date: FixedOffset::east(0).timestamp_millis(0),
+            internal_date: FixedOffset::zero().timestamp0(),
             email_id: Default::default(),
         }
     }
 }
+
+#[derive(Debug)]
+pub struct BufferedMessage(pub TempPath);
 
 #[cfg(test)]
 mod test {

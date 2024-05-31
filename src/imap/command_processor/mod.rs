@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -19,21 +19,40 @@
 //! Implements most of the IMAP protocol, specifically that which is not
 //! sensitive to the actual wire format.
 //!
-//! As with `account::mailbox`, this module is split into several submodules
+//! As with `account::v2::state`, this module is split into several submodules
 //! for manageability, but is best thought of as one single module.
 
 macro_rules! map_error {
     ($this:expr) => {{
         let log_prefix = &$this.log_prefix;
+        let account = $this.account.as_mut();
         let selected = $this.selected.as_ref();
         move |e| {
-            let selected_ok = selected.map_or(true, |s| s.stateless().is_ok());
+            let selected_ok = account.map_or(
+                true, |account| selected.map_or(
+                    true, |s| account.is_usable_mailbox(s)));
             catch_all_error_handling(selected_ok, log_prefix, e)
+        }
+    }};
+
+    (log_prefix = $log_prefix:expr,
+     $($($kind:ident)|+ => ($cond:ident, $code:expr),)+) => {{
+        let log_prefix = $log_prefix;
+        move |e| match e {
+            $($(Error::$kind)|* => s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::$cond,
+                code: $code,
+                quip: Some(Cow::Owned(e.to_string())),
+            }),)*
+            e => {
+                catch_all_error_handling(true, log_prefix, e)
+            }
         }
     }};
 
     ($this:expr, $($($kind:ident)|+ => ($cond:ident, $code:expr),)+) => {{
         let log_prefix = &$this.log_prefix;
+        let account = $this.account.as_mut();
         let selected = $this.selected.as_ref();
         move |e| match e {
             $($(Error::$kind)|* => s::Response::Cond(s::CondResponse {
@@ -42,8 +61,9 @@ macro_rules! map_error {
                 quip: Some(Cow::Owned(e.to_string())),
             }),)*
             e => {
-                let selected_ok = selected.map_or(
-                    true, |s| s.stateless().is_ok());
+                let selected_ok = account.map_or(
+                    true, |account| selected.map_or(
+                        true, |s| account.is_usable_mailbox(s)));
                 catch_all_error_handling(selected_ok, log_prefix, e)
             }
         }
@@ -86,6 +106,7 @@ mod flags;
 mod mailboxes;
 mod messages;
 mod search;
+mod smtp_out;
 mod user_config;
 
 pub use self::defs::CommandProcessor;

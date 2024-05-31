@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2022, Jason Lingle
+// Copyright (c) 2020, 2022, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -56,6 +56,15 @@ enum DevSubcommand {
     ///
     /// There is no way to configure this.
     ImapTest,
+    /// Compile the Mozilla Public Suffix List.
+    CompilePsl(CompilePslCommand),
+}
+
+#[cfg(feature = "dev-tools")]
+#[derive(StructOpt)]
+struct CompilePslCommand {
+    infile: PathBuf,
+    outfile: PathBuf,
 }
 
 #[derive(StructOpt, Default)]
@@ -69,6 +78,7 @@ pub(super) struct ServerCommonOptions {
 #[derive(StructOpt)]
 enum ServerSubcommand {
     Deliver(ServerDeliverSubcommand),
+    SmtpOutSanityCheck(SmtpOutSanityCheckSubcommand),
     /// Manage user accounts.
     User(ServerUserSubcommand),
     /// Serve a single IMAPS session over standard IO.
@@ -80,17 +90,36 @@ enum ServerSubcommand {
     ///
     /// This is intended to be used with inetd, xinetd, etc.
     ServeLmtp(ServerCommonOptions),
+    /// Serve a single SMTP (clear+STARTTLS) inbound session over standard IO.
+    ///
+    /// This is intended to be used with inetd, xinetd, etc.
+    ServeSmtpin(ServerCommonOptions),
+    /// Serve a single SMTP (clear+STARTTLS) submission session over standard
+    /// IO.
+    ///
+    /// This is intended to be used with inetd, xinetd, etc.
+    ServeSmtpsub(ServerCommonOptions),
+    /// Serve a single SMTPS submission session over standard IO.
+    ///
+    /// This is intended to be used with inetd, xinetd, etc.
+    ServeSmtpssub(ServerCommonOptions),
 }
 
 impl ServerSubcommand {
     fn common_options(&mut self) -> ServerCommonOptions {
         match *self {
             ServerSubcommand::Deliver(ref mut c) => mem::take(&mut c.common),
+            ServerSubcommand::SmtpOutSanityCheck(ref mut c) => {
+                mem::take(&mut c.common)
+            },
             ServerSubcommand::User(ServerUserSubcommand::Add(ref mut c)) => {
                 mem::take(&mut c.common)
-            }
+            },
             ServerSubcommand::ServeImaps(ref mut c) => mem::take(c),
             ServerSubcommand::ServeLmtp(ref mut c) => mem::take(c),
+            ServerSubcommand::ServeSmtpin(ref mut c) => mem::take(c),
+            ServerSubcommand::ServeSmtpsub(ref mut c) => mem::take(c),
+            ServerSubcommand::ServeSmtpssub(ref mut c) => mem::take(c),
         }
     }
 }
@@ -163,10 +192,6 @@ pub(super) struct ServerDeliverSubcommand {
     #[structopt(short, long, default_value = "INBOX")]
     pub(super) mailbox: String,
 
-    /// Create the destination mailbox if it does not already exist.
-    #[structopt(short, long)]
-    pub(super) create: bool,
-
     /// Add this IMAP flag (e.g., '\Flagged') or keyword to the delivered
     /// message(s). Can be passed multiple times.
     #[structopt(parse(try_from_str), short, long, number_of_values(1))]
@@ -179,6 +204,24 @@ pub(super) struct ServerDeliverSubcommand {
     /// The files to import/deliver. "-" will read from stdin.
     #[structopt(parse(from_os_str), default_value = "-")]
     pub(super) inputs: Vec<PathBuf>,
+}
+
+/// Perform a sanity check on outbound SMTP capabilities.
+///
+/// This performs an assessment of how other mail servers may perceive your
+/// setup and provides recommendations for improving first-contact reputation.
+#[derive(StructOpt)]
+pub(super) struct SmtpOutSanityCheckSubcommand {
+    #[structopt(flatten)]
+    pub(super) common: ServerCommonOptions,
+
+    /// Assume this IP address is representative of the mail server, instead of
+    /// auto-detecting.
+    #[structopt(parse(try_from_str), long)]
+    pub(super) ip: Option<std::net::IpAddr>,
+
+    /// Simulate sending an email from this address.
+    pub(super) email: String,
 }
 
 #[derive(StructOpt, Default)]
@@ -231,15 +274,24 @@ pub(super) enum RemoteSubcommand {
     /// forever.
     Chpw(RemoteCommonOptions),
     Config(RemoteConfigSubcommand),
+    ForeignSmtpTls(ForeignSmtpTlsCommand),
+    RetryEmail(RetryEmailCommand),
 }
 
 impl RemoteSubcommand {
     pub(super) fn common_options(&mut self) -> RemoteCommonOptions {
         match *self {
             RemoteSubcommand::Test(ref mut c)
-            | RemoteSubcommand::Chpw(ref mut c) => mem::take(c),
+            | RemoteSubcommand::Chpw(ref mut c)
+            | RemoteSubcommand::ForeignSmtpTls(ForeignSmtpTlsCommand::List(
+                ref mut c,
+            )) => mem::take(c),
 
             RemoteSubcommand::Config(ref mut c) => mem::take(&mut c.common),
+            RemoteSubcommand::ForeignSmtpTls(
+                ForeignSmtpTlsCommand::Delete(ref mut c),
+            ) => mem::take(&mut c.common),
+            RemoteSubcommand::RetryEmail(ref mut c) => mem::take(&mut c.common),
         }
     }
 }
@@ -267,6 +319,73 @@ pub(super) struct RemoteConfigSubcommand {
     /// messages and operations originating from the system.
     #[structopt(long)]
     pub(super) external_key_pattern: Option<String>,
+
+    /// Change which mailbox sent messages are implicitly saved to.
+    ///
+    /// The default disables this feature. If you enable it, you must ensure
+    /// that your mail client(s) are configured not to save copies of outgoing
+    /// messages themselves. To explicitly configure the default, pass the
+    /// empty string to this option.
+    ///
+    /// This setting only has any effect if you are using Crymap for outbound
+    /// mail submission.
+    #[structopt(long)]
+    pub(super) smtp_out_save: Option<String>,
+
+    /// Enable delivery of mail success receipts to this mailbox.
+    ///
+    /// By default, receipts are not delivered for successful mail
+    /// transactions. To restore the default, pass the empty string.
+    ///
+    /// When enabled, any outbound mail operation which fully succeeds results
+    /// in a message being delivered to this mailbox, already marked as read,
+    /// indicating that success and providing technical details on the mail
+    /// delivery process.
+    ///
+    /// This setting only has any effect if you are using Crymap for outbound
+    /// mail submission.
+    #[structopt(long)]
+    pub(super) smtp_out_success_receipts: Option<String>,
+
+    /// Change which mailbox mail failure receipts are saved to.
+    ///
+    /// By default, receipts for failed mail transactions are delivered to the
+    /// INBOX.
+    ///
+    /// This setting only has any effect if you are using Crymap for outbound
+    /// mail submission.
+    #[structopt(long)]
+    pub(super) smtp_out_failure_receipts: Option<String>,
+}
+
+/// Inspect or modify the TLS status recorded for foreign SMTP domains.
+#[derive(StructOpt)]
+pub(super) enum ForeignSmtpTlsCommand {
+    /// List every TLS status currently recorder for foreign SMTP domains.
+    List(RemoteCommonOptions),
+    Delete(DeleteForeignSmtpTlsCommand),
+}
+
+/// Deletes the stored TLS status for one or more foreign SMTP domains.
+///
+/// Deleting the status causes the next attempt of any mail delivery to that
+/// domain to run without any expectations of security level. You can use this
+/// to recover from administrators downgrading their site's TLS, for example.
+#[derive(StructOpt)]
+pub(super) struct DeleteForeignSmtpTlsCommand {
+    #[structopt(flatten)]
+    pub(super) common: RemoteCommonOptions,
+    /// The domain(s) whose status is to be deleted.
+    pub(super) domains: Vec<String>,
+}
+
+/// Reattempts to send an email which had previously failed temporarily.
+#[derive(StructOpt)]
+pub(super) struct RetryEmailCommand {
+    #[structopt(flatten)]
+    pub(super) common: RemoteCommonOptions,
+    /// The message ID to retry.
+    pub(super) message_id: String,
 }
 
 pub fn main() {
@@ -288,16 +407,20 @@ pub fn main() {
         ) => {
             println!("{}", e.message);
             return;
-        }
+        },
         Err(e) => {
             eprintln!("{}", e.message);
             EX_USAGE.exit()
-        }
+        },
     });
 
     match cmd {
         #[cfg(feature = "dev-tools")]
         Command::Dev(DevSubcommand::ImapTest) => super::imap_test::imap_test(),
+        #[cfg(feature = "dev-tools")]
+        Command::Dev(DevSubcommand::CompilePsl(cmd)) => {
+            crate::smtp::compile_psl(&cmd.infile, &cmd.outfile);
+        },
         Command::Remote(cmd) => super::remote::main(cmd),
         Command::Server(cmd) => server(cmd),
     }
@@ -339,7 +462,7 @@ fn server(mut cmd: ServerSubcommand) {
                     e
                 );
                 EX_CONFIG.exit()
-            }
+            },
         };
 
     let stderr_is_tty = Ok(true) == nix::unistd::isatty(2);
@@ -349,7 +472,10 @@ fn server(mut cmd: ServerSubcommand) {
             cmd,
             ServerSubcommand::Deliver(..)
                 | ServerSubcommand::ServeLmtp(..)
-                | ServerSubcommand::ServeImaps(..),
+                | ServerSubcommand::ServeImaps(..)
+                | ServerSubcommand::ServeSmtpin(..)
+                | ServerSubcommand::ServeSmtpsub(..)
+                | ServerSubcommand::ServeSmtpssub(..),
         )
     {
         if let Err(exit) =
@@ -374,7 +500,7 @@ fn server(mut cmd: ServerSubcommand) {
                 e
             );
             EX_IOERR.exit()
-        }
+        },
     };
 
     if stderr_is_tty {
@@ -413,15 +539,27 @@ fn server(mut cmd: ServerSubcommand) {
     match cmd {
         ServerSubcommand::Deliver(cmd) => {
             super::deliver::deliver(system_config, cmd, users_root);
-        }
+        },
+        ServerSubcommand::SmtpOutSanityCheck(cmd) => {
+            super::sanity::sanity_check(system_config, cmd);
+        },
         ServerSubcommand::User(ServerUserSubcommand::Add(cmd)) => {
             super::user::add(cmd, users_root);
-        }
+        },
         ServerSubcommand::ServeImaps(_) => {
             super::serve::imaps(system_config, root, users_root);
-        }
+        },
         ServerSubcommand::ServeLmtp(_) => {
             super::serve::lmtp(system_config, root, users_root);
-        }
+        },
+        ServerSubcommand::ServeSmtpin(_) => {
+            super::serve::smtpin(system_config, root, users_root);
+        },
+        ServerSubcommand::ServeSmtpsub(_) => {
+            super::serve::smtpsub(system_config, root, users_root, false);
+        },
+        ServerSubcommand::ServeSmtpssub(_) => {
+            super::serve::smtpsub(system_config, root, users_root, true);
+        },
     }
 }

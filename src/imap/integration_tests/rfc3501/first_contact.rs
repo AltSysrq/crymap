@@ -39,7 +39,7 @@ fn greeting_goodbye() {
         } => {
             assert!(caps.capabilities.contains(&Cow::Borrowed("IMAP4rev1")));
             assert!(caps.capabilities.contains(&Cow::Borrowed("LITERAL+")));
-        }
+        },
         g => panic!("Unexpected greeting: {:?}", g),
     }
 
@@ -72,7 +72,7 @@ fn request_capabilities() {
         } => {
             assert!(caps.capabilities.contains(&Cow::Borrowed("IMAP4rev1")));
             assert!(caps.capabilities.contains(&Cow::Borrowed("LITERAL+")));
-        }
+        },
         r => panic!("Unexpected response: {:?}", r),
     }
     assert_tagged_ok(responses.next().unwrap());

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -186,5 +186,6 @@ mod rfc7162;
 mod rfc7888;
 mod rfc8438;
 mod rfc8474;
+mod rfc8514;
 mod xcry;
 mod xlist;

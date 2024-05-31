@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -37,7 +37,7 @@ pub mod b64 {
     ) -> Result<Vec<u8>, D::Error> {
         use serde::de::Error;
         String::deserialize(de).and_then(|s| {
-            base64::decode(&s).map_err(|err| Error::custom(err.to_string()))
+            base64::decode(s).map_err(|err| Error::custom(err.to_string()))
         })
     }
 }
@@ -52,4 +52,18 @@ pub mod b64 {
 pub struct UserConfig {
     pub master_key: MasterKeyConfig,
     pub key_store: KeyStoreConfig,
+    #[serde(default)]
+    pub smtp_out: SmtpOutConfig,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct SmtpOutConfig {
+    /// If set, save messages sent through outbound SMTP in this mailbox.
+    pub save: Option<String>,
+    /// If set, save receipts of successfully sent outbound messages in this
+    /// mailbox.
+    pub success_receipts: Option<String>,
+    /// If set, deliver receipts of unsuccessfully sent outbound messages in
+    /// this mailbox instead of `INBOX`.
+    pub failure_receipts: Option<String>,
 }

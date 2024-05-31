@@ -91,7 +91,7 @@ fn mailbox_names() {
     match it.next().unwrap().response {
         s::Response::List(ml) => {
             assert_eq!("6855mana/&APw-nic&APY-de", ml.name.raw)
-        }
+        },
         r => panic!("Unexpected response: {:?}", r),
     }
     assert_tagged_ok(it.next().unwrap());

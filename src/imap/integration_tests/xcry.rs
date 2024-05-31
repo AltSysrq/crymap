@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -15,6 +15,8 @@
 //
 // You should have received a copy of the GNU General Public License along with
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
+
+use std::borrow::Cow;
 
 use super::defs::*;
 use crate::support::error::Error;
@@ -98,4 +100,116 @@ fn user_configuration() {
             assert!(cfg.password_changed.is_some());
         }
     };
+
+    ok_command!(
+        client,
+        c("XCRY SET-USER-CONFIG SMTP-OUT-SAVE \"Sent\" \
+           SMTP-OUT-SUCCESS-RECEIPTS \"Sent/Success\" \
+           SMTP-OUT-FAILURE-RECEIPTS \"Sent/Failure\"")
+    );
+
+    command!(mut responses = client, c("XCRY GET-USER-CONFIG"));
+    assert_tagged_ok(responses.pop().unwrap());
+    has_untagged_response_matching! {
+        s::Response::XCryUserConfig(ref cfg) in responses => {
+            assert!(cfg.extended.contains(
+                &s::XCry2UserConfigData::SmtpOutSave(
+                    Some(Cow::Borrowed("Sent")))));
+            assert!(cfg.extended.contains(
+                &s::XCry2UserConfigData::SmtpOutSuccessReceipts(
+                    Some(Cow::Borrowed("Sent/Success")))));
+            assert!(cfg.extended.contains(
+                &s::XCry2UserConfigData::SmtpOutFailureReceipts(
+                    Some(Cow::Borrowed("Sent/Failure")))));
+        }
+    };
+
+    ok_command!(
+        client,
+        c("XCRY SET-USER-CONFIG SMTP-OUT-SAVE NIL \
+           SMTP-OUT-SUCCESS-RECEIPTS NIL \
+           SMTP-OUT-FAILURE-RECEIPTS NIL")
+    );
+
+    command!(mut responses = client, c("XCRY GET-USER-CONFIG"));
+    assert_tagged_ok(responses.pop().unwrap());
+    has_untagged_response_matching! {
+        s::Response::XCryUserConfig(ref cfg) in responses => {
+            assert!(cfg.extended.contains(
+                &s::XCry2UserConfigData::SmtpOutSave(None)));
+            assert!(cfg.extended.contains(
+                &s::XCry2UserConfigData::SmtpOutSuccessReceipts(None)));
+            assert!(cfg.extended.contains(
+                &s::XCry2UserConfigData::SmtpOutFailureReceipts(None)));
+        }
+    };
+}
+
+#[test]
+fn foreign_smtp_tls() {
+    let setup = set_up();
+    let mut client = setup.connect("xcryfstl");
+    quick_log_in(&mut client);
+
+    ok_command!(client, c("XCRY SMTP-OUT FOREIGN-TLS INIT-TEST"));
+    command!(mut responses = client, c("XCRY SMTP-OUT FOREIGN-TLS LIST"));
+    assert_eq!(3, responses.len());
+    assert_tagged_ok(responses.pop().unwrap());
+
+    let mut stati = responses
+        .into_iter()
+        .map(|line| match line.response {
+            s::Response::XCryForeignSmtpTls(data) => data,
+            r => panic!("unexpected response: {r:?}"),
+        })
+        .collect::<Vec<_>>();
+    stati.sort_by_key(|s| s.domain.clone());
+
+    assert_eq!(
+        vec![
+            s::XCryForeignSmtpTlsData {
+                domain: Cow::Borrowed("insecure.example.com"),
+                starttls: false,
+                valid_certificate: false,
+                tls_version: None,
+            },
+            s::XCryForeignSmtpTlsData {
+                domain: Cow::Borrowed("secure.example.com"),
+                starttls: true,
+                valid_certificate: true,
+                tls_version: Some(Cow::Borrowed("TLS 1.3")),
+            },
+        ],
+        stati,
+    );
+
+    ok_command!(
+        client,
+        c("XCRY SMTP-OUT FOREIGN-TLS DELETE INSECURE.EXAMPLE.COM")
+    );
+
+    command!(mut responses = client, c("XCRY SMTP-OUT FOREIGN-TLS LIST"));
+    assert_eq!(2, responses.len());
+    assert_tagged_ok(responses.pop().unwrap());
+}
+
+#[test]
+fn spool_execute() {
+    let setup = set_up();
+    let mut client = setup.connect("xcryspex");
+    quick_log_in(&mut client);
+
+    // We don't have a way to actually verify that a real message would be
+    // executed properly, so just ensure the command is understood and that we
+    // get the message for a non-existent but valid ID.
+    command!([response] = client, c("XCRY SMTP-OUT SPOOL EXECUTE 42"));
+    assert_error_response(
+        response,
+        Some(s::RespTextCode::Nonexistent(())),
+        Error::NxMessage,
+    );
+
+    // Executing the command finagles with the `account` field; ensure we're
+    // still logged in properly.
+    quick_select(&mut client, "INBOX");
 }

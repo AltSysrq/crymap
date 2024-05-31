@@ -24,7 +24,7 @@ fn to_utf8(cow: Cow<[u8]>) -> Cow<str> {
     match cow {
         Cow::Owned(owned) => Cow::Owned(match String::from_utf8(owned) {
             Ok(s) => s,
-            Err(e) => String::from_utf8_lossy(&e.as_bytes()).into_owned(),
+            Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
         }),
         Cow::Borrowed(borrowed) => String::from_utf8_lossy(borrowed),
     }
@@ -91,13 +91,11 @@ pub fn decode_unstructured(mut s: Cow<[u8]>) -> String {
                     is_unfolding = false;
                     unfolded.push(ch);
                 }
+            } else if b'\r' == ch || b'\n' == ch {
+                unfolded.push(b' ');
+                is_unfolding = true;
             } else {
-                if b'\r' == ch || b'\n' == ch {
-                    unfolded.push(b' ');
-                    is_unfolding = true;
-                } else {
-                    unfolded.push(ch);
-                }
+                unfolded.push(ch);
             }
         }
 

@@ -25,23 +25,41 @@ files, and [user management](users.md) for the `users` directory.
 
 The user data directory contains the following files:
 
-- `garbage`. This is used internally for deleting directories. It is safe to
-  fully delete all its contents at any time. Crymap itself aggressively cleans
-  it.
+- `backups`. This contains routine database backups produced atomically by
+  Crymap.
+
+- `crymap-v1-files`. This contains the file trees that were present when the
+  user was migrated from Crymap 1.x to Crymap 2.x. It will not be present for
+  users that were created on Crymap 2.x, nor will it be recreated if removed.
+  It is safe to remove entirely once you are sure you don't need to roll back
+  to Crymap 1.x.
+
+- `delivery.sqlite` and `delivery.sqlite-journal`. This is a cleartext SQLite
+  database used for message delivery. Message delivery occurs without the user
+  being logged in, and information about how such messages are to be added to
+  the user's account are written here. When the user is logged in, the database
+  is processed and the messages are deposited into their final positions. If
+  this database is removed, and pending messages will eventually show up in the
+  inbox once Crymap determines that they have been orphaned.
+
+- `garbage`. This is a holdover from Crymap 1.x, and was used internally for
+  deleting directories. It is safe to fully delete all its contents at any
+  time. Crymap itself aggressively cleans it.
 
 - `keys`. A directory containing the user's RSA keys. It is a critical part the
   user data needed for accessing the user's mail.
-
-- `mail`. The root of the user's mailbox hierarchy. All the user's mail is
-  stored inside this directory. Each directory inside is a single mailbox.
 
 - `maintenance-run`. This is a marker file used to track the last time that a
   full maintenance pass was run on the account. This can be deleted safely,
   which will cause the next login to trigger a full maintenance pass.
 
-- `shadow`. This is a "shadow" of the `mail` hierarchy used to track mailbox
-  attributes that operate independently of the mailboxes themselves. Currently,
-  this is only for IMAP subscriptions.
+- `messages`. This contains the user's actual email, one file per message.
+
+- `meta.sqlite.xex` and `meta.sqlite.xex-journal`. This is an encrypted SQLite
+  database containing all information about the user's messages and mailboxes.
+  Atomic backups of `meta.sqlite.xex` are routinely created under `backups`. If
+  you restore `meta.sqlite.xex` from backup, you **MUST** also remove
+  `meta.sqlite.xex-journal` at the same time.
 
 - `tmp`. Used for temporary files and temporary markers. Crymap will
   automatically clean stale files out of this directory. It is not too
@@ -54,48 +72,15 @@ The user data directory contains the following files:
   with an earlier backup version (either a backup created under `tmp` or by
   some external backup system) to revert a password change.
 
-## Mailboxes
+## OpenSSL mirrors
 
-A mailbox is a directory named after the IMAP mailbox of the same name. The
-`INBOX` mailbox is quite special (and must be all upper case); other mailboxes
-can be named freely.
+If Crymap is set up in a way that causes it to chroot, it will maintain a copy
+of the system OpenSSL certificate store within each chroot. This will usually
+manifest as an `etc` or `usr` directory within the `users` directory or within
+each user directory. This is needed so that certificates of external servers
+can be validated when using outbound SMTP, as they must access these files
+after Crymap has moved into the chroot and rendered the normal location of
+these files inaccessible.
 
-Inside a mailbox, all subdirectories not prefixed with `%` are child mailboxes.
-
-Normally, each mailbox will have a directory named `%$hexcode` and a symlink
-pointing to it named `%`. If neither exists, it means the user at some point
-attempted to delete the mailbox while it had child mailboxes. This manifests as
-a "non selectable" mailbox in IMAP. The `%$hexcode` directory contains the
-actual mailbox data.
-
-A mailbox data directory may contain the following:
-
-- `c0`, `c1`, `c2`, `c3`. These contain metadata transactions for the mailbox,
-  such as changing flags on messages.
-
-- `c-guess`. Used in the metadata transaction process. Safe to delete or
-  corrupt.
-
-- `mailbox.toml`. Contains immutable metadata about the mailbox.
-
-- `recent`. Contains a marker file used to track the "recent" IMAP flag. Safe
-  to delete.
-
-- `rollups`. Contains rollups of the mailbox state.
-
-- `socks`. Contains marker symlinks used to locate sockets used to notify
-  idling Crymap processes of changes. Safe to delete.
-
-- `u0`, `u1`, `u2`, `u3`. These contain the actual messages in the mailbox.
-
-- `u-guess`. Used to accelerate working with the `u*` directories. Safe to
-  delete or corrupt.
-
-It is normal for the `c*` and `u*` directory trees to contain broken or cyclic
-symlinks. These symlinks play an important role in how Crymap manages its data.
-
-If you think a mailbox has been corrupted somehow, it is a reasonable
-last-resort step to remove the `c*` and `rollups` directories. **This will
-destroy all the user's message metadata** and may undelete some messages. The
-next time the mailbox is opened, it may take a very long time. However, Crymap
-should be able to recover the messages themselves.
+If possible, Crymap will create hard links, but will copy the files if the
+destination directory is on a different file system.

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -137,8 +137,6 @@ fn delete_mailbox_during_idle() {
 
     ok_command!(client, c("DELETE 2177dmdi"));
 
-    victim.write_raw(b"DONE\r\n").unwrap();
-
     buffer.clear();
     let response = victim.read_one_response(&mut buffer).unwrap();
     unpack_cond_response! {
@@ -176,5 +174,37 @@ fn idle_works_with_extremely_long_paths() {
             response: s::Response::Exists(_),
         },
         response
+    );
+}
+
+#[test]
+fn overlong_done_line() {
+    let setup = set_up();
+    let mut client = setup.connect("2177oldl");
+    quick_log_in(&mut client);
+    quick_create(&mut client, "2177oldl");
+    quick_select(&mut client, "2177oldl");
+
+    client.write_raw(b"I1 IDLE\r\n").unwrap();
+    let mut buffer = Vec::new();
+    client.read_logical_line(&mut buffer).unwrap();
+    assert!(buffer.starts_with(b"+ "));
+
+    // The server may hang up before we send the full line.
+    let _ = client.write_raw(
+        "All IDLE and no DONE makes Crymap a dull server "
+            .repeat(10000)
+            .as_bytes(),
+    );
+    let response = client.read_one_response(&mut buffer).unwrap();
+    assert_matches!(
+        s::ResponseLine {
+            tag: None,
+            response: s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Bye,
+                ..
+            }),
+        },
+        response,
     );
 }

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -21,18 +21,15 @@ use std::io::{self, BufRead, Read};
 use std::mem;
 use std::path::{Path, PathBuf};
 
-use chrono::prelude::*;
 use log::error;
 
 use super::main::ServerDeliverSubcommand;
-use crate::account::account::Account;
-use crate::account::mailbox::StatelessMailbox;
 use crate::account::model::*;
-use crate::support::error::Error;
-use crate::support::safe_name::is_safe_name;
-use crate::support::sysexits::*;
-use crate::support::system_config::SystemConfig;
-use crate::support::unix_privileges;
+use crate::account::v2::DeliveryAccount;
+use crate::support::{
+    error::Error, log_prefix::LogPrefix, safe_name::is_safe_name, sysexits::*,
+    system_config::SystemConfig, unix_privileges,
+};
 
 pub(super) fn deliver(
     system_config: SystemConfig,
@@ -68,14 +65,15 @@ pub(super) fn deliver(
     }
 
     let mut user_root = users_root.join(&user_name);
-    let log_prefix = format!("delivery:~{}", user_name);
+    let log_prefix = LogPrefix::new("delivery".to_owned());
+    log_prefix.set_user(user_name.clone());
 
     if !user_root.is_dir() {
         die!(EX_NOUSER, "{} is not a Crymap user.", user_name);
     }
 
     if let Err(exit) = unix_privileges::assume_user_privileges(
-        &log_prefix,
+        &log_prefix.to_string(),
         system_config.security.chroot_system,
         &mut user_root,
         false,
@@ -83,37 +81,19 @@ pub(super) fn deliver(
         exit.exit();
     }
 
-    let account = Account::new(log_prefix, user_root, None);
-
-    if cmd.create {
-        match account.create(CreateRequest {
-            name: cmd.mailbox.clone(),
-            special_use: vec![],
-        }) {
-            Ok(_) => (),
-            Err(Error::MailboxExists) => (),
-            Err(Error::UnsafeName) | Err(Error::BadOperationOnInbox) => {
-                die!(EX_CANTCREAT, "{}: Bad mailbox name", cmd.mailbox);
-            }
-            Err(e) => {
-                die!(EX_CANTCREAT, "Failed to create {}: {}", cmd.mailbox, e);
-            }
-        }
-    }
-
-    let mailbox = match account.mailbox(&cmd.mailbox, false) {
-        Ok(mb) => mb,
-        Err(Error::NxMailbox) | Err(Error::UnsafeName) => {
-            die!(EX_CANTCREAT, "{}: Non-existent mailbox", cmd.mailbox)
-        }
-        Err(e) => die!(EX_SOFTWARE, "Failed to open {}: {}", cmd.mailbox, e),
+    let mut account = match DeliveryAccount::new(log_prefix, user_root) {
+        Ok(a) => a,
+        Err(e) => die!(EX_CANTCREAT, "Failed to open account: {e:?}"),
     };
 
     let items = mem::take(&mut cmd.inputs);
 
-    if let Err(e) =
-        run_delivery(cmd, items.into_iter(), io::stdin().lock(), mailbox)
-    {
+    if let Err(e) = run_delivery(
+        &cmd,
+        items.into_iter(),
+        io::stdin().lock(),
+        (&mut account, cmd.mailbox.as_str()),
+    ) {
         e.exit();
     }
 }
@@ -126,38 +106,36 @@ trait DeliveryTarget {
     ) -> Result<(), Error>;
 }
 
-impl DeliveryTarget for StatelessMailbox {
+impl<'a, 'b> DeliveryTarget for (&'a mut DeliveryAccount, &'b str) {
     fn deliver<R: Read>(
         &mut self,
         flags: Vec<Flag>,
         data: R,
     ) -> Result<(), Error> {
-        let internal_date =
-            FixedOffset::east(0).from_utc_datetime(&Utc::now().naive_local());
-        self.append(internal_date, flags, data)?;
+        self.0.deliver(self.1, &flags, data)?;
         Ok(())
     }
 }
 
 fn run_delivery(
-    cmd: ServerDeliverSubcommand,
+    cmd: &ServerDeliverSubcommand,
     items: impl Iterator<Item = PathBuf>,
     mut stdin: impl Read,
     mut target: impl DeliveryTarget,
 ) -> Result<(), Sysexit> {
     for item in items {
-        match deliver_single(&cmd, &item, &mut stdin, &mut target) {
+        match deliver_single(cmd, &item, &mut stdin, &mut target) {
             Ok(()) => (),
             Err(e) => {
                 error!("Unable to process {}: {}", item.display(), e);
                 return Err(match e {
                     Error::Io(e) if io::ErrorKind::NotFound == e.kind() => {
                         EX_NOINPUT
-                    }
+                    },
                     Error::Io(_) | Error::GaveUpInsertion => EX_UNAVAILABLE,
                     _ => EX_SOFTWARE,
                 });
-            }
+            },
         }
     }
 
@@ -185,9 +163,7 @@ fn deliver_single(
     Ok(())
 }
 
-fn extract_maildir_flags<'a>(
-    path: &'a Path,
-) -> impl Iterator<Item = Flag> + 'a {
+fn extract_maildir_flags(path: &Path) -> impl Iterator<Item = Flag> + '_ {
     path.extension()
         .and_then(|ext| ext.to_str())
         .unwrap_or("")
@@ -551,7 +527,6 @@ mod test {
             common: Default::default(),
             user: None,
             mailbox: "INBOX".to_owned(),
-            create: false,
             flag: flags.clone(),
             maildir_flags: false,
             inputs: vec![],
@@ -559,7 +534,7 @@ mod test {
         let mut target = MockTarget::default();
 
         run_delivery(
-            cmd,
+            &cmd,
             iter::once(Path::new("-").to_owned()),
             b"This is a message.\nFoo bar baz.\n" as &[u8],
             &mut target,
@@ -582,7 +557,6 @@ mod test {
             common: Default::default(),
             user: None,
             mailbox: "INBOX".to_owned(),
-            create: false,
             flag: flags.clone(),
             maildir_flags: false,
             inputs: vec![],
@@ -590,7 +564,7 @@ mod test {
         let mut target = MockTarget::default();
 
         run_delivery(
-            cmd,
+            &cmd,
             iter::once(Path::new("-").to_owned()),
             b"This is a message.\r\nFoo bar baz.\r\n" as &[u8],
             &mut target,
@@ -627,7 +601,6 @@ mod test {
             common: Default::default(),
             user: None,
             mailbox: "INBOX".to_owned(),
-            create: false,
             flag: flags.clone(),
             maildir_flags: true,
             inputs: vec![],
@@ -635,7 +608,7 @@ mod test {
 
         let mut target = MockTarget::default();
         run_delivery(
-            cmd,
+            &cmd,
             vec![path_a, path_b].into_iter(),
             b"" as &[u8],
             &mut target,

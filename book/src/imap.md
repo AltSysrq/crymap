@@ -30,45 +30,48 @@ sections where relevant.
 Notwithstanding the few exceptions discussed, Crymap's IMAP implementation
 conforms to the following standards:
 
-- RFC 2045 MIME Extensions: Format of Internet Message Bodies
-- RFC 2046 MIME Extensions: Media types
-- RFC 2047 MIME Extensions: Message Header Extensions for Non-ASCII Text
-- RFC 2157 UTF-7
-- RFC 2177 (IDLE)
-- RFC 2183 The Content-Disposition Header Field
-- RFC 2231 MIME Parameter Value and Encoded Word Extensions: Character Sets, Languages, and Continuations
-- RFC 2342 (NAMESPACE)
-- RFC 2557 (Content-Location header field)
-- RFC 2595 (PLAIN authentication)
-- RFC 2971 (ID)
-- RFC 3066 Tags for the Identification of Languages
-- RFC 3282 Content Language Headers
-- RFC 3348 (CHILDREN)
-- RFC 3501 (IMAP4rev1)
-- RFC 3502 (MULTIAPPEND)
-- RFC 3516 (BINARY)
-- RFC 3691 (UNSELECT)
-- RFC 4315 (UIDPLUS)
-- RFC 4731 (ESEARCH)
-- RFC 4959 (SASL-IR)
-- RFC 4978 (COMPRESS=DEFLATE)
-- RFC 5161 (ENABLE)
-- RFC 5182 (SEARCHRES)
-- RFC 5253 (LIST-EXTENDED)
-- RFC 5322 (Internet Message Format)
-- RFC 5530 IMAP Response Codes
-- RFC 5819 (LIST-STATUS)
-- RFC 5918 Unicode Format for Network Interchange
-- RFC 6154 (CREATE-SPECIAL-USE and SPECIAL-USE)
-- RFC 6532 Internationalized Email Headers
-- RFC 6851 (MOVE)
-- RFC 6855 (UTF8=ACCEPT)
-- RFC 7162 (CONDSTORE and QRESYNC)
-- RFC 7888 (LITERAL+)
-- RFC 8438 (STATUS=SIZE)
-- RFC 8457 IMAP "$Important" Keyword and "\Important" Special-Use Attribute
-- RFC 8474 (OBJECTID)
-- RFC 9051 (IMAP4rev2)
+- [RFC 2045](https://datatracker.ietf.org/doc/html/rfc2045.html) MIME Extensions: Format of Internet Message Bodies
+- [RFC 2046](https://datatracker.ietf.org/doc/html/rfc2046.html) MIME Extensions: Media types
+- [RFC 2047](https://datatracker.ietf.org/doc/html/rfc2047.html) MIME Extensions: Message Header Extensions for Non-ASCII Text
+- [RFC 2157](https://datatracker.ietf.org/doc/html/rfc2157.html) UTF-7
+- [RFC 2177](https://datatracker.ietf.org/doc/html/rfc2177.html) (IDLE)
+- [RFC 2183](https://datatracker.ietf.org/doc/html/rfc2183.html) The Content-Disposition Header Field
+- [RFC 2231](https://datatracker.ietf.org/doc/html/rfc2231.html) MIME Parameter Value and Encoded Word Extensions: Character Sets, Languages, and Continuations
+- [RFC 2342](https://datatracker.ietf.org/doc/html/rfc2342.html) (NAMESPACE)
+- [RFC 2557](https://datatracker.ietf.org/doc/html/rfc2557.html) (Content-Location header field)
+- [RFC 2595](https://datatracker.ietf.org/doc/html/rfc2595.html) (PLAIN authentication)
+- [RFC 2971](https://datatracker.ietf.org/doc/html/rfc2971.html) (ID)
+- [RFC 3066](https://datatracker.ietf.org/doc/html/rfc3066.html) Tags for the Identification of Languages
+- [RFC 3282](https://datatracker.ietf.org/doc/html/rfc3282.html) Content Language Headers
+- [RFC 3348](https://datatracker.ietf.org/doc/html/rfc3348.html) (CHILDREN)
+- [RFC 3501](https://datatracker.ietf.org/doc/html/rfc3501.html) (IMAP4rev1)
+- [RFC 3502](https://datatracker.ietf.org/doc/html/rfc3502.html) (MULTIAPPEND)
+- [RFC 3516](https://datatracker.ietf.org/doc/html/rfc3516.html) (BINARY)
+- [RFC 3691](https://datatracker.ietf.org/doc/html/rfc3691.html) (UNSELECT)
+- [RFC 4315](https://datatracker.ietf.org/doc/html/rfc4315.html) (UIDPLUS)
+- [RFC 4731](https://datatracker.ietf.org/doc/html/rfc4731.html) (ESEARCH)
+- [RFC 4959](https://datatracker.ietf.org/doc/html/rfc4959.html) (SASL-IR)
+- [RFC 4978](https://datatracker.ietf.org/doc/html/rfc4978.html) (COMPRESS=DEFLATE)
+- [RFC 5161](https://datatracker.ietf.org/doc/html/rfc5161.html) (ENABLE)
+- [RFC 5182](https://datatracker.ietf.org/doc/html/rfc5182.html) (SEARCHRES)
+- [RFC 5253](https://datatracker.ietf.org/doc/html/rfc5253.html) (LIST-EXTENDED)
+- [RFC 5322](https://datatracker.ietf.org/doc/html/rfc5322.html) (Internet Message Format)
+- [RFC 5530](https://datatracker.ietf.org/doc/html/rfc5530.html) IMAP Response Codes
+- [RFC 5819](https://datatracker.ietf.org/doc/html/rfc5819.html) (LIST-STATUS)
+- [RFC 5918](https://datatracker.ietf.org/doc/html/rfc5918.html) Unicode Format for Network Interchange
+- [RFC 6154](https://datatracker.ietf.org/doc/html/rfc6154.html) (CREATE-SPECIAL-USE and SPECIAL-USE)
+- [RFC 6532](https://datatracker.ietf.org/doc/html/rfc6532.html) Internationalized Email Headers
+- [RFC 6851](https://datatracker.ietf.org/doc/html/rfc6851.html) (MOVE)
+- [RFC 6855](https://datatracker.ietf.org/doc/html/rfc6855.html) (UTF8=ACCEPT)
+- [RFC 7162](https://datatracker.ietf.org/doc/html/rfc7162.html) (CONDSTORE and QRESYNC)
+- [RFC 7888](https://datatracker.ietf.org/doc/html/rfc7888.html) (LITERAL+)
+- [RFC 8438](https://datatracker.ietf.org/doc/html/rfc8438.html) (STATUS=SIZE)
+- [RFC 8457](https://datatracker.ietf.org/doc/html/rfc8457.html) IMAP "$Important" Keyword and "\Important" Special-Use Attribute
+- [RFC 8474](https://datatracker.ietf.org/doc/html/rfc8474.html) (OBJECTID)
+- [RFC 8514](https://datatracker.ietf.org/doc/html/rfc8514.html) (SAVEDATE)
+  since Crymap 2.0.0.
+- [RFC 9051](https://datatracker.ietf.org/doc/html/rfc9051.html) (IMAP4rev2)
+  since Crymap 1.0.1.
 
 ## Unicode support
 
@@ -103,9 +106,6 @@ Search uses Unicode "simple" case folding.
 
 The maximum message size for `APPEND` is hard-wired to 64MB.
 
-Batch insertions (through `COPY`, `MOVE`, or `APPEND`) are limited to 65536
-messages.
-
 Any operation that involves parsing message content will not process more than
 20 levels of multipart or `message/rfc822` nesting, nor will it process more
 than 1000 different body parts.
@@ -115,12 +115,8 @@ Message header lines in excess of 64kB are not processed.
 Search operations will consider up to 128kB of text. Non-text body parts are
 ignored for search.
 
-A mailbox can have up to 2'305'843'008 message IDs allocated. Note however that
-inserting multiple messages into a mailbox at once can use up to 128 times as
-many IDs as the number of messages actually inserted. Up to 3'999'999'999
-change transactions can be performed on a mailbox. If either of these limits
-are reached, the mailbox will be "full" and further operations will fail. (Note
-that Crymap has not actually been tested in this condition.)
+A mailbox can have up to 4'294'967'294 message IDs allocated. Message IDs are
+allocated sequentially.
 
 ## Mailboxes
 
@@ -269,11 +265,6 @@ store to maintain tri-state flags like Junk/NonJunk/(nothing) properly.)
 
 Modseqs are 63-bit integers as required by the later QRESYNC extension.
 
-Internally, Modseqs are a 2-element vector clock pairing the maximum known UID
-with a monotonic "Change ID" (CID) with additional bookkeeping to maintain the
-extension's strict ordering requirements. This can be seen in returned Modseq
-values as the UID multiplied by 4 billion plus the CID.
-
 If multiple messages are changed at once, they all receive the same Modseq.
 
 Expunging a message increments the highest Modseq value.
@@ -371,11 +362,18 @@ All mailboxes support these attributes.
 
 This extension is fully implemented.
 
-Crymap remembers the most recent 1024 expunge events.
+Crymap remembers all expunge events.
 
 ### SASL-IR
 
 This extension is fully implemented.
+
+### SAVEDATE
+
+This extension is fully implemented as of Crymap 2.0.0.
+
+When migrating from the Crymap 1.x message store, the `SAVEDATE` of each
+message is initialised to the modified time of the file storing the message.
 
 ### SEARCHRES
 
@@ -390,18 +388,13 @@ attributes are supported.
 
 ### STATUS=SIZE
 
-This extension is fully implemented to the letter of the standard and not at
-all to the spirit. It is only implemented because IMAP4rev2 requires it.
+This extension is fully implemented.
 
-Returning the size of a mailbox sounds like a useful operation. However, the
-standard does not permit returning the _actual_ size. Instead, it requires the
-returned size to be greater than or equal to the sum of the sizes of the
-messages as they would be fetched in full.
-
-Since determining the size of a message requires decrypting it, Crymap has no
-way to do this in a way that even resembles efficiency. Instead, it takes
-advantage of the fact that the returned size need only be an _upper bound_ and
-determines the "size" by simply multiplying the message count by 4GB.
+In versions of Crymap prior to 2.0.0, this was only implemented to the letter
+of the standard and not the spirit due to efficiency concerns: Each message was
+assumed to be 4GB in size and this size was simply multiplied by the message
+count. Crymap 2.0.0 is able to track message sizes efficiently, so this
+limitation no longer applies.
 
 ### UIDPLUS
 
@@ -465,8 +458,32 @@ Response:
   internal-key-pattern
   external-key-pattern
   password-changed-datetime
-  [astring astring...]
+  key value key value [...]
 ```
+
+The `GET-USER-CONFIG` subcommand was poorly designed in Crymap 1.x.
+
+The Crymap 1.x capabilities are `INTERNAL-KEY-PATTERN`, `EXTERNAL-KEY-PATTERN`,
+and `PASSWORD`, which correspond to the ability to pass each of those settings
+to `SET-USER-CONFIG`. Those three settings are guaranteed to be present, in
+that order, immediately after the capabilities in the `USER-CONFIG` response.
+Each is an `nstring`.
+
+Beyond the Crymap 1.x settings are other settings. Each `key` is an `atom`
+naming the setting, and the `value` is an `nstring` giving the current value of
+that setting. The presence of a setting in this list implies that it can be
+passed to `XRY SET-USER-CONFIG`.
+
+Crymap 2.0.0 adds the `SMTP-OUT` capability. This indicates the presence of the
+`XCRY SMTP-OUT` subcommand and the following new settings:
+- `SMTP-OUT-SAVE`, mailbox into which sent messages are implicitly saved
+  (default `NIL`, meaning no implicit saving happens)
+- `SMTP-OUT-SUCCESS-RECEIPTS`, mailbox into which receipts for
+  successfully-delivered messages are saved (default `NIL`, meaning no delivery
+  of success receipts)
+- `SMTP-OUT-FAILURE-RECEIPTS`, mailbox into which receipts for
+  unsuccessfully-delivered messages are saved (default `NIL`, which is the same
+  as `"INBOX"`)
 
 `capabilities` provides a list of valid tokens that can be passed to `XCRY
 SET-USER-CONFIG`.
@@ -475,8 +492,9 @@ SET-USER-CONFIG`.
 
 Arguments: `key value [key value [...]]`
 
-Updates the given key-value pairs in the configuration. Using this to
-"configure" `PASSWORD` is also how password changes are done.
+Updates the given key-value pairs in the configuration. Each `key` is an
+`atom`; each `value` is an `nstring`. Using this to "configure" `PASSWORD` is
+also how password changes are done.
 
 Response:
 
@@ -486,6 +504,37 @@ Response:
 
 The returned filename should be shown to the user to let them know what file to
 use to undo the change.
+
+#### XCRY SMTP-OUT FOREIGN-TLS LIST
+
+No arguments.
+
+Produces a list of the TLS requirements imposed on outbound SMTP domains.
+
+Example responses:
+
+```text
+* XCRY SMTP-OUT FOREIGN-TLS secure.example.com STARTTLS VALID-CERTIFICATE "TLS 1.3"
+* XCRY SMTP-OUT FOREIGN-TLS insecure.example.com NIL
+```
+
+#### XCRY SMTP-OUT FOREIGN-TLS DELETE
+
+Arguments: `domain [domain ...]`
+
+Each `domain` is an `astring` naming a domain whose TLS requirements are to be
+forgotten. The next attempt to send mail to that domain will not require any
+particular TLS features to be present.
+
+#### XCRY SMTP-OUT SPOOL EXECUTE
+
+Arguments: `message-id`
+
+`message-id` is an `astring` naming a spooled message ID which should be
+retried.
+
+Currently, spooled message IDs can only be found by the user in message failure
+receipts.
 
 ### XLIST
 
@@ -560,10 +609,6 @@ the author would ever get use of.
 Incompatible with the way Crymap chroots into the user data directory in
 traditional UNIX-style deployments.
 
-### SAVEDATE
-
-Incompatible with the way Crymap stores message data.
-
 ### WITHIN
 
 Should Crymap ever implement the CONTEXT extensions, this extension has a
@@ -574,4 +619,3 @@ pathological interaction with them, and itself offers very little benefit.
 Besides being useless to the author, it's also unclear how this should really
 work, since mail delivery does not have access to the information it would need
 to maintain the quota.
-

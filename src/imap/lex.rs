@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -89,6 +89,7 @@
 
 use std::borrow::Cow;
 use std::io::{self, Read, Write};
+use std::mem;
 
 use chrono::prelude::*;
 
@@ -104,7 +105,7 @@ pub struct LexWriter<W> {
     literal_plus: bool,
 }
 
-impl<W: Write> LexWriter<W> {
+impl<W: LexOutput> LexWriter<W> {
     pub fn new(writer: W, unicode_aware: bool, literal_plus: bool) -> Self {
         LexWriter {
             writer,
@@ -120,11 +121,6 @@ impl<W: Write> LexWriter<W> {
 
     pub fn verbatim(&mut self, s: &str) -> io::Result<()> {
         self.writer.write_all(s.as_bytes())?;
-        Ok(())
-    }
-
-    pub fn verbatim_bytes(&mut self, s: &[u8]) -> io::Result<()> {
-        self.writer.write_all(s)?;
         Ok(())
     }
 
@@ -160,6 +156,16 @@ impl<W: Write> LexWriter<W> {
         }
     }
 
+    pub fn unicode_nstring(
+        &mut self,
+        s: &Option<impl AsRef<str>>,
+    ) -> io::Result<()> {
+        match s.as_ref() {
+            None => self.nil(),
+            Some(s) => self.string(s.as_ref()),
+        }
+    }
+
     pub fn censored_string(&mut self, s: &str) -> io::Result<()> {
         self.string(&self.censor(s))
     }
@@ -183,7 +189,7 @@ impl<W: Write> LexWriter<W> {
     pub fn literal(
         &mut self,
         use_binary_syntax: bool,
-        mut data: impl Read,
+        data: impl Read + 'static,
         len: u64,
     ) -> io::Result<()> {
         write!(
@@ -197,12 +203,16 @@ impl<W: Write> LexWriter<W> {
                 ""
             }
         )?;
-        io::copy(&mut data, &mut self.writer)?;
+        self.writer.splice(data)?;
         Ok(())
     }
 
     pub fn literal_source(&mut self, ls: &mut LiteralSource) -> io::Result<()> {
-        self.literal(ls.binary, &mut ls.data, ls.len)
+        self.literal(
+            ls.binary,
+            mem::replace(&mut ls.data, Box::new(&[][..])),
+            ls.len,
+        )
     }
 
     pub fn flag(&mut self, flag: &Flag) -> io::Result<()> {
@@ -246,7 +256,11 @@ impl<W: Write> LexWriter<W> {
         if self.is_quotable(s) {
             write!(self.writer, "\"{}\"", s)?;
         } else {
-            self.literal(false, s.as_bytes(), s.len() as u64)?;
+            self.literal(
+                false,
+                io::Cursor::new(s.as_bytes().to_owned()),
+                s.len() as u64,
+            )?;
         }
 
         Ok(())
@@ -296,7 +310,9 @@ impl<W: Write> LexWriter<W> {
     fn is_conservative_atom(&self, s: &str) -> bool {
         !"nil".eq_ignore_ascii_case(s)
             && !s.is_empty()
-            && s.as_bytes().iter().copied().all(|b| match b {
+            && s.as_bytes().iter().copied().all(|b| {
+                matches!(
+                b,
                 b'a'..=b'z'
                 | b'A'..=b'Z'
                 | b'0'..=b'9'
@@ -306,8 +322,7 @@ impl<W: Write> LexWriter<W> {
                 | b'+'
                 | b'_'
                 | b'.'
-                | b'-' => true,
-                _ => false,
+                    | b'-')
             })
     }
 
@@ -333,6 +348,50 @@ fn encode_part(dst: &mut String, src: &str, first: bool) {
     dst.push_str("=?utf-8?b?");
     dst.push_str(&base64::encode_config(src, base64::STANDARD_NO_PAD));
     dst.push_str("?=");
+}
+
+pub trait LexOutput: Write {
+    /// Splice `data` into the stream at the current position.
+    ///
+    /// `data` is potentially very large. In async contexts, it is not read
+    /// within this call, but is stored with the current position so that it
+    /// can be written when needed.
+    fn splice<R: Read + 'static>(&mut self, data: R) -> io::Result<()>;
+}
+
+/// Adapts a synchronous writer to perform `splice` with `io::copy`.
+#[derive(Clone, Copy, Debug)]
+pub struct InlineSplice<W>(pub W);
+
+impl<W: Write> Write for InlineSplice<W> {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        self.0.write(data)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
+
+impl<W: Write> LexOutput for InlineSplice<W> {
+    fn splice<R: Read + 'static>(&mut self, mut data: R) -> io::Result<()> {
+        io::copy(&mut data, self)?;
+        Ok(())
+    }
+}
+
+impl LexOutput for Vec<u8> {
+    fn splice<R: Read + 'static>(&mut self, mut data: R) -> io::Result<()> {
+        io::copy(&mut data, self)?;
+        Ok(())
+    }
+}
+
+impl LexOutput for &mut Vec<u8> {
+    fn splice<R: Read + 'static>(&mut self, mut data: R) -> io::Result<()> {
+        io::copy(&mut data, self)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

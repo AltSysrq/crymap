@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -33,18 +33,14 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// An `enum { Inline(u64), OutOfLine(Box<Vec<u64>>) }` is as large as this
 /// structure but with inferior characteristics.
 ///
-/// Serialises as a `[u64]`, with the "near" element *last*.
-#[derive(Clone)]
+/// Serialises as a `[u64]`, with the "near" element *last*. This serialisation
+/// is only used by the V1 data store. The V2 data store has its own
+/// representation.
+#[derive(Clone, Default)]
 pub struct SmallBitset {
     near: u64,
-    #[allow(clippy::box_vec)]
+    #[allow(clippy::box_collection)]
     far: Option<Box<Vec<u64>>>,
-}
-
-impl Default for SmallBitset {
-    fn default() -> Self {
-        SmallBitset { near: 0, far: None }
-    }
 }
 
 impl fmt::Debug for SmallBitset {
@@ -58,6 +54,11 @@ impl SmallBitset {
     /// Initialise a new, empty bitset.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Initialise a new bitset with the given near bits and no far bits.
+    pub fn new_with_near(near: u64) -> Self {
+        Self { near, far: None }
     }
 
     /// Insert `val` into the bitset.
@@ -87,7 +88,7 @@ impl SmallBitset {
     }
 
     /// Iterate over all the values in the bitset.
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = usize> + 'a {
+    pub fn iter(&self) -> impl Iterator<Item = usize> + '_ {
         static EMPTY: Vec<u64> = Vec::new();
         iter::once(self.near)
             .chain(self.far.as_deref().unwrap_or(&EMPTY).iter().copied())
@@ -99,12 +100,76 @@ impl SmallBitset {
             })
     }
 
+    /// Iterates over the far values in the bitset.
+    pub fn iter_far(&self) -> impl Iterator<Item = usize> + '_ {
+        self.iter().filter(|&i| i >= 64)
+    }
+
+    /// Add all flags from `rhs` to `self`.
+    pub fn add_all(&mut self, rhs: &Self) {
+        self.near |= rhs.near;
+        match (&mut self.far, &rhs.far) {
+            (_, &None) => {},
+            (&mut Some(ref mut lfar), &Some(ref rfar)) => {
+                for (l, r) in lfar.iter_mut().zip(rfar.iter()) {
+                    *l |= *r;
+                }
+
+                if rfar.len() > lfar.len() {
+                    lfar.extend_from_slice(&rfar[lfar.len()..]);
+                }
+            },
+            (lfar, &Some(ref rfar)) => {
+                *lfar = Some(rfar.clone());
+            },
+        }
+    }
+
+    /// Remove all flags from `rhs` in `self`.
+    pub fn remove_all(&mut self, rhs: &Self) {
+        self.near &= !rhs.near;
+        if let (&mut Some(ref mut lfar), &Some(ref rfar)) =
+            (&mut self.far, &rhs.far)
+        {
+            for (l, r) in lfar.iter_mut().zip(rfar.iter()) {
+                *l &= !*r;
+            }
+        }
+    }
+
+    /// Remove all flags from `self` not set in `rhs`.
+    pub fn remove_complement(&mut self, rhs: &Self) {
+        self.near &= rhs.near;
+        match (&mut self.far, &rhs.far) {
+            (&mut None, _) => {},
+            (lfar, &None) => *lfar = None,
+            (&mut Some(ref mut lfar), &Some(ref rfar)) => {
+                if lfar.len() > rfar.len() {
+                    lfar.truncate(rfar.len());
+                }
+                for (l, r) in lfar.iter_mut().zip(rfar.iter()) {
+                    *l &= *r;
+                }
+            },
+        }
+    }
+
+    /// Returns the bitset of the "near" 64 values.
+    pub fn near_bits(&self) -> u64 {
+        self.near
+    }
+
+    /// Returns whether the bitset has any "far" (>=64) values.
+    pub fn has_far(&self) -> bool {
+        self.far.is_some()
+    }
+
     fn addr_mut(&mut self, val: usize) -> (&mut u64, u64) {
         if val < 64 {
             (&mut self.near, 1 << val)
         } else {
             let ix = val / 64 - 1;
-            let far = self.far.get_or_insert_with(|| Box::new(Vec::new()));
+            let far = self.far.get_or_insert_with(Box::default);
             if far.len() <= ix {
                 far.resize(ix + 1, 0);
             }
@@ -139,12 +204,12 @@ impl Serialize for SmallBitset {
                     &near_array as &[u64]
                 }
                 .serialize(serializer)
-            }
+            },
             Some(ref far) => {
                 let mut elements = Vec::clone(far);
                 elements.push(self.near);
                 elements.serialize(serializer)
-            }
+            },
         }
     }
 }
@@ -166,8 +231,52 @@ impl<'de> Deserialize<'de> for SmallBitset {
     }
 }
 
+impl std::iter::FromIterator<usize> for SmallBitset {
+    fn from_iter<T: IntoIterator<Item = usize>>(iter: T) -> Self {
+        let mut this = Self::new();
+        for bit in iter {
+            this.insert(bit);
+        }
+        this
+    }
+}
+
+#[cfg(test)]
+impl From<Vec<usize>> for SmallBitset {
+    fn from(v: Vec<usize>) -> Self {
+        v.into_iter().collect()
+    }
+}
+
+impl std::cmp::PartialEq for SmallBitset {
+    fn eq(&self, rhs: &Self) -> bool {
+        if self.near != rhs.near {
+            return false;
+        }
+
+        match (&self.far, &rhs.far) {
+            (&None, &None) => true,
+            (&Some(ref v), &None) | (&None, &Some(ref v)) => {
+                v.iter().all(|&w| 0 == w)
+            },
+            (&Some(ref lhs), &Some(ref rhs)) => {
+                let len = lhs.len().max(rhs.len());
+                lhs.iter()
+                    .copied()
+                    .chain(std::iter::repeat(0))
+                    .zip(rhs.iter().copied().chain(std::iter::repeat(0)))
+                    .take(len)
+                    .all(|(lhs, rhs)| lhs == rhs)
+            },
+        }
+    }
+}
+
+impl std::cmp::Eq for SmallBitset {}
+
 #[cfg(test)]
 mod test {
+    use proptest::prelude::*;
     use serde_cbor;
 
     use super::*;
@@ -246,5 +355,119 @@ mod test {
 
         bs.remove(1000);
         serde_flip(&bs);
+    }
+
+    #[test]
+    fn partial_eq() {
+        let mut bs1 = SmallBitset::new();
+        let mut bs2 = SmallBitset::new();
+        assert_eq!(bs1, bs2);
+
+        bs1.insert(1);
+        assert_ne!(bs1, bs2);
+        assert_ne!(bs2, bs1);
+        bs2.insert(1);
+        assert_eq!(bs1, bs2);
+        assert_eq!(bs2, bs1);
+
+        // bs1 now has a far bit
+        bs1.insert(99);
+        assert_ne!(bs1, bs2);
+        assert_ne!(bs2, bs1);
+        // bs1 still has far bits, but they're all zero.
+        bs1.remove(99);
+        assert_eq!(bs1, bs2);
+        assert_eq!(bs2, bs1);
+
+        // Now both have far bits, but of different lengths.
+        bs2.insert(999);
+        assert_ne!(bs1, bs2);
+        assert_ne!(bs2, bs1);
+        bs2.remove(999);
+        assert_eq!(bs1, bs2);
+        assert_eq!(bs2, bs1);
+    }
+
+    proptest! {
+        #[test]
+        fn add_all(
+            hs1 in prop::collection::hash_set(
+                0usize..128,
+                0..10,
+            ),
+            hs2 in prop::collection::hash_set(
+                0usize..128,
+                0..10,
+            ),
+        ) {
+            let bs1 = hs1.iter().copied().collect::<SmallBitset>();
+            let bs2 = hs2.iter().copied().collect::<SmallBitset>();
+            let combined = hs1.iter().copied()
+                .chain(hs2.iter().copied())
+                .collect::<SmallBitset>();
+
+            let mut result = bs1.clone();
+            result.add_all(&bs2);
+            assert_eq!(combined, result);
+
+            result = bs2.clone();
+            result.add_all(&bs1);
+            assert_eq!(combined, result);
+        }
+
+        #[test]
+        fn remove_all(
+            hs1 in prop::collection::hash_set(
+                0usize..128,
+                0..10,
+            ),
+            hs2 in prop::collection::hash_set(
+                0usize..128,
+                0..10,
+            ),
+        ) {
+            let bs1 = hs1.iter().copied().collect::<SmallBitset>();
+            let bs2 = hs2.iter().copied().collect::<SmallBitset>();
+            let bs1_minus_bs2 = hs1.iter().copied()
+                .filter(|e| !hs2.contains(e))
+                .collect::<SmallBitset>();
+            let bs2_minus_bs1 = hs2.iter().copied()
+                .filter(|e| !hs1.contains(e))
+                .collect::<SmallBitset>();
+
+            let mut result = bs1.clone();
+            result.remove_all(&bs2);
+            assert_eq!(bs1_minus_bs2, result);
+
+            result = bs2.clone();
+            result.remove_all(&bs1);
+            assert_eq!(bs2_minus_bs1, result);
+        }
+
+        #[test]
+        fn remove_complement(
+            hs1 in prop::collection::hash_set(
+                0usize..128,
+                0..10,
+            ),
+            hs2 in prop::collection::hash_set(
+                0usize..128,
+                0..10,
+            ),
+        ) {
+            let bs1 = hs1.iter().copied().collect::<SmallBitset>();
+            let bs2 = hs2.iter().copied().collect::<SmallBitset>();
+            let bs1_intersect_bs2 = hs1.iter().copied()
+                .filter(|e| hs2.contains(e))
+                .collect::<SmallBitset>();
+
+            let mut result = bs1.clone();
+            result.remove_complement(&bs2);
+            assert_eq!(bs1_intersect_bs2, result);
+
+            result = bs2.clone();
+            result.remove_complement(&bs1);
+            assert_eq!(bs1_intersect_bs2, result);
+        }
     }
 }

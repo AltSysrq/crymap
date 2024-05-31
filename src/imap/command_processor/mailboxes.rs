@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -27,16 +27,13 @@ use crate::imap::mailbox_name::MailboxName;
 use crate::support::error::Error;
 
 impl CommandProcessor {
-    pub(super) fn cmd_close(&mut self, _sender: SendResponse<'_>) -> CmdResult {
+    pub(super) fn cmd_close(&mut self) -> CmdResult {
         {
+            let account = account!(self)?;
             let selected = selected!(self)?;
-            if !selected.stateless().read_only() {
-                if let Err(e) = selected.expunge_all_deleted() {
-                    warn!(
-                        "{} Implicit EXPUNGE failed: {}",
-                        selected.stateless().log_prefix(),
-                        e
-                    );
+            if !selected.read_only() {
+                if let Err(e) = account.expunge_all_deleted(selected) {
+                    warn!("{} Implicit EXPUNGE failed: {}", self.log_prefix, e);
                 }
             }
         }
@@ -45,10 +42,7 @@ impl CommandProcessor {
         success()
     }
 
-    pub(super) fn cmd_unselect(
-        &mut self,
-        _sender: SendResponse<'_>,
-    ) -> CmdResult {
+    pub(super) fn cmd_unselect(&mut self) -> CmdResult {
         selected!(self)?;
         self.selected = None;
         success()
@@ -57,7 +51,6 @@ impl CommandProcessor {
     pub(crate) fn cmd_create(
         &mut self,
         cmd: s::CreateCommand<'_>,
-        _sender: SendResponse<'_>,
     ) -> CmdResult {
         let account = account!(self)?;
         let request = CreateRequest {
@@ -89,7 +82,6 @@ impl CommandProcessor {
     pub(crate) fn cmd_delete(
         &mut self,
         cmd: s::DeleteCommand<'_>,
-        _sender: SendResponse<'_>,
     ) -> CmdResult {
         let account = account!(self)?;
         let mailbox = cmd.mailbox.get_utf8(self.unicode_aware);
@@ -105,10 +97,10 @@ impl CommandProcessor {
         success()
     }
 
-    pub(crate) fn cmd_list(
+    pub(crate) async fn cmd_list(
         &mut self,
         cmd: s::ListCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let is_extended = cmd.select_opts.is_some()
             || cmd.return_opts.is_some()
@@ -118,7 +110,7 @@ impl CommandProcessor {
         let patterns = match cmd.pattern {
             s::MboxOrPat::Single(pat) => {
                 vec![pat.get_utf8(self.unicode_aware).into_owned()]
-            }
+            },
             s::MboxOrPat::Multi(pats) => pats
                 .into_iter()
                 .map(|pat| pat.get_utf8(self.unicode_aware).into_owned())
@@ -129,7 +121,7 @@ impl CommandProcessor {
         let return_opts = cmd.return_opts.unwrap_or_default();
         let mut return_stati: Option<Vec<s::StatusAtt>> = None;
         for opt in &return_opts {
-            if let s::ListReturnOpt::Status(ref stati) = opt {
+            if let s::ListReturnOpt::Status(ref stati) = *opt {
                 if return_stati.is_some() {
                     return Err(s::Response::Cond(s::CondResponse {
                         cond: s::RespCondType::Bad,
@@ -187,78 +179,92 @@ impl CommandProcessor {
         let responses =
             account!(self)?.list(&request).map_err(map_error!(self))?;
         for mut response in responses {
-            let status = return_stati.as_ref().and_then(|stati| {
-                // Unlike virtually every other place in IMAP, RFC 5819
-                // stipulates a very strict response order: we return the LIST
-                // response, then the STATUS, but the content of the LIST
-                // depends on our result for computing the STATUS.
+            let status = match return_stati {
+                None => None,
+                Some(ref stati) => {
+                    // Unlike virtually every other place in IMAP, RFC 5819
+                    // stipulates a very strict response order: we return the
+                    // LIST response, then the STATUS, but the content of the
+                    // LIST depends on our result for computing the STATUS.
 
-                // First off, there's no status if this mailbox is \Noselect or
-                // \NonExistent.
-                if response.attributes.contains(&MailboxAttribute::Noselect)
-                    || response
-                        .attributes
-                        .contains(&MailboxAttribute::NonExistent)
-                {
-                    return None;
-                }
-
-                // It exists(ed), try to get its status
-                if let Ok(status) = self.evaluate_status(
-                    Cow::Borrowed(&response.name),
-                    stati,
-                    sender,
-                ) {
-                    Some(status)
-                } else {
-                    // RFC 5819 specifies to silently drop the STATUS response
-                    // if anything goes wrong. However, we're still required to
-                    // handle the case where the mailbox was deleted between
-                    // getting the list response and STATUS.
-                    if !self
-                        .account
-                        .as_ref()
-                        .and_then(|a| a.mailbox_path(&response.name).ok())
-                        .map_or(true, |mbp| mbp.is_selectable())
+                    // First off, there's no status if this mailbox is
+                    // \Noselect or \NonExistent.
+                    if response.attributes.contains(&MailboxAttribute::Noselect)
+                        || response
+                            .attributes
+                            .contains(&MailboxAttribute::NonExistent)
                     {
-                        response.attributes.push(MailboxAttribute::Noselect);
+                        None
+                    } else {
+                        // It exists(ed), try to get its status
+                        if let Ok(status) = self
+                            .evaluate_status(
+                                Cow::Borrowed(&response.name),
+                                stati,
+                                sender,
+                            )
+                            .await
+                        {
+                            Some(status)
+                        } else {
+                            // RFC 5819 specifies to silently drop the STATUS
+                            // response if anything goes wrong. However, we're
+                            // still required to handle the case where the
+                            // mailbox was deleted between getting the list
+                            // response and STATUS.
+                            if self.account.as_mut().is_some_and(|account| {
+                                matches!(
+                                    account.probe_mailbox(&response.name),
+                                    Err(Error::MailboxUnselectable
+                                        | Error::NxMailbox),
+                                )
+                            }) {
+                                response
+                                    .attributes
+                                    .push(MailboxAttribute::Noselect);
+                            }
+                            None
+                        }
                     }
-                    None
-                }
-            });
-
-            sender(s::Response::List(s::MailboxList {
-                flags: response
-                    .attributes
-                    .into_iter()
-                    .map(|a| Cow::Borrowed(a.name()))
-                    .collect(),
-                name: MailboxName::of_utf8(Cow::Owned(response.name)),
-                child_info: if response.child_info.is_empty() {
-                    None
-                } else {
-                    Some(
-                        response
-                            .child_info
-                            .into_iter()
-                            .map(Cow::Borrowed)
-                            .collect(),
-                    )
                 },
-            }));
+            };
+
+            send_response(
+                sender,
+                s::Response::List(s::MailboxList {
+                    flags: response
+                        .attributes
+                        .into_iter()
+                        .map(|a| Cow::Borrowed(a.name()))
+                        .collect(),
+                    name: MailboxName::of_utf8(Cow::Owned(response.name)),
+                    child_info: if response.child_info.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            response
+                                .child_info
+                                .into_iter()
+                                .map(Cow::Borrowed)
+                                .collect(),
+                        )
+                    },
+                }),
+            )
+            .await;
 
             if let Some(status) = status {
-                sender(status);
+                send_response(sender, status).await;
             }
         }
 
         success()
     }
 
-    pub(crate) fn cmd_lsub(
+    pub(crate) async fn cmd_lsub(
         &mut self,
         cmd: s::LsubCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let reference = cmd.reference.get_utf8(self.unicode_aware);
         let pattern = cmd.pattern.get_utf8(self.unicode_aware);
@@ -277,24 +283,28 @@ impl CommandProcessor {
         let responses =
             account!(self)?.list(&request).map_err(map_error!(self))?;
         for response in responses {
-            sender(s::Response::Lsub(s::MailboxList {
-                flags: response
-                    .attributes
-                    .into_iter()
-                    .map(|a| Cow::Borrowed(a.name()))
-                    .collect(),
-                name: MailboxName::of_utf8(Cow::Owned(response.name)),
-                child_info: None,
-            }));
+            send_response(
+                sender,
+                s::Response::Lsub(s::MailboxList {
+                    flags: response
+                        .attributes
+                        .into_iter()
+                        .map(|a| Cow::Borrowed(a.name()))
+                        .collect(),
+                    name: MailboxName::of_utf8(Cow::Owned(response.name)),
+                    child_info: None,
+                }),
+            )
+            .await;
         }
 
         success()
     }
 
-    pub(crate) fn cmd_xlist(
+    pub(crate) async fn cmd_xlist(
         &mut self,
         cmd: s::XlistCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let reference = cmd.reference.get_utf8(self.unicode_aware);
         let pattern = cmd.pattern.get_utf8(self.unicode_aware);
@@ -313,15 +323,19 @@ impl CommandProcessor {
         let responses =
             account!(self)?.list(&request).map_err(map_error!(self))?;
         for response in responses {
-            sender(s::Response::Xlist(s::MailboxList {
-                flags: response
-                    .attributes
-                    .into_iter()
-                    .map(|a| Cow::Borrowed(a.name()))
-                    .collect(),
-                name: MailboxName::of_utf8(Cow::Owned(response.name)),
-                child_info: None,
-            }));
+            send_response(
+                sender,
+                s::Response::Xlist(s::MailboxList {
+                    flags: response
+                        .attributes
+                        .into_iter()
+                        .map(|a| Cow::Borrowed(a.name()))
+                        .collect(),
+                    name: MailboxName::of_utf8(Cow::Owned(response.name)),
+                    child_info: None,
+                }),
+            )
+            .await;
         }
 
         success()
@@ -330,7 +344,6 @@ impl CommandProcessor {
     pub(crate) fn cmd_rename(
         &mut self,
         cmd: s::RenameCommand<'_>,
-        _sender: SendResponse<'_>,
     ) -> CmdResult {
         let account = account!(self)?;
         let request = RenameRequest {
@@ -351,10 +364,10 @@ impl CommandProcessor {
         success()
     }
 
-    pub(crate) fn cmd_examine(
+    pub(crate) async fn cmd_examine(
         &mut self,
         cmd: s::ExamineCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         self.select(
             &cmd.mailbox,
@@ -362,12 +375,13 @@ impl CommandProcessor {
             sender,
             true,
         )
+        .await
     }
 
-    pub(crate) fn cmd_select(
+    pub(crate) async fn cmd_select(
         &mut self,
         cmd: s::SelectCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         self.select(
             &cmd.mailbox,
@@ -375,26 +389,30 @@ impl CommandProcessor {
             sender,
             false,
         )
+        .await
     }
 
-    pub(crate) fn cmd_status(
+    pub(crate) async fn cmd_status(
         &mut self,
         cmd: s::StatusCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
-        sender(self.evaluate_status(
-            cmd.mailbox.get_utf8(self.unicode_aware),
-            &cmd.atts,
-            sender,
-        )?);
+        let status = self
+            .evaluate_status(
+                cmd.mailbox.get_utf8(self.unicode_aware),
+                &cmd.atts,
+                sender,
+            )
+            .await?;
+        send_response(sender, status).await;
         success()
     }
 
-    fn evaluate_status(
+    async fn evaluate_status(
         &mut self,
         mailbox_name: Cow<'_, str>,
         atts: &[s::StatusAtt],
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> PartialResult<s::Response<'static>> {
         let request = StatusRequest {
             name: mailbox_name.into_owned(),
@@ -410,7 +428,7 @@ impl CommandProcessor {
         };
 
         if request.max_modseq && self.account.is_some() {
-            self.enable_condstore(sender, true);
+            self.enable_condstore(sender, true).await;
         }
 
         let response =
@@ -445,7 +463,7 @@ impl CommandProcessor {
             ));
         }
         if let Some(max_modseq) = response.max_modseq {
-            atts.push(s::StatusResponseAtt::HighestModseq(max_modseq));
+            atts.push(s::StatusResponseAtt::HighestModseq(max_modseq.raw()));
         }
         if let Some(mailbox_id) = response.mailbox_id {
             atts.push(s::StatusResponseAtt::MailboxId(Cow::Owned(mailbox_id)));
@@ -468,7 +486,6 @@ impl CommandProcessor {
     pub(crate) fn cmd_subscribe(
         &mut self,
         cmd: s::SubscribeCommand<'_>,
-        _sender: SendResponse<'_>,
     ) -> CmdResult {
         account!(self)?
             .subscribe(&cmd.mailbox.get_utf8(self.unicode_aware))
@@ -483,7 +500,6 @@ impl CommandProcessor {
     pub(crate) fn cmd_unsubscribe(
         &mut self,
         cmd: s::UnsubscribeCommand<'_>,
-        _sender: SendResponse<'_>,
     ) -> CmdResult {
         account!(self)?
             .unsubscribe(&cmd.mailbox.get_utf8(self.unicode_aware))
@@ -495,11 +511,11 @@ impl CommandProcessor {
         success()
     }
 
-    fn select(
+    async fn select(
         &mut self,
         mailbox: &MailboxName<'_>,
         modifiers: Vec<s::SelectModifier<'_>>,
-        sender: SendResponse,
+        sender: &mut SendResponse,
         read_only: bool,
     ) -> CmdResult {
         // We need to validate the modifiers before we do anything else
@@ -520,7 +536,7 @@ impl CommandProcessor {
                     }
 
                     enable_condstore = true;
-                }
+                },
                 s::SelectModifier::Qresync(qr) => {
                     if !self.qresync_enabled {
                         return Err(s::Response::Cond(s::CondResponse {
@@ -577,13 +593,13 @@ impl CommandProcessor {
                         known_uids,
                         mapping_reference,
                     });
-                }
+                },
             }
         }
 
         // SELECT and EXAMINE unselect any selected mailbox regardless of
         // whether they succeed.
-        self.unselect(sender);
+        self.unselect(sender).await;
 
         // RFC 7162 does not describe whether an implicit enable of CONDSTORE
         // due to `SELECT mailbox (CONDSTORE)` while another mailbox was
@@ -599,93 +615,111 @@ impl CommandProcessor {
         // 2. It is more likely a buggy client would be broken by a spurious
         // HIGHESTMODSEQ than a missing one.
         if enable_condstore {
-            self.enable_condstore(sender, true);
+            self.enable_condstore(sender, true).await;
         }
 
         let mailbox = mailbox.get_utf8(self.unicode_aware);
-        let stateless = account!(self)?.mailbox(&mailbox, read_only).map_err(
-            map_error! {
-                self,
-                NxMailbox | MailboxUnselectable =>
-                    (No, Some(s::RespTextCode::Nonexistent(()))),
-                UnsafeName =>
-                    (No, Some(s::RespTextCode::Cannot(()))),
-            },
-        )?;
-        let mailbox_id = stateless.path().mailbox_id().map_err(map_error! {
-            self,
-            NxMailbox | MailboxUnselectable =>
-                (No, Some(s::RespTextCode::Nonexistent(()))),
-            UnsafeName =>
-                (No, Some(s::RespTextCode::Cannot(()))),
-        })?;
-
-        let (mut stateful, select) =
-            stateless.select().map_err(map_error! {
+        let (mut stateful, qresync_response) = account!(self)?
+            .select(&mailbox, !read_only, qresync.as_ref())
+            .map_err(map_error! {
                 self,
                 NxMailbox | MailboxUnselectable =>
                     (No, Some(s::RespTextCode::Nonexistent(()))),
                 UnsafeName =>
                     (No, Some(s::RespTextCode::Cannot(()))),
             })?;
-        sender(s::Response::Flags(select.flags.clone()));
-        sender(s::Response::Cond(s::CondResponse {
-            cond: s::RespCondType::Ok,
-            code: Some(s::RespTextCode::PermanentFlags(select.flags)),
-            quip: None,
-        }));
-        sender(s::Response::Exists(
-            select.exists.try_into().unwrap_or(u32::MAX),
-        ));
-        sender(s::Response::Recent(
-            select.recent.try_into().unwrap_or(u32::MAX),
-        ));
+        let select = stateful.select_response().map_err(map_error!(self))?;
+        let mailbox_id = stateful.rfc8474_mailbox_id();
+
+        send_response(sender, s::Response::Flags(select.flags.clone())).await;
+        send_response(
+            sender,
+            s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Ok,
+                code: Some(s::RespTextCode::PermanentFlags(select.flags)),
+                quip: None,
+            }),
+        )
+        .await;
+        send_response(
+            sender,
+            s::Response::Exists(select.exists.try_into().unwrap_or(u32::MAX)),
+        )
+        .await;
+        send_response(
+            sender,
+            s::Response::Recent(select.recent.try_into().unwrap_or(u32::MAX)),
+        )
+        .await;
         if let Some(unseen) = select.unseen {
-            sender(s::Response::Cond(s::CondResponse {
-                cond: s::RespCondType::Ok,
-                code: Some(s::RespTextCode::Unseen(unseen.0.get())),
-                quip: None,
-            }));
+            send_response(
+                sender,
+                s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Ok,
+                    code: Some(s::RespTextCode::Unseen(unseen.0.get())),
+                    quip: None,
+                }),
+            )
+            .await;
         }
-        sender(s::Response::Cond(s::CondResponse {
-            cond: s::RespCondType::Ok,
-            code: Some(s::RespTextCode::UidNext(select.uidnext.0.get())),
-            quip: None,
-        }));
-        sender(s::Response::Cond(s::CondResponse {
-            cond: s::RespCondType::Ok,
-            code: Some(s::RespTextCode::UidValidity(select.uidvalidity)),
-            quip: None,
-        }));
-        sender(s::Response::Cond(s::CondResponse {
-            cond: s::RespCondType::Ok,
-            code: Some(s::RespTextCode::MailboxId(Cow::Owned(mailbox_id))),
-            quip: None,
-        }));
-        if self.condstore_enabled {
-            sender(s::Response::Cond(s::CondResponse {
+        send_response(
+            sender,
+            s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::Ok,
-                code: Some(s::RespTextCode::HighestModseq(
-                    select.max_modseq.map_or(1, |m| m.raw().get()),
-                )),
+                code: Some(s::RespTextCode::UidNext(select.uidnext.0.get())),
                 quip: None,
-            }));
+            }),
+        )
+        .await;
+        send_response(
+            sender,
+            s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Ok,
+                code: Some(s::RespTextCode::UidValidity(select.uidvalidity)),
+                quip: None,
+            }),
+        )
+        .await;
+        send_response(
+            sender,
+            s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Ok,
+                code: Some(s::RespTextCode::MailboxId(Cow::Owned(mailbox_id))),
+                quip: None,
+            }),
+        )
+        .await;
+        if self.condstore_enabled {
+            send_response(
+                sender,
+                s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Ok,
+                    code: Some(s::RespTextCode::HighestModseq(
+                        select.max_modseq.raw(),
+                    )),
+                    quip: None,
+                }),
+            )
+            .await;
         }
 
-        if let Some(qresync) = qresync {
-            let response =
-                stateful.qresync(qresync).map_err(map_error!(self))?;
+        if let Some(response) = qresync_response {
             if !response.expunged.is_empty() {
-                sender(s::Response::Vanished(s::VanishedResponse {
-                    earlier: true,
-                    uids: Cow::Owned(response.expunged.to_string()),
-                }));
+                send_response(
+                    sender,
+                    s::Response::Vanished(s::VanishedResponse {
+                        earlier: true,
+                        uids: Cow::Owned(response.expunged.to_string()),
+                    }),
+                )
+                .await;
             }
             // The FETCH responses, if any, are handled by the poll cycle at
             // the end of the SELECT.
+            stateful.add_changed_uids(response.changed.into_iter());
         }
 
-        let read_only = stateful.stateless().read_only();
+        let read_only = stateful.read_only();
         self.selected = Some(stateful);
 
         Ok(s::Response::Cond(s::CondResponse {
@@ -699,13 +733,17 @@ impl CommandProcessor {
         }))
     }
 
-    fn unselect(&mut self, sender: SendResponse<'_>) {
+    async fn unselect(&mut self, sender: &mut SendResponse) {
         if self.selected.is_some() {
-            sender(s::Response::Cond(s::CondResponse {
-                cond: s::RespCondType::Ok,
-                code: Some(s::RespTextCode::Closed(())),
-                quip: None,
-            }));
+            send_response(
+                sender,
+                s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Ok,
+                    code: Some(s::RespTextCode::Closed(())),
+                    quip: None,
+                }),
+            )
+            .await;
         }
         self.selected = None;
         self.searchres.clear();

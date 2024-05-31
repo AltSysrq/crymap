@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -61,7 +61,7 @@ use rand::{rngs::OsRng, Rng};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use super::AES_BLOCK;
+use super::{master_key::MasterKey, AES_BLOCK};
 use crate::support::compression::Compression;
 use crate::support::error::Error;
 
@@ -122,6 +122,12 @@ pub struct Reader<R> {
     pub metadata: Metadata,
 }
 
+pub struct CachedSessionKey<'a> {
+    pub master_key: &'a MasterKey,
+    pub message_id: i64,
+    pub session_key: &'a [u8; AES_BLOCK],
+}
+
 impl<R: Read> Reader<R> {
     /// Create a new reader.
     ///
@@ -129,35 +135,47 @@ impl<R: Read> Reader<R> {
     /// referenced by the metadata to get the private key used to decrypt the
     /// session key.
     ///
+    /// If `cached_session_key` is passed, it is used to derive the session key
+    /// of the stream without using RSA.
+    ///
     /// The header block is fully read in by this call.
     pub fn new(
         mut reader: R,
+        cached_session_key: Option<CachedSessionKey<'_>>,
         priv_key_lookup: impl FnOnce(&str) -> Result<Arc<Rsa<Private>>, Error>,
     ) -> Result<Self, Error> {
         let meta_length = reader.read_u16::<LittleEndian>()?;
         let meta: Metadata =
             serde_cbor::from_reader(reader.by_ref().take(meta_length.into()))?;
-        let priv_key = priv_key_lookup(&meta.meta_key_id)?;
 
-        let key = match meta.meta_algorithm {
-            MetaAlgorithm::RsaPkcs1Oaep => {
-                // private_decrypt() requires the output buffer to be at least
-                // the size of the RSA modulus
-                let mut buf =
-                    vec![0u8; (priv_key.size() as usize).max(AES_BLOCK)];
-                if AES_BLOCK
-                    != priv_key.private_decrypt(
-                        &meta.encrypted_key,
-                        &mut buf,
-                        openssl::rsa::Padding::PKCS1_OAEP,
-                    )?
-                {
-                    return Err(Error::BadEncryptedKey);
-                }
+        let key = if let Some(csk) = cached_session_key {
+            let mut key = *csk.session_key;
+            csk.master_key
+                .crypt_cached_session_key(&mut key, csk.message_id);
+            key
+        } else {
+            let priv_key = priv_key_lookup(&meta.meta_key_id)?;
 
-                let mut k = [0u8; AES_BLOCK];
-                k.copy_from_slice(&buf[..AES_BLOCK]);
-                k
+            match meta.meta_algorithm {
+                MetaAlgorithm::RsaPkcs1Oaep => {
+                    // private_decrypt() requires the output buffer to be at least
+                    // the size of the RSA modulus
+                    let mut buf =
+                        vec![0u8; (priv_key.size() as usize).max(AES_BLOCK)];
+                    if AES_BLOCK
+                        != priv_key.private_decrypt(
+                            &meta.encrypted_key,
+                            &mut buf,
+                            openssl::rsa::Padding::PKCS1_OAEP,
+                        )?
+                    {
+                        return Err(Error::BadEncryptedKey);
+                    }
+
+                    let mut k = [0u8; AES_BLOCK];
+                    k.copy_from_slice(&buf[..AES_BLOCK]);
+                    k
+                },
             }
         };
 
@@ -169,6 +187,17 @@ impl<R: Read> Reader<R> {
             cleartext_buffer: Cursor::new(Vec::with_capacity(1024)),
             metadata: meta,
         })
+    }
+
+    /// Returns an encrypted form of the session key that is safe for caching.
+    pub fn session_key(
+        &self,
+        master_key: &MasterKey,
+        message_id: i64,
+    ) -> [u8; AES_BLOCK] {
+        let mut ret = self.key;
+        master_key.crypt_cached_session_key(&mut ret, message_id);
+        ret
     }
 }
 
@@ -188,10 +217,10 @@ impl<R: Read> BufRead for Reader<R> {
                 Ok(i) => i as usize,
                 Err(e) if io::ErrorKind::UnexpectedEof == e.kind() => {
                     return Ok(&[]);
-                }
+                },
                 Err(e) => {
                     return Err(e);
-                }
+                },
             };
 
             self.ciphertext_buffer.resize(slab_size + 2 * AES_BLOCK, 0);
@@ -218,7 +247,7 @@ impl<R: Read> BufRead for Reader<R> {
                     .update(
                         &self.ciphertext_buffer
                             [AES_BLOCK..slab_size + AES_BLOCK],
-                        &mut self.cleartext_buffer.get_mut()
+                        self.cleartext_buffer.get_mut()
                     )
                     .map_err(to_ioerr)?
             );
@@ -399,10 +428,11 @@ mod test {
             }
 
             let decrypted = {
-                let mut reader = Reader::new(Cursor::new(ciphertext), |_| {
-                    Ok(Arc::clone(&RSA1024A))
-                })
-                .unwrap();
+                let mut reader =
+                    Reader::new(Cursor::new(ciphertext), None, |_| {
+                        Ok(Arc::clone(&RSA1024A))
+                    })
+                    .unwrap();
                 let mut d = Vec::new();
                 reader.read_to_end(&mut d).unwrap();
                 d

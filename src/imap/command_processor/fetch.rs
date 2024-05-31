@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -19,24 +19,25 @@
 use std::borrow::Cow;
 use std::convert::TryInto;
 use std::fmt;
+use std::future::Future;
 use std::mem;
 
 use log::{error, warn};
 
 use super::defs::*;
 use crate::account::{
-    mailbox::{FetchReceiver, StatefulMailbox},
     model::*,
+    v2::{Account, FetchReceiver, Mailbox},
 };
 use crate::imap::literal_source::LiteralSource;
 use crate::mime::fetch::{self, section::*};
 use crate::support::error::Error;
 
 impl CommandProcessor {
-    pub(super) fn cmd_fetch(
+    pub(super) async fn cmd_fetch(
         &mut self,
         cmd: s::FetchCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let ids = self.parse_seqnum_range(&cmd.messages)?;
         self.fetch(
@@ -45,16 +46,17 @@ impl CommandProcessor {
             ids,
             false,
             false,
-            StatefulMailbox::seqnum_store,
-            |mb, r| mb.prefetch(&r, &SeqRange::new()),
-            StatefulMailbox::seqnum_fetch,
+            Account::seqnum_store,
+            |a, mb, r| a.seqnum_prefetch(mb, r),
+            Account::seqnum_fetch,
         )
+        .await
     }
 
-    pub(super) fn cmd_uid_fetch(
+    pub(super) async fn cmd_uid_fetch(
         &mut self,
         cmd: s::FetchCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let ids = self.parse_uid_range(&cmd.messages)?;
         self.fetch(
@@ -63,15 +65,16 @@ impl CommandProcessor {
             ids,
             true,
             true,
-            StatefulMailbox::store,
-            |mb, r| mb.prefetch(&r, &r.ids),
-            |mb, r, f| mb.fetch(&r, f),
+            Account::store,
+            |a, mb, r| a.prefetch(mb, r),
+            |a, mb, r, f| a.fetch(mb, r, f),
         )
+        .await
     }
 
-    pub(super) fn fetch_for_background_update(
+    pub(super) async fn fetch_for_background_update(
         &mut self,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
         uids: Vec<Uid>,
     ) {
         let mut ids = SeqRange::new();
@@ -86,42 +89,51 @@ impl CommandProcessor {
             what.push(s::FetchAtt::Modseq(()));
         }
 
-        let _ = self.fetch(
-            s::FetchCommand {
-                messages: Cow::Borrowed(""),
-                target: s::FetchCommandTarget::Multi(what),
-                modifiers: None,
-            },
-            sender,
-            ids,
-            false,
-            false,
-            |_, _| panic!("Shouldn't STORE in background update"),
-            |mb, r| mb.prefetch(&r, &r.ids),
-            |mb, r, f| mb.fetch(&r, f),
-        );
+        let _ = self
+            .fetch(
+                s::FetchCommand {
+                    messages: Cow::Borrowed(""),
+                    target: s::FetchCommandTarget::Multi(what),
+                    modifiers: None,
+                },
+                sender,
+                ids,
+                false,
+                false,
+                |_, _, _| panic!("Shouldn't STORE in background update"),
+                |a, mb, r| a.prefetch(mb, r),
+                |a, mb, r, f| a.fetch(mb, r, f),
+            )
+            .await;
     }
 
-    fn fetch<ID: Default>(
-        &mut self,
+    async fn fetch<
+        'a,
+        ID: Default,
+        F: Future<Output = Result<FetchResponse, Error>> + 'a,
+    >(
+        &'a mut self,
         cmd: s::FetchCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
         ids: SeqRange<ID>,
         force_fetch_uid: bool,
         allow_vanished: bool,
         f_store: impl FnOnce(
-            &mut StatefulMailbox,
+            &mut Account,
+            &mut Mailbox,
             &StoreRequest<ID>,
         ) -> Result<StoreResponse<ID>, Error>,
         f_prefetch: impl FnOnce(
-            &mut StatefulMailbox,
+            &mut Account,
+            &mut Mailbox,
             &FetchRequest<ID>,
-        ) -> PrefetchResponse,
+        ) -> Result<PrefetchResponse, Error>,
         f_fetch: impl FnOnce(
-            &mut StatefulMailbox,
+            &'a mut Account,
+            &'a mut Mailbox,
             FetchRequest<ID>,
-            FetchReceiver<'_>,
-        ) -> Result<FetchResponse, Error>,
+            FetchReceiver,
+        ) -> F,
     ) -> CmdResult
     where
         SeqRange<ID>: fmt::Debug,
@@ -149,8 +161,8 @@ impl CommandProcessor {
 
                     enable_condstore = true;
                     has_changedsince = true;
-                    request.changed_since = Modseq::of(modseq);
-                }
+                    request.changed_since = Some(Modseq::of(modseq));
+                },
                 s::FetchModifier::Vanished(_) => {
                     if !self.qresync_enabled {
                         return Err(s::Response::Cond(s::CondResponse {
@@ -183,7 +195,7 @@ impl CommandProcessor {
                     }
 
                     request.collect_vanished = true;
-                }
+                },
             }
         }
 
@@ -203,10 +215,8 @@ impl CommandProcessor {
         // Don't implicitly enable CONDSTORE if not selected since we will
         // return BAD in that case.
         if (enable_condstore || request.modseq) && self.selected.is_some() {
-            self.enable_condstore(sender, true);
+            self.enable_condstore(sender, true).await;
         }
-
-        let selected = selected!(self)?;
 
         // If there are non-.PEEK body sections in the request, implicitly set
         // \Seen on all the messages.
@@ -218,8 +228,12 @@ impl CommandProcessor {
         // cache-fill protocol.
         //
         // This is only best-effort, and we only log if anything goes wrong.
-        if fetch_properties.set_seen && !selected.stateless().read_only() {
+        if fetch_properties.set_seen && !selected!(self)?.read_only() {
+            let account = account!(self)?;
+            let selected = selected!(self)?;
+
             let store_res = f_store(
+                account,
                 selected,
                 &StoreRequest {
                     ids: &request.ids,
@@ -236,17 +250,55 @@ impl CommandProcessor {
                     self.log_prefix, e
                 );
             }
+
+            // We need to do a mini-poll to bring the STORE into effect.
+            if let Ok(poll) = account.mini_poll(selected) {
+                // We're not in a position to process these just yet, so feed
+                // it back into the next poll.
+                selected.add_changed_uids(poll.fetch.into_iter());
+            }
         }
 
-        let prefetch = f_prefetch(selected, &request);
-        fetch_preresponse(sender, prefetch)?;
+        let mut prefetch =
+            f_prefetch(account!(self)?, selected!(self)?, &request)
+                .map_err(map_error!(self))?;
+        if !self.flag_responses_enabled {
+            prefetch.flags.clear();
+        }
+        fetch_preresponse(sender, prefetch).await?;
 
-        let receiver = |seqnum, items| {
-            fetch_response(sender, fetch_properties, seqnum, items);
+        let (receiver_tx, mut receiver_rx) =
+            tokio::sync::mpsc::channel(fetch_properties.channel_buffer_size);
+
+        let do_fetch =
+            f_fetch(account!(self)?, selected!(self)?, request, receiver_tx);
+        let send_responses = async move {
+            while let Some((seqnum, items)) = receiver_rx.recv().await {
+                fetch_response(sender, fetch_properties, seqnum, items).await;
+            }
         };
 
-        let response = f_fetch(selected, request, &receiver).map_err(map_error! {
-            self,
+        let (response, _) = tokio::join!(do_fetch, send_responses);
+        let response = response.map_err(map_error! {
+            // XXX We can't use the `self` form because `f_fetch` borrows
+            // `self.account` and `self.mailbox` permanently. This is due to a
+            // limitation in the type system. Ideally, we'd declare `f_fetch`
+            // as
+            //
+            //   impl for<'a> FnOnce (
+            //     &'a mut Account,
+            //     &'a mut Mailbox,
+            //     ...
+            //   ) -> impl Future<...> + 'a
+            //
+            // but there's no way to express that right now --- we need to
+            // commit to some lifetime which exists for the entirety of this
+            // function.
+            //
+            // This isn't that big of a problem though, as once we've gotten
+            // past prefetch, there isn't really any way for the storage layer
+            // to discover that the mailbox was deleted out from under us.
+            log_prefix = &self.log_prefix,
             MasterKeyUnavailable => (No, Some(s::RespTextCode::ServerBug(()))),
             BadEncryptedKey => (No, Some(s::RespTextCode::Corruption(()))),
             ExpungedMessage => (No, Some(s::RespTextCode::ExpungeIssued(()))),
@@ -258,10 +310,21 @@ impl CommandProcessor {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 struct FetchProperties {
     set_seen: bool,
     extended_body_structure: bool,
+    channel_buffer_size: usize,
+}
+
+impl Default for FetchProperties {
+    fn default() -> Self {
+        Self {
+            set_seen: false,
+            extended_body_structure: false,
+            channel_buffer_size: 64,
+        }
+    }
 }
 
 fn fetch_properties(target: &s::FetchCommandTarget<'_>) -> FetchProperties {
@@ -270,12 +333,12 @@ fn fetch_properties(target: &s::FetchCommandTarget<'_>) -> FetchProperties {
     match *target {
         s::FetchCommandTarget::Single(ref att) => {
             scan_fetch_properties(&mut props, att);
-        }
+        },
         s::FetchCommandTarget::Multi(ref atts) => {
             for att in atts {
                 scan_fetch_properties(&mut props, att);
             }
-        }
+        },
         _ => (),
     }
 
@@ -283,18 +346,32 @@ fn fetch_properties(target: &s::FetchCommandTarget<'_>) -> FetchProperties {
 }
 
 fn scan_fetch_properties(props: &mut FetchProperties, att: &s::FetchAtt<'_>) {
+    if matches!(
+        *att,
+        s::FetchAtt::Envelope(_)
+            | s::FetchAtt::InternalDate(_)
+            | s::FetchAtt::Rfc822(_)
+            | s::FetchAtt::Body(_)
+            | s::FetchAtt::ExtendedBodyStructure(_)
+            | s::FetchAtt::ShortBodyStructure(_),
+    ) {
+        // Use a smaller channel size if we're fetching things that involve
+        // actually reading the message.
+        props.channel_buffer_size = 1;
+    }
+
     match *att {
         s::FetchAtt::ExtendedBodyStructure(_) => {
             props.extended_body_structure = true;
-        }
+        },
         s::FetchAtt::Body(ref body) if !body.peek && !body.size_only => {
             props.set_seen = true;
-        }
+        },
         s::FetchAtt::Rfc822(Some(s::FetchAttRfc822::Size)) => (),
         s::FetchAtt::Rfc822(Some(s::FetchAttRfc822::Header)) => (),
         s::FetchAtt::Rfc822(_) => {
             props.set_seen = true;
-        }
+        },
         _ => (),
     }
 }
@@ -311,27 +388,27 @@ fn fetch_target_from_ast<T>(
             request.internal_date = true;
             request.rfc822size = true;
             request.envelope = true;
-        }
+        },
         s::FetchCommandTarget::Fast(()) => {
             request.flags = true;
             request.internal_date = true;
             request.rfc822size = true;
-        }
+        },
         s::FetchCommandTarget::Full(()) => {
             request.flags = true;
             request.internal_date = true;
             request.rfc822size = true;
             request.envelope = true;
             request.bodystructure = true;
-        }
+        },
         s::FetchCommandTarget::Single(att) => {
             fetch_att_from_ast(request, att);
-        }
+        },
         s::FetchCommandTarget::Multi(atts) => {
             for att in atts {
                 fetch_att_from_ast(request, att);
             }
-        }
+        },
     }
 }
 
@@ -343,13 +420,14 @@ where
         s::FetchAtt::Envelope(()) => request.envelope = true,
         s::FetchAtt::Flags(()) => request.flags = true,
         s::FetchAtt::InternalDate(()) => request.internal_date = true,
+        s::FetchAtt::SaveDate(()) => request.save_date = true,
         s::FetchAtt::Rfc822(Some(s::FetchAttRfc822::Size)) => {
             request.rfc822size = true;
-        }
+        },
         s::FetchAtt::ExtendedBodyStructure(())
         | s::FetchAtt::ShortBodyStructure(()) => {
             request.bodystructure = true;
-        }
+        },
         s::FetchAtt::Uid(()) => request.uid = true,
         s::FetchAtt::Modseq(()) => request.modseq = true,
         s::FetchAtt::EmailId(()) => request.email_id = true,
@@ -360,21 +438,21 @@ where
                 report_as_legacy: Some(Imap2Section::Rfc822Header),
                 ..BodySection::default()
             });
-        }
+        },
         s::FetchAtt::Rfc822(Some(s::FetchAttRfc822::Text)) => {
             request.sections.push(BodySection {
                 leaf_type: LeafType::Content,
                 report_as_legacy: Some(Imap2Section::Rfc822Text),
                 ..BodySection::default()
             });
-        }
+        },
         s::FetchAtt::Rfc822(None) => {
             request.sections.push(BodySection {
                 leaf_type: LeafType::Full,
                 report_as_legacy: Some(Imap2Section::Rfc822),
                 ..BodySection::default()
             });
-        }
+        },
         s::FetchAtt::Body(body) => {
             fn apply_section_text(
                 section: &mut BodySection,
@@ -389,23 +467,25 @@ where
                             .into_iter()
                             .map(Cow::into_owned)
                             .collect();
-                    }
+                    },
                     Some(s::SectionText::Header(())) => {
                         section.leaf_type = LeafType::Headers;
-                    }
+                    },
                     Some(s::SectionText::Text(())) => {
                         section.leaf_type = LeafType::Text;
-                    }
+                    },
                     Some(s::SectionText::Mime(())) => {
                         section.leaf_type = LeafType::Mime;
-                    }
+                    },
                     None => section.leaf_type = LeafType::Content,
                 }
             }
 
-            let mut section = BodySection::default();
-            section.report_as_binary = s::FetchAttBodyKind::Binary == body.kind;
-            section.size_only = body.size_only;
+            let mut section = BodySection {
+                report_as_binary: s::FetchAttBodyKind::Binary == body.kind,
+                size_only: body.size_only,
+                ..BodySection::default()
+            };
 
             match body.section {
                 None => (),
@@ -413,14 +493,14 @@ where
                     // We don't set decode_cte here --- BINARY[] is exactly
                     // equivalent to BODY[]
                     apply_section_text(&mut section, Some(spec));
-                }
+                },
                 Some(s::SectionSpec::Sub(spec)) => {
                     section.subscripts = spec.subscripts;
                     // With subscripts, we decode the CTE if this is a BINARY
                     // command
                     section.decode_cte = section.report_as_binary;
                     apply_section_text(&mut section, spec.text);
-                }
+                },
             }
             if let Some(slice) = body.slice {
                 let start: u64 = slice.start.into();
@@ -430,41 +510,49 @@ where
             }
 
             request.sections.push(section);
-        }
+        },
     }
 }
 
-fn fetch_preresponse(
-    sender: SendResponse,
+async fn fetch_preresponse(
+    sender: &mut SendResponse,
     response: PrefetchResponse,
 ) -> PartialResult<()> {
     if !response.vanished.is_empty() {
-        sender(s::Response::Vanished(s::VanishedResponse {
-            earlier: true,
-            uids: Cow::Owned(response.vanished.to_string()),
-        }));
+        send_response(
+            sender,
+            s::Response::Vanished(s::VanishedResponse {
+                earlier: true,
+                uids: Cow::Owned(response.vanished.to_string()),
+            }),
+        )
+        .await;
     }
     if !response.flags.is_empty() {
-        sender(s::Response::Flags(response.flags));
+        send_response(sender, s::Response::Flags(response.flags)).await;
     }
     Ok(())
 }
 
-fn fetch_response(
-    sender: SendResponse,
+async fn fetch_response(
+    sender: &mut SendResponse,
     fetch_properties: FetchProperties,
     seqnum: Seqnum,
     items: Vec<fetch::multi::FetchedItem>,
 ) {
-    sender(s::Response::Fetch(s::FetchResponse {
-        seqnum: seqnum.0.get(),
-        atts: s::MsgAtts {
-            atts: items
-                .into_iter()
-                .filter_map(|att| fetch_att_to_ast(att, fetch_properties))
-                .collect(),
-        },
-    }));
+    send_response(
+        sender,
+        s::Response::Fetch(s::FetchResponse {
+            seqnum: seqnum.0.get(),
+            atts: s::MsgAtts {
+                atts: items
+                    .into_iter()
+                    .filter_map(|att| fetch_att_to_ast(att, fetch_properties))
+                    .collect(),
+            },
+        }),
+    )
+    .await;
 }
 
 fn fetch_response_final(response: FetchResponse) -> CmdResult {
@@ -494,7 +582,7 @@ fn fetch_att_to_ast(
     match item {
         FI::Nil => panic!("Nil FetchedItem"),
         FI::Uid(uid) => Some(s::MsgAtt::Uid(uid.0.get())),
-        FI::Modseq(modseq) => Some(s::MsgAtt::Modseq(modseq.raw().get())),
+        FI::Modseq(modseq) => Some(s::MsgAtt::Modseq(modseq.raw())),
         FI::Flags(flags) => Some(s::MsgAtt::Flags(if flags.recent {
             s::FlagsFetch::Recent(flags.flags)
         } else {
@@ -502,6 +590,7 @@ fn fetch_att_to_ast(
         })),
         FI::Rfc822Size(size) => Some(s::MsgAtt::Rfc822Size(size)),
         FI::InternalDate(dt) => Some(s::MsgAtt::InternalDate(dt)),
+        FI::SaveDate(dt) => Some(s::MsgAtt::SaveDate(dt)),
         FI::EmailId(ei) => Some(s::MsgAtt::EmailId(Cow::Owned(ei))),
         FI::ThreadIdNil => Some(s::MsgAtt::ThreadIdNil(())),
         FI::Envelope(env) => Some(s::MsgAtt::Envelope(envelope_to_ast(*env))),
@@ -515,7 +604,7 @@ fn fetch_att_to_ast(
             } else {
                 s::MsgAtt::ShortBodyStructure(converted)
             })
-        }
+        },
         FI::BodySection((mut section, fetched_result)) => {
             let data = match fetched_result {
                 Ok(fetched) => {
@@ -525,26 +614,26 @@ fn fetch_att_to_ast(
                         len,
                         section.report_as_binary && fetched.contains_nul,
                     )
-                }
+                },
                 Err(e) => {
                     // Should never happen since the `fetch` implementation
                     // lifts all fetch errors up to top-level.
                     error!("Dropping unfetchable body section: {}", e);
                     return None;
-                }
+                },
             };
 
             match section.report_as_legacy {
                 None => (),
                 Some(Imap2Section::Rfc822) => {
                     return Some(s::MsgAtt::Rfc822Full(data));
-                }
+                },
                 Some(Imap2Section::Rfc822Header) => {
                     return Some(s::MsgAtt::Rfc822Header(data));
-                }
+                },
                 Some(Imap2Section::Rfc822Text) => {
                     return Some(s::MsgAtt::Rfc822Text(data));
-                }
+                },
             }
 
             fn section_text_to_ast(
@@ -557,7 +646,7 @@ fn fetch_att_to_ast(
                     LeafType::Mime => Some(s::SectionText::Mime(())),
                     LeafType::Headers if section.header_filter.is_empty() => {
                         Some(s::SectionText::Header(()))
-                    }
+                    },
                     LeafType::Headers => Some(s::SectionText::HeaderFields(
                         s::SectionTextHeaderField {
                             negative: section.discard_matching_headers,
@@ -584,13 +673,10 @@ fn fetch_att_to_ast(
                     )),
                     (false, _) => {
                         Some(s::SectionSpec::Sub(s::SubSectionSpec {
-                            subscripts: mem::replace(
-                                &mut section.subscripts,
-                                vec![],
-                            ),
+                            subscripts: mem::take(&mut section.subscripts),
                             text: section_text_to_ast(section),
                         }))
-                    }
+                    },
                 };
 
             if size_only {
@@ -613,7 +699,7 @@ fn fetch_att_to_ast(
                     data,
                 }))
             }
-        }
+        },
     }
 }
 

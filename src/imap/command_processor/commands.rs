@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020 Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -22,9 +22,11 @@ use std::convert::TryInto;
 use log::{error, info};
 
 use super::defs::*;
-use crate::account::mailbox::IdleListener;
-use crate::account::model::SeqRange;
-use crate::support::error::Error;
+use crate::{
+    account::model::{PollResponse, SeqRange},
+    imap::response_writer::{OutputControl, OutputEvent},
+    support::error::Error,
+};
 
 impl CommandProcessor {
     /// Return the greeting line to return to the client.
@@ -42,15 +44,16 @@ impl CommandProcessor {
     /// Handles a regular command, i.e., one that the protocol level does not
     /// give special treatment to.
     ///
-    /// `sender` can be called with secondary responses as needed.
+    /// `sender` can passed secondary responses as needed.
     ///
     /// Returns the final, tagged response. If the response condition is `BYE`,
     /// the connection will be closed after sending it.
-    pub fn handle_command<'a>(
+    pub async fn handle_command(
         &mut self,
-        command_line: s::CommandLine<'a>,
-        sender: SendResponse<'_>,
-    ) -> s::ResponseLine<'a> {
+        command_line: s::CommandLine<'_>,
+        mut sender: SendResponse,
+    ) -> s::ResponseLine<'static> {
+        let sender = &mut sender;
         let allow_full_poll = match command_line.cmd {
             // FETCH, STORE, and SEARCH (the non-UID versions) are the only
             // cursed commands that don't allow us to update the message state
@@ -75,110 +78,123 @@ impl CommandProcessor {
 
         let res = match command_line.cmd {
             s::Command::Simple(s::SimpleCommand::Capability) => {
-                self.cmd_capability(sender)
-            }
+                self.cmd_capability(sender).await
+            },
             s::Command::Simple(s::SimpleCommand::Check) => {
-                self.cmd_noop("Nothing exciting", sender)
-            }
-            s::Command::Simple(s::SimpleCommand::Close) => {
-                self.cmd_close(sender)
-            }
+                self.cmd_noop("Nothing exciting")
+            },
+            s::Command::Simple(s::SimpleCommand::Close) => self.cmd_close(),
             s::Command::Simple(s::SimpleCommand::Compress) => {
                 panic!("COMPRESS DEFLATE should be handled by server.rs")
-            }
+            },
             s::Command::Simple(s::SimpleCommand::Expunge) => {
                 staple_highest_modseq = self.qresync_enabled;
-                self.cmd_expunge(sender)
-            }
+                self.cmd_expunge()
+            },
             s::Command::Simple(s::SimpleCommand::Idle) => {
                 panic!("IDLE should be dispatched by server.rs")
-            }
+            },
             s::Command::Simple(s::SimpleCommand::LogOut) => {
-                self.cmd_log_out(sender)
-            }
+                self.cmd_log_out(sender).await
+            },
             s::Command::Simple(s::SimpleCommand::Namespace) => {
-                self.cmd_namespace(sender)
-            }
+                self.cmd_namespace(sender).await
+            },
             s::Command::Simple(s::SimpleCommand::Noop) => {
-                self.cmd_noop("NOOP OK", sender)
-            }
+                self.cmd_noop("NOOP OK")
+            },
             s::Command::Simple(s::SimpleCommand::StartTls) => {
-                self.cmd_start_tls(sender)
-            }
+                self.cmd_start_tls()
+            },
             s::Command::Simple(s::SimpleCommand::Unselect) => {
-                self.cmd_unselect(sender)
-            }
+                self.cmd_unselect()
+            },
+            s::Command::Simple(s::SimpleCommand::XCryFlagsOff) => {
+                self.flag_responses_enabled = false;
+                success()
+            },
+            s::Command::Simple(s::SimpleCommand::XCryFlagsOn) => {
+                self.flag_responses_enabled = true;
+                success()
+            },
             s::Command::Simple(s::SimpleCommand::XCryPurge) => {
                 self.cmd_xcry_purge()
-            }
+            },
             s::Command::Simple(s::SimpleCommand::XCryGetUserConfig) => {
-                self.cmd_xcry_get_user_config(sender)
-            }
+                self.cmd_xcry_get_user_config(sender).await
+            },
             s::Command::Simple(s::SimpleCommand::XCryZstdTrain) => {
                 self.cmd_xcry_zstd_train()
-            }
+            },
             s::Command::Simple(s::SimpleCommand::Xyzzy) => {
-                self.cmd_noop("Nothing happens", sender)
-            }
+                self.cmd_noop("Nothing happens")
+            },
             s::Command::Simple(s::SimpleCommand::XAppendFinishedNoop) => {
-                self.cmd_noop("APPEND OK", sender)
-            }
+                self.cmd_noop("APPEND OK")
+            },
 
-            s::Command::Create(cmd) => self.cmd_create(cmd, sender),
-            s::Command::Delete(cmd) => self.cmd_delete(cmd, sender),
-            s::Command::Examine(cmd) => self.cmd_examine(cmd, sender),
-            s::Command::List(cmd) => self.cmd_list(cmd, sender),
-            s::Command::Lsub(cmd) => self.cmd_lsub(cmd, sender),
-            s::Command::Xlist(cmd) => self.cmd_xlist(cmd, sender),
-            s::Command::Rename(cmd) => self.cmd_rename(cmd, sender),
-            s::Command::Select(cmd) => self.cmd_select(cmd, sender),
-            s::Command::Status(cmd) => self.cmd_status(cmd, sender),
-            s::Command::Subscribe(cmd) => self.cmd_subscribe(cmd, sender),
-            s::Command::Unsubscribe(cmd) => self.cmd_unsubscribe(cmd, sender),
+            s::Command::Create(cmd) => self.cmd_create(cmd),
+            s::Command::Delete(cmd) => self.cmd_delete(cmd),
+            s::Command::Examine(cmd) => self.cmd_examine(cmd, sender).await,
+            s::Command::List(cmd) => self.cmd_list(cmd, sender).await,
+            s::Command::Lsub(cmd) => self.cmd_lsub(cmd, sender).await,
+            s::Command::Xlist(cmd) => self.cmd_xlist(cmd, sender).await,
+            s::Command::Rename(cmd) => self.cmd_rename(cmd),
+            s::Command::Select(cmd) => self.cmd_select(cmd, sender).await,
+            s::Command::Status(cmd) => self.cmd_status(cmd, sender).await,
+            s::Command::Subscribe(cmd) => self.cmd_subscribe(cmd),
+            s::Command::Unsubscribe(cmd) => self.cmd_unsubscribe(cmd),
             s::Command::LogIn(cmd) => self.cmd_log_in(cmd),
-            s::Command::Copy(cmd) => self.cmd_copy(cmd, sender),
-            s::Command::Move(cmd) => self.cmd_move(cmd, sender),
-            s::Command::Fetch(cmd) => self.cmd_fetch(cmd, sender),
-            s::Command::Store(cmd) => self.cmd_store(cmd, sender),
+            s::Command::Copy(cmd) => self.cmd_copy(cmd, sender).await,
+            s::Command::Move(cmd) => self.cmd_move(cmd, sender).await,
+            s::Command::Fetch(cmd) => self.cmd_fetch(cmd, sender).await,
+            s::Command::Store(cmd) => self.cmd_store(cmd, sender).await,
             s::Command::Search(cmd) => {
-                self.cmd_search(cmd, &command_line.tag, sender)
-            }
-            s::Command::XVanquish(uids) => self.cmd_vanquish(uids, sender),
+                self.cmd_search(cmd, &command_line.tag, sender).await
+            },
+            s::Command::XVanquish(uids) => self.cmd_vanquish(uids),
 
             s::Command::Uid(s::UidCommand::Copy(cmd)) => {
-                self.cmd_uid_copy(cmd, sender)
-            }
+                self.cmd_uid_copy(cmd, sender).await
+            },
             s::Command::Uid(s::UidCommand::Move(cmd)) => {
-                self.cmd_uid_move(cmd, sender)
-            }
+                self.cmd_uid_move(cmd, sender).await
+            },
             s::Command::Uid(s::UidCommand::Fetch(cmd)) => {
-                self.cmd_uid_fetch(cmd, sender)
-            }
+                self.cmd_uid_fetch(cmd, sender).await
+            },
             s::Command::Uid(s::UidCommand::Search(cmd)) => {
-                self.cmd_uid_search(cmd, &command_line.tag, sender)
-            }
+                self.cmd_uid_search(cmd, &command_line.tag, sender).await
+            },
             s::Command::Uid(s::UidCommand::Store(cmd)) => {
-                self.cmd_uid_store(cmd, sender)
-            }
+                self.cmd_uid_store(cmd, sender).await
+            },
             s::Command::Uid(s::UidCommand::Expunge(uids)) => {
                 staple_highest_modseq = self.qresync_enabled;
-                self.cmd_uid_expunge(uids, sender)
-            }
+                self.cmd_uid_expunge(uids)
+            },
 
-            s::Command::Id(parms) => self.cmd_id(parms, sender),
+            s::Command::Id(parms) => self.cmd_id(parms, sender).await,
 
-            s::Command::Enable(exts) => self.cmd_enable(exts, sender),
+            s::Command::Enable(exts) => self.cmd_enable(exts, sender).await,
 
             s::Command::XCrySetUserConfig(configs) => {
-                self.cmd_xcry_set_user_config(configs, sender)
-            }
+                self.cmd_xcry_set_user_config(configs, sender).await
+            },
+
+            s::Command::XCryForeignSmtpTls(cmd) => {
+                self.cmd_xcry_foreign_smtp_tls(cmd, sender).await
+            },
+            s::Command::XCrySmtpSpoolExecute(ids) => {
+                self.cmd_xcry_smtp_spool_execute(ids).await
+            },
         };
 
         if res.is_ok() {
             let poll_res = if allow_full_poll {
-                self.full_poll(sender)
+                self.full_poll(sender).await
             } else {
-                self.mini_poll(sender)
+                self.mini_poll(sender).await
             };
 
             if let Err(err) = poll_res {
@@ -188,7 +204,11 @@ impl CommandProcessor {
             // If an error occurred and we have a selected mailbox, check that
             // the mailbox still exists. If not, disconnect the client instead
             // of letting them continue to flail in confusion.
-            if !selected.stateless().is_ok() {
+            if !self
+                .account
+                .as_mut()
+                .is_some_and(|a| a.is_usable_mailbox(selected))
+            {
                 return s::ResponseLine {
                     tag: None,
                     response: s::Response::Cond(s::CondResponse {
@@ -215,9 +235,7 @@ impl CommandProcessor {
             {
                 if s::RespCondType::Ok == cr.cond && cr.code.is_none() {
                     cr.code = Some(s::RespTextCode::HighestModseq(
-                        selected
-                            .report_max_modseq()
-                            .map_or(1, |m| m.raw().get()),
+                        selected.snapshot_modseq().raw(),
                     ));
                 }
             }
@@ -238,48 +256,33 @@ impl CommandProcessor {
             }
         }
 
-        if matches!(
-            res,
-            s::Response::Cond(s::CondResponse {
-                cond: s::RespCondType::Bye,
-                ..
-            })
-        ) {
-            // BYE is never tagged
-            s::ResponseLine {
-                tag: None,
-                response: res,
-            }
-        } else {
-            s::ResponseLine {
-                tag: Some(command_line.tag),
-                response: res,
-            }
-        }
+        maybe_tagged_response(command_line.tag, res)
     }
 
-    fn cmd_capability(&mut self, sender: SendResponse<'_>) -> CmdResult {
-        sender(s::Response::Capability(capability_data()));
+    async fn cmd_capability(&mut self, sender: &mut SendResponse) -> CmdResult {
+        send_response(sender, s::Response::Capability(capability_data())).await;
         success()
     }
 
-    fn cmd_enable(
+    async fn cmd_enable(
         &mut self,
         exts: Vec<Cow<'_, str>>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let mut enabled = Vec::new();
         // Per RFC 5161, we silently ignore any extension which isn't
         // ENABLE-able or known.
         for ext in exts {
+            let ext = Cow::Owned(ext.clone().into_owned());
             if "XYZZY".eq_ignore_ascii_case(&ext) {
                 enabled.push(ext);
             } else if "UTF8=ACCEPT".eq_ignore_ascii_case(&ext) {
                 self.unicode_aware = true;
                 self.utf8_enabled = true;
+                send_event(sender, OutputEvent::EnableUnicode).await;
                 enabled.push(ext);
             } else if "CONDSTORE".eq_ignore_ascii_case(&ext) {
-                self.enable_condstore(sender, false);
+                self.enable_condstore(sender, false).await;
                 enabled.push(ext);
             } else if "QRESYNC".eq_ignore_ascii_case(&ext) {
                 // RFC 7162 says:
@@ -309,12 +312,13 @@ impl CommandProcessor {
                 //   * ENABLED CONDSTORE QRESYNC
                 //
                 // This is what we do here as well.
-                self.enable_condstore(sender, false);
+                self.enable_condstore(sender, false).await;
                 self.qresync_enabled = true;
                 enabled.push(ext);
             } else if "IMAP4rev2".eq_ignore_ascii_case(&ext) {
                 self.unicode_aware = true;
                 self.imap4rev2_enabled = true;
+                send_event(sender, OutputEvent::EnableUnicode).await;
                 enabled.push(ext);
             }
         }
@@ -325,7 +329,7 @@ impl CommandProcessor {
             "The future is now"
         };
 
-        sender(s::Response::Enabled(enabled));
+        send_response(sender, s::Response::Enabled(enabled)).await;
         Ok(s::Response::Cond(s::CondResponse {
             cond: s::RespCondType::Ok,
             code: None,
@@ -333,9 +337,9 @@ impl CommandProcessor {
         }))
     }
 
-    pub(super) fn enable_condstore(
+    pub(super) async fn enable_condstore(
         &mut self,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
         implicit: bool,
     ) {
         if self.condstore_enabled {
@@ -344,29 +348,31 @@ impl CommandProcessor {
 
         self.condstore_enabled = true;
 
-        let highest_modseq = self
-            .selected
-            .as_ref()
-            .map(|s| s.report_max_modseq().map_or(1, |m| m.raw().get()));
+        let highest_modseq =
+            self.selected.as_ref().map(|s| s.snapshot_modseq().raw());
 
         // Only send an untagged OK if there's something interesting to say
         if implicit || highest_modseq.is_some() {
-            sender(s::Response::Cond(s::CondResponse {
-                cond: s::RespCondType::Ok,
-                code: highest_modseq.map(s::RespTextCode::HighestModseq),
-                quip: Some(Cow::Borrowed(if implicit {
-                    "CONDSTORE enabled implicitly"
-                } else {
-                    "CONDSTORE enabled while already selected"
-                })),
-            }));
+            send_response(
+                sender,
+                s::Response::Cond(s::CondResponse {
+                    cond: s::RespCondType::Ok,
+                    code: highest_modseq.map(s::RespTextCode::HighestModseq),
+                    quip: Some(Cow::Borrowed(if implicit {
+                        "CONDSTORE enabled implicitly"
+                    } else {
+                        "CONDSTORE enabled while already selected"
+                    })),
+                }),
+            )
+            .await;
         }
     }
 
-    fn cmd_id(
+    async fn cmd_id(
         &mut self,
         ids: Vec<Option<Cow<'_, str>>>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         // Only take action on the first ID exchange so we don't keep
         // accumulating stuff in the log prefix.
@@ -391,21 +397,18 @@ impl CommandProcessor {
                     }
 
                     message.push_str(" \"");
-                    message.push_str(&name);
+                    message.push_str(name);
                     message.push_str("\" = \"");
-                    message.push_str(&value);
+                    message.push_str(value);
                     message.push_str("\";");
                 }
             }
 
             if !user_agent_name.is_empty() {
-                self.log_prefix.push('(');
-                self.log_prefix.push_str(&user_agent_name);
-                if !user_agent_version.is_empty() {
-                    self.log_prefix.push('/');
-                    self.log_prefix.push_str(&user_agent_version);
-                }
-                self.log_prefix.push(')');
+                self.log_prefix.set_user_agent(
+                    Some(user_agent_name),
+                    Some(user_agent_version).filter(|v| !v.is_empty()),
+                );
             }
 
             info!(
@@ -431,24 +434,20 @@ impl CommandProcessor {
         for (name, value) in &self.system_config.identification {
             // Silently replace _ with - since it's easy to accidentally use _
             // in the config but _ is never used in these parameters.
-            id_info.push(Some(Cow::Owned(name.replace("_", "-"))));
+            id_info.push(Some(Cow::Owned(name.replace('_', "-"))));
             id_info.push(Some(Cow::Owned(value.clone())));
         }
 
-        sender(s::Response::Id(id_info));
+        send_response(sender, s::Response::Id(id_info)).await;
         success()
     }
 
-    fn cmd_namespace(&mut self, sender: SendResponse<'_>) -> CmdResult {
-        sender(s::Response::Namespace(()));
+    async fn cmd_namespace(&mut self, sender: &mut SendResponse) -> CmdResult {
+        send_response(sender, s::Response::Namespace(())).await;
         success()
     }
 
-    fn cmd_noop(
-        &mut self,
-        quip: &'static str,
-        _sender: SendResponse<'_>,
-    ) -> CmdResult {
+    fn cmd_noop(&mut self, quip: &'static str) -> CmdResult {
         // Nothing to do here; shared command processing takes care of the
         // actual poll operation.
         Ok(s::Response::Cond(s::CondResponse {
@@ -458,22 +457,32 @@ impl CommandProcessor {
         }))
     }
 
-    fn cmd_log_out(&mut self, sender: SendResponse<'_>) -> CmdResult {
+    async fn cmd_log_out(&mut self, sender: &mut SendResponse) -> CmdResult {
         self.selected = None;
         self.account = None;
 
         // LOGOUT is a bit weird because RFC 3501 requires sending an OK
         // response *AFTER* the BYE.
         self.logged_out = true;
-        sender(s::Response::Cond(s::CondResponse {
-            cond: s::RespCondType::Bye,
-            code: None,
-            quip: Some(Cow::Borrowed("BYE")),
-        }));
+        send_event(
+            sender,
+            OutputEvent::ResponseLine {
+                line: s::ResponseLine {
+                    tag: None,
+                    response: s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Bye,
+                        code: None,
+                        quip: Some(Cow::Borrowed("BYE")),
+                    }),
+                },
+                ctl: OutputControl::Buffer,
+            },
+        )
+        .await;
         success()
     }
 
-    fn cmd_start_tls(&mut self, _sender: SendResponse<'_>) -> CmdResult {
+    fn cmd_start_tls(&mut self) -> CmdResult {
         Err(s::Response::Cond(s::CondResponse {
             cond: s::RespCondType::Bad,
             code: None,
@@ -494,7 +503,9 @@ impl CommandProcessor {
     fn cmd_xcry_zstd_train(&mut self) -> CmdResult {
         use chrono::prelude::*;
 
-        let data = selected!(self)?.zstd_train().map_err(map_error!(self))?;
+        let data = account!(self)?
+            .zstd_train(selected!(self)?)
+            .map_err(map_error!(self))?;
         let data = base64::encode(&data);
         let mut wrapped_data = String::new();
         for chunk in data.as_bytes().chunks(72) {
@@ -530,11 +541,9 @@ Content-Transfer-Encoding: base64
         );
 
         account!(self)?
-            .mailbox("INBOX", false)
-            .map_err(map_error!(self))?
             .append(
-                FixedOffset::east(0)
-                    .from_utc_datetime(&Utc::now().naive_local()),
+                "INBOX",
+                Utc::now().into(),
                 vec![],
                 message.replace('\n', "\r\n").as_bytes(),
             )
@@ -543,65 +552,103 @@ Content-Transfer-Encoding: base64
         success()
     }
 
-    fn full_poll(&mut self, sender: SendResponse<'_>) -> Result<(), Error> {
-        let selected = match self.selected.as_mut() {
-            Some(s) => s,
-            None => return Ok(()),
+    async fn full_poll(
+        &mut self,
+        sender: &mut SendResponse,
+    ) -> Result<(), Error> {
+        let Some(ref mut account) = self.account else {
+            return Ok(());
         };
 
-        let poll = selected.poll()?;
+        account.drain_deliveries();
+
+        let Some(ref mut selected) = self.selected.as_mut() else {
+            return Ok(());
+        };
+
+        let poll = account.poll(selected)?;
+        self.send_full_poll_responses(sender, poll).await;
+        Ok(())
+    }
+
+    async fn send_full_poll_responses(
+        &mut self,
+        sender: &mut SendResponse,
+        poll: PollResponse,
+    ) {
         if self.qresync_enabled {
             if !poll.expunge.is_empty() {
                 let mut sr = SeqRange::new();
                 for (_, uid) in poll.expunge {
                     sr.append(uid);
                 }
-                sender(s::Response::Vanished(s::VanishedResponse {
-                    earlier: false,
-                    uids: Cow::Owned(sr.to_string()),
-                }));
+                send_response(
+                    sender,
+                    s::Response::Vanished(s::VanishedResponse {
+                        earlier: false,
+                        uids: Cow::Owned(sr.to_string()),
+                    }),
+                )
+                .await;
             }
         } else {
             for (seqnum, _) in poll.expunge.into_iter().rev() {
-                sender(s::Response::Expunge(seqnum.0.get()));
+                send_response(sender, s::Response::Expunge(seqnum.0.get()))
+                    .await;
             }
         }
         if let Some(exists) = poll.exists {
-            sender(s::Response::Exists(exists.try_into().unwrap_or(u32::MAX)));
+            send_response(
+                sender,
+                s::Response::Exists(exists.try_into().unwrap_or(u32::MAX)),
+            )
+            .await;
         }
         if let Some(recent) = poll.recent {
-            sender(s::Response::Recent(recent.try_into().unwrap_or(u32::MAX)));
+            send_response(
+                sender,
+                s::Response::Recent(recent.try_into().unwrap_or(u32::MAX)),
+            )
+            .await;
         }
 
-        self.fetch_for_background_update(sender, poll.fetch);
+        self.fetch_for_background_update(sender, poll.fetch).await;
 
         // This must come after fetch_for_background_update so that we can
         // override the client's own calculation of HIGHESTMODSEQ
         if let Some(max_modseq) = poll.max_modseq {
             if self.condstore_enabled {
-                sender(s::Response::Cond(s::CondResponse {
-                    cond: s::RespCondType::Ok,
-                    code: Some(s::RespTextCode::HighestModseq(
-                        max_modseq.raw().get(),
-                    )),
-                    quip: None,
-                }));
+                send_response(
+                    sender,
+                    s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Ok,
+                        code: Some(s::RespTextCode::HighestModseq(
+                            max_modseq.raw(),
+                        )),
+                        quip: None,
+                    }),
+                )
+                .await;
             }
         }
-
-        Ok(())
     }
 
-    fn mini_poll(&mut self, sender: SendResponse<'_>) -> Result<(), Error> {
-        let selected = match self.selected.as_mut() {
-            Some(s) => s,
-            None => return Ok(()),
+    async fn mini_poll(
+        &mut self,
+        sender: &mut SendResponse,
+    ) -> Result<(), Error> {
+        let Some(ref mut account) = self.account else {
+            return Ok(());
         };
-        let uids = selected.mini_poll();
-        let uids_empty = uids.is_empty();
-        let divergent_modseq = selected.divergent_modseq();
 
-        self.fetch_for_background_update(sender, uids);
+        let Some(ref mut selected) = self.selected else {
+            return Ok(());
+        };
+
+        let poll = account.mini_poll(selected)?;
+        let uids_empty = poll.fetch.is_empty();
+
+        self.fetch_for_background_update(sender, poll.fetch).await;
 
         // If the true max modseq is not the same as the reported max modseq,
         // we need to also send a HIGHESTMODSEQ response (after the fetches
@@ -609,136 +656,145 @@ Content-Transfer-Encoding: base64
         // on looking at the FETCH responses, since the value from FETCH could
         // be greater than of an expungement the client hasn't seen.
         if !uids_empty && self.condstore_enabled {
-            if let Some(divergent_modseq) = divergent_modseq {
-                sender(s::Response::Cond(s::CondResponse {
-                    cond: s::RespCondType::Ok,
-                    code: Some(s::RespTextCode::HighestModseq(
-                        divergent_modseq.raw().get(),
-                    )),
-                    quip: Some(Cow::Borrowed("Snapshot diverged from reality")),
-                }));
+            if let Some(divergent_modseq) = poll.divergent_modseq {
+                send_response(
+                    sender,
+                    s::Response::Cond(s::CondResponse {
+                        cond: s::RespCondType::Ok,
+                        code: Some(s::RespTextCode::HighestModseq(
+                            divergent_modseq.raw(),
+                        )),
+                        quip: Some(Cow::Borrowed(
+                            "Snapshot diverged from reality",
+                        )),
+                    }),
+                )
+                .await;
             }
         }
 
         Ok(())
     }
 
+    /// Performs preflight checks before idling.
+    ///
+    /// If this returns a response, IDLE is not currently possible. That
+    /// response should be sent as the response to IDLE and the IDLE workflow
+    /// must be aborted.
+    ///
+    /// If this returns no response, the `+ idling` continuation line should be
+    /// sent, then `cmd_idle` invoked to perform idling.
+    pub fn cmd_idle_preflight(
+        &mut self,
+        tag: &str,
+    ) -> Option<s::ResponseLine<'static>> {
+        if let Err(e) = account!(self) {
+            return Some(maybe_tagged_response(Cow::Owned(tag.to_owned()), e));
+        }
+
+        if let Err(e) = selected!(self) {
+            return Some(maybe_tagged_response(Cow::Owned(tag.to_owned()), e));
+        }
+
+        None
+    }
+
     /// The IDLE command.
     ///
-    /// This needs to be dispatched directly by server.rs since it interacts
-    /// with the protocol flow.
+    /// This idles on the currently selected mailbox until `cancel` completes
+    /// or an error occurs. Data is sent through `sender` as it becomes
+    /// available.
     ///
-    /// `before_first_idle` is invoked after the first idle operation is
-    /// prepared but before any waiting happens. This is used to send the
-    /// continuation line back to the client.
+    /// This is not cancel-safe if the connection is expected to continue being
+    /// used. Dropping the future before it completes may result in updates to
+    /// the mailbox state that have not been sent to the client.
     ///
-    /// `keep_idling` is invoked each time immediately before idling is
-    /// performed on the given listener. If it returns `false`, the idle
-    /// command ends.
-    ///
-    /// `after_poll` is invoked each time immediately after sending poll
-    /// responses. It is used to flush the output stream.
-    pub fn cmd_idle<'a>(
+    /// The returned response should be sent as a tagged response line.
+    pub async fn cmd_idle(
         &mut self,
-        before_first_idle: impl FnOnce() -> Result<(), Error>,
-        mut keep_idling: impl FnMut(&IdleListener) -> bool,
-        mut after_poll: impl FnMut() -> Result<(), Error>,
-        tag: Cow<'a, str>,
-        sender: SendResponse<'_>,
-    ) -> s::ResponseLine<'a> {
-        let mut before_first_idle = Some(before_first_idle);
-
+        tag: &str,
+        mut sender: SendResponse,
+        mut cancel: tokio::sync::oneshot::Receiver<()>,
+    ) -> s::ResponseLine<'static> {
         let result = loop {
-            let selected = match selected!(self) {
-                Ok(s) => s,
-                Err(e) => break Err(e),
-            };
+            let account = self
+                .account
+                .as_mut()
+                .expect("account was validated by cmd_idle_preflight");
+            let selected = self
+                .selected
+                .as_mut()
+                .expect("selected was validated by cmd_idle_preflight");
 
-            let listener = match selected
-                .stateless()
-                .prepare_idle()
-                .map_err(map_error!(self))
-            {
-                Ok(l) => l,
-                Err(e) => break Err(e),
-            };
+            tokio::select! {
+                _ = &mut cancel => break Ok(()),
+                r = account.idle(selected) => match r {
+                    Ok(poll) => {
+                        self.send_full_poll_responses(&mut sender, poll).await;
+                        send_event(&mut sender, OutputEvent::Flush).await;
+                    },
 
-            if let Err(e) = self.full_poll(sender).map_err(map_error!(self)) {
-                break Err(e);
-            }
-
-            if let Err(e) = after_poll().map_err(map_error!(self)) {
-                break Err(e);
-            }
-
-            if let Some(before_first_idle) = before_first_idle.take() {
-                if let Err(e) = before_first_idle().map_err(map_error!(self)) {
-                    break Err(e);
-                }
-            }
-
-            if !keep_idling(&listener) {
-                break Ok(());
-            }
-
-            if let Err(e) = listener
-                .idle()
-                .map_err(Error::from)
-                .map_err(map_error!(self))
-            {
-                break Err(e);
+                    Err(e) => break Err(e),
+                },
             }
         };
 
-        if let Err(response) = result {
-            if before_first_idle.is_some() {
-                // We never sent the continuation line, so we're ok to return
-                // the response
-                s::ResponseLine {
-                    tag: Some(tag),
-                    response,
-                }
-            } else {
-                // We sent a continuation line. We're not allowed to return any
-                // tagged response, so die instead.
-                let response = if self
-                    .selected
-                    .as_ref()
-                    .map_or(true, |s| s.stateless().is_ok())
+        let result = result.map_err(map_error!(
+            self,
+            NxMailbox => (Bye, None),
+            MailboxUnselectable => (Bye, None),
+        ));
+        let response = match result {
+            Ok(()) => s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::Ok,
+                code: None,
+                quip: None,
+            }),
+            Err(mut e) => {
+                if let s::Response::Cond(s::CondResponse {
+                    ref mut cond, ..
+                }) = e
                 {
-                    s::Response::Cond(s::CondResponse {
-                        cond: s::RespCondType::Bye,
-                        code: Some(s::RespTextCode::ServerBug(())),
-                        quip: Some(Cow::Borrowed("Unexpected internal error")),
-                    })
-                } else {
-                    s::Response::Cond(s::CondResponse {
-                        cond: s::RespCondType::Bye,
-                        code: None,
-                        quip: Some(Cow::Borrowed("Mailbox deleted or renamed")),
-                    })
-                };
-
-                s::ResponseLine {
-                    tag: None,
-                    response,
+                    // We aren't allowed to send a tagged NO response once
+                    // we've sent the continuation line, so we need to commit
+                    // to hanging up the connection instead.
+                    *cond = s::RespCondType::Bye;
                 }
-            }
-        } else {
-            s::ResponseLine {
-                tag: Some(tag),
-                response: s::Response::Cond(s::CondResponse {
-                    cond: s::RespCondType::Ok,
-                    code: None,
-                    quip: Some(Cow::Borrowed("IDLE done")),
-                }),
-            }
-        }
+
+                e
+            },
+        };
+
+        maybe_tagged_response(Cow::Owned(tag.to_owned()), response)
     }
 }
 
 pub(super) fn capability_data() -> s::CapabilityData<'static> {
     s::CapabilityData {
         capabilities: CAPABILITIES.iter().copied().map(Cow::Borrowed).collect(),
+    }
+}
+
+fn maybe_tagged_response(
+    tag: Cow<'_, str>,
+    res: s::Response<'static>,
+) -> s::ResponseLine<'static> {
+    if matches!(
+        res,
+        s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Bye,
+            ..
+        })
+    ) {
+        // BYE is never tagged
+        s::ResponseLine {
+            tag: None,
+            response: res,
+        }
+    } else {
+        s::ResponseLine {
+            tag: Some(Cow::Owned(tag.into_owned())),
+            response: res,
+        }
     }
 }

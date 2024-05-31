@@ -3,7 +3,8 @@
 ## crymap.toml
 
 Below is an example `crymap.toml` with every option explicitly set to the
-default and comments explaining what each one does.
+default (or an example value if there is no default) and comments explaining
+what each one does.
 
 ```toml
 [tls]
@@ -18,6 +19,8 @@ certificate_chain = "<no default>"
 # `support_url` is probably the most important one since some mail clients
 # can use it to help the user get assistance.
 # Underscores in key names are replaced with hyphens.
+# The contents of this section is examples and not defaults, as the default
+# configuration is empty.
 [identification]
 vendor = "Example Company"
 support_url = "mailto:it@example.com"
@@ -48,10 +51,17 @@ chroot_system = false
 # given here.
 system_user = ""
 
-# The [lmtp] section applies when Crymap is run with `crymap server serve-lmtp`.
-[lmtp]
+# The [smtp] section applies when Crymap is run with `crymap server serve-lmtp`,
+# `crymap server serve-smtpin`, `crymap server serve-smtpsub`, and
+# `crymap server serve-smtpssub`.
+#
+# In Crymap 1.x, this section was called `[lmtp]`, and that name is still
+# supported for backwards-compatibility.
+[smtp]
 # If non-empty, Crymap will report this value as its hostname.
 # By default, Crymap reports the system host name.
+# Explicit configuration of this value is required for outbound SMTP support
+# as a fully-qualified domain is required in that case.
 host_name = ""
 
 # By default, Crymap will strip everything after the `@` in destination
@@ -72,7 +82,46 @@ keep_recipient_domain = false
 # happen. Note that this means that your SMTP daemon must make the
 # normalisations you want. Most importantly, enabling this option will make
 # Crymap mail delivery CASE SENSITIVE TO USER NAMES.
+#
+# You probably shouldn't set this to true if Crymap is fronting SMTP itself.
 verbatim_user_names = false
+
+# By default, Crymap evaluates DMARC for inbound SMTP but does not take any
+# action on DMARC failures.
+# If set to true, Crymap will reject inbound SMTP transactions if the DMARC
+# evaluation fails and the DMARC record requests to reject such failures.
+#
+# This has no effect on LMTP or SMTP submission.
+reject_dmarc_failures = false
+
+# If enabled, receipts produced for outbound SMTP transactions will include
+# very verbose details about TLS handshakes.
+verbose_outbound_tls = false
+
+# Each entry under `smtp.domains` describes an SMTP domain the Crymap server
+# will support. You only need to configure this if Crymap is handling SMTP
+# itself.
+# Simply defining a table, even if empty, is sufficient to make Crymap consider
+# the domain usable.
+[smtp.domains."example.com"]
+# Each value under `dkim` defines a DKIM key which will be used to sign
+# messages originating from this domain. They have no effect on inbound
+# messages.
+#
+# The part after `dkim.` is the DKIM selector. The value is either `rsa:DATA`,
+# where DATA is a base64-encoded RSA private key in DER format, or
+# `ed25519:DATA`, where DATA is a base64-encoded ED25519 private key in raw
+# format.
+#
+# If there are multiple keys for one domain, they will all be used to sign the
+# message, in lexicographical order. Note that Microsoft Exchange only examines
+# the first DKIM header on a message, and fails the message if it does not know
+# about the signature algorithm. As of 2024-05, it does not understand ED25519,
+# so you should ensure that the first key (in lexicographical order, not
+# necessarily the written in the configuration) is a reasonably-sized RSA key
+# if you care about talking to people on Exchange/Outlook.com/Hotmail/etc.
+dkim.selector1 = "rsa:MIQU2whmZwg<VERY LONG STRING...>"
+dkim.selector2 = "ed25519:13SSM<LONG STRING...>"
 
 [diagnostic]
 # If set, redirect standard error to this file on startup.

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -18,12 +18,13 @@
 
 //! This module contains everything to do with a single user's data: their
 //! mailboxes, their settings, their keys.
+//!
+//! Unversioned submodules are not storage-implementation-specific.
 
-pub(crate) mod account;
-mod hier_id_scheme;
-pub(crate) mod key_store;
-pub(crate) mod mailbox;
-pub(crate) mod mailbox_path;
-mod mailbox_state;
-pub(crate) mod model;
-mod recency_token;
+pub mod key_store;
+mod message_format;
+pub mod model;
+mod search_backend;
+
+mod v1;
+pub mod v2;

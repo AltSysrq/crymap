@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2022, Jason Lingle
+// Copyright (c) 2020, 2022, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -20,16 +20,21 @@ use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::fmt;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use log::error;
 
-use crate::account::{
-    account::Account,
-    mailbox::{StatefulMailbox, StatelessMailbox},
-    model::*,
+use crate::{
+    account::{
+        model::*,
+        v2::{Account, Mailbox},
+    },
+    imap::response_writer::{OutputControl, OutputEvent},
+    support::{
+        dns, error::Error, log_prefix::LogPrefix, system_config::SystemConfig,
+    },
 };
-use crate::support::{error::Error, system_config::SystemConfig};
 
 pub(super) use crate::imap::syntax as s;
 
@@ -56,6 +61,7 @@ pub(super) static CAPABILITIES: &[&str] = &[
     "OBJECTID",
     "QRESYNC",
     "SASL-IR",
+    "SAVEDATE",
     "SEARCHRES",
     "SPECIAL-USE",
     "STATUS=SIZE",
@@ -88,18 +94,25 @@ pub(super) static TAGLINE: &str = concat!(
 /// command does multiple distinct actions (e.g. `FETCH BODY[]` does an
 /// implicit `STORE`, `CLOSE` does an implicit `EXPUNGE`).
 pub struct CommandProcessor {
-    pub(super) log_prefix: String,
+    pub(super) log_prefix: LogPrefix,
     pub(super) system_config: Arc<SystemConfig>,
+    pub(super) dns_resolver: Option<Rc<dns::Resolver>>,
     pub(super) data_root: PathBuf,
 
     pub(super) account: Option<Account>,
-    pub(super) selected: Option<StatefulMailbox>,
+    pub(super) selected: Option<Mailbox>,
     pub(super) searchres: SeqRange<Uid>,
     pub(super) unicode_aware: bool,
     pub(super) utf8_enabled: bool,
     pub(super) condstore_enabled: bool,
     pub(super) qresync_enabled: bool,
     pub(super) imap4rev2_enabled: bool,
+
+    /// Whether implicit `* FLAGS` responses are sent when new flags are
+    /// discovered. Controlled by `XCRY FLAGS (ON|OFF)`. This is used by the
+    /// integration tests to prevent cross-talk noise since flags are
+    /// account-wide.
+    pub(super) flag_responses_enabled: bool,
 
     pub(super) multiappend: Option<Multiappend>,
 
@@ -109,7 +122,7 @@ pub struct CommandProcessor {
 }
 
 pub(super) struct Multiappend {
-    pub(super) dst: StatelessMailbox,
+    pub(super) dst: String,
     pub(super) request: AppendRequest,
 }
 
@@ -122,19 +135,54 @@ pub(super) type CmdResult = Result<s::Response<'static>, s::Response<'static>>;
 /// fail with an IMAP response.
 pub(super) type PartialResult<T> = Result<T, s::Response<'static>>;
 
-/// Function pointer used to send additional non-tagged responses.
-pub(super) type SendResponse<'a> = &'a (dyn Send + Sync + Fn(s::Response<'_>));
+/// Channel used to send additional non-tagged responses as they become
+/// available.
+pub(super) type SendResponse = tokio::sync::mpsc::Sender<OutputEvent>;
+
+/// Send an event through the sender, ignoring errors.
+///
+/// This ensures that ignoring the future entirely with `let _` doesn't happen.
+pub(super) async fn send_event(sender: &mut SendResponse, event: OutputEvent) {
+    let _ = sender.send(event).await;
+}
+
+/// Send a response through `sender`, ignoring errors.
+///
+/// `OutputControl` is set implicitly by inspecting the response.
+pub(super) async fn send_response(
+    sender: &mut SendResponse,
+    response: s::Response<'static>,
+) {
+    let ctl = match response {
+        s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::Bye,
+            ..
+        }) => OutputControl::Disconnect,
+        _ => OutputControl::Buffer,
+    };
+    let _ = sender
+        .send(OutputEvent::ResponseLine {
+            ctl,
+            line: s::ResponseLine {
+                tag: None,
+                response,
+            },
+        })
+        .await;
+}
 
 impl CommandProcessor {
     pub fn new(
-        log_prefix: String,
+        log_prefix: LogPrefix,
         system_config: Arc<SystemConfig>,
         data_root: PathBuf,
+        dns_resolver: Option<Rc<dns::Resolver>>,
     ) -> Self {
         CommandProcessor {
             log_prefix,
             system_config,
             data_root,
+            dns_resolver,
 
             account: None,
             selected: None,
@@ -144,6 +192,7 @@ impl CommandProcessor {
             condstore_enabled: false,
             qresync_enabled: false,
             imap4rev2_enabled: false,
+            flag_responses_enabled: true,
 
             multiappend: None,
 
@@ -153,15 +202,15 @@ impl CommandProcessor {
         }
     }
 
-    pub fn unicode_aware(&self) -> bool {
-        self.unicode_aware
+    pub fn is_authenticated(&self) -> bool {
+        self.account.is_some()
     }
 
     pub fn logged_out(&self) -> bool {
         self.logged_out
     }
 
-    pub fn log_prefix(&self) -> &str {
+    pub fn log_prefix(&self) -> &LogPrefix {
         &self.log_prefix
     }
 
@@ -170,10 +219,12 @@ impl CommandProcessor {
         raw: &str,
     ) -> PartialResult<SeqRange<Seqnum>> {
         if "$" == raw {
-            return Ok(selected!(self)?.uid_range_to_seqnum(&self.searchres));
+            return Ok(selected!(self)?
+                .uid_range_to_seqnum(&self.searchres, true)
+                .unwrap());
         }
 
-        let max_seqnum = selected!(self)?.max_seqnum().unwrap_or(Seqnum::MIN);
+        let max_seqnum = selected!(self)?.max_seqnum();
         let seqrange = SeqRange::parse(raw, max_seqnum).ok_or_else(|| {
             s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::Bad,
@@ -208,7 +259,7 @@ impl CommandProcessor {
             return Ok(self.searchres.clone());
         }
 
-        let max_uid = selected!(self)?.max_uid().unwrap_or(Uid::MIN);
+        let max_uid = selected!(self)?.next_uid();
         let seqrange = SeqRange::parse(raw, max_uid).ok_or_else(|| {
             s::Response::Cond(s::CondResponse {
                 cond: s::RespCondType::Bad,
@@ -260,36 +311,45 @@ where
 #[cfg(not(test))]
 pub(super) fn catch_all_error_handling(
     selected_ok: bool,
-    log_prefix: &str,
+    log_prefix: &LogPrefix,
     e: Error,
 ) -> s::Response<'static> {
     // Don't log if the selected mailbox is gone; it's probably a result of
     // that.
     if selected_ok {
         error!("{} Unhandled internal error: {}", log_prefix, e);
-    }
 
-    s::Response::Cond(s::CondResponse {
-        cond: s::RespCondType::No,
-        code: Some(s::RespTextCode::ServerBug(())),
-        quip: Some(Cow::Borrowed(
-            "Unexpected error; check server logs for details",
-        )),
-    })
-}
-
-#[cfg(test)]
-pub(super) fn catch_all_error_handling(
-    selected_ok: bool,
-    log_prefix: &str,
-    e: Error,
-) -> s::Response<'static> {
-    if !selected_ok {
         s::Response::Cond(s::CondResponse {
             cond: s::RespCondType::No,
             code: Some(s::RespTextCode::ServerBug(())),
             quip: Some(Cow::Borrowed(
                 "Unexpected error; check server logs for details",
+            )),
+        })
+    } else {
+        s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::No,
+            code: Some(s::RespTextCode::ServerBug(())),
+            quip: Some(Cow::Borrowed(
+                "Unexpected error; was the mailbox deleted?",
+            )),
+        })
+    }
+}
+
+#[cfg(test)]
+pub(super) fn catch_all_error_handling(
+    selected_ok: bool,
+    log_prefix: &LogPrefix,
+    e: Error,
+) -> s::Response<'static> {
+    if !selected_ok {
+        error!("{} Unhandled error, but !selected_ok: {}", log_prefix, e);
+        s::Response::Cond(s::CondResponse {
+            cond: s::RespCondType::No,
+            code: Some(s::RespTextCode::ServerBug(())),
+            quip: Some(Cow::Borrowed(
+                "Unexpected error; was the mailbox deleted?",
             )),
         })
     } else {

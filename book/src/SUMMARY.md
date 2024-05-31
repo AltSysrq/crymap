@@ -10,6 +10,7 @@
   - [Backups and Recovery](admin-guide/backups.md)
   - [Understanding the Filesystem](admin-guide/filesystem.md)
   - [Tuning](admin-guide/tuning.md)
+  - [Migration from Crymap 1.x](admin-guide/migration.md)
 - [User Guide](user-guide.md)
 - [IMAP Characteristics](imap.md)
-- [LMTP Characteristics](lmtp.md)
+- [SMTP/LMTP Characteristics](smtp.md)

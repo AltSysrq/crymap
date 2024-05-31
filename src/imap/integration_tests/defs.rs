@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -28,17 +28,19 @@ use lazy_static::lazy_static;
 use regex::bytes::Regex;
 use tempfile::TempDir;
 
-use crate::account::account::Account;
-use crate::account::model::Flag;
-use crate::crypt::master_key::MasterKey;
-use crate::imap::client::Client;
-use crate::imap::command_processor::CommandProcessor;
-use crate::imap::literal_source::LiteralSource;
-use crate::imap::mailbox_name::MailboxName;
-use crate::imap::server::Server;
-use crate::support::error::Error;
-use crate::support::system_config::*;
 use crate::test_data::*;
+use crate::{
+    account::{model::Flag, v2::Account},
+    crypt::master_key::MasterKey,
+    imap::{
+        client::Client, command_processor::CommandProcessor,
+        literal_source::LiteralSource, mailbox_name::MailboxName,
+    },
+    support::{
+        async_io::ServerIo, chronox::*, error::Error, log_prefix::LogPrefix,
+        system_config::*,
+    },
+};
 
 pub(super) use crate::imap::syntax as s;
 
@@ -70,11 +72,12 @@ pub fn set_up_new_root() -> Setup {
     let user_dir = system_dir.path().join("azure");
     fs::create_dir(&user_dir).unwrap();
 
-    let account = Account::new(
-        "initial-setup".to_owned(),
+    let mut account = Account::new(
+        LogPrefix::new("initial-setup".to_owned()),
         user_dir,
-        Some(Arc::new(MasterKey::new())),
-    );
+        Arc::new(MasterKey::new()),
+    )
+    .unwrap();
     account.provision(b"hunter2").unwrap();
 
     Setup { system_dir }
@@ -94,31 +97,34 @@ impl Setup {
         let data_root: PathBuf = self.system_dir.path().to_owned();
 
         std::thread::spawn(move || {
-            let processor = CommandProcessor::new(
-                name.to_owned(),
-                Arc::new(SystemConfig::default()),
-                data_root,
-            );
-            let mut server = Server::new(
-                io::BufReader::new(server_in),
-                io::BufWriter::new(server_out),
-                processor,
-            );
-
-            match server.run() {
-                Ok(()) => (),
-                Err(crate::support::error::Error::Io(e))
-                    if io::ErrorKind::UnexpectedEof == e.kind()
-                        || Some(nix::libc::EPIPE) == e.raw_os_error() =>
-                {
-                    ()
-                }
-                Err(e) => panic!("Unexpected server error: {}", e),
-            }
+            run_imap_server(name, data_root, server_in, server_out);
         });
 
         Client::new(io::BufReader::new(client_in), client_out, Some(name))
     }
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn run_imap_server(
+    name: &'static str,
+    data_root: PathBuf,
+    server_in: UnixStream,
+    server_out: UnixStream,
+) {
+    let processor = CommandProcessor::new(
+        LogPrefix::new(name.to_owned()),
+        Arc::new(SystemConfig {
+            smtp: SmtpConfig {
+                host_name: "mx.example.com".to_owned(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+        data_root,
+        None,
+    );
+    let io = ServerIo::new_owned_pair(server_in, server_out).unwrap();
+    crate::imap::server::run(io, processor).await;
 }
 
 pub fn receive_line_like(client: &mut PipeClient, pat: &str) {
@@ -155,6 +161,9 @@ pub fn quick_log_in(client: &mut PipeClient) {
         .unwrap();
 
     assert_eq!(1, responses.len());
+
+    // Disable flags responses by default to prevent test cross-talk.
+    ok_command!(client, s::Command::Simple(s::SimpleCommand::XCryFlagsOff));
 }
 
 pub fn quick_create(client: &mut PipeClient, mailbox: &str) {
@@ -234,7 +243,7 @@ pub fn examine_shared(client: &mut PipeClient) {
     quick_select(client, MBOX);
 
     fn internal_date_for_uid(uid: u32) -> Option<DateTime<FixedOffset>> {
-        Some(FixedOffset::east(0).ymd(2020, 1, uid).and_hms(0, 0, 0))
+        Some(FixedOffset::zero().ymd_hmsx(2020, 1, uid, 0, 0, 0))
     }
 
     macro_rules! append {
@@ -263,7 +272,6 @@ pub fn examine_shared(client: &mut PipeClient) {
     append!(5, Some(vec![Flag::Seen]), ENRON_SMALL_MULTIPARTS[2]);
     append!(6, None, ENRON_SMALL_MULTIPARTS[3]);
     ok_command!(client, c("XVANQUISH 6"));
-    ok_command!(client, c("XCRY PURGE"));
     append!(
         7,
         Some(vec![Flag::Keyword("$Important".to_owned())]),
@@ -399,7 +407,7 @@ pub fn list_results_to_str(lines: Vec<s::ResponseLine<'_>>) -> String {
                 }
 
                 ret.push('\n');
-            }
+            },
 
             line => panic!("Unexpected response line: {:?}", line),
         }
@@ -426,7 +434,7 @@ pub fn lsub_results_to_str(lines: Vec<s::ResponseLine<'_>>) -> String {
                     ret.push_str(&flag);
                 }
                 ret.push('\n');
-            }
+            },
 
             line => panic!("Unexpected response line: {:?}", line),
         }

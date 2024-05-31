@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -18,6 +18,8 @@
 
 use std::borrow::Cow;
 use std::fmt;
+
+use chrono::prelude::*;
 
 use super::grovel::Visitor;
 use super::header;
@@ -91,8 +93,19 @@ impl<V: Visitor + ?Sized> Visitor for ContentDecoder<V> {
         self.delegate.uid(uid)
     }
 
+    fn email_id(&mut self, id: &str) -> Result<(), Self::Output> {
+        self.delegate.email_id(id)
+    }
+
     fn last_modified(&mut self, modseq: Modseq) -> Result<(), Self::Output> {
         self.delegate.last_modified(modseq)
+    }
+
+    fn savedate(
+        &mut self,
+        savedate: DateTime<Utc>,
+    ) -> Result<(), Self::Output> {
+        self.delegate.savedate(savedate)
     }
 
     fn want_flags(&self) -> bool {
@@ -109,6 +122,10 @@ impl<V: Visitor + ?Sized> Visitor for ContentDecoder<V> {
 
     fn end_flags(&mut self) -> Result<(), Self::Output> {
         self.delegate.end_flags()
+    }
+
+    fn rfc822_size(&mut self, size: u32) -> Result<(), Self::Output> {
+        self.delegate.rfc822_size(size)
     }
 
     fn metadata(
@@ -220,6 +237,10 @@ impl<V: Visitor + ?Sized> Visitor for ContentDecoder<V> {
         // drop.
         self.delegate.end()
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        panic!("missing method on ContentDecoder")
+    }
 }
 
 impl ContentDecoderImpl {
@@ -231,11 +252,11 @@ impl ContentDecoderImpl {
             CTE::Base64 => {
                 self.decode_base64(data);
                 &self.cte_buffer
-            }
+            },
             CTE::QuotedPrintable => {
                 self.decode_qp(data);
                 &self.cte_buffer
-            }
+            },
         };
 
         if self.decode_utf7 {
@@ -296,7 +317,7 @@ impl ContentDecoderImpl {
                 | b'=' => {
                     self.input_buffer.push(byte);
                     pushed_any = true;
-                }
+                },
                 _ => (),
             }
         }
@@ -384,7 +405,7 @@ mod test {
         subscripts: Vec<u32>,
     ) -> Vec<u8> {
         let (_, result) = grovel::grovel(
-            &grovel::SimpleAccessor {
+            &mut grovel::SimpleAccessor {
                 data: message.into(),
                 ..grovel::SimpleAccessor::default()
             },

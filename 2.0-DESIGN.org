@@ -1,0 +1,251 @@
+#+STARTUP: fold
+
+These are the design notes made when planning and initially developing v2.0.
+They will not be updated to reflect reality beyond that point.
+
+* Simpler SQLite-backed storage model
+
+1.0 uses a filesystem-as-a-database model to be friendly to backup tools. This
+arose because I failed to consider the possibility of keeping metadata in a
+database and messages in separate files. We could simplify the code and do away
+with some filesystem weirdness (such as deliberately making broken symlinks) by
+moving the metadata to a database.
+
+The new structure would look like this:
+
+- `user.toml` - as is currently.
+
+- `keys` - as is currently.
+
+- `tmp` - as is currently.
+
+- `socks` - similar to what's currently used, but no longer specific to any
+  particular mailbox. (And, since path length limitations are no longer a
+  concern, it can hold real sockets instead of broken symlinks).
+
+- `messages` - This directory tree contains all messages.
+
+- `delivery.sqlite` - A cleartext database used for not-logged-in message
+  delivery processes to notify IMAP clients about new messages.
+
+- `meta.sqlite` - The user's database file.
+
+- `backups` - Stores backup copies of the database and user configuration (so
+  `user.toml` would now get backed up here too instead of in `tmp`).
+
+** Messages directory
+
+Design goals:
+
+- Messages are delivered by being dropped in here.
+- One file per message.
+- There is no distinction between message delivery and restoring the database
+  from an old backup --- messages not represented in the database should just
+  be delivered to the inbox.
+- We need to tolerate arbitrary backup inconsistencies --- e.g. a newer message
+  being present but an older one being absent.
+- Discovery of messages that need to be added to the inbox should be efficient.
+
+There isn't any way to tolerate the arbitrary inconsistency without just
+scanning all the files.
+
+So what we do is:
+
+- Each message is stored at `messages/XX/XXX...`, where `XXXX...` is the
+  hexadecimal representation of the SHA-3 of the file.
+
+- When a message is delivered by an external process, information about the
+  message is added to `delivery.sqlite`. When an IMAP process eventually
+  discovers the files, it adds them to the user database and removes them from
+  this one.
+
+- Once per 24 hours, when `INBOX` is opened, a full scan is made for
+  unaccounted files.
+
+The actual message format is unchanged from 1.0.
+
+** Database file
+
+All information about mailboxes and message metadata is stored in a single
+database file. The database uses SQLite's VFS layer to transparently encrypt
+the database in XEX mode, which means we can keep the sector size reported to
+SQLite the same and can pass through all the atomic write flags. It also keeps
+"SQLite sectors" aligned to actual FS sectors. While we'll need to do
+read-modify-write operations if a write is not aligned to a block boundary, the
+SQLite docs imply that won't actually happen, and even if it does, SQLite
+doesn't actually use concurrent readers and writers on the same file.
+
+At most once per day, SQLite's built-in backup functionality is used to create
+a database backup under `backups`. All but the newest 7 backups are deleted
+automatically. This ensures that even if a backup tool captures a corrupt copy
+of the main database, there will be fully consistent backups available to
+restore. Automatically detecting the need for doing so would be difficult and
+slow down normal operation too much, but it's easy enough for an admin to do
+when restoring a whole system from backup.
+
+Possible schema:
+
+#+BEGIN_SRC sql
+  CREATE TABLE mailbox (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    path TEXT NOT NULL,
+    special_use TEXT,
+    -- The next UID to provision for a message.
+    next_uid INTEGER NOT NULL,
+    -- The UID of the first message to mark as "recent".
+    recent_uid INTEGER NOT NULL,
+    -- The first modification sequence number that has not been used in this
+    -- mailbox. Unlike in Crymap 1.0, this is not a vector clock since we can
+    -- globally coordinate increments. The modseq 1 is the initial state of the
+    -- mailbox, so `next_modseq` starts at 2.
+    next_modseq INTEGER NOT NULL,
+    -- The modseq at which new flags were last defined for this mailbox.
+    flags_modseq INTEGER NOT NULL,
+    -- The modseq at which a new message was last appended.
+    append_modseq INTEGER NOT NULL,
+    -- The modseq at which a new message was last expunged.
+    expunge_modseq INTEGER NOT NULL
+  ) STRICT;
+
+  CREATE TABLE message (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    sha3 BLOB NOT NULL,
+    -- The session key is decrypted when the message is added to the database and
+    -- used thereafter. This gives a substantial performance improvement when
+    -- reading messages since RSA is slow.
+    session_key BLOB NOT NULL,
+    -- The decompressed and decrypted size of the message (i.e. RFC822.SIZE).
+    size INTEGER NOT NULL,
+    -- The last time (UNIX timestamp) the message was expunged from any mailbox.
+    --
+    -- This is used to identify when it is safe to delete orphaned messages.
+    last_expunged INTEGER
+  ) STRICT;
+
+  CREATE TABLE mailbox_message (
+    mailbox_id INTEGER NOT NULL,
+    uid INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    -- The SAVEDATE attribute (UNIX time) of this instantiation of the message.
+    savedate INTEGER NOT NULL,
+    -- The modseq at which this message was appended.
+    append_modseq INTEGER NOT NULL,
+    -- The modseq at which this message's flags were last modified.
+    flags_modseq INTEGER NOT NULL,
+    PRIMARY KEY (mailbox_id, uid),
+    FOREIGN KEY (mailbox_id) REFERENCES mailbox (id),
+    FOREIGN KEY (message_id) REFERENCES message (id)
+  ) STRICT WITHOUT ROWID;
+
+  CREATE TABLE mailbox_flag (
+    mailbox_id INTEGER NOT NULL,
+    local_id INTEGER NOT NULL,
+    flag TEXT NOT NULL,
+    PRIMARY KEY (mailbox_id, local_id),
+    UNIQUE KEY (mailbox_id, flag)
+  ) STRICT;
+
+  CREATE TABLE mailbox_message_flag (
+    mailbox_id INTEGER NOT NULL,
+    uid INTEGER NOT NULL,
+    flag_id INTEGER NOT NULL,
+    PRIMARY KEY (mailbox_id, uid, flag_id),
+    FOREIGN KEY (mailbox_id, uid) REFERENCES mailbox_message (mailbox_id, uid),
+    FOREIGN KEY (mailbox_id, flag_id) REFERENCES mailbox_flag (mailbox_id, flag_id),
+  ) STRICT WITHOUT ROWID;
+
+  -- Tracks the modseq of when each UID was expunged from its mailbox. It is used
+  -- by QRESYNC and mailbox polling to discover expunge events. Unlike in V1,
+  -- this is allowed to grow without bound, and is only cleaned up when the whole
+  -- mailbox is deleted, since it does not need to be held in memory.
+  CREATE TABLE mailbox_message_expungement (
+    mailbox_id INTEGER NOT NULL,
+    uid INTEGER NOT NULL,
+    expunged_modseq INTEGER NOT NULL,
+    -- This primary key + WITHOUT ROWID means that it is extremely efficient to
+    -- scan in everything that changed after a certain point.
+    PRIMARY KEY (mailbox_id, expunged_modseq, uid),
+    FOREIGN KEY (mailbox_id) REFERENCES (mailbox, id)
+  ) STRICT WITHOUT ROWID;
+
+  CREATE TABLE subscription (
+    path TEXT NOT NULL PRIMARY KEY
+  ) STRICT;
+#+END_SRC
+
+* SMTP support
+
+The primary motivation is, as of 2023-11-26, the version of OpenSMTPD in the
+FreeBSD package system is incompatible with the version of OpenSSL in
+FreeBSD 14. I want to eliminate that third-party dependency.
+
+Other motivations:
+
+- DKIM support. On OpenSMTPD, this involves a hacky OpenSMTPD -> DKIM proxy ->
+  OpenSMTPD SMTP relay chain. Crymap should have DKIM built in.
+
+- It would make Crymap the sole source of truth for what users exist and what
+  their credentials are.
+
+- Sending email via OpenSMTPD causes the cleartext to be written to disk.
+
+** Inbound SMTP
+
+Most of this is already done for LMTP. The main consideration is that we need
+to ensure we reject mail addressed to the wrong domain so that the server
+doesn't look like an open relay.
+
+There won't be any filtering support. I have no need for that.
+
+** Outbound SMTP
+
+Crymap will be a *synchronous* outbound SMTP relay. In other words, when it
+receives an `RCPT TO`, it immediately connects to the destination server and
+initiates the mail transaction there. Mail data is immediately fanned out.
+
+We end up with three types of results:
+
+- Total success.
+- Total failure, where all outbound transactions failed. This gets reported
+  back to the client as a failure.
+- Partial failure. SMTP gives us no way to report on that; instead, we deliver
+  an email to the sender explaining the problem.
+
+Optional configuration will allow sending reports for success and total failure
+as well, to aid in debugging.
+
+There will be a configuration option to use a specific host:port to handle all
+outbound messages, for the use case where having Crymap handle authentication
+and DKIM but a regular spooling MTA actually send the email.
+
+* Daemon
+
+Configuring Crymap to run via inetd has the disadvantage that certain failures
+get reported over the socket. It's also extra setup. A Crymap daemon which just
+listens on the respective ports and forks off processes itself would address
+these issues.
+
+* Single-threaded
+
+Crymap 1.0 uses multi-threading for two general cases:
+
+- Reading many messages at once. This is useful because RSA is so slow. With
+  session keys being cached in the database, the optimisation is no longer
+  required.
+
+- Implementing IDLE. This could be better done with single-threaded async code.
+
+Going single-threaded reduces resource usage, which is important for a
+process-per-connection design.
+
+* New IMAP features
+
+The SAVEDATE extension becomes supportable with the new message storage system.
+
+* Sieve support?
+
+RFC 5804. There's a Thunderbird extension that uses it. This is an entirely
+separate IMAP-like protocol instead of being an IMAP extension, for some
+reason. (The `IMAPSIEVE` extension is different and weird.)
+
+* end of file (org-mode workaround)

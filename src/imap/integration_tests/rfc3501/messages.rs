@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -71,11 +71,13 @@ fn append_with_new_flag() {
     quick_create(&mut client, "3501meaf");
     quick_select(&mut client, "3501meaf");
 
+    ok_command!(client, c("XCRY FLAGS ON"));
+
     client
         .start_append(
             "3501meaf",
             s::AppendFragment {
-                flags: Some(vec![Flag::Keyword("plugh".to_owned())]),
+                flags: Some(vec![Flag::Keyword("3501meaf".to_owned())]),
                 ..s::AppendFragment::default()
             },
             ENRON_SMALL_MULTIPARTS[0],
@@ -87,7 +89,7 @@ fn append_with_new_flag() {
     assert_tagged_ok_any(responses.pop().unwrap());
     has_untagged_response_matching! {
         s::Response::Flags(ref flags) in responses => {
-            assert!(flags.contains(&Flag::Keyword("plugh".to_owned())));
+            assert!(flags.contains(&Flag::Keyword("3501meaf".to_owned())));
         }
     };
 }
@@ -164,8 +166,8 @@ fn append_copy_nx_destination() {
     command!([response] = client, c("COPY 1 ../foo"));
     assert_error_response(
         response,
-        Some(s::RespTextCode::Cannot(())),
-        Error::UnsafeName,
+        Some(s::RespTextCode::TryCreate(())),
+        Error::NxMailbox,
     );
 
     command!([response] = client, c("COPY 1 3501meac/noselect"));
@@ -193,8 +195,8 @@ fn append_copy_nx_destination() {
     let response = client.read_one_response(&mut buffer).unwrap();
     assert_error_response(
         response,
-        Some(s::RespTextCode::Cannot(())),
-        Error::UnsafeName,
+        Some(s::RespTextCode::TryCreate(())),
+        Error::NxMailbox,
     );
 
     client
@@ -223,21 +225,12 @@ fn copy_expunged() {
     quick_select(&mut client2, "3501mecx");
 
     ok_command!(client2, c("XVANQUISH 1:2"));
-    ok_command!(client2, c("XCRY PURGE"));
 
-    command!([response] = client, c("COPY 1 3501mecx"));
-    assert_error_response(
-        response,
-        Some(s::RespTextCode::ExpungeIssued(())),
-        Error::ExpungedMessage,
-    );
-
-    command!([response] = client, c("COPY 1:2 3501mecx"));
-    assert_error_response(
-        response,
-        Some(s::RespTextCode::ExpungeIssued(())),
-        Error::ExpungedMessage,
-    );
+    command!(mut responses = client, c("COPY 1 3501mecx"));
+    unpack_cond_response! {
+        (Some(_), s::RespCondType::No, None, Some(_)) =
+            responses.pop().unwrap() => ()
+    };
 }
 
 #[test]

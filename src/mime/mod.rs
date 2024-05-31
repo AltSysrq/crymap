@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -17,9 +17,10 @@
 // Crymap. If not, see <http://www.gnu.org/licenses/>.
 
 mod content_encoding;
+pub mod dkim;
 pub mod encoded_word;
 pub mod fetch;
 pub mod grovel;
-mod header;
+pub mod header;
 mod quoted_printable;
 pub mod utf7;

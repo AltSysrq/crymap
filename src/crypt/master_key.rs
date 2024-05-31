@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -53,11 +53,14 @@ use secstr::SecBox;
 use serde::{Deserialize, Serialize};
 use tiny_keccak::{Hasher, Kmac};
 
+use super::AES_BLOCK;
 use crate::support::user_config::b64;
 
 const MASTER_SIZE: usize = 32;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
 #[allow(non_camel_case_types)]
 pub enum Algorithm {
     /// Use the Argon2i 1.3 algorithm with a memory cost of 4MB, time cost of
@@ -65,13 +68,8 @@ pub enum Algorithm {
     ///
     /// The final password hash is `KMAC256(salt, argon2_hash, 32, "check")`.
     /// The derived key is `KMAC256(salt, argon_hash, 32, "master")`
+    #[default]
     Argon2i_V13_M4096_T10_L1_Kmac256,
-}
-
-impl Default for Algorithm {
-    fn default() -> Self {
-        Algorithm::Argon2i_V13_M4096_T10_L1_Kmac256
-    }
 }
 
 /// Configuration which represents the derivation of the master key.
@@ -129,7 +127,49 @@ impl MasterKey {
 
         let mut hash = [0u8; 32];
         k.finalize(&mut hash);
-        base64::encode(&hash)
+        base64::encode(hash)
+    }
+
+    /// Generates the key to use for XEX mode on the given file.
+    pub(super) fn xex_key(&self, filename: &str) -> [u8; AES_BLOCK] {
+        let mut k = Kmac::v128(self.master_key.unsecure(), b"xex-key");
+        k.update(filename.as_bytes());
+
+        let mut hash = [0u8; AES_BLOCK];
+        k.finalize(&mut hash);
+        hash
+    }
+
+    /// Generates the nonce to use for XEX mode on the given file.
+    pub(super) fn xex_nonce(&self, filename: &str) -> [u8; AES_BLOCK] {
+        let mut k = Kmac::v128(self.master_key.unsecure(), b"xex-nonce");
+        k.update(filename.as_bytes());
+
+        let mut hash = [0u8; AES_BLOCK];
+        k.finalize(&mut hash);
+        hash
+    }
+
+    /// Encrypts or decrypts a cached session key.
+    ///
+    /// The session key is encrypted by XORing it with a one-time-pad generated
+    /// by KMAC-128. This is an extra layer of protection over the XEX-mode
+    /// encryption used on the database that contains the cached session keys
+    /// since XEX-mode is less secure than non-random-write modes.
+    pub(super) fn crypt_cached_session_key(
+        &self,
+        session_key: &mut [u8; AES_BLOCK],
+        message_id: i64,
+    ) {
+        let mut k = Kmac::v128(self.master_key.unsecure(), b"session-key-otp");
+        k.update(&message_id.to_le_bytes());
+
+        let mut hash = [0u8; AES_BLOCK];
+        k.finalize(&mut hash);
+
+        for (sk, h) in session_key.iter_mut().zip(&hash) {
+            *sk ^= h;
+        }
     }
 
     /// Given this key and a password, generate a `MasterKeyConfig` which can

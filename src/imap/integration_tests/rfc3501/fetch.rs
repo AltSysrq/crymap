@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -22,7 +22,7 @@ use chrono::prelude::*;
 
 use super::super::defs::*;
 use crate::account::model::Flag;
-use crate::support::error::Error;
+use crate::support::chronox::*;
 use crate::test_data::*;
 
 #[test]
@@ -419,7 +419,7 @@ fn check_torture_test_body_structure(bs: &s::Body<'_>, extended: bool) {
         s::ClassifiedBodyType1Part::Basic(ref p23c) => p23c,
         ref p23c => {
             panic!("Unexpected core structure for Part 2.3: {:#?}", p23c)
-        }
+        },
     };
     assert_eq!("application", p23_core.media_type);
     assert_eq!("andrew-inset", p23_core.media_subtype);
@@ -874,14 +874,16 @@ fn implicit_seen() {
 
             // Also ensure this is the fetch response we think it is
             has_msgatt_matching! { s::MsgAtt::Body(..) in fr };
-        }
+        },
         r => panic!("Unexpected response: {:?}", r),
     }
 }
 
 #[test]
 fn error_conditions() {
-    let setup = set_up();
+    // Using a unique account so that XCRY PURGE doesn't interfere with other
+    // tests.
+    let setup = set_up_new_root();
     let mut client = setup.connect("3501feec");
     quick_log_in(&mut client);
     quick_create(&mut client, "3501feec");
@@ -920,18 +922,20 @@ fn error_conditions() {
     quick_log_in(&mut client);
     quick_select(&mut client, "3501feec");
 
-    // Also do some flag storing to make the first client aware of UID 3 even
-    // though it is not in the UID map.
+    // Also do some flag storing. In V1, this would make the first client aware
+    // of UID 3 even though it is not in the UID map. V2 doesn't have that
+    // distinction.
     quick_append_enron(&mut client2, "3501feec", 1);
     ok_command!(client2, c("UID STORE 3 +FLAGS.SILENT (\\Seen)"));
     ok_command!(client, c("STORE 1 +FLAGS.SILENT (\\Seen)"));
 
-    command!([response] = client, c("UID FETCH 3 BODY[]"));
-    assert_error_response(
-        response,
-        Some(s::RespTextCode::ClientBug(())),
-        Error::UnaddressableMessage,
-    );
+    command!(mut responses = client, c("UID FETCH 3 BODY[]"));
+    // * 2 EXISTS
+    // * 1 RECENT
+    // * 2 FETCH (UID 3 ...)   -- because it's new
+    // N OK
+    assert_eq!(4, responses.len());
+    assert_tagged_ok(responses.pop().unwrap());
 
     ok_command!(client, c("NOOP"));
 
@@ -962,7 +966,7 @@ fn wrapped_headers_not_mangled() {
                 // get the bytes to line up in the right way to trigger the
                 // bug.
                 internal_date: Some(
-                    FixedOffset::east(0).ymd(2003, 2, 26).and_hms(10, 58, 31),
+                    FixedOffset::zero().ymd_hmsx(2003, 2, 26, 10, 58, 31),
                 ),
                 ..s::AppendFragment::default()
             },

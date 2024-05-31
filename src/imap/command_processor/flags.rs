@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2023, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -20,35 +20,39 @@ use std::borrow::Cow;
 use std::fmt;
 
 use super::defs::*;
-use crate::account::{mailbox::StatefulMailbox, model::*};
+use crate::account::{
+    model::*,
+    v2::{Account, Mailbox},
+};
 use crate::support::error::Error;
 
 impl CommandProcessor {
-    pub(crate) fn cmd_store(
+    pub(crate) async fn cmd_store(
         &mut self,
         cmd: s::StoreCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let ids = self.parse_seqnum_range(&cmd.messages)?;
-        self.store(ids, cmd, sender, StatefulMailbox::seqnum_store)
+        self.store(ids, cmd, sender, Account::seqnum_store).await
     }
 
-    pub(crate) fn cmd_uid_store(
+    pub(crate) async fn cmd_uid_store(
         &mut self,
         cmd: s::StoreCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
     ) -> CmdResult {
         let ids = self.parse_uid_range(&cmd.messages)?;
-        self.store(ids, cmd, sender, StatefulMailbox::store)
+        self.store(ids, cmd, sender, Account::store).await
     }
 
-    fn store<ID>(
+    async fn store<ID>(
         &mut self,
         ids: SeqRange<ID>,
         cmd: s::StoreCommand<'_>,
-        sender: SendResponse<'_>,
+        sender: &mut SendResponse,
         f: impl FnOnce(
-            &mut StatefulMailbox,
+            &mut Account,
+            &mut Mailbox,
             &StoreRequest<ID>,
         ) -> Result<StoreResponse<ID>, Error>,
     ) -> CmdResult
@@ -56,7 +60,7 @@ impl CommandProcessor {
         SeqRange<ID>: fmt::Debug,
     {
         if cmd.unchanged_since.is_some() {
-            self.enable_condstore(sender, true);
+            self.enable_condstore(sender, true).await;
         }
 
         let request = StoreRequest {
@@ -65,10 +69,10 @@ impl CommandProcessor {
             remove_listed: s::StoreCommandType::Minus == cmd.typ,
             remove_unlisted: s::StoreCommandType::Eq == cmd.typ,
             loud: !cmd.silent,
-            unchanged_since: cmd.unchanged_since,
+            unchanged_since: cmd.unchanged_since.map(Modseq::of),
         };
 
-        let resp = f(selected!(self)?, &request).map_err(map_error! {
+        let resp = f(account!(self)?, selected!(self)?, &request).map_err(map_error! {
             self,
             MailboxFull => (No, Some(s::RespTextCode::Limit(()))),
             NxMessage => (No, Some(s::RespTextCode::Nonexistent(()))),
@@ -78,19 +82,7 @@ impl CommandProcessor {
             GaveUpInsertion => (No, Some(s::RespTextCode::Unavailable(()))),
         })?;
 
-        fn expunged_response() -> s::Response<'static> {
-            s::Response::Cond(s::CondResponse {
-                cond: s::RespCondType::No,
-                code: Some(s::RespTextCode::ExpungeIssued(())),
-                quip: Some(Cow::Borrowed("Some messages have been expunged")),
-            })
-        }
-
         if !resp.modified.is_empty() {
-            if !resp.ok {
-                sender(expunged_response());
-            }
-
             Ok(s::Response::Cond(s::CondResponse {
                 cond: if resp.ok {
                     s::RespCondType::Ok
@@ -105,7 +97,11 @@ impl CommandProcessor {
         } else if resp.ok {
             success()
         } else {
-            Ok(expunged_response())
+            Ok(s::Response::Cond(s::CondResponse {
+                cond: s::RespCondType::No,
+                code: None,
+                quip: Some(Cow::Borrowed("No messages matched")),
+            }))
         }
     }
 }

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, Jason Lingle
+// Copyright (c) 2020, 2024, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -24,9 +24,10 @@ use openssl::ssl::{HandshakeError, SslConnector, SslMethod, SslVerifyMode};
 use thiserror::Error;
 
 use super::main::*;
-use crate::imap::client::Client;
-use crate::imap::syntax as s;
-use crate::support::rcio::*;
+use crate::{
+    imap::{client::Client, syntax as s},
+    support::rcio::*,
+};
 
 type RemoteClient = Client<Box<dyn BufRead>, Box<dyn Write>>;
 
@@ -54,13 +55,24 @@ fn main_impl(mut cmd: RemoteSubcommand) -> Result<(), Error> {
     match cmd {
         RemoteSubcommand::Test(_) => {
             println!("Server looks OK");
-        }
+        },
         RemoteSubcommand::Chpw(_) => {
             change_password(&mut client)?;
-        }
+        },
         RemoteSubcommand::Config(cmd) => {
             config(&mut client, cmd)?;
-        }
+        },
+        RemoteSubcommand::ForeignSmtpTls(ForeignSmtpTlsCommand::List(_)) => {
+            list_foreign_smtp_tls(&mut client)?;
+        },
+        RemoteSubcommand::ForeignSmtpTls(ForeignSmtpTlsCommand::Delete(
+            cmd,
+        )) => {
+            delete_foreign_smtp_tls(&mut client, cmd.domains)?;
+        },
+        RemoteSubcommand::RetryEmail(cmd) => {
+            retry_email(&mut client, cmd.message_id)?;
+        },
     }
 
     let mut buffer = Vec::new();
@@ -77,7 +89,7 @@ fn connect(options: RemoteCommonOptions) -> Result<RemoteClient, Error> {
             Ok(None) => die!(EX_NOUSER, "No passwd entry for current user"),
             Err(e) => {
                 die!(EX_OSFILE, "Failed to look up current UNIX user: {}", e)
-            }
+            },
         },
     };
 
@@ -141,11 +153,10 @@ fn connect(options: RemoteCommonOptions) -> Result<RemoteClient, Error> {
         );
     }
 
-    let password =
-        match rpassword::read_password_from_tty(Some("Current password: ")) {
-            Ok(p) => p,
-            Err(e) => die!(EX_NOINPUT, "Failed to read password: {}", e),
-        };
+    let password = match rpassword::prompt_password("Current password: ") {
+        Ok(p) => p,
+        Err(e) => die!(EX_NOINPUT, "Failed to read password: {}", e),
+    };
 
     let mut auth_string =
         base64::encode(format!("{}\0{}\0{}", user, user, password));
@@ -199,31 +210,29 @@ fn die_if_not_success(what: &str, response: s::ResponseLine<'_>) {
                 "{} failed; condition: {:?}; text: {}",
                 what,
                 cond,
-                quip.unwrap_or_default()
+                quip.unwrap_or_default(),
             );
-        }
+        },
         r => {
             die!(
                 EX_PROTOCOL,
                 "Server returned unexpected response for {}: {:?}",
                 what,
-                r
+                r,
             );
-        }
+        },
     }
 }
 
 fn change_password(client: &mut RemoteClient) -> Result<(), Error> {
     let new_password = loop {
-        match rpassword::read_password_from_tty(Some("New password: "))
-            .and_then(|a| {
-                rpassword::read_password_from_tty(Some("Confirm: "))
-                    .map(|b| (a, b))
-            }) {
+        match rpassword::prompt_password("New password: ").and_then(|a| {
+            rpassword::prompt_password("Confirm: ").map(|b| (a, b))
+        }) {
             Err(e) => die!(EX_NOINPUT, "Failed to read password: {}", e),
             Ok((a, b)) if a != b => {
                 eprintln!("Passwords don't match, try again");
-            }
+            },
             Ok((a, _)) if a.is_empty() => die!(EX_NOINPUT, "No password given"),
             Ok((a, _)) => break a,
         }
@@ -251,7 +260,7 @@ following name inside the 'tmp' directory of your Crymap account:
 If you need to undo the password change, you or an administrator can replace
 'user.toml' in your Crymap account with that file. The backup file will be
 deleted on the next successful login 24 hours from now.",
-                file
+                file,
             );
             break;
         }
@@ -294,6 +303,27 @@ fn config(
             .push(s::XCryUserConfigOption::ExternalKeyPattern(Cow::Owned(ekp)));
     }
 
+    if let Some(s) = cmd.smtp_out_save {
+        require_configurable(&current_config, "SMTP-OUT");
+        configs.push(s::XCryUserConfigOption::SmtpOutSave(
+            Some(Cow::<str>::Owned(s)).filter(|s| !s.is_empty()),
+        ));
+    }
+
+    if let Some(s) = cmd.smtp_out_success_receipts {
+        require_configurable(&current_config, "SMTP-OUT");
+        configs.push(s::XCryUserConfigOption::SmtpOutSuccessReceipts(
+            Some(Cow::<str>::Owned(s)).filter(|s| !s.is_empty()),
+        ));
+    }
+
+    if let Some(s) = cmd.smtp_out_failure_receipts {
+        require_configurable(&current_config, "SMTP-OUT");
+        configs.push(s::XCryUserConfigOption::SmtpOutFailureReceipts(
+            Some(Cow::<str>::Owned(s)).filter(|s| !s.is_empty()),
+        ));
+    }
+
     if configs.is_empty() {
         println!(
             "Current configuration:\n\
@@ -305,8 +335,38 @@ fn config(
             current_config
                 .password_changed
                 .map(|dt| dt.to_rfc3339())
-                .unwrap_or_else(|| "never".to_owned())
+                .unwrap_or_else(|| "never".to_owned()),
         );
+        for extended in current_config.extended {
+            match extended {
+                s::XCry2UserConfigData::SmtpOutSave(None) => {
+                    println!("\tsmtp-out-save: messages NOT saved");
+                },
+                s::XCry2UserConfigData::SmtpOutSave(Some(ref mb)) => {
+                    println!("\tsmtp-out-save: messages saved to {mb}");
+                },
+                s::XCry2UserConfigData::SmtpOutSuccessReceipts(None) => {
+                    println!("\tsmtp-out-success-receipts: not enabled");
+                },
+                s::XCry2UserConfigData::SmtpOutSuccessReceipts(Some(
+                    ref mb,
+                )) => {
+                    println!("\tsmtp-out-success-receipts: delivered to {mb}");
+                },
+                s::XCry2UserConfigData::SmtpOutFailureReceipts(None) => {
+                    println!(
+                        "\tsmtp-out-failure-receipts: \
+                              delivered to INBOX by default"
+                    );
+                },
+                s::XCry2UserConfigData::SmtpOutFailureReceipts(Some(
+                    ref mb,
+                )) => {
+                    println!("\tsmtp-out-failure-receipts: delivered to {mb}");
+                },
+                s::XCry2UserConfigData::Unknown(..) => {},
+            }
+        }
     } else {
         let mut buffer = Vec::new();
         let mut responses = client
@@ -330,6 +390,110 @@ fn require_configurable(
     die!(
         EX_SOFTWARE,
         "{} is not configurable on this server",
-        required
+        required,
     );
+}
+
+fn list_foreign_smtp_tls(client: &mut RemoteClient) -> Result<(), Error> {
+    require_smtp_out_support(client)?;
+
+    let mut buffer = Vec::new();
+    let mut responses = client.command(
+        s::Command::XCryForeignSmtpTls(s::XCryForeignSmtpTlsCommand::List(())),
+        &mut buffer,
+    )?;
+    die_if_not_success("FOREIGN-TLS LIST", responses.pop().unwrap());
+
+    if responses.is_empty() {
+        println!("no foreign SMTP TLS stati in database");
+    } else {
+        for line in responses {
+            if let s::Response::XCryForeignSmtpTls(data) = line.response {
+                if !data.starttls {
+                    println!(
+                        "{domain}: TLS not required",
+                        domain = data.domain
+                    );
+                } else {
+                    println!(
+                        "{domain}: TLS required, at least {version}; \
+                         valid certificate {certreq}",
+                        domain = data.domain,
+                        version = data
+                            .tls_version
+                            .unwrap_or(Cow::Borrowed("any version")),
+                        certreq = if data.valid_certificate {
+                            "is required"
+                        } else {
+                            "is NOT required"
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn delete_foreign_smtp_tls(
+    client: &mut RemoteClient,
+    domains: Vec<String>,
+) -> Result<(), Error> {
+    require_smtp_out_support(client)?;
+
+    if domains.is_empty() {
+        die!(EX_USAGE, "At least one domain must be specified");
+    }
+
+    let mut buffer = Vec::new();
+    let mut responses = client.command(
+        s::Command::XCryForeignSmtpTls(s::XCryForeignSmtpTlsCommand::Delete(
+            domains.into_iter().map(Cow::Owned).collect(),
+        )),
+        &mut buffer,
+    )?;
+    die_if_not_success("FOREIGN-TLS DELETE", responses.pop().unwrap());
+    Ok(())
+}
+
+fn retry_email(client: &mut RemoteClient, id: String) -> Result<(), Error> {
+    require_smtp_out_support(client)?;
+
+    let mut buffer = Vec::new();
+    let mut responses = client.command(
+        s::Command::XCrySmtpSpoolExecute(Cow::Owned(id)),
+        &mut buffer,
+    )?;
+    die_if_not_success("SMTP-OUT SPOOL EXECUTE", responses.pop().unwrap());
+    Ok(())
+}
+
+fn require_smtp_out_support(client: &mut RemoteClient) -> Result<(), Error> {
+    let mut buffer = Vec::new();
+    let mut responses = client.command(
+        s::Command::Simple(s::SimpleCommand::XCryGetUserConfig),
+        &mut buffer,
+    )?;
+    die_if_not_success("GET-USER-CONFIG", responses.pop().unwrap());
+
+    let current_config = responses
+        .into_iter()
+        .filter_map(|r| match r.response {
+            s::Response::XCryUserConfig(c) => Some(c),
+            _ => None,
+        })
+        .next()
+        .unwrap_or_else(|| die!(EX_PROTOCOL, "No user config returned"));
+
+    for cap in &current_config.capabilities {
+        if "SMTP-OUT".eq_ignore_ascii_case(cap) {
+            return Ok(());
+        }
+    }
+
+    die!(
+        EX_SOFTWARE,
+        "Crymap server does not support SMTP-OUT extensions",
+    )
 }

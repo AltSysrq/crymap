@@ -59,6 +59,10 @@
 //! discussion on the mailing list, we do allow accessing a part's content with
 //! extraneous subscripts that would imply the part should be a multipart.
 
+// This warning occurs because we're abusing ? as a short-circuit-on-success
+// operator.
+#![allow(clippy::result_large_err)]
+
 use std::fmt;
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -347,7 +351,7 @@ impl Visitor for SectionLocator {
                 )
                 .expect("leaf.header() returned early");
                 Some(leaf)
-            }
+            },
             _ => None,
         }
     }
@@ -441,6 +445,10 @@ impl Visitor for SectionLocator {
                 contains_nul: false,
             }),
         )
+    }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
     }
 }
 
@@ -644,6 +652,10 @@ impl Visitor for SectionFetcher {
         let fetched = self.end_buffer();
         (target, fetched)
     }
+
+    fn visit_default(&mut self) -> Result<(), Self::Output> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -667,7 +679,7 @@ mod test {
 
     fn do_fetch_bytes(message: Vec<u8>, section: BodySection) -> String {
         let (_, result) = grovel::grovel(
-            &grovel::SimpleAccessor {
+            &mut grovel::SimpleAccessor {
                 data: message.into(),
                 ..grovel::SimpleAccessor::default()
             },
@@ -1174,7 +1186,7 @@ Zm9v
     #[test]
     fn decode_unknown_cte_of_multipart() {
         let (_, result) = grovel::grovel(
-            &grovel::SimpleAccessor {
+            &mut grovel::SimpleAccessor {
                 data: b"\
 Content-Type: multipart/mixed; boundary=bound
 
@@ -1208,7 +1220,7 @@ hello
     #[test]
     fn decode_unknown_cte_of_single_part_with_subscript() {
         let (_, result) = grovel::grovel(
-            &grovel::SimpleAccessor {
+            &mut grovel::SimpleAccessor {
                 data: b"\
 Content-Transfer-Encoding: chunked
 
