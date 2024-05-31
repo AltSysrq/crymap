@@ -1,3 +1,0 @@
-* Crymap 2.0.0
-
-- `--create` is no longer an option to `crymap deliver`.

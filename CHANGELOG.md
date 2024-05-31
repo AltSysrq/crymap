@@ -1,3 +1,18 @@
+# 2.0.0
+
+- Major overhaul.
+- Entirely new data model for accounts, giving better performance and
+  reliability.
+- The SAVEDATE IMAP extension is now supported.
+- Crymap can now take inbound SMTP directly.
+- Crymap can now perform outbound SMTP (albeit the workflow is a bit
+  unconventional).
+- Various bugfixes.
+
+## Breaking changes
+
+- `--create` is no longer an option to `crymap deliver`.
+
 # 1.0.1
 
 - Rust 1.66.0 is now the earliest officially supported Rust version.
