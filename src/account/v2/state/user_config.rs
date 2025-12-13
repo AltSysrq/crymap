@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, 2024, Jason Lingle
+// Copyright (c) 2023, 2024, 2025, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -26,16 +26,6 @@ use crate::{
     account::model::*,
     support::{error::Error, safe_name::is_safe_name, user_config::UserConfig},
 };
-
-// Like format!, but returns None if the formatter fails instead of panicking.
-macro_rules! try_format {
-    ($($stuff:tt)*) => {{
-        use std::io::Write as _;
-        let mut buf = Vec::new();
-        write!(&mut buf, $($stuff)*).ok()
-            .and_then(|_| String::from_utf8(buf).ok())
-    }}
-}
 
 impl Account {
     /// Load and return the user's current configuration.
@@ -64,15 +54,15 @@ impl Account {
         let now = Utc::now();
 
         if let Some(internal_key_pattern) = request.internal_key_pattern {
+            if !is_valid_key_pattern(&internal_key_pattern) {
+                return Err(Error::UnsafeName);
+            }
+
             // We need to format the keys with some date to check the patterns
-            // for validity. This is both because they contain % in raw form,
-            // which makes for an unsafe name, and because format!() will
-            // result in a panic if the date format is not understood by
-            // chrono.
-            if !is_safe_name(
-                &try_format!("{}", now.format(&internal_key_pattern))
-                    .unwrap_or_default(),
-            ) {
+            // for validity because they contain % in raw form, which makes for
+            // an unsafe name.
+            if !is_safe_name(&format!("{}", now.format(&internal_key_pattern)))
+            {
                 return Err(Error::UnsafeName);
             }
 
@@ -80,10 +70,12 @@ impl Account {
         }
 
         if let Some(external_key_pattern) = request.external_key_pattern {
-            if !is_safe_name(
-                &try_format!("{}", now.format(&external_key_pattern))
-                    .unwrap_or_default(),
-            ) {
+            if !is_valid_key_pattern(&external_key_pattern) {
+                return Err(Error::UnsafeName);
+            }
+
+            if !is_safe_name(&format!("{}", now.format(&external_key_pattern)))
+            {
                 return Err(Error::UnsafeName);
             }
 
@@ -130,4 +122,9 @@ impl Account {
 
         Ok(backup_name)
     }
+}
+
+fn is_valid_key_pattern(pattern: &str) -> bool {
+    chrono::format::strftime::StrftimeItems::new(pattern)
+        .all(|r| !matches!(r, chrono::format::Item::Error))
 }

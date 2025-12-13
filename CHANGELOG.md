@@ -1,6 +1,8 @@
 # Unreleased
 
 - Fix the SMTP receiver being unable to receive mail from MailGun.
+- Fix panic when attempting to configure an invalid key pattern if Crymap was
+  built with more recent Rust versions.
 
 # 2.0.0
 
