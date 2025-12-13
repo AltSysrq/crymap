@@ -6,6 +6,7 @@
 - Fix incorrect syntax of Return-Path headers added by `smtpin` service.
 - Attempts to send HTTP requests to the SMTP ports are now answered with an
   immediate disconnect and less log spam.
+- Update the Public Suffix List.
 
 # 2.0.0
 
