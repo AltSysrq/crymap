@@ -79,10 +79,10 @@ lazy_static! {
         Regex::new("^(?i)(HELO|EHLO|LHLO) ([^ ]*)").unwrap();
     static ref RX_MAIL: Regex =
         Regex::new("^(?i)MAIL FROM:<([^>]*)>(.*)$").unwrap();
-    static ref RX_MAIL_BODY_PARM: Regex =
-        Regex::new("(?i)BODY=(7BIT|8BITMIME|BINARYMIME)").unwrap();
+    static ref RX_MAIL_IGNORED_PARM: Regex =
+        Regex::new("^(?i)BODY=(7BIT|8BITMIME|BINARYMIME)|SMTPUTF8$").unwrap();
     static ref RX_MAIL_SIZE_PARM: Regex =
-        Regex::new("(?i)SIZE=([0-9]+)").unwrap();
+        Regex::new("^(?i)SIZE=([0-9]+)$").unwrap();
     static ref RX_RCPT: Regex =
         Regex::new("^(?i)RCPT TO:<(?:@[^:]+:)?([^>]+)>(.*)$").unwrap();
     static ref RX_BDAT: Regex =
@@ -151,7 +151,7 @@ impl FromStr for Command {
                             truncated_parm,
                         ));
                     }
-                } else if !RX_MAIL_BODY_PARM.is_match(parm) {
+                } else if !RX_MAIL_IGNORED_PARM.is_match(parm) {
                     add_warning(format!(
                         "Ignoring unknown MAIL FROM parameter {:?}",
                         truncated_parm,
@@ -273,6 +273,19 @@ mod test {
                     .to_owned()],
             )),
             "MAIL FROM:<foo@bar.com> body=9BIT".parse()
+        );
+        assert_eq!(
+            Ok(Command::MailFrom("foo@bar.com".to_owned(), None, vec![])),
+            "MAIL FROM:<foo@bar.com> SmTpUtF8".parse(),
+        );
+        assert_eq!(
+            Ok(Command::MailFrom(
+                "foo@bar.com".to_owned(),
+                None,
+                vec!["Ignoring unknown MAIL FROM parameter \"smtputf8=foo\""
+                    .to_owned()],
+            )),
+            "MAIL FROM:<foo@bar.com> smtputf8=foo".parse(),
         );
         assert_eq!(
             Ok(Command::MailFrom(

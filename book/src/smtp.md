@@ -128,7 +128,7 @@ support transport of 8-bit content simply _do not exist_.
 The presence of the `SMTPUTF8` capability has no effect. For a message that
 nominally requires that capability, Crymap will attempt to send it anyway and
 allow the server to decide whether or not it understands the SMTP commands and
-the message itself.
+the message itself. The `SMTPUTF8` `MAIL FROM` parameter is never used.
 
 Crymap will always transfer the message with `BDAT` if the server supports the
 `CHUNKING` extension.

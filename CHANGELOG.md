@@ -1,6 +1,11 @@
 # Unreleased
 
-- Fix the SMTP receiver being unable to receive mail from MailGun.
+- Fix the SMTP receiver being unable to receive mail which was using the
+  `SMTPUTF8` `MAIL FROM` parameter. This most notably prevented receiving email
+  from MailGun, which will use this parameter even if it's not required for the
+  message.
+- The SMTP receiver is now tolerant of unexpected or invalid parameters to the
+  `MAIL FROM` and `RCPT TO` commands.
 - Fix panic when attempting to configure an invalid key pattern if Crymap was
   built with more recent Rust versions.
 - Fix incorrect syntax of Return-Path headers added by `smtpin` service.
