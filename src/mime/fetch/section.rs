@@ -295,7 +295,7 @@ impl Visitor for SectionLocator {
     ) -> Result<(), Output> {
         // Save the CTE off to the side in case `target` has superfluous
         // indices and we end up needing to fetch this section's content.
-        if self.target.as_ref().map_or(false, |t| t.decode_cte) {
+        if self.target.as_ref().is_some_and(|t| t.decode_cte) {
             if "Content-Transfer-Encoding".eq_ignore_ascii_case(name) {
                 if let Some(cte) =
                     header::parse_content_transfer_encoding(value)
@@ -563,7 +563,7 @@ impl Visitor for SectionFetcher {
             && self
                 .target
                 .as_ref()
-                .map_or(false, |t| t.header_filter.is_empty())
+                .is_some_and(|t| t.header_filter.is_empty())
             && self.in_headers
         {
             self.write(raw)
@@ -579,7 +579,7 @@ impl Visitor for SectionFetcher {
         value: &[u8],
     ) -> Result<(), Output> {
         // If doing CTE decoding and we see a CTE we don't recognise, bail
-        if self.target.as_ref().map_or(false, |t| t.decode_cte)
+        if self.target.as_ref().is_some_and(|t| t.decode_cte)
             && "Content-Transfer-Encoding".eq_ignore_ascii_case(name)
             && header::parse_content_transfer_encoding(value).is_none()
         {
@@ -591,7 +591,7 @@ impl Visitor for SectionFetcher {
             || self
                 .target
                 .as_ref()
-                .map_or(false, |t| t.header_filter.is_empty())
+                .is_some_and(|t| t.header_filter.is_empty())
         {
             return Ok(());
         }
@@ -631,7 +631,7 @@ impl Visitor for SectionFetcher {
             && !self
                 .target
                 .as_ref()
-                .map_or(false, |t| t.header_filter.is_empty())
+                .is_some_and(|t| t.header_filter.is_empty())
         {
             self.write(b"\r\n")?;
         }

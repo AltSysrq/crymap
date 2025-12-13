@@ -231,7 +231,7 @@ impl<W: Write> BodyCanonicaliser<W> {
     }
 
     fn crlf_buffer_next(&self) -> u8 {
-        if self.crlfs % 2 == 0 {
+        if self.crlfs.is_multiple_of(2) {
             b'\r'
         } else {
             b'\n'
@@ -241,7 +241,7 @@ impl<W: Write> BodyCanonicaliser<W> {
     pub(super) fn finish(mut self) -> io::Result<W> {
         // If crlfs is odd, we have a lone \r at the end, and therefore the
         // body doesn't end with CRLF.
-        if self.crlfs % 2 != 0 {
+        if !self.crlfs.is_multiple_of(2) {
             self.dump_crlfs()?;
         }
 
@@ -339,7 +339,7 @@ impl<W: Write> Write for BodyCanonicaliser<W> {
             // If we have an odd number of CRLF characters, the final CR is
             // binary data and not part of a line ending, so the CRLF chain is
             // not subject to collapsing.
-            if self.crlfs % 2 != 0 {
+            if !self.crlfs.is_multiple_of(2) {
                 // We only get here for the first of several consecutive
                 // whitespace characters, but holding_space will be true here
                 // if there was space before the partial CRLF sequence.

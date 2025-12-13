@@ -137,7 +137,7 @@ impl Account {
                 expunged_it.next();
             }
 
-            !expunged_it.peek().is_some_and(|&uid| uid == m.uid)
+            expunged_it.peek().is_none_or(|&uid| uid != m.uid)
         });
 
         expunged_it = poll.expunged.iter().copied().peekable();

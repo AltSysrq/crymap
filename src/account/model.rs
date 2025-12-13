@@ -63,13 +63,12 @@ impl Default for Uid {
 }
 
 impl Uid {
-    // Unsafe because new() isn't const for some reason
-    pub const MIN: Self = unsafe { Uid(NonZeroU32::new_unchecked(1)) };
+    pub const MIN: Self = Uid(NonZeroU32::new(1).unwrap());
     // The maximum possible UID value in the V1 data store is limited by the
     // 63-bit `Modseq` space and the value the UID is multiplied with, but we
     // don't care about enforcing that anymore, so we can just use u32::MAX, as
     // V2 has no such limit.
-    pub const MAX: Self = unsafe { Uid(NonZeroU32::new_unchecked(u32::MAX)) };
+    pub const MAX: Self = Uid(NonZeroU32::new(u32::MAX).unwrap());
 
     pub fn of(uid: u32) -> Option<Self> {
         NonZeroU32::new(uid).map(Uid).filter(|&u| u <= Uid::MAX)
@@ -141,7 +140,7 @@ impl Default for Seqnum {
 
 impl Seqnum {
     // Unsafe because new() isn't const for some reason
-    pub const MIN: Self = unsafe { Seqnum(NonZeroU32::new_unchecked(1)) };
+    pub const MIN: Self = Seqnum(NonZeroU32::new(1).unwrap());
 
     pub fn of(seqnum: u32) -> Option<Self> {
         NonZeroU32::new(seqnum).map(Seqnum)

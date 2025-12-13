@@ -258,7 +258,7 @@ impl StatefulMailbox {
     }
 
     pub(super) fn see_cid(&mut self, cid: Cid) {
-        if 0 == cid.0 % 32 {
+        if cid.0.is_multiple_of(32) {
             // Changes are fairly slow to read in, so force rollup at end of
             // the current or next poll cycle. This is also why we have a
             // fairly small rollup interval --- 32 changes.

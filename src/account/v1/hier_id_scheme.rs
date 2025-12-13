@@ -125,7 +125,7 @@ impl<'a> HierIdScheme<'a> {
         let dst = self.allocation_path_for_id(dst_id);
         // We only need to try allocating the directory for the first item in
         // each branch.
-        if 1 == dst_id || 0 == dst_id % 256 {
+        if 1 == dst_id || dst_id.is_multiple_of(256) {
             self.mkdirs(&dst)?;
         }
 
@@ -201,8 +201,7 @@ impl<'a> HierIdScheme<'a> {
             return Err(Error::MailboxFull);
         }
 
-        let target_id = (first_id + allocation_size - 1) / allocation_size
-            * allocation_size;
+        let target_id = first_id.div_ceil(allocation_size) * allocation_size;
         if max_id.saturating_sub(first_id) < srcs.len() as u32 {
             return Err(Error::MailboxFull);
         }
@@ -213,7 +212,7 @@ impl<'a> HierIdScheme<'a> {
         while to_allocate < target_id {
             let id = to_allocate;
             let gravestone = self.allocation_path_for_id(id);
-            if 0 == id % 256 {
+            if id.is_multiple_of(256) {
                 // Try to allocate all 256 ids at once
                 let parent = gravestone.containing_directory();
                 self.mkdirs_bare(parent)?;

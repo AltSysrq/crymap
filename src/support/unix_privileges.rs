@@ -317,7 +317,7 @@ fn get_openssldir() -> Option<&'static Path> {
     // variable, so there's no way to find out exactly what OpenSSL plans to
     // do, but overriding that directory for production Crymap would be very
     // unusual.
-    return parse_openssldir(openssl::version::dir());
+    parse_openssldir(openssl::version::dir())
 }
 
 /// Parses the string produced by `openssl::version::dir` to produce a path,

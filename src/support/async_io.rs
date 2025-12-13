@@ -303,7 +303,7 @@ impl ServerIo {
 
             _ => task::Poll::Ready(Err(e
                 .into_io_error()
-                .unwrap_or_else(|e| io::Error::new(io::ErrorKind::Other, e)))),
+                .unwrap_or_else(io::Error::other))),
         }
     }
 }
@@ -516,7 +516,7 @@ fn mhss_to_error<S>(mhss: openssl::ssl::MidHandshakeSslStream<S>) -> Error {
             Err(e) if e.code() == openssl::ssl::ErrorCode::SYSCALL => {
                 Error::Io(io::ErrorKind::UnexpectedEof.into())
             },
-            Err(e) => Error::Io(io::Error::new(io::ErrorKind::Other, e)),
+            Err(e) => Error::Io(io::Error::other(e)),
         }
     }
 }

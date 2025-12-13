@@ -211,7 +211,7 @@ impl StatefulMailbox {
 
         let response = self.state.qresync(
             V1Modseq::import(request.resync_from),
-            |&uid| known_uids.as_ref().map_or(true, |k| k.contains(uid)),
+            |&uid| known_uids.as_ref().is_none_or(|k| k.contains(uid)),
             seqnum_reference.items(u32::MAX),
             uid_reference.items(u32::MAX),
         );

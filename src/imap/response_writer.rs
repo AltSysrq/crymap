@@ -230,7 +230,7 @@ impl State {
                     let before_out = compress.total_out();
                     compress
                         .compress(data, compressed, flate2::FlushCompress::None)
-                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                        .map_err(io::Error::other)?;
                     let after_in = compress.total_in();
                     let after_out = compress.total_out();
 
@@ -296,7 +296,7 @@ impl State {
                     let before_out = compress.total_out();
                     compress
                         .compress(&[], &mut self.compressed, flush_compress)
-                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                        .map_err(io::Error::other)?;
                     let after_out = compress.total_out();
 
                     if after_out == before_out {

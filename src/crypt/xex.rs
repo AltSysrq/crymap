@@ -195,7 +195,7 @@ impl Xex {
 
         let end = offset + dst.len() as u64;
 
-        if 0 != end % AES_BLOCK64 {
+        if !end.is_multiple_of(AES_BLOCK64) {
             // dst ends with an incomplete block.
             let final_block_start = end / AES_BLOCK64 * AES_BLOCK64;
             let final_block_len = end - final_block_start;
@@ -226,7 +226,7 @@ impl Xex {
 
         // We now know that `dst` ends on a block boundary.
 
-        if 0 != offset % AES_BLOCK64 {
+        if !offset.is_multiple_of(AES_BLOCK64) {
             // dst begins with a misaligned block.
             let first_block_start = offset / AES_BLOCK64 * AES_BLOCK64;
             let first_block_len = AES_BLOCK64 - (offset - first_block_start);
@@ -307,7 +307,7 @@ impl Xex {
         // For other cases where there's an incomplete block tail, we handle it
         // at the end.
 
-        if 0 != offset % AES_BLOCK64 {
+        if !offset.is_multiple_of(AES_BLOCK64) {
             // The start of the write is not aligned to a block boundary, so do
             // the read-modify-write for that block separately.
             let new_offset = offset.next_multiple_of(AES_BLOCK64);

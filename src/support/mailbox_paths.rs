@@ -63,7 +63,7 @@ pub fn mailbox_path_matcher<'a>(
 
             let mut start = 0;
             for end in part
-                .match_indices(|c| '%' == c || '*' == c)
+                .match_indices(['%', '*'])
                 .map(|(ix, _)| ix)
                 .chain(part.len()..=part.len())
             {

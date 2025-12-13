@@ -106,7 +106,7 @@ trait DeliveryTarget {
     ) -> Result<(), Error>;
 }
 
-impl<'a, 'b> DeliveryTarget for (&'a mut DeliveryAccount, &'b str) {
+impl DeliveryTarget for (&mut DeliveryAccount, &str) {
     fn deliver<R: Read>(
         &mut self,
         flags: Vec<Flag>,

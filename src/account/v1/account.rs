@@ -289,7 +289,7 @@ impl Account {
             .ok()
             .and_then(|md| md.modified().ok())
             .and_then(|mtime| mtime.elapsed().ok())
-            .map_or(false, |dur| dur.as_secs() < 24 * 3600)
+            .is_some_and(|dur| dur.as_secs() < 24 * 3600)
         {
             return;
         }
@@ -677,7 +677,7 @@ fn clean_tmp(log_prefix: &str, tmp: &Path) -> Result<(), io::Error> {
                 (Ok(mtime), Ok(ctime)) => Some(mtime.max(ctime)),
             })
             .and_then(|mtime| mtime.elapsed().ok())
-            .map_or(false, |elapsed| elapsed.as_secs() > 24 * 3600)
+            .is_some_and(|elapsed| elapsed.as_secs() > 24 * 3600)
         {
             let path = entry.path();
             warn!(

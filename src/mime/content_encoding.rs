@@ -174,7 +174,7 @@ impl<V: Visitor + ?Sized> Visitor for ContentDecoder<V> {
             && self
                 .charset
                 .as_ref()
-                .map_or(false, |s| s.eq_ignore_ascii_case(b"UTF-7"));
+                .is_some_and(|s| s.eq_ignore_ascii_case(b"UTF-7"));
 
         let charset_decoder = if !decode_utf7 && self.decode_charset {
             encoding_rs::Encoding::for_label_no_replacement(

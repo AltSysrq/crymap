@@ -153,7 +153,7 @@ impl MessageStore {
             .filter_map(|e| e.ok())
             .filter(move |e| {
                 e.file_type().is_file()
-                    && modified_before.map_or(true, |modified_before| {
+                    && modified_before.is_none_or(|modified_before| {
                         e.metadata()
                             .ok()
                             .and_then(|md| md.modified().ok())

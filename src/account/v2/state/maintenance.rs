@@ -258,7 +258,7 @@ impl Account {
                     (Ok(mtime), Ok(ctime)) => Some(mtime.max(ctime)),
                 })
                 .and_then(|mtime| mtime.elapsed().ok())
-                .map_or(false, |elapsed| elapsed.as_secs() > 24 * 3600)
+                .is_some_and(|elapsed| elapsed.as_secs() > 24 * 3600)
             {
                 let path = entry.path();
                 warn!(

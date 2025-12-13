@@ -98,7 +98,7 @@ impl FromStr for Command {
             if s.len() >= prefix.len()
                 && (allow_trailing_garbage || s.len() == prefix.len())
                 && s.get(0..prefix.len())
-                    .map_or(false, |sp| prefix.eq_ignore_ascii_case(sp))
+                    .is_some_and(|sp| prefix.eq_ignore_ascii_case(sp))
             {
                 return Ok(cmd.clone());
             }

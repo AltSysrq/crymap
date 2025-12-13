@@ -511,8 +511,7 @@ impl Server {
                         Cow::Borrowed("Line too long"),
                     )
                     .await?;
-                    return Err(Error::Io(io::Error::new(
-                        io::ErrorKind::Other,
+                    return Err(Error::Io(io::Error::other(
                         "Authentication line too long",
                     )));
                 }

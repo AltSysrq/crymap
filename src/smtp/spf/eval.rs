@@ -921,10 +921,10 @@ fn find_validated_name<'d>(
     for candidate in candidates {
         let matches = match ctx.ip {
             IpAddr::V4(ip) => dns::look_up(&mut dns_cache.a, candidate)
-                .map(|records| records.iter().any(|&r| r == ip)),
+                .map(|records| records.contains(&ip)),
 
             IpAddr::V6(ip) => dns::look_up(&mut dns_cache.aaaa, candidate)
-                .map(|records| records.iter().any(|&r| r == ip)),
+                .map(|records| records.contains(&ip)),
         };
 
         match matches {

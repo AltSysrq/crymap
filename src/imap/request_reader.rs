@@ -656,10 +656,7 @@ fn poll_decompress<R: AsyncRead>(
                 flate2::FlushDecompress::Sync
             },
         ) {
-            return task::Poll::Ready(Err(io::Error::new(
-                io::ErrorKind::Other,
-                e,
-            )));
+            return task::Poll::Ready(Err(io::Error::other(e)));
         }
         let after_in = decompress.total_in();
         let after_out = decompress.total_out();

@@ -963,7 +963,7 @@ impl Connection {
             }
         }
 
-        if results.iter().any(|&r| StoreResult::Modified == r) {
+        if results.contains(&StoreResult::Modified) {
             txn.commit()?;
         }
 
@@ -1130,10 +1130,7 @@ impl Connection {
             // resync_from`.
 
             let accept_uid = |uid: Uid| -> bool {
-                qresync
-                    .known_uids
-                    .as_ref()
-                    .map_or(true, |k| k.contains(uid))
+                qresync.known_uids.as_ref().is_none_or(|k| k.contains(uid))
             };
 
             let mut expunged = SeqRange::<Uid>::new();

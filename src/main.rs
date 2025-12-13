@@ -23,7 +23,8 @@
     clippy::too_many_arguments,
     clippy::needless_range_loop,
     clippy::needless_borrowed_reference,
-    clippy::precedence
+    clippy::precedence,
+    clippy::doc_lazy_continuation
 )]
 #![deny(clippy::pattern_type_mismatch)]
 #![allow(non_local_definitions)]

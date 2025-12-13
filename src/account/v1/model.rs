@@ -104,9 +104,7 @@ impl Cid {
 pub struct V1Modseq(NonZeroU64);
 
 impl V1Modseq {
-    // Unsafe because NonZeroU64::new() is non-const.
-    pub const MIN: Self =
-        unsafe { Self(NonZeroU64::new_unchecked(Cid::END.0 as u64)) };
+    pub const MIN: Self = Self(NonZeroU64::new(Cid::END.0 as u64).unwrap());
 
     pub fn of(raw: u64) -> Option<Self> {
         NonZeroU64::new(raw).map(Self).filter(|&m| m >= Self::MIN)
