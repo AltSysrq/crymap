@@ -55,6 +55,8 @@ pub enum Command {
     Http,
 }
 
+const MAX_WARNINGS: usize = 4;
+
 static SIMPLE_COMMANDS: &[(&str, Command, bool)] = &[
     ("DATA", Command::Data, false),
     ("RSET", Command::Reset, false),
@@ -102,6 +104,13 @@ impl FromStr for Command {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, ()> {
+        let mut warnings = Vec::<String>::new();
+        let mut add_warning = |w: String| {
+            if warnings.len() < MAX_WARNINGS {
+                warnings.push(w);
+            }
+        };
+
         for &(prefix, ref cmd, allow_trailing_garbage) in SIMPLE_COMMANDS {
             if s.len() >= prefix.len()
                 && (allow_trailing_garbage || s.len() == prefix.len())
@@ -118,7 +127,6 @@ impl FromStr for Command {
                 cap.get(2).unwrap().as_str().to_owned(),
             ))
         } else if let Some(cap) = RX_MAIL.captures(s) {
-            let mut warnings = Vec::<String>::new();
             let mut size = None::<u64>;
             for parm in cap
                 .get(2)
@@ -138,13 +146,13 @@ impl FromStr for Command {
                     {
                         size = Some(s);
                     } else {
-                        warnings.push(format!(
+                        add_warning(format!(
                             "Ignoring invalid MAIL FROM parameter {:?}",
                             truncated_parm,
                         ));
                     }
                 } else if !RX_MAIL_BODY_PARM.is_match(parm) {
-                    warnings.push(format!(
+                    add_warning(format!(
                         "Ignoring unknown MAIL FROM parameter {:?}",
                         truncated_parm,
                     ));
@@ -157,20 +165,16 @@ impl FromStr for Command {
                 warnings,
             ))
         } else if let Some(cap) = RX_RCPT.captures(s) {
-            let warnings = if let Some(extra) =
-                cap.get(2).filter(|c| !c.as_str().is_empty())
-            {
+            if let Some(extra) = cap.get(2).filter(|c| !c.as_str().is_empty()) {
                 let extra = extra.as_str().trim();
                 let extra = &extra[..extra
                     .char_indices()
                     .nth(64)
                     .map(|(ix, _)| ix)
                     .unwrap_or(extra.len())];
-                vec![format!(
+                add_warning(format!(
                     "Ignoring extraneous RCPT TO parameters: {extra:?}"
-                )]
-            } else {
-                vec![]
+                ));
             };
 
             Ok(Command::Recipient(
