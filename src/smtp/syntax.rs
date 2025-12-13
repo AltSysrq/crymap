@@ -80,7 +80,7 @@ lazy_static! {
     static ref RX_MAIL: Regex =
         Regex::new("^(?i)MAIL FROM:<([^>]*)>(.*)$").unwrap();
     static ref RX_MAIL_BODY_PARM: Regex =
-        Regex::new("(?i)BODY=[A-Z0-9]*").unwrap();
+        Regex::new("(?i)BODY=(7BIT|8BITMIME|BINARYMIME)").unwrap();
     static ref RX_MAIL_SIZE_PARM: Regex =
         Regex::new("(?i)SIZE=([0-9]+)").unwrap();
     static ref RX_RCPT: Regex =
@@ -264,6 +264,15 @@ mod test {
         assert_eq!(
             Ok(Command::MailFrom("foo@bar.com".to_owned(), None, vec![])),
             "MAIL FROM:<foo@bar.com> body=7bit".parse()
+        );
+        assert_eq!(
+            Ok(Command::MailFrom(
+                "foo@bar.com".to_owned(),
+                None,
+                vec!["Ignoring unknown MAIL FROM parameter \"body=9BIT\""
+                    .to_owned()],
+            )),
+            "MAIL FROM:<foo@bar.com> body=9BIT".parse()
         );
         assert_eq!(
             Ok(Command::MailFrom(
