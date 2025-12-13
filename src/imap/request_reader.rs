@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2025, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -895,9 +895,9 @@ mod test {
         run_test("\n", "incomprehensible\n");
         run_test("foo\r\n", "incomprehensible\n");
         run_test("foo bar\r\n", "bad: foo\n");
-        run_test(&format!("{:099999}\r\n", 1), "incomprehensible\n");
+        run_test(&format_big(1, 99999), "incomprehensible\n");
         run_test(
-            &format!("x {:099999}\r\ny noop\n", 1),
+            &format!("x {}\r\ny noop\n", format_big(1, 99999)),
             //
             "too long, recovered: x\n\
              stand-alone: y NOOP\n",
@@ -937,9 +937,9 @@ mod test {
         run_test(
             &format!(
                 "a CREATE {{98765+}}\n\
-                 {:098765}\n\
+                 {}\n\
                  b DELETE Trash\n",
-                1,
+                format_big(1, 98765),
             ),
             //
             "too long, recovered: a\n\
@@ -1013,14 +1013,21 @@ mod test {
         run_test(
             &format!(
                 "A APPEND INBOX {{1}}\n\
-                 \x20{:098765}\n\
+                 \x20{}\n\
                  B CREATE FOO\n",
-                1,
+                format_big(1, 98765),
             ),
             //
             "append (1 false): A APPEND INBOX \n\
              append too long\n\
              stand-alone: B CREATE FOO\n",
         );
+    }
+
+    fn format_big(n: u32, width: usize) -> String {
+        let suffix = format!("{n}");
+        let mut s = "0".repeat(width - suffix.len());
+        s.push_str(&suffix);
+        s
     }
 }
