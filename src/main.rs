@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, Jason Lingle
+// Copyright (c) 2020, 2023, 2025, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -26,6 +26,7 @@
     clippy::precedence
 )]
 #![deny(clippy::pattern_type_mismatch)]
+#![allow(non_local_definitions)]
 
 #[cfg(test)]
 macro_rules! assert_matches {

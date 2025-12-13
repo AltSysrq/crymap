@@ -32,7 +32,7 @@ use std::str;
 /// Returns the decoded text, as well as a possible "dangling" slice, which
 /// represents a QP escape sequence that is not yet complete. It will always
 /// extend to the end of the input slice.
-pub fn qp_decode(s: &[u8]) -> (Cow<[u8]>, &[u8]) {
+pub fn qp_decode(s: &[u8]) -> (Cow<'_, [u8]>, &[u8]) {
     let mut transformed = Vec::new();
     let mut soft_line_break = false;
     let mut dangling: Option<&[u8]> = None;

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, 2024, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, 2025, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -1422,7 +1422,7 @@ pub enum SearchQuery {
     And(Vec<SearchQuery>),
     Modseq(Modseq),
     EmailId(String),
-    ThreadId(String),
+    ThreadId(#[allow(dead_code)] String),
     // RFC 8514
     SavedBefore(NaiveDate),
     SavedOn(NaiveDate),

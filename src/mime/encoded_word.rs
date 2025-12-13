@@ -33,7 +33,7 @@ lazy_static! {
 }
 
 /// Decode all encoded words in the given unstructured string.
-pub fn ew_decode_unstructured(text: &str) -> Cow<str> {
+pub fn ew_decode_unstructured(text: &str) -> Cow<'_, str> {
     let mut transformed = String::new();
 
     let mut untransformed_ix = 0;

@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, 2024, Jason Lingle
+// Copyright (c) 2020, 2023, 2024, 2025, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -2069,7 +2069,7 @@ syntax_rule! {
 
 // ==================== PRIMITIVE PARSERS ====================
 
-fn normal_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
+fn normal_atom(i: &[u8]) -> IResult<&[u8], Cow<'_, str>> {
     map(
         bytes::complete::take_while1(|b| match b {
             0..=b' ' => false,
@@ -2087,7 +2087,7 @@ fn normal_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
 // reject it when a later stage tries to coerce the value into an enum or safe
 // name. The formal syntax never also requires us to break tokens on backslash,
 // so including it here also won't break any valid syntax.
-fn backslash_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
+fn backslash_atom(i: &[u8]) -> IResult<&[u8], Cow<'_, str>> {
     map(
         bytes::complete::take_while1(|b| match b {
             0..=b' ' => false,
@@ -2099,7 +2099,7 @@ fn backslash_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
     )(i)
 }
 
-fn astring_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
+fn astring_atom(i: &[u8]) -> IResult<&[u8], Cow<'_, str>> {
     map(
         bytes::complete::take_while1(|b| match b {
             0..=b' ' => false,
@@ -2111,7 +2111,7 @@ fn astring_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
     )(i)
 }
 
-fn tag_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
+fn tag_atom(i: &[u8]) -> IResult<&[u8], Cow<'_, str>> {
     map(
         // RFC 3501 does not specify a maximum size for tags, but 128 should be
         // more than enough for anyone.
@@ -2125,7 +2125,7 @@ fn tag_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
     )(i)
 }
 
-fn list_mailbox_atom(i: &[u8]) -> IResult<&[u8], Cow<str>> {
+fn list_mailbox_atom(i: &[u8]) -> IResult<&[u8], Cow<'_, str>> {
     map(
         bytes::complete::take_while1(|b| match b {
             0..=b' ' => false,
@@ -2198,13 +2198,13 @@ fn quoted_string_content(i: &[u8]) -> IResult<&[u8], &[u8]> {
     alt((quoted_char, is_not("\r\n\"\\")))(i)
 }
 
-fn quoted(i: &[u8]) -> IResult<&[u8], Cow<str>> {
+fn quoted(i: &[u8]) -> IResult<&[u8], Cow<'_, str>> {
     sequence::delimited(
         tag("\""),
         multi::fold_many0(
             map(quoted_string_content, String::from_utf8_lossy),
             || Cow::Owned(String::new()),
-            |mut accum: Cow<str>, piece| {
+            |mut accum: Cow<'_, str>, piece| {
                 if accum.is_empty() {
                     piece
                 } else {
@@ -2217,15 +2217,15 @@ fn quoted(i: &[u8]) -> IResult<&[u8], Cow<str>> {
     )(i)
 }
 
-fn string(i: &[u8]) -> IResult<&[u8], Cow<str>> {
+fn string(i: &[u8]) -> IResult<&[u8], Cow<'_, str>> {
     alt((quoted, map(literal, String::from_utf8_lossy)))(i)
 }
 
-fn astring(i: &[u8]) -> IResult<&[u8], Cow<str>> {
+fn astring(i: &[u8]) -> IResult<&[u8], Cow<'_, str>> {
     alt((astring_atom, string))(i)
 }
 
-fn nstring(i: &[u8]) -> IResult<&[u8], Option<Cow<str>>> {
+fn nstring(i: &[u8]) -> IResult<&[u8], Option<Cow<'_, str>>> {
     alt((map(kw("NIL"), |_| None), map(string, Some)))(i)
 }
 
@@ -2240,14 +2240,14 @@ fn mailbox(i: &[u8]) -> IResult<&[u8], MailboxName<'_>> {
     map(astring, MailboxName::of_wire)(i)
 }
 
-fn sequence_set(i: &[u8]) -> IResult<&[u8], Cow<str>> {
+fn sequence_set(i: &[u8]) -> IResult<&[u8], Cow<'_, str>> {
     map(
         alt((is_a("0123456789:*,"), tag("$"))),
         String::from_utf8_lossy,
     )(i)
 }
 
-fn text(i: &[u8]) -> IResult<&[u8], Cow<str>> {
+fn text(i: &[u8]) -> IResult<&[u8], Cow<'_, str>> {
     map(is_not("\r\n"), String::from_utf8_lossy)(i)
 }
 

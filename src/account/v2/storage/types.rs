@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, 2024, Jason Lingle
+// Copyright (c) 2023, 2024, 2025, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -237,8 +237,11 @@ pub struct Mailbox {
     pub name: String,
     pub selectable: bool,
     pub special_use: Option<MailboxAttribute>,
+    #[allow(dead_code)]
     pub next_uid: Uid,
+    #[allow(dead_code)]
     pub recent_uid: Uid,
+    #[allow(dead_code)]
     pub max_modseq: Modseq,
 }
 
@@ -279,14 +282,20 @@ impl FromRow for MailboxStatus {
 
 /// All data pertaining to a single message.
 #[derive(Debug, Clone)]
+#[cfg(test)]
 pub struct RawMessage {
+    #[allow(dead_code)]
     pub id: MessageId,
+    #[allow(dead_code)]
     pub path: String,
+    #[allow(dead_code)]
     pub session_key: Option<SessionKey>,
+    #[allow(dead_code)]
     pub rfc822_size: Option<u64>,
     pub last_activity: UnixTimestamp,
 }
 
+#[cfg(test)]
 impl FromRow for RawMessage {
     fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {
@@ -301,16 +310,21 @@ impl FromRow for RawMessage {
 
 /// The first-level data pertaining to a message instance in a mailbox.
 #[derive(Debug, Clone)]
+#[cfg(test)]
 pub struct RawMailboxMessage {
+    #[allow(dead_code)]
     pub mailbox_id: MailboxId,
+    #[allow(dead_code)]
     pub uid: Uid,
     pub message_id: MessageId,
     pub near_flags: i64,
+    #[allow(dead_code)]
     pub savedate: UnixTimestamp,
     pub append_modseq: Modseq,
     pub flags_modseq: Modseq,
 }
 
+#[cfg(test)]
 impl FromRow for RawMailboxMessage {
     fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {

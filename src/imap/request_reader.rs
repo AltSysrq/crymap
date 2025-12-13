@@ -148,7 +148,7 @@ impl<R: AsyncRead + Unpin> RequestReader<R> {
         &'a mut self,
         send_output: &mut tokio::sync::mpsc::Sender<OutputEvent>,
         recover_overlong: bool,
-    ) -> io::Result<CommandStart<'_>> {
+    ) -> io::Result<CommandStart<'a>> {
         self.drop_consumed();
 
         loop {

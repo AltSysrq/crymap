@@ -52,10 +52,12 @@ impl SpooledMessageId {
 /// A message spooled for outbound delivery.
 pub struct SpooledMessage {
     /// The ID of this message.
+    #[allow(dead_code)]
     pub id: SpooledMessageId,
     /// The suggested SMTP transfer type.
     pub transfer: storage::SmtpTransfer,
     /// The time at which this message may be despooled.
+    #[allow(dead_code)]
     pub expires: DateTime<Utc>,
     /// The SMTP `MAIL FROM` address.
     pub mail_from: String,
