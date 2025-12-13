@@ -1,4 +1,4 @@
-# Unreleased
+# 2.0.1
 
 - Fix the SMTP receiver being unable to receive mail which was using the
   `SMTPUTF8` `MAIL FROM` parameter. This most notably prevented receiving email
