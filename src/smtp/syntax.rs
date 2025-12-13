@@ -139,13 +139,13 @@ impl FromStr for Command {
                         size = Some(s);
                     } else {
                         warnings.push(format!(
-                            "ignoring invalid MAIL FROM parameter {:?}",
+                            "Ignoring invalid MAIL FROM parameter {:?}",
                             truncated_parm,
                         ));
                     }
                 } else if !RX_MAIL_BODY_PARM.is_match(parm) {
                     warnings.push(format!(
-                        "ignoring unknown MAIL FROM parameter {:?}",
+                        "Ignoring unknown MAIL FROM parameter {:?}",
                         truncated_parm,
                     ));
                 }
@@ -167,7 +167,7 @@ impl FromStr for Command {
                     .map(|(ix, _)| ix)
                     .unwrap_or(extra.len())];
                 vec![format!(
-                    "ignoring extraneous RCPT TO parameters: {extra:?}"
+                    "Ignoring extraneous RCPT TO parameters: {extra:?}"
                 )]
             } else {
                 vec![]
@@ -293,9 +293,18 @@ mod test {
             Ok(Command::MailFrom(
                 "foo@bar.com".to_owned(),
                 None,
-                vec!["ignoring invalid MAIL FROM parameter \"size=99999999999999999999\"".to_owned()],
+                vec!["Ignoring invalid MAIL FROM parameter \"size=99999999999999999999\"".to_owned()],
             )),
             "MAIL FROM:<foo@bar.com> size=99999999999999999999".parse::<Command>()
+        );
+        assert_eq!(
+            Ok(Command::MailFrom(
+                "foo@bar.com".to_owned(),
+                None,
+                vec!["Ignoring unknown MAIL FROM parameter \"FOO=BAR\""
+                    .to_owned()],
+            )),
+            "MAIL FROM:<foo@bar.com> FOO=BAR".parse::<Command>()
         );
 
         assert_eq!(
@@ -309,7 +318,7 @@ mod test {
         assert_eq!(
             Ok(Command::Recipient(
                 "userc@d.bar.org".to_owned(),
-                vec!["ignoring extraneous RCPT TO parameters: \"FOO=BAR\""
+                vec!["Ignoring extraneous RCPT TO parameters: \"FOO=BAR\""
                     .to_owned()],
             )),
             "RCPT TO:<userc@d.bar.org> FOO=BAR".parse()
