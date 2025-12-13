@@ -51,6 +51,8 @@ pub enum Command {
     Quit,
     /// STARTTLS
     StartTls,
+    /// Anything that looks like a common HTTP command.
+    Http,
 }
 
 static SIMPLE_COMMANDS: &[(&str, Command, bool)] = &[
@@ -62,6 +64,12 @@ static SIMPLE_COMMANDS: &[(&str, Command, bool)] = &[
     ("NOOP", Command::Noop, false),
     ("QUIT", Command::Quit, false),
     ("STARTTLS", Command::StartTls, false),
+    ("GET", Command::Http, true),
+    ("HEAD", Command::Http, true),
+    ("PUT", Command::Http, true),
+    ("POST", Command::Http, true),
+    ("DELETE", Command::Http, true),
+    ("OPTIONS", Command::Http, true),
 ];
 
 lazy_static! {
@@ -353,5 +361,15 @@ mod test {
             Ok(Command::Auth("NTLM".to_owned(), None)),
             "auth NTLM".parse::<Command>(),
         );
+
+        assert_eq!(Ok(Command::Http), "GET / HTTP/1.0".parse());
+        assert_eq!(Ok(Command::Http), "HEAD /favicon HTTP/1.1".parse());
+        assert_eq!(
+            Ok(Command::Http),
+            "PUT /../../../etc/passwd HTTP/1.0".parse()
+        );
+        assert_eq!(Ok(Command::Http), "POST /adminmyphp HTTP/1.2".parse());
+        assert_eq!(Ok(Command::Http), "DELETE /bar HTTP/1.0".parse());
+        assert_eq!(Ok(Command::Http), "OPTIONS * HTTP/1.1".parse());
     }
 }

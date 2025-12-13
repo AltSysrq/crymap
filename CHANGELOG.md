@@ -4,6 +4,8 @@
 - Fix panic when attempting to configure an invalid key pattern if Crymap was
   built with more recent Rust versions.
 - Fix incorrect syntax of Return-Path headers added by `smtpin` service.
+- Attempts to send HTTP requests to the SMTP ports are now answered with an
+  immediate disconnect and less log spam.
 
 # 2.0.0
 

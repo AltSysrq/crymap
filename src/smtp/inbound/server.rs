@@ -352,6 +352,7 @@ impl Server {
             Command::Noop => self.cmd_noop().await,
             Command::Quit => self.cmd_quit().await,
             Command::StartTls => self.cmd_start_tls().await,
+            Command::Http => self.cmd_http(),
         }
     }
 
@@ -1046,6 +1047,18 @@ impl Server {
 
         info!("{} TLS handshake completed", self.log_prefix);
 
+        Ok(())
+    }
+
+    fn cmd_http(&mut self) -> Result<(), Error> {
+        // As tempting as it'd be to respond with
+        //   HTTP/1.0 418 I'm an SMTP server!
+        // we've already sent out the SMTP greeting line.
+        warn!(
+            "{} Client made an HTTP request, aborting the connection",
+            self.log_prefix,
+        );
+        self.quit = true;
         Ok(())
     }
 
