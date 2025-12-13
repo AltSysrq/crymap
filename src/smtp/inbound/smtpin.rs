@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2024, Jason Lingle
+// Copyright (c) 2024, 2025, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -746,7 +746,8 @@ impl SmtpinService {
         let now = Utc::now();
         let smtp_date = now.to_rfc2822();
         let mut message_prefix = message.auth_headers;
-        let _ = write!(message_prefix, "Return-Path: {}\r\n", self.return_path);
+        let _ =
+            write!(message_prefix, "Return-Path: <{}>\r\n", self.return_path);
         let message_prefix_base = message_prefix.len();
 
         // We don't have anywhere to hold partially-failed transactions, nor do

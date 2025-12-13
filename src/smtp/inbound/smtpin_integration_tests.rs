@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2024, Jason Lingle
+// Copyright (c) 2024, 2025, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -442,6 +442,7 @@ fn minimal_mail_delivery() {
     let delivered =
         fetch_email(&setup, "zim", "minimal_mail_delivery").unwrap();
     println!("delivered:\n{delivered}");
+    assert!(delivered.contains("Return-Path: <>"));
     // We don't get an SPF header because none of the possible inputs were
     // actually domains.
     assert!(delivered.contains("spf=none"));
@@ -537,6 +538,7 @@ fn multi_mail_delivery() {
     println!("delivered:\n{delivered}");
     assert!(delivered.contains("spf=temperror"));
     assert!(delivered.contains("envelope-from=\"earth.com\""));
+    assert!(delivered.contains("Return-Path: <human@earth.com>"));
 
     assert!(fetch_email(&setup, "zim", "multi_mail_delivery").is_some());
     assert!(fetch_email(&setup, "gäz", "multi_mail_delivery").is_some());
