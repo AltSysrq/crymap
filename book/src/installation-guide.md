@@ -29,7 +29,7 @@ Crymap and statically linked, but this is not recommended since you won't be
 able to get OpenSSL updates with your OS and this process is not described in
 this manual.)
 
-Each [https://github.com/AltSysrq/crymap/releases/](release of Crymap) has
+Each [release of Crymap](https://github.com/AltSysrq/crymap/releases/) has
 pre-built binaries for AMD64 Debian and FreeBSD. Simply download the
 appropriate one of these and save it in a place you consider appropriate; for
 example (`#` means "as root"):

@@ -104,6 +104,10 @@ Search uses Unicode "simple" case folding.
 
 ## Limits
 
+The maximum IMAP command line length is 65536 bytes, including the line ending.
+For `APPEND` commands, the message literals are not included in this, and each
+line fragment between a message literal is treated as a separate line.
+
 The maximum message size for `APPEND` is hard-wired to 64MB.
 
 Any operation that involves parsing message content will not process more than
@@ -120,8 +124,8 @@ allocated sequentially.
 
 ## Mailboxes
 
-All mailboxes other than `INBOX` may have children. Nesting depth is dependent
-on the host operating system's maximum path length.
+All mailboxes other than `INBOX` may have children. Nesting depth is limited
+only by the maximum IMAP command line length.
 
 Mailbox names may not contain `%`, `*`, `\`, `/`, control characters or one of
 a few Unicode control characters, and may not begin with `.` or `#`.
@@ -465,9 +469,9 @@ The `GET-USER-CONFIG` subcommand was poorly designed in Crymap 1.x.
 
 The Crymap 1.x capabilities are `INTERNAL-KEY-PATTERN`, `EXTERNAL-KEY-PATTERN`,
 and `PASSWORD`, which correspond to the ability to pass each of those settings
-to `SET-USER-CONFIG`. Those three settings are guaranteed to be present, in
-that order, immediately after the capabilities in the `USER-CONFIG` response.
-Each is an `nstring`.
+to `SET-USER-CONFIG`. The values of those three settings are guaranteed to be
+present, in that order, immediately after the capabilities in the `USER-CONFIG`
+response. Each is an `nstring`.
 
 Beyond the Crymap 1.x settings are other settings. Each `key` is an `atom`
 naming the setting, and the `value` is an `nstring` giving the current value of
@@ -484,9 +488,6 @@ Crymap 2.0.0 adds the `SMTP-OUT` capability. This indicates the presence of the
 - `SMTP-OUT-FAILURE-RECEIPTS`, mailbox into which receipts for
   unsuccessfully-delivered messages are saved (default `NIL`, which is the same
   as `"INBOX"`)
-
-`capabilities` provides a list of valid tokens that can be passed to `XCRY
-SET-USER-CONFIG`.
 
 #### XCRY SET-USER-CONFIG
 
