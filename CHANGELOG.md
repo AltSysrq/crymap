@@ -1,3 +1,7 @@
+# Unreleased
+
+- Fix the SMTP receiver being unable to receive mail from MailGun.
+
 # 2.0.0
 
 - Major overhaul.

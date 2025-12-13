@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, 2024 Jason Lingle
+// Copyright (c) 2020, 2023, 2024, 2025 Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -329,10 +329,18 @@ impl Server {
             Command::Auth(mechanism, data) => {
                 self.cmd_auth(mechanism, data).await
             },
-            Command::MailFrom(email, size) => {
+            Command::MailFrom(email, size, warnings) => {
+                for warning in warnings {
+                    warn!("{} {}", self.log_prefix, warning);
+                }
                 self.cmd_mail_from(email, size).await
             },
-            Command::Recipient(email) => self.cmd_recipient(email).await,
+            Command::Recipient(email, warnings) => {
+                for warning in warnings {
+                    warn!("{} {}", self.log_prefix, warning);
+                }
+                self.cmd_recipient(email).await
+            },
             Command::Data => self.cmd_data().await,
             Command::BinaryData(len, last) => {
                 self.cmd_binary_data(len, last).await

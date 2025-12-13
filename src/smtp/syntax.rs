@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2020, 2023, 2024 Jason Lingle
+// Copyright (c) 2020, 2023, 2024, 2025, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -28,9 +28,11 @@ pub enum Command {
     /// AUTH mechanism [base64]
     Auth(String, Option<String>),
     /// MAIL FROM:<return-path> [SIZE=sz] [BODY=encoding]
-    MailFrom(String, Option<u64>),
+    /// The final element is a list of warnings.
+    MailFrom(String, Option<u64>, Vec<String>),
     /// RCPT TO:<ignored...:email>
-    Recipient(String),
+    /// The final element is a list of warnings.
+    Recipient(String, Vec<String>),
     /// DATA
     Data,
     /// BDAT length [LAST]
@@ -65,14 +67,14 @@ static SIMPLE_COMMANDS: &[(&str, Command, bool)] = &[
 lazy_static! {
     static ref RX_HELO: Regex =
         Regex::new("^(?i)(HELO|EHLO|LHLO) ([^ ]*)").unwrap();
-    static ref RX_MAIL: Regex = Regex::new(
-        "^(?i)MAIL FROM:<([^>]*)>\
-         (?: BODY=(?:7BIT|8BITMIME|BINARYMIME)\
-         | SIZE=([0-9]+))*$"
-    )
-    .unwrap();
+    static ref RX_MAIL: Regex =
+        Regex::new("^(?i)MAIL FROM:<([^>]*)>(.*)$").unwrap();
+    static ref RX_MAIL_BODY_PARM: Regex =
+        Regex::new("(?i)BODY=[A-Z0-9]*").unwrap();
+    static ref RX_MAIL_SIZE_PARM: Regex =
+        Regex::new("(?i)SIZE=([0-9]+)").unwrap();
     static ref RX_RCPT: Regex =
-        Regex::new("^(?i)RCPT TO:<(?:@[^:]+:)?([^>]+)>$").unwrap();
+        Regex::new("^(?i)RCPT TO:<(?:@[^:]+:)?([^>]+)>(.*)$").unwrap();
     static ref RX_BDAT: Regex =
         Regex::new("^(?i)BDAT ([0-9]+)( LAST)?$").unwrap();
     static ref RX_AUTH: Regex =
@@ -108,18 +110,65 @@ impl FromStr for Command {
                 cap.get(2).unwrap().as_str().to_owned(),
             ))
         } else if let Some(cap) = RX_MAIL.captures(s) {
-            let size = match cap.get(2).map(|s| s.as_str().parse::<u64>()) {
-                None => None,
-                Some(Err(_)) => return Err(()),
-                Some(Ok(sz)) => Some(sz),
-            };
+            let mut warnings = Vec::<String>::new();
+            let mut size = None::<u64>;
+            for parm in cap
+                .get(2)
+                .map(|c| c.as_str())
+                .unwrap_or("")
+                .split(' ')
+                .filter(|s| !s.is_empty())
+            {
+                let truncated_parm = &parm[..parm
+                    .char_indices()
+                    .nth(64)
+                    .map(|(ix, _)| ix)
+                    .unwrap_or(parm.len())];
+                if let Some(cap) = RX_MAIL_SIZE_PARM.captures(parm) {
+                    if let Some(s) =
+                        cap.get(1).and_then(|c| c.as_str().parse::<u64>().ok())
+                    {
+                        size = Some(s);
+                    } else {
+                        warnings.push(format!(
+                            "ignoring invalid MAIL FROM parameter {:?}",
+                            truncated_parm,
+                        ));
+                    }
+                } else if !RX_MAIL_BODY_PARM.is_match(parm) {
+                    warnings.push(format!(
+                        "ignoring unknown MAIL FROM parameter {:?}",
+                        truncated_parm,
+                    ));
+                }
+            }
 
             Ok(Command::MailFrom(
                 cap.get(1).unwrap().as_str().to_owned(),
                 size,
+                warnings,
             ))
         } else if let Some(cap) = RX_RCPT.captures(s) {
-            Ok(Command::Recipient(cap.get(1).unwrap().as_str().to_owned()))
+            let warnings = if let Some(extra) =
+                cap.get(2).filter(|c| !c.as_str().is_empty())
+            {
+                let extra = extra.as_str().trim();
+                let extra = &extra[..extra
+                    .char_indices()
+                    .nth(64)
+                    .map(|(ix, _)| ix)
+                    .unwrap_or(extra.len())];
+                vec![format!(
+                    "ignoring extraneous RCPT TO parameters: {extra:?}"
+                )]
+            } else {
+                vec![]
+            };
+
+            Ok(Command::Recipient(
+                cap.get(1).unwrap().as_str().to_owned(),
+                warnings,
+            ))
         } else if let Some(cap) = RX_BDAT.captures(s) {
             cap.get(1)
                 .unwrap()
@@ -189,49 +238,73 @@ mod test {
         );
 
         assert_eq!(
-            Ok(Command::MailFrom("foo@bar.com".to_owned(), None)),
+            Ok(Command::MailFrom("foo@bar.com".to_owned(), None, vec![])),
             "MAIL FROM:<foo@bar.com>".parse()
         );
         assert_eq!(
-            Ok(Command::MailFrom("foo@bar.com".to_owned(), None)),
+            Ok(Command::MailFrom("foo@bar.com".to_owned(), None, vec![])),
             "MAIL FROM:<foo@bar.com> BODY=BiNaRyMiMe".parse()
         );
         assert_eq!(
-            Ok(Command::MailFrom("foo@bar.com".to_owned(), None)),
+            Ok(Command::MailFrom("foo@bar.com".to_owned(), None, vec![])),
             "MAIL FROM:<foo@bar.com> body=8bitmime".parse()
         );
         assert_eq!(
-            Ok(Command::MailFrom("foo@bar.com".to_owned(), None)),
+            Ok(Command::MailFrom("foo@bar.com".to_owned(), None, vec![])),
             "MAIL FROM:<foo@bar.com> body=7bit".parse()
         );
         assert_eq!(
-            Ok(Command::MailFrom("foo@bar.com".to_owned(), Some(42))),
+            Ok(Command::MailFrom(
+                "foo@bar.com".to_owned(),
+                Some(42),
+                vec![]
+            )),
             "MAIL FROM:<foo@bar.com> SIZE=42".parse()
         );
         assert_eq!(
-            Ok(Command::MailFrom("foo@bar.com".to_owned(), Some(42))),
+            Ok(Command::MailFrom(
+                "foo@bar.com".to_owned(),
+                Some(42),
+                vec![]
+            )),
             "MAIL FROM:<foo@bar.com> body=7bit size=42".parse()
         );
         assert_eq!(
-            Ok(Command::MailFrom("foo@bar.com".to_owned(), Some(42))),
+            Ok(Command::MailFrom(
+                "foo@bar.com".to_owned(),
+                Some(42),
+                vec![]
+            )),
             "MAIL FROM:<foo@bar.com> size=42 body=7bit".parse()
         );
         assert_eq!(
-            Ok(Command::MailFrom(String::new(), None)),
+            Ok(Command::MailFrom(String::new(), None, vec![])),
             "mail from:<>".parse()
         );
         assert_eq!(
-            Err(()),
-            "MAIL FROM:<foo@bar.com> size=-1".parse::<Command>()
+            Ok(Command::MailFrom(
+                "foo@bar.com".to_owned(),
+                None,
+                vec!["ignoring invalid MAIL FROM parameter \"size=99999999999999999999\"".to_owned()],
+            )),
+            "MAIL FROM:<foo@bar.com> size=99999999999999999999".parse::<Command>()
         );
 
         assert_eq!(
-            Ok(Command::Recipient("userc@d.bar.org".to_owned())),
+            Ok(Command::Recipient("userc@d.bar.org".to_owned(), vec![])),
             "RCPT TO:<userc@d.bar.org>".parse()
         );
         assert_eq!(
-            Ok(Command::Recipient("userc@d.bar.org".to_owned())),
+            Ok(Command::Recipient("userc@d.bar.org".to_owned(), vec![])),
             "rcpt to:<@hosta.int,@jkl.org:userc@d.bar.org>".parse()
+        );
+        assert_eq!(
+            Ok(Command::Recipient(
+                "userc@d.bar.org".to_owned(),
+                vec!["ignoring extraneous RCPT TO parameters: \"FOO=BAR\""
+                    .to_owned()],
+            )),
+            "RCPT TO:<userc@d.bar.org> FOO=BAR".parse()
         );
 
         assert_eq!(Ok(Command::Data), "DATA".parse());
