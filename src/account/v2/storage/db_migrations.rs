@@ -1,5 +1,5 @@
 //-
-// Copyright (c) 2023, Jason Lingle
+// Copyright (c) 2023, 2025, Jason Lingle
 //
 // This file is part of Crymap.
 //
@@ -68,8 +68,8 @@ pub fn apply_migrations(
         txn.execute_batch(migration)?;
         txn.execute(
             "INSERT INTO `migration` (`version`, `applied_at`) \
-             VALUES (1, ?)",
-            (UnixTimestamp::now(),),
+             VALUES (?, ?)",
+            (version, UnixTimestamp::now()),
         )?;
     }
 
